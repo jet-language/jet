@@ -95,6 +95,7 @@ const BUILD_SCRATCH_DIR: &str = "build-scratch";
 const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
 const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+static OPTIMIZE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,9 +173,10 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
         let reproducibility = Reproducibility::recover_certification_staging_unlocked(roots)?;
         let archive = Archive::recover_archive_staging_unlocked(roots)?;
         let repairs = Archive::recover_repair_quarantine_unlocked(roots)?;
+        let build_debug = super::BuildDebug::recover_scratch(&roots.hangar_dir())?;
         let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
-        Ok(staging + reproducibility + archive + repairs + leases + closure)
+        Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure)
     })
 }
 
@@ -527,6 +529,7 @@ fn record_realized_mode_unlocked(
     fresh_action_key: Option<&str>,
 ) -> std::io::Result<StoreEntry> {
     ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
+    super::Provider::validate_nix_build_facts(&realized.producer)?;
     let graph = Closure::closure_graph_structure_unlocked(roots)?;
     Closure::validate_universe_references(
         &realized.producer.provider,
@@ -539,11 +542,13 @@ fn record_realized_mode_unlocked(
     // are the durable output facts.
     let mut named_outputs = BTreeMap::new();
     for (name, path) in &realized.named_outputs {
-        let digest = if name == "out" {
-            realized.envelope.output_hash.clone()
-        } else {
-            super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?
-        };
+        let digest = super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?;
+        if name == "out" && digest != realized.envelope.output_hash {
+            return Err(std::io::Error::other(format!(
+                "Nix primary output changed during Store registration: expected {}, got {digest}",
+                realized.envelope.output_hash
+            )));
+        }
         named_outputs.insert(name.clone(), digest);
     }
     let (out, bin, rlib) = if realized.producer.provider == "nix" {
@@ -635,11 +640,13 @@ fn project_nix_outputs_unlocked(
     let mut projected = BTreeMap::new();
     let mut seen_sources: BTreeMap<String, String> = BTreeMap::new();
     for (name, source) in &realized.named_outputs {
-        let digest = if name == "out" {
-            realized.envelope.output_hash.clone()
-        } else {
-            super::Envelope::try_output_hash_of(source).map_err(std::io::Error::other)?
-        };
+        let digest = super::Envelope::try_output_hash_of(source).map_err(std::io::Error::other)?;
+        if name == "out" && digest != realized.envelope.output_hash {
+            return Err(std::io::Error::other(format!(
+                "Nix primary output changed during Store projection: expected {}, got {digest}",
+                realized.envelope.output_hash
+            )));
+        }
         let canonical = if let Some(existing) = seen_sources.get(source) {
             existing.clone()
         } else {
@@ -1550,8 +1557,7 @@ pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutab
 
 impl Drop for CacheLease {
     fn drop(&mut self) {
-        let _ = make_tree_writable_for_removal(&self.snapshot_root);
-        let _ = fs::remove_dir_all(&self.snapshot_root);
+        let _ = remove_snapshot_node(&self.snapshot_root);
     }
 }
 
@@ -1597,15 +1603,17 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         SEQ.fetch_add(1, Ordering::Relaxed),
         entry.id
     ));
+    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+        super::Provider::validate_nix_build_facts(&producer)?;
+    }
     match fs::symlink_metadata(&snapshot_root) {
         Ok(metadata) => {
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
                 return Err(std::io::Error::other(
-                    "cache lease snapshot is not a real directory",
+                    "cache lease snapshot is not a regular node",
                 ));
             }
-            make_tree_writable_for_removal(&snapshot_root)?;
-            fs::remove_dir_all(&snapshot_root)?;
+            remove_snapshot_node(&snapshot_root)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -1636,8 +1644,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     let digest = super::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
     if digest != entry.envelope.output_hash {
-        make_tree_writable_for_removal(&snapshot_root)?;
-        fs::remove_dir_all(&snapshot_root)?;
+        remove_snapshot_node(&snapshot_root)?;
         return Err(std::io::Error::other(format!(
             "private lease snapshot mismatch: expected {}, got {digest}",
             entry.envelope.output_hash
@@ -1658,7 +1665,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .flatten();
     let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
     let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
-    let nix_store_projection = nix_store_projection_for_entry(roots, entry, &snapshot_root);
+    let nix_store_projection = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
     Ok(CacheLease {
         files,
         executables,
@@ -1681,39 +1688,62 @@ fn nix_store_projection_for_entry(
     roots: &Roots,
     entry: &StoreEntry,
     snapshot_root: &Path,
-) -> Vec<(String, PathBuf)> {
+) -> std::io::Result<Vec<(String, PathBuf)>> {
     let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     if producer.provider != "nix" {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    producer
-        .facts
-        .iter()
-        .filter_map(|(key, path)| {
-            let name = key.strip_prefix("nix.output.")?;
-            let store_name = path.strip_prefix("/nix/store/")?;
-            if store_name.is_empty()
-                || store_name.contains('/')
-                || store_name == "."
-                || store_name == ".."
-            {
-                return None;
+    let mut projection = Vec::new();
+    for (key, path) in &producer.facts {
+        let Some(name) = key.strip_prefix("nix.output.") else {
+            continue;
+        };
+        let Some(store_name) = path.strip_prefix("/nix/store/") else {
+            continue;
+        };
+        if store_name.is_empty()
+            || store_name.contains('/')
+            || store_name == "."
+            || store_name == ".."
+        {
+            return Err(std::io::Error::other(format!(
+                "invalid canonical Nix output path `{path}`"
+            )));
+        }
+        let source = if name == "out" {
+            snapshot_root.to_path_buf()
+        } else {
+            let digest = entry.named_outputs.get(name).ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "Nix output `{name}` has no verified named-output digest"
+                ))
+            })?;
+            let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+            let metadata = fs::symlink_metadata(&object).map_err(|error| {
+                std::io::Error::other(format!(
+                    "Nix output `{name}` projected object is unavailable: {error}"
+                ))
+            })?;
+            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+                return Err(std::io::Error::other(format!(
+                    "Nix output `{name}` projected object is not a regular node"
+                )));
             }
-            let source = if name == "out" {
-                snapshot_root.to_path_buf()
-            } else {
-                let digest = entry.named_outputs.get(name)?;
-                let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
-                fs::symlink_metadata(&object)
-                    .ok()
-                    .filter(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())?;
-                object
-            };
-            Some((path.clone(), source))
-        })
-        .collect()
+            object
+        };
+        if let Some((_, existing)) = projection.iter().find(|(logical, _)| logical == path) {
+            if existing != &source {
+                return Err(std::io::Error::other(format!(
+                    "conflicting canonical Nix output path `{path}`"
+                )));
+            }
+            continue;
+        }
+        projection.push((path.clone(), source));
+    }
+    Ok(projection)
 }
 
 struct ExecWrappers {
@@ -1911,6 +1941,16 @@ fn copy_snapshot_node(
         return Err(std::io::Error::other("special file in cache snapshot"));
     }
     Ok(())
+}
+
+fn remove_snapshot_node(path: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    make_tree_writable_for_removal(path)?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
 }
 
 #[cfg(unix)]
@@ -2974,8 +3014,12 @@ fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
 /// reachable entries and unknown legacy records are retained.
 pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
-    if !store.exists() {
-        return Ok(CleanReport::default());
+    match fs::symlink_metadata(&store) {
+        Ok(_) => Ingest::require_real_directory(&store, "Hangar root")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CleanReport::default())
+        }
+        Err(error) => return Err(error),
     }
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || clean_plan_unlocked(roots))
 }
@@ -3015,7 +3059,7 @@ pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
 
 fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
-    fs::create_dir_all(&store)?;
+    Ingest::ensure_real_directory(&store, "Hangar root")?;
     let live = live_roots_unlocked(roots)?;
     let mut report = sweep_build_scratch(&store)?;
     let now = now_secs();
@@ -3048,7 +3092,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
 pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let hangar = roots.hangar_dir();
-        fs::create_dir_all(&hangar)?;
+        Ingest::ensure_real_directory(&hangar, "Hangar root")?;
         let stamp = hangar.join(AUTO_CLEAN_STAMP);
         let now = SystemTime::now();
         if std::env::var_os("JETPACK_AUTO_CLEAN_ALWAYS").is_none() {
@@ -3069,33 +3113,52 @@ pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
 fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
     let root = hangar.join(BUILD_SCRATCH_DIR);
     let mut report = CleanReport::default();
-    let Ok(rd) = fs::read_dir(&root) else {
-        return Ok(report);
-    };
-    for ent in rd.flatten() {
+    match fs::symlink_metadata(&root) {
+        Ok(_) => Ingest::require_real_directory(&root, "Hangar build scratch")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+        Err(error) => return Err(error),
+    }
+    let rd = fs::read_dir(&root)?;
+    for ent in rd {
+        let ent = ent?;
         let path = ent.path();
+        if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar build scratch entry is a symlink: {}", path.display()),
+            ));
+        }
         if super::Provider::active_tmp_marker_is_live(&path) {
             continue;
         }
         report.swept_tmp += 1;
         report.swept_tmp_bytes += dir_size(&path);
-    }
+    };
     Ok(report)
 }
 
 fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
     let root = hangar.join(BUILD_SCRATCH_DIR);
     let mut report = CleanReport::default();
-    let Ok(rd) = fs::read_dir(&root) else {
-        return Ok(report);
+    match fs::symlink_metadata(&root) {
+        Ok(_) => Ingest::require_real_directory(&root, "Hangar build scratch")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+        Err(error) => return Err(error),
     };
-    for ent in rd.flatten() {
+    for ent in fs::read_dir(&root)? {
+        let ent = ent?;
         let path = ent.path();
+        if fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar build scratch entry is a symlink: {}", path.display()),
+            ));
+        }
         if super::Provider::active_tmp_marker_is_live(&path) {
             continue;
         }
         let bytes = dir_size(&path);
-        if path.is_dir() {
+        if fs::symlink_metadata(&path)?.is_dir() {
             fs::remove_dir_all(&path)?;
         } else {
             fs::remove_file(&path)?;
@@ -3179,22 +3242,33 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
     let objects = hangar.join(OBJECTS_DIR);
     let cas = hangar.join(CAS_DIR);
     let mut report = CleanReport::default();
-    if !objects.is_dir() {
-        return Ok(report);
-    }
-    fs::create_dir_all(&cas)?;
-    for ent in fs::read_dir(&objects)?.flatten() {
+    Ingest::ensure_real_directory(hangar, "Hangar root")?;
+    Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
+    Ingest::ensure_real_directory(&cas, "Hangar CAS pool")?;
+    let mut object_dirs = Vec::new();
+    for ent in fs::read_dir(&objects)? {
+        let ent = ent?;
         let path = ent.path();
         let name = ent.file_name().to_string_lossy().into_owned();
-        if !path.is_dir() || name.ends_with(PARTIAL_SUFFIX) {
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object entry is a symlink: {}", path.display()),
+            ));
+        }
+        if !metadata.is_dir() || name.ends_with(PARTIAL_SUFFIX) {
             continue;
         }
+        object_dirs.push(path);
+    }
+    for path in object_dirs {
         make_tree_writable_for_removal(&path)?;
         for file in files_under(&path) {
-            let Ok(meta) = fs::metadata(&file) else {
+            let Ok(meta) = fs::symlink_metadata(&file) else {
                 continue;
             };
-            if !meta.is_file() || meta.len() == 0 {
+            if meta.file_type().is_symlink() || !meta.is_file() || meta.len() == 0 {
                 continue;
             }
             let Ok(bytes) = fs::read(&file) else {
@@ -3206,11 +3280,49 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
                 permission_identity(&meta)
             );
             let cas_file = cas.join(&digest);
-            if !cas_file.exists() {
+            match fs::symlink_metadata(&cas_file) {
+                Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Hangar CAS entry is not a regular file: {}", cas_file.display()),
+                    ));
+                }
+                Ok(existing) => {
+                    if existing.len() != meta.len()
+                        || permission_identity(&existing) != permission_identity(&meta)
+                        || fs::read(&cas_file)? != bytes
+                    {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Hangar CAS entry is corrupt: {}", cas_file.display()),
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let tmp = cas.join(format!("{digest}.partial"));
-                fs::write(&tmp, &bytes)?;
-                fs::set_permissions(&tmp, meta.permissions())?;
-                fs::rename(&tmp, &cas_file)?;
+                    if let Ok(partial) = fs::symlink_metadata(&tmp) {
+                        if partial.file_type().is_symlink() || !partial.is_file() {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("Hangar CAS partial is not a regular file: {}", tmp.display()),
+                            ));
+                        }
+                        fs::remove_file(&tmp)?;
+                    }
+                    let mut partial = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&tmp)?;
+                    use std::io::Write as _;
+                    partial.write_all(&bytes)?;
+                    partial.sync_all()?;
+                    fs::set_permissions(&tmp, meta.permissions())?;
+                    if let Err(error) = fs::rename(&tmp, &cas_file) {
+                        let _ = fs::remove_file(&tmp);
+                        return Err(error);
+                    }
+                }
+                Err(error) => return Err(error),
             }
             if same_file_inode(&file, &cas_file) {
                 continue;
@@ -3330,39 +3442,60 @@ fn hardlink_replace(first: &Path, file: &Path) -> std::io::Result<()> {
     if first == file {
         return Ok(());
     }
-    let tmp = file.with_extension(format!("jet-dedup-{}", std::process::id()));
-    fs::rename(file, &tmp)?;
-    match fs::hard_link(first, file) {
-        Ok(()) => {
-            let _ = fs::remove_file(&tmp);
-            Ok(())
+    let sequence = OPTIMIZE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp = file.with_extension(format!("jet-dedup-{}-{sequence}", std::process::id()));
+    #[cfg(unix)]
+    {
+        fs::hard_link(first, &tmp)?;
+        match fs::rename(&tmp, file) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = fs::remove_file(&tmp);
+                Err(error)
+            }
         }
-        Err(e) => {
-            let _ = fs::rename(&tmp, file);
-            Err(e)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::rename(file, &tmp)?;
+        match fs::hard_link(first, file) {
+            Ok(()) => {
+                let _ = fs::remove_file(&tmp);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = fs::rename(&tmp, file);
+                Err(error)
+            }
         }
     }
 }
 
 fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
     let mut out = Vec::new();
-    if let Ok(rd) = fs::read_dir(hangar) {
-        for ent in rd.flatten() {
-            let path = ent.path();
-            let name = ent.file_name().to_string_lossy().into_owned();
-            let reserved = name == BUILD_SCRATCH_DIR
-                || name == STAGE_DIR
-                || name == OBJECTS_DIR
-                || name == CAS_DIR
-                || name == REFERRERS_DIR
-                || name == "receipts"
-                || name == "lifecycle-db"
-                || name == "closure-db"
-                || name == "quarantine"
-                || name.starts_with('.');
-            if path.is_dir() && !reserved {
-                out.push(ent);
-            }
+    for ent in fs::read_dir(hangar)? {
+        let ent = ent?;
+        let path = ent.path();
+        let name = ent.file_name().to_string_lossy().into_owned();
+        let reserved = name == BUILD_SCRATCH_DIR
+            || name == STAGE_DIR
+            || name == OBJECTS_DIR
+            || name == CAS_DIR
+            || name == REFERRERS_DIR
+            || name == "receipts"
+            || name == "lifecycle-db"
+            || name == "closure-db"
+            || name == "quarantine"
+            || name.starts_with('.');
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object entry is a symlink: {}", path.display()),
+            ));
+        }
+        if metadata.is_dir() && !reserved {
+            out.push(ent);
         }
     }
     out.sort_by_key(|e| e.file_name());
@@ -3374,9 +3507,15 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
     if let Ok(rd) = fs::read_dir(root) {
         for ent in rd.flatten() {
             let p = ent.path();
-            if p.is_dir() {
+            let Ok(metadata) = fs::symlink_metadata(&p) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
                 out.extend(files_under(&p));
-            } else {
+            } else if metadata.is_file() {
                 out.push(p);
             }
         }

@@ -707,13 +707,9 @@ fn prepared_nix_facts(identity: &PreparedNixIdentity) -> BTreeMap<String, String
             "nix.cache.platform".into(),
             identity.cache_identity.platform.clone(),
         ),
-        ("nix.build.facts.digest".into(), nix_build_facts_digest()),
     ]);
-    for (key, value) in nix_build_facts() {
+    for (key, value) in nix_build_facts_record() {
         facts.insert(key, value);
-    }
-    for (key, value) in nix_build_environment_facts() {
-        facts.insert(format!("nix.build.env.{key}"), value);
     }
     for (name, digest) in &identity.named_output_digests {
         facts.insert(format!("nix.output.{name}.digest"), digest.clone());
@@ -765,21 +761,42 @@ fn nix_build_facts_digest() -> String {
     SHA256::sha256_hex(canonical.as_bytes())
 }
 
+pub(crate) fn nix_build_facts_record() -> BTreeMap<String, String> {
+    let mut facts = BTreeMap::from([("nix.build.facts.digest".into(), nix_build_facts_digest())]);
+    for (key, value) in nix_build_facts() {
+        facts.insert(key, value);
+    }
+    for (key, value) in nix_build_environment_facts() {
+        facts.insert(format!("nix.build.env.{key}"), value);
+    }
+    facts
+}
+
+pub(crate) fn validate_nix_build_facts(
+    producer: &super::Store::ProducerRecord,
+) -> std::io::Result<()> {
+    if producer.provider != "nix" {
+        return Ok(());
+    }
+    for (key, expected) in nix_build_facts_record() {
+        if producer.facts.get(&key) != Some(&expected) {
+            return Err(std::io::Error::other(format!(
+                "Nix producer fact `{key}` is missing or changed"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Return only the fixed, audited environment projection recorded by a Nix
 /// producer. PATH stays under Jetpack's package composition law.
 pub(crate) fn nix_runtime_environment(
     producer: &super::Store::ProducerRecord,
 ) -> BTreeMap<String, String> {
-    if producer.provider != "nix" {
+    if validate_nix_build_facts(producer).is_err() {
         return BTreeMap::new();
     }
     nix_build_environment_facts()
-        .into_iter()
-        .filter_map(|(name, expected)| {
-            let fact = format!("nix.build.env.{name}");
-            (producer.facts.get(&fact) == Some(&expected)).then_some((name, expected))
-        })
-        .collect()
 }
 
 pub(crate) fn validate_nix_lock_before_store(
@@ -1771,17 +1788,23 @@ pub(crate) fn realize_adapter(
         &source_hash,
     );
     if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
-        attempt.preserve_scratch(ctx.store_dir, &staged, &out_dir);
+        let scratch_error = attempt
+            .preserve_scratch(ctx.store_dir, &staged, &out_dir)
+            .err()
+            .map(|error| format!("; preserved scratch unavailable: {error}"))
+            .unwrap_or_default();
         let _ = attempt.persist(ctx.store_dir);
-        return Err(ProviderError::BuildDebug(format!(
-                "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}",
-                plan.name,
-                attempt.failed_step,
-                attempt.steps.len(),
-                d.what,
-                plan.name,
-                attempt.scratch_dir
-            )));
+        let message = format!(
+            "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}{}",
+            plan.name,
+            attempt.failed_step,
+            attempt.steps.len(),
+            d.what,
+            plan.name,
+            attempt.scratch_dir,
+            scratch_error
+        );
+        return Err(ProviderError::BuildDebug(message));
     }
     let _ = attempt.persist(ctx.store_dir);
     super::Store::seal_local_output(&out_dir).map_err(|error| {
@@ -2352,11 +2375,7 @@ mod tests {
         );
         assert_eq!(facts.get("nix.build.uid").map(String::as_str), Some("unprivileged"));
         assert_eq!(facts.get("nix.build.time").map(String::as_str), Some("deterministic"));
-        let env_facts = nix_build_environment_facts();
-        let producer_facts = env_facts
-            .iter()
-            .map(|(name, value)| (format!("nix.build.env.{name}"), value.clone()))
-            .collect();
+        let producer_facts = nix_build_facts_record();
         let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap();
         let producer = super::super::Store::ProducerRecord::new(
             "nix",
@@ -2373,6 +2392,13 @@ mod tests {
         assert_eq!(runtime.get("NIX_BUILD_TOP").map(String::as_str), Some("/build"));
         assert_eq!(runtime.get("LC_ALL").map(String::as_str), Some("C"));
         assert!(!runtime.contains_key("PATH"));
+
+        let mut tampered = producer.clone();
+        tampered
+            .facts
+            .insert("nix.build.env.HOME".into(), "/tmp".into());
+        assert!(validate_nix_build_facts(&tampered).is_err());
+        assert!(nix_runtime_environment(&tampered).is_empty());
     }
 
     #[test]

@@ -388,9 +388,18 @@ fn provider_projection(
         }
     };
     if let Some(facts) = facts.as_ref() {
-        let canonical_entry =
-            ProviderFacts::for_reference("", &entry.reference).qualified_reference();
-        if facts.qualified_reference() != canonical_entry {
+        let entry_facts = ProviderFacts::for_reference("", &entry.reference);
+        let canonical_entry = entry_facts.qualified_reference();
+        let unpinned_alias_matches = entry_facts.selector.raw.is_empty()
+            && facts.reference == entry.reference
+            && facts.target == entry_facts.target
+            && (facts.provider == entry_facts.provider
+                || matches!(
+                    facts.facts.get("provider.authority"),
+                    Some(crate::ProviderFactValue::Text(authority))
+                        if authority == &entry_facts.provider
+                ));
+        if facts.qualified_reference() != canonical_entry && !unpinned_alias_matches {
             reports.push(ExplainReport {
                 kind: "conflict".to_string(),
                 message: format!(

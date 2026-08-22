@@ -242,6 +242,10 @@ pub struct PackagePolicy {
     /// D-MEM-GUARANTEE1=A: keep sentries in release and contain every foreign
     /// dependency. This is a tighten-only switch.
     pub harden: bool,
+    /// D-JPK-POLICYSURFACE1=D: an optional SPDX identifier allow-list.
+    pub licenses: Option<Vec<String>>,
+    /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority rules.
+    pub source_maps: Vec<(String, Vec<String>)>,
 }
 
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: authority facts are package
@@ -375,6 +379,8 @@ pub enum PackageParseError {
     RetiredPolicyField { field: String, replacement: String },
     /// D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
     BadGuaranteePolicy { detail: String },
+    /// D-JPK-POLICYSURFACE1=D: malformed SPDX/source package policy.
+    BadPackagePolicy { detail: String },
     /// D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
     BadAllocatorPolicy { detail: String },
 }
@@ -415,6 +421,7 @@ impl fmt::Display for PackageParseError {
                 write!(f, "`{field}` is retired; use `{replacement}`")
             }
             Self::BadGuaranteePolicy { detail } => f.write_str(detail),
+            Self::BadPackagePolicy { detail } => f.write_str(detail),
             Self::BadAllocatorPolicy { detail } => f.write_str(detail),
         }
     }
@@ -436,7 +443,7 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};",
             self.name,
             self.version,
             self.jet,
@@ -457,6 +464,8 @@ impl PackageFacts {
             self.effects_deny,
             self.policy.contain,
             self.policy.harden,
+            self.policy.licenses,
+            self.policy.source_maps,
         )
         .expect("writing to a String cannot fail");
         for (name, config) in &self.inline_configs {
@@ -1782,11 +1791,14 @@ fn parse_common(
             "policy" => {
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
+                let (licenses, source_maps) = Blocks::parse_package_policy_surface(body)?;
                 facts.policy = PackagePolicy {
                     declarations: Blocks::parse_policy(body, true)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
                     contain,
                     harden,
+                    licenses,
+                    source_maps,
                 };
             }
             crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => return Err(PackageParseError::ConfigMembers),

@@ -855,7 +855,7 @@ module workspace {
     #[test]
     fn members_calls_top_level_fn() {
         // A `members:` expression can call a top-level helper `fn`.
-        let src = "fn member(name: String) => String { return \"./pkgs/{name}\" }\n\
+        let src = "fn member(name: String) String -> { return \"./pkgs/{name}\" }\n\
                    module workspace {\n    members: [member(\"hello\"), member(\"ranker\")]\n}\n";
         let tmp = tempdir("comptime-function");
         for (relative, name) in [("pkgs/hello", "hello"), ("pkgs/ranker", "ranker")] {

@@ -178,11 +178,14 @@ mod tests {
                 format!("{name}@core")
             };
             let output = out.to_string_lossy().into_owned();
-            let facts = if provider == "nix" {
+            let mut facts = if provider == "nix" {
                 BTreeMap::from([("nix.output.out".into(), output.clone())])
             } else {
                 BTreeMap::new()
             };
+            if provider == "nix" {
+                facts.extend(crate::Provider::nix_build_facts_record());
+            }
             seal_node(&out).unwrap();
             let encoded = canonical_producer(
                 provider,
@@ -849,13 +852,18 @@ mod tests {
         let out_digest = crate::Envelope::try_output_hash_of(&snapshot.to_string_lossy()).unwrap();
 
         let dev = roots.root.join("external-dev-output");
-        fs::create_dir_all(&dev).unwrap();
-        fs::write(dev.join("headers"), "dev").unwrap();
+        fs::write(&dev, "dev").unwrap();
         seal_local_output(&dev).unwrap();
         let dev_digest = crate::Envelope::try_output_hash_of(&dev.to_string_lossy()).unwrap();
         let dev_object = project_external_output_unlocked(&roots, &dev, &dev_digest).unwrap();
 
         let drv = "/nix/store/projection.drv";
+        let mut producer_facts = crate::Provider::nix_build_facts_record();
+        producer_facts.extend(BTreeMap::from([
+            ("nix.drv_path".into(), drv.into()),
+            ("nix.output.out".into(), "/nix/store/projection-out".into()),
+            ("nix.output.dev".into(), "/nix/store/projection-dev".into()),
+        ]));
         let producer = ProducerRecord::new(
             "nix",
             drv,
@@ -868,11 +876,7 @@ mod tests {
             .unwrap(),
             "nix-derivation:projection",
             "policy=test\nplatform=test",
-            BTreeMap::from([
-                ("nix.drv_path".into(), drv.into()),
-                ("nix.output.out".into(), "/nix/store/projection-out".into()),
-                ("nix.output.dev".into(), "/nix/store/projection-dev".into()),
-            ]),
+            producer_facts,
         )
         .unwrap();
         let entry = StoreEntry {
@@ -900,7 +904,7 @@ mod tests {
             realized_at: 0,
             last_used_at: 0,
         };
-        let projection = nix_store_projection_for_entry(&roots, &entry, &snapshot);
+        let projection = nix_store_projection_for_entry(&roots, &entry, &snapshot).unwrap();
         let projection = projection.into_iter().collect::<BTreeMap<_, _>>();
         assert_eq!(
             projection.get("/nix/store/projection-out"),
@@ -910,6 +914,34 @@ mod tests {
             projection.get("/nix/store/projection-dev"),
             Some(&PathBuf::from(dev_object))
         );
+
+        #[cfg(target_os = "linux")]
+        {
+            let lease = snapshot_lease(&roots, &entry).unwrap();
+            let env = crate::Shell::Env {
+                bin_dirs: Vec::new(),
+                vars: BTreeMap::new(),
+                unset_vars: Vec::new(),
+                refs: vec![entry.reference.clone()],
+                label: "projection-test".into(),
+                prompt_path: jet_env_model::ModuleEval::PromptPathMode::Short,
+                prompt_strip: jet_env_model::ModuleEval::PromptStripMode::Off,
+                cache_leases: vec![lease],
+            };
+            let code = crate::Shell::run_clean_command(
+                &env,
+                &[
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    "test -d /nix/store/projection-out && test -f /nix/store/projection-dev".into(),
+                ],
+            );
+            assert_eq!(
+                code,
+                0,
+                "rootless canonical store projection must be consumable"
+            );
+        }
     }
 
     #[test]

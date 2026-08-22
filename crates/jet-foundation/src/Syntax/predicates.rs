@@ -308,6 +308,10 @@ pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
 /// fields intentionally do not enter the source `PolicyKey` registry.
 pub const POLICY_FIELD_CONTAIN: &str = "contain";
 pub const POLICY_FIELD_HARDEN: &str = "harden";
+/// D-JPK-POLICYSURFACE1=D: package license allow-list policy.
+pub const POLICY_FIELD_LICENSES: &str = "licenses";
+/// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.
+pub const POLICY_FIELD_SOURCES: &str = "sources";
 /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
 /// provider authority live under the one `authority: { … }` block.
 pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1

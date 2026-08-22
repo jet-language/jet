@@ -3448,7 +3448,13 @@ fn validate_source_maps(lock: &SemanticLockFile) -> Vec<ValidationIssue> {
         if rec.identity.kind != LockRecordKind::Package {
             continue;
         }
-        let Some(map) = matching_source_map(lock, &rec.identity.key) else {
+        let package = rec
+            .identity
+            .key
+            .strip_prefix("registry:")
+            .and_then(|key| key.rsplit_once(':').map(|(_, package)| package))
+            .unwrap_or(&rec.identity.key);
+        let Some(map) = matching_source_map(lock, package) else {
             continue;
         };
         let source = rec
@@ -3465,8 +3471,14 @@ fn validate_source_maps(lock: &SemanticLockFile) -> Vec<ValidationIssue> {
         if source.is_empty() {
             continue;
         }
+        let authority = source
+            .strip_prefix("registry:")
+            .and_then(|source| source.split(';').next())
+            .unwrap_or(source.as_str());
         let allowed = &map.sources;
-        let ok = allowed.iter().any(|a| source_matches(a, &source));
+        let ok = allowed
+            .iter()
+            .any(|allowed| source_matches(allowed, &source) || source_matches(allowed, authority));
         if !ok {
             issues.push(ValidationIssue::SourceAuthority {
                 package: rec.identity.key.clone(),
@@ -3482,7 +3494,15 @@ fn matching_source_map<'a>(
     lock: &'a SemanticLockFile,
     package: &str,
 ) -> Option<&'a SourceMapEntry> {
-    lock.source_maps.iter().find(|m| pattern_matches(&m.pattern, package))
+    lock.source_maps
+        .iter()
+        .filter(|map| pattern_matches(&map.pattern, package))
+        .max_by_key(|map| {
+            (
+                map.pattern.strip_suffix('*').unwrap_or(&map.pattern).len(),
+                !map.pattern.ends_with('*'),
+            )
+        })
 }
 
 fn pattern_matches(pattern: &str, package: &str) -> bool {

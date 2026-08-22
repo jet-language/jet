@@ -6073,7 +6073,7 @@ fn run() {
     assert_eq!(stdout, "9\n", "{stderr}");
 }
 
-/// D-MEMPROVENANCE3=A: undeclared `fn(String, String) => View<str>` freezes every
+/// D-MEMPROVENANCE3=A: undeclared `fn(String, String) View<str>` freezes every
 /// non-scalar callback argument — mutating the unused second owner is E0212.
 #[test]
 fn undeclared_view_callback_freezes_every_non_scalar_argument() {
@@ -6106,7 +6106,7 @@ fn run() {
     );
 }
 
-/// D-MEMPROVENANCE3=A: `fn(line: String, noise: String) => View<str> from line`
+/// D-MEMPROVENANCE3=A: `fn(line: String, noise: String) View<str> from line`
 /// only freezes the named source — mutating the unused argument stays legal.
 #[test]
 fn declared_view_callback_from_freezes_only_named_source() {

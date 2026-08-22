@@ -141,7 +141,7 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
     }
 }
 
-/// Build `fn <name>() => T { return <default expr> }` for an `add` op.
+/// Build `fn <name>() T -> { return <default expr> }` for an `add` op.
 fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func {
     Func {
         span,

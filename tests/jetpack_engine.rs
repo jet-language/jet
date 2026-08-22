@@ -63,11 +63,9 @@ fn hangar_path_reports_the_native_user_data_location() {
         .or_else(|| std::env::var_os("HOME"))
         .expect("home directory environment variable");
     let expected = if cfg!(target_os = "macos") {
-        Path::new(&home)
-            .join("Library/Application Support/Jet/Hangar")
+        Path::new(&home).join("Library/Application Support/Jet/Hangar")
     } else if cfg!(windows) {
-        Path::new(&home)
-            .join("AppData/Local/Jet/Hangar")
+        Path::new(&home).join("AppData/Local/Jet/Hangar")
     } else {
         data.path.join("jet/hangar")
     };
@@ -231,10 +229,19 @@ fn hangar_migration_rejects_destination_symlink_without_following_it() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E2604"), "{stderr}");
-    assert!(stderr.contains("Inspect the reported Hangar path"), "{stderr}");
+    assert!(
+        stderr.contains("Inspect the reported Hangar path"),
+        "{stderr}"
+    );
     assert!(stderr.contains("is a symlink"), "{stderr}");
-    assert_eq!(fs::read_to_string(outside.join("marker")).unwrap(), "must stay outside");
-    assert_eq!(fs::read_link(destination_parent.join("hangar")).unwrap(), outside.path);
+    assert_eq!(
+        fs::read_to_string(outside.join("marker")).unwrap(),
+        "must stay outside"
+    );
+    assert_eq!(
+        fs::read_link(destination_parent.join("hangar")).unwrap(),
+        outside.path
+    );
 }
 
 #[test]
@@ -320,19 +327,17 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert!(explanation_json.contains("producer record lacks the shared provider-facts carrier"));
 
     let restored = Scratch::new("cache-restored");
-    jetpack::Store::substitute_cache_entry(
-        &roots,
-        &entry.id,
-        "public",
-        &restored.join("out"),
-    )
-    .unwrap();
+    jetpack::Store::substitute_cache_entry(&roots, &entry.id, "public", &restored.join("out"))
+        .unwrap();
     assert_eq!(
         fs::read_to_string(restored.join("out/payload")).unwrap(),
         "cache bytes\n"
     );
     #[cfg(unix)]
-    assert_eq!(fs::read_link(restored.join("out/alias")).unwrap(), Path::new("payload"));
+    assert_eq!(
+        fs::read_link(restored.join("out/alias")).unwrap(),
+        Path::new("payload")
+    );
 
     // A corrupt first mirror is advisory failure. Lookup must continue to the
     // next ordered mirror and never install its bytes.
@@ -348,12 +353,17 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     fs::remove_file(&blocked.path).unwrap();
     fs::create_dir_all(blocked.join("nar")).unwrap();
     fs::write(
-        blocked.join("nar").join(format!("{}.nar", entry.envelope.output_hash)),
+        blocked
+            .join("nar")
+            .join(format!("{}.nar", entry.envelope.output_hash)),
         b"corrupted first mirror",
     )
     .unwrap();
     fs::write(
-        blocked.join(&format!("{}-{}.narinfo", entry.envelope.output_hash, entry.id)),
+        blocked.join(&format!(
+            "{}-{}.narinfo",
+            entry.envelope.output_hash, entry.id
+        )),
         &info_bytes,
     )
     .unwrap();
@@ -553,7 +563,10 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     )
     .unwrap();
     let store_name = format!("{}-{}", entry.envelope.output_hash, entry.id);
-    let receipt_path = mirror.path.join("trust").join(format!("{store_name}.receipt"));
+    let receipt_path = mirror
+        .path
+        .join("trust")
+        .join(format!("{store_name}.receipt"));
     let receipt_bytes = fs::read(&receipt_path).unwrap();
     let field = |name: &str| {
         String::from_utf8(receipt_bytes.clone())
@@ -769,14 +782,19 @@ fn reproducibility_registration_writes_first_difference_and_blocks_cache() {
         .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
         .expect("structured reproducibility report");
     let report = fs::read_to_string(report_path).unwrap();
+    assert!(
+        jetpack::JSON::parse(&report).is_ok(),
+        "report must be valid JSON: {report}"
+    );
     assert!(report.contains("\"schema\":\"jet-reproducibility-report-v1\""));
     assert!(report.contains("\"producer_action\""));
     assert!(report.contains("\"first_difference\""));
     assert!(report.contains("\"path\":\"payload\""), "{report}");
     assert!(report.contains(&first.envelope.output_hash));
-    assert!(!jetpack::Store::list_checked(&roots).unwrap().iter().any(|entry| {
-        entry.envelope.output_hash != first.envelope.output_hash
-    }));
+    assert!(!jetpack::Store::list_checked(&roots)
+        .unwrap()
+        .iter()
+        .any(|entry| { entry.envelope.output_hash != first.envelope.output_hash }));
 
     jetpack::Store::bind_cache(
         &roots,
@@ -902,10 +920,7 @@ Deriver: unknown-deriver\n"
     assert!(canonical.contains("FileHash: "));
     assert!(canonical.contains(&format!("References: {reference}\n")));
     assert!(canonical.contains("Deriver: unknown-deriver\n"));
-    assert_eq!(
-        jetpack::Store::NarInfo::parse(&canonical).unwrap(),
-        info
-    );
+    assert_eq!(jetpack::Store::NarInfo::parse(&canonical).unwrap(), info);
 }
 
 #[test]
@@ -1033,9 +1048,11 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         "switch stderr: {}",
         String::from_utf8_lossy(&switched.stderr)
     );
-    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
-        .unwrap()
-        .contains("\"generation\":1"));
+    assert!(
+        fs::read_to_string(project.join(".jet/profiles/dev/current"))
+            .unwrap()
+            .contains("\"generation\":1")
+    );
     let hook_after_switch = jetpack::EnvHook::definition_fingerprint(&project.path, None);
     assert_ne!(hook_before_switch, hook_after_switch);
 
@@ -1048,7 +1065,8 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         "/bin/sh",
         "-c",
         "command -v greet",
-    ].as_slice());
+    ]
+    .as_slice());
     assert!(
         entered.status.success(),
         "dev-shell projection stderr: {}",
@@ -1079,9 +1097,11 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         "second switch stderr: {}",
         String::from_utf8_lossy(&switched_new.stderr)
     );
-    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
-        .unwrap()
-        .contains("\"generation\":2"));
+    assert!(
+        fs::read_to_string(project.join(".jet/profiles/dev/current"))
+            .unwrap()
+            .contains("\"generation\":2")
+    );
 
     let rolled_back = run(["profile", "rollback", "dev", "--no-color"].as_slice());
     assert!(
@@ -1110,6 +1130,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     let generation_one_root = project.join(".jet/profiles/dev/generations/1/root");
     let generation_one_binary = generation_one_root.join("bin/greet");
     let generation_one_original = fs::read(&generation_one_binary).unwrap();
+    make_writable(&generation_one_root.to_string_lossy());
     fs::write(&generation_one_binary, "tampered generation\n").unwrap();
     let failed_rollback = run(["profile", "rollback", "dev", "1", "--no-color"].as_slice());
     assert_eq!(failed_rollback.status.code(), Some(2));
@@ -1383,8 +1404,352 @@ fn package_generation_plan_rejects_lossy_external_provider_facts() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1335"), "{stderr}");
-    assert!(stderr.contains("lossy or conflicting provider fact"), "{stderr}");
-    assert!(stderr.contains("exact version, revision, or digest"), "{stderr}");
+    assert!(
+        stderr.contains("lossy or conflicting provider fact"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("exact version, revision, or digest"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn package_policy_authorizes_spdx_and_source_mapping_through_publish_seam() {
+    let raw = r#"
+name: "consumer"
+version: "0.1.0"
+license: "MIT"
+policy: {
+    licenses: .Allow(["MIT", "Apache-2.0"]),
+    sources: { "Acme.*": ["internal"] },
+}
+"#;
+    let manifest = jet::Manifest::parse(Path::new("package.jet"), raw).expect("policy manifest");
+    assert_eq!(
+        manifest.policy.licenses,
+        Some(vec!["MIT".to_string(), "Apache-2.0".to_string()])
+    );
+    assert_eq!(
+        manifest.policy.source_maps,
+        vec![("Acme.*".to_string(), vec!["internal".to_string()])]
+    );
+
+    let receipt = jet::Publish::authorize_package_candidate(
+        &manifest.policy,
+        "Acme.Widget",
+        "1.2.3",
+        Some("MIT OR Apache-2.0"),
+        "internal",
+    )
+    .expect("mapped SPDX candidate should be allowed");
+    assert!(receipt.summary().contains("source-rule=Acme.*"));
+    assert!(receipt.summary().contains("fingerprint=sha256-"));
+}
+
+#[test]
+fn package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest() {
+    let policy = jet::Package::PackagePolicy {
+        licenses: Some(vec!["MIT".to_string()]),
+        source_maps: vec![("Acme.*".to_string(), vec!["internal".to_string()])],
+        ..Default::default()
+    };
+    let source_error = jet::Publish::authorize_package_candidate(
+        &policy,
+        "Acme.Widget",
+        "1.2.3",
+        Some("MIT"),
+        "public",
+    )
+    .expect_err("dependency-confusion source must be denied");
+    assert!(source_error.detail.contains("not allowed"));
+
+    let license_error =
+        jet::Publish::validate_published_license("Acme.Widget", "1.2.3", Some("not a license"))
+            .expect_err("malformed SPDX must be denied");
+    assert!(license_error.detail.contains("invalid SPDX"));
+
+    let diagnostic = jet::Publish::package_policy_diagnostic(&license_error);
+    assert_eq!(diagnostic.code, "E2607");
+    assert!(diagnostic.what.contains("invalid SPDX"));
+    assert!(diagnostic.why.contains("security-sensitive"));
+    assert!(diagnostic.fix.contains("valid SPDX expression"));
+
+    let malformed = jet::Manifest::parse(
+        Path::new("package.jet"),
+        "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { licenses: .Allow([\"MIT\", \"MIT\"]) }\n",
+    )
+    .expect_err("duplicate license policy entries must be rejected");
+    assert_eq!(malformed.code, "E1206");
+    assert!(malformed.what.contains("package.jet"));
+    assert!(malformed
+        .why
+        .contains("package metadata policy is malformed"));
+    assert!(malformed.fix.contains("syntax-decisions.md"));
+}
+
+#[test]
+fn real_cargo_project_import_preserves_lock_facts_and_migration_findings() {
+    let project = Scratch::new("provider-import-real-cargo");
+    fs::write(
+        project.join("Cargo.toml"),
+        r#"[package]
+name = "real-app"
+version = "0.4.0"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
+serde = "1"
+
+[target.'cfg(unix)'.dependencies]
+cc = "1"
+
+[dev-dependencies]
+insta = "1"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("Cargo.lock"),
+        r#"version = 4
+
+[[package]]
+name = "serde"
+version = "1.0.200"
+source = "registry+https://example.invalid"
+checksum = "serde-checksum"
+
+[[package]]
+name = "cc"
+version = "1.0.99"
+source = "registry+https://example.invalid"
+checksum = "cc-checksum"
+
+[[package]]
+name = "insta"
+version = "1.39.0"
+source = "registry+https://example.invalid"
+checksum = "insta-checksum"
+"#,
+    )
+    .unwrap();
+
+    let plan = jetpack::MigrationImport::import_cargo(
+        &fs::read_to_string(project.join("Cargo.toml")).unwrap(),
+        &fs::read_to_string(project.join("Cargo.lock")).unwrap(),
+    );
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "Cargo.toml" && todo.message.contains("build script") }));
+    for (name, version, provider_ref) in [
+        ("serde", "1.0.200", "serde#version=1.0.200@cargo"),
+        ("cc", "1.0.99", "cc#version=1.0.99&platform=cfg(unix)@cargo"),
+    ] {
+        assert!(
+            plan.emit_pkg_jet()
+                .contains(&format!("{name}: {provider_ref}")),
+            "generated package omitted {provider_ref}: {}",
+            plan.emit_pkg_jet()
+        );
+        let facts = plan
+            .provider_facts
+            .get(provider_ref)
+            .expect("real project provider facts");
+        facts.validate().expect("lossless Cargo dependency facts");
+        assert!(facts.native_document.contains("Cargo.toml:"));
+        assert!(facts.native_document.contains("Cargo.lock:"));
+        assert_eq!(facts.resolved_source, format!("cargo:{name}@{version}"));
+        assert_eq!(
+            facts.provenance.get("package.version").map(String::as_str),
+            Some("Cargo.lock.version")
+        );
+        assert!(facts
+            .explain_lines()
+            .iter()
+            .any(|line| line == "native Cargo.toml+Cargo.lock: retained"));
+        let round_trip = jetpack::ProviderFacts::from_json(&facts.to_json())
+            .expect("Cargo provider facts export");
+        assert_eq!(round_trip, facts.clone());
+        if name == "cc" {
+            assert_eq!(facts.selector.platform, "cfg(unix)");
+        }
+    }
+    let insta = plan
+        .provider_facts
+        .get("insta#version=1.39.0@cargo")
+        .expect("real project dev-dependency facts");
+    insta
+        .validate()
+        .expect("lossless Cargo dev-dependency facts");
+    assert!(!plan.emit_pkg_jet().contains("insta:"));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "Cargo.toml" && todo.message.contains("dev") }));
+    assert!(plan.deps.iter().any(|dep| dep.name == "cc"));
+    assert!(plan.deps.iter().any(|dep| dep.name == "insta" && dep.dev));
+}
+
+#[test]
+fn provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier() {
+    use jet_pkg_model::ProviderFacts::ProviderFacts;
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let documents = [
+        (
+            ProviderFamily::NuGet,
+            "<package><metadata><id>widget</id><version>1.2.3</version><licenseExpression>MIT</licenseExpression><repository type=\"git\" url=\"https://example.invalid/widget\" /></metadata></package>",
+            "widget#version=1.2.3@nuget",
+        ),
+        (
+            ProviderFamily::Conan,
+            "name = \"widget\"\nversion = \"1.2.3\"\nlicense = \"MIT\"\ndef requirements(self):\n    self.requires(\"zlib/1.3.1\")\n",
+            "widget#version=1.2.3@conan",
+        ),
+        (
+            ProviderFamily::Vcpkg,
+            r#"{"name":"widget","version-string":"1.2.3","license":"MIT","dependencies":[{"name":"zlib","version>=":"1.3.0","features":["core"]}],"features":{"tools":["fmt"]}}"#,
+            "widget#version=1.2.3@vcpkg",
+        ),
+    ];
+
+    for (family, native, reference) in documents {
+        let report = normalize_provider_document(family, native);
+        report.validate().expect("lossless provider report");
+        let lock = report
+            .lock_record("engine-test", reference, "x86_64-linux")
+            .expect("provider lock");
+        let facts = ProviderFacts::from_json(
+            lock.future_fields
+                .get("provider-facts")
+                .expect("shared provider facts in lock"),
+        )
+        .expect("shared provider facts JSON");
+        assert_eq!(facts.native_document, native);
+        assert_eq!(facts.qualified_reference(), reference);
+        assert!(report
+            .shared_facts()
+            .explain_lines()
+            .iter()
+            .any(|line| line.contains("provider")));
+    }
+
+    let malformed = normalize_provider_document(
+        ProviderFamily::Vcpkg,
+        r#"{"name":"widget","version":"1.0.0","version-string":"1.1.0","dependencies":[{"features":["core"]}]}"#,
+    );
+    assert!(malformed.validate().is_err());
+    assert!(malformed
+        .losses
+        .iter()
+        .any(|loss| loss.contains("no non-empty `name`")));
+    assert!(malformed
+        .conflicts
+        .iter()
+        .any(|conflict| conflict.contains("conflicting version fields")));
+}
+
+#[test]
+fn real_project_import_reports_lossy_npm_requests_without_generated_refs() {
+    let project = Scratch::new("provider-import-real-npm");
+    fs::write(
+        project.join("package.json"),
+        r#"{
+  "name": "web-app",
+  "version": "1.2.3",
+  "dependencies": {"vite": "^5.4.0"},
+  "devDependencies": {"typescript": "~5.5.0"},
+  "optionalDependencies": {"fsevents": "2.3.3"},
+  "peerDependencies": {"react": "^18.0.0"},
+  "bundledDependencies": ["local-tool"],
+  "scripts": {"build": "vite build"}
+}
+"#,
+    )
+    .unwrap();
+
+    let document = fs::read_to_string(project.join("package.json")).unwrap();
+    let plan = jetpack::MigrationImport::import_npm(&document);
+    let generated = plan.emit_pkg_jet();
+    for name in ["vite", "typescript", "fsevents", "react"] {
+        assert!(
+            !generated.contains(&format!("{name}:")),
+            "lossy ref generated: {generated}"
+        );
+    }
+    for (name, field) in [
+        ("vite", "dependencies"),
+        ("typescript", "devDependencies"),
+        ("react", "peerDependencies"),
+    ] {
+        let facts = plan
+            .provider_facts
+            .get(&format!("{name}@npm"))
+            .expect("provider facts for unresolved npm dependency");
+        assert!(facts.native_document.contains("web-app"));
+        assert!(facts
+            .losses
+            .iter()
+            .any(|loss| loss.source == format!("package.json.{field}")));
+        assert!(plan.todos.iter().any(|todo| {
+            todo.source_path == "package.json" && todo.message.contains("unresolved")
+        }));
+    }
+    let optional = plan
+        .provider_facts
+        .get("fsevents#version=2.3.3@npm")
+        .expect("provider facts for exact optional npm dependency");
+    optional
+        .validate()
+        .expect("lossless npm optional dependency facts");
+    assert_eq!(
+        optional
+            .provenance
+            .get("package.dependency_kind")
+            .map(String::as_str),
+        Some("package.json.optionalDependencies")
+    );
+    assert!(optional
+        .explain_lines()
+        .iter()
+        .any(|line| line == "native package.json: retained"));
+    let optional_round_trip =
+        jetpack::ProviderFacts::from_json(&optional.to_json()).expect("npm facts export");
+    assert_eq!(optional_round_trip, optional.clone());
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "package.json" && todo.message.contains("optional") }));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| todo.source_path == "package.json" && todo.message.contains("bundled")));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| todo.message.contains("legacy build action")));
+}
+
+#[test]
+fn cargo_import_reports_ambiguous_lock_identity_without_generation() {
+    let plan = jetpack::MigrationImport::import_cargo(
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+        "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+one\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.201\"\nsource = \"registry+two\"\n",
+    );
+    assert!(!plan.emit_pkg_jet().contains("serde:"));
+    let facts = plan
+        .provider_facts
+        .get("serde@cargo")
+        .expect("ambiguous Cargo provider facts");
+    assert!(facts.conflicts.iter().any(|conflict| {
+        conflict.key == "provider.selector.version" && conflict.source == "Cargo.lock"
+    }));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "Cargo.lock" && todo.message.contains("conflicts") }));
 }
 
 #[test]
@@ -1402,9 +1767,17 @@ fn doctor_checks_real_state_and_is_read_only() {
         "registry init: {}",
         String::from_utf8_lossy(&registry_init.stderr)
     );
-    let keygen = jet().args(["registry", "keygen"])
-        .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
-    assert!(keygen.status.success(), "keygen: {}", String::from_utf8_lossy(&keygen.stderr));
+    let keygen = jet()
+        .args(["registry", "keygen"])
+        .current_dir(&project.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .output()
+        .unwrap();
+    assert!(
+        keygen.status.success(),
+        "keygen: {}",
+        String::from_utf8_lossy(&keygen.stderr)
+    );
     let registry_url = format!("file://{}", registry.display());
     let credentialed_registry_url = "http://user:super-secret@example.invalid/index";
     let helper = jetpack::FFI::cached_crypto_helper_path();
@@ -1413,7 +1786,8 @@ fn doctor_checks_real_state_and_is_read_only() {
     // so "this bridge's files" is a key filter — another suite building another
     // bridge concurrently must not read as `doctor` touching this one.
     let signing_bridge_files = |dir: &std::path::Path, key: &str| {
-        let mut names = fs::read_dir(dir).unwrap()
+        let mut names = fs::read_dir(dir)
+            .unwrap()
             .map(|e| e.unwrap().file_name())
             .filter(|name| name.to_string_lossy().contains(key))
             .collect::<Vec<_>>();
@@ -1430,13 +1804,25 @@ fn doctor_checks_real_state_and_is_read_only() {
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
         .env("JET_REGISTRY_URL", &registry_url)
-        .output().unwrap();
-    assert!(healthy.status.success(), "stderr: {}", String::from_utf8_lossy(&healthy.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        healthy.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&healthy.stderr)
+    );
     let healthy_json = jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
     assert_eq!(json_string(&healthy_json, "status"), "healthy");
-    assert_eq!(fs::metadata(&helper).unwrap().len(), helper_before.len(), "doctor changed signing helper");
+    assert_eq!(
+        fs::metadata(&helper).unwrap().len(),
+        helper_before.len(),
+        "doctor changed signing helper"
+    );
     let helper_parent_after = signing_bridge_files(&helper_dir, &helper_key);
-    assert_eq!(helper_parent_after, helper_parent_before, "doctor changed signing helper cache");
+    assert_eq!(
+        helper_parent_after, helper_parent_before,
+        "doctor changed signing helper cache"
+    );
 
     fs::remove_file(keys.join("jet.ed25519")).unwrap();
     let degraded = jetpack()
@@ -1445,36 +1831,92 @@ fn doctor_checks_real_state_and_is_read_only() {
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
         .env("JET_REGISTRY_URL", credentialed_registry_url)
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert_eq!(degraded.status.code(), Some(2));
     let degraded_text = String::from_utf8(degraded.stderr).unwrap();
     assert!(degraded_text.contains("[fail] registry"), "{degraded_text}");
-    assert!(degraded_text.contains("embedded registry credentials"), "{degraded_text}");
+    assert!(
+        degraded_text.contains("embedded registry credentials"),
+        "{degraded_text}"
+    );
     assert!(degraded_text.contains("[warn] signing"), "{degraded_text}");
-    assert!(degraded_text.ends_with("result: broken\n"), "{degraded_text}");
-    assert!(!degraded_text.contains("super-secret"), "credential leaked: {degraded_text}");
-    let keygen = jet().args(["registry", "keygen", "--force"])
-        .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
-    assert!(keygen.status.success(), "keygen: {}", String::from_utf8_lossy(&keygen.stderr));
+    assert!(
+        degraded_text.ends_with("result: broken\n"),
+        "{degraded_text}"
+    );
+    assert!(
+        !degraded_text.contains("super-secret"),
+        "credential leaked: {degraded_text}"
+    );
+    let query_degraded = jetpack()
+        .args(["doctor", "--online"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .env(
+            "JET_REGISTRY_URL",
+            "file:///registry.git?access_token=super-secret",
+        )
+        .output()
+        .unwrap();
+    assert_eq!(query_degraded.status.code(), Some(2));
+    let query_degraded_text = String::from_utf8(query_degraded.stderr).unwrap();
+    assert!(
+        query_degraded_text.contains("embedded registry credentials"),
+        "{query_degraded_text}"
+    );
+    assert!(
+        !query_degraded_text.contains("super-secret"),
+        "credential leaked: {query_degraded_text}"
+    );
+    let keygen = jet()
+        .args(["registry", "keygen", "--force"])
+        .current_dir(&project.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .output()
+        .unwrap();
+    assert!(
+        keygen.status.success(),
+        "keygen: {}",
+        String::from_utf8_lossy(&keygen.stderr)
+    );
     let public_path = keys.join("jet.ed25519.pub");
     let matching_public = fs::read_to_string(&public_path).unwrap();
     let mut mismatched_public = matching_public.clone().into_bytes();
-    mismatched_public[0] = if mismatched_public[0] == b'0' { b'1' } else { b'0' };
+    mismatched_public[0] = if mismatched_public[0] == b'0' {
+        b'1'
+    } else {
+        b'0'
+    };
     fs::write(&public_path, &mismatched_public).unwrap();
-    let mismatch = jetpack().args(["doctor", "--online"])
-        .current_dir(&project.path).env("JETPACK_ROOT", &root.path)
-        .env("JET_KEYS_DIR", &keys.path).env("JET_REGISTRY_URL", credentialed_registry_url)
-        .output().unwrap();
+    let mismatch = jetpack()
+        .args(["doctor", "--online"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_KEYS_DIR", &keys.path)
+        .env("JET_REGISTRY_URL", credentialed_registry_url)
+        .output()
+        .unwrap();
     let mismatch_text = String::from_utf8(mismatch.stderr).unwrap();
     assert_eq!(mismatch.status.code(), Some(2), "{mismatch_text}");
-    assert!(mismatch_text.contains("does not match its public key"), "{mismatch_text}");
-    assert!(!mismatch_text.contains("super-secret"), "credential leaked: {mismatch_text}");
+    assert!(
+        mismatch_text.contains("does not match its public key"),
+        "{mismatch_text}"
+    );
+    assert!(
+        !mismatch_text.contains("super-secret"),
+        "credential leaked: {mismatch_text}"
+    );
     fs::write(&public_path, matching_public).unwrap();
 
     let output = root.join("owned-output");
     fs::create_dir_all(&output).unwrap();
     fs::write(output.join("payload"), "trusted bytes").unwrap();
-    let roots = jetpack::Store::Roots { root: root.path.clone(), dev_mode: false };
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
     let entry = jetpack::Store::ingest_tree(
         &roots,
         &jetpack::Store::IngestRequest {
@@ -1500,10 +1942,15 @@ fn doctor_checks_real_state_and_is_read_only() {
     let old_meta = fs::read_to_string(&meta).unwrap();
     let stale_meta = old_meta.replace(
         &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
-        "\"last_used_at\": \"0\"");
+        "\"last_used_at\": \"0\"",
+    );
     fs::write(&meta, &stale_meta).unwrap();
     make_writable(&entry.out);
-    fs::write(std::path::Path::new(&entry.out).join("payload"), "corrupt bytes").unwrap();
+    fs::write(
+        std::path::Path::new(&entry.out).join("payload"),
+        "corrupt bytes",
+    )
+    .unwrap();
     fs::create_dir_all(root.join(".locks")).unwrap();
     let stale_lock = root.join(".locks/abandoned.lock");
     fs::write(&stale_lock, "pid=4294967294\n").unwrap();
@@ -1511,7 +1958,9 @@ fn doctor_checks_real_state_and_is_read_only() {
     let before_meta = fs::read(&meta).unwrap();
     let before_lock = fs::read(&stale_lock).unwrap();
     let before_public = fs::read(keys.join("jet.ed25519.pub")).unwrap();
-    let before_public_permissions = fs::metadata(keys.join("jet.ed25519.pub")).unwrap().permissions();
+    let before_public_permissions = fs::metadata(keys.join("jet.ed25519.pub"))
+        .unwrap()
+        .permissions();
     let before_output_permissions = fs::metadata(output.join("payload")).unwrap().permissions();
 
     let broken = jetpack()
@@ -1519,8 +1968,12 @@ fn doctor_checks_real_state_and_is_read_only() {
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
-        .env("JET_REGISTRY_URL", format!("file://{}", project.join("missing").display()))
-        .output().unwrap();
+        .env(
+            "JET_REGISTRY_URL",
+            format!("file://{}", project.join("missing").display()),
+        )
+        .output()
+        .unwrap();
     assert_eq!(broken.status.code(), Some(2));
     let text = String::from_utf8(broken.stdout).unwrap();
     assert!(text.contains("failed its content digest"), "{text}");
@@ -1529,13 +1982,34 @@ fn doctor_checks_real_state_and_is_read_only() {
     assert!(text.contains("kernel advisory locks readable"), "{text}");
     assert!(text.contains("unused for more than 30 days"), "{text}");
     assert!(text.contains("signing key for `jet` is missing"), "{text}");
-    assert_eq!(fs::read(&meta).unwrap(), before_meta, "doctor changed metadata");
-    assert_eq!(fs::read(&stale_lock).unwrap(), before_lock, "doctor changed lock state");
-    assert_eq!(fs::read(keys.join("jet.ed25519.pub")).unwrap(), before_public, "doctor changed public key");
-    assert_eq!(fs::metadata(keys.join("jet.ed25519.pub")).unwrap().permissions(), before_public_permissions, "doctor changed key permissions");
-    assert_eq!(fs::metadata(output.join("payload")).unwrap().permissions(), before_output_permissions, "doctor changed output permissions");
+    assert_eq!(
+        fs::read(&meta).unwrap(),
+        before_meta,
+        "doctor changed metadata"
+    );
+    assert_eq!(
+        fs::read(&stale_lock).unwrap(),
+        before_lock,
+        "doctor changed lock state"
+    );
+    assert_eq!(
+        fs::read(keys.join("jet.ed25519.pub")).unwrap(),
+        before_public,
+        "doctor changed public key"
+    );
+    assert_eq!(
+        fs::metadata(keys.join("jet.ed25519.pub"))
+            .unwrap()
+            .permissions(),
+        before_public_permissions,
+        "doctor changed key permissions"
+    );
+    assert_eq!(
+        fs::metadata(output.join("payload")).unwrap().permissions(),
+        before_output_permissions,
+        "doctor changed output permissions"
+    );
 }
-
 
 #[test]
 fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
@@ -1598,7 +2072,6 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
         "explain: {stdout}"
     );
 }
-
 
 #[test]
 fn build_resolves_fixture_ref() {
@@ -1777,11 +2250,17 @@ fn no_nix_projects_external_output_and_build_facts() {
         "Nix output escaped Hangar projection: {}",
         entry.out
     );
-    assert!(staging.path.exists(), "projection must not mutate the source store");
+    assert!(
+        staging.path.exists(),
+        "projection must not mutate the source store"
+    );
     let producer = jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
     assert_eq!(producer.provider, "nix");
     assert_eq!(
-        producer.facts.get("nix.projection.mode").map(String::as_str),
+        producer
+            .facts
+            .get("nix.projection.mode")
+            .map(String::as_str),
         Some("canonical-hangar")
     );
     assert_eq!(
@@ -1818,7 +2297,6 @@ fn no_nix_projects_external_output_and_build_facts() {
         "/homeless-shelter|/build|/build|C"
     );
 }
-
 
 #[test]
 fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
@@ -1914,7 +2392,6 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
     assert!(build().status.success());
 }
 
-
 #[test]
 fn list_shows_realized_package() {
     let root = Scratch::new("root");
@@ -1941,7 +2418,6 @@ fn list_shows_realized_package() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("greet"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn disappeared_output_build_fails_without_store_state_and_retries() {
@@ -1971,7 +2447,7 @@ fn disappeared_output_build_fails_without_store_state_and_retries() {
     let failed = build();
     assert!(!failed.status.success());
     let stderr = String::from_utf8_lossy(&failed.stderr);
-    assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+    assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
     assert!(stderr.contains("does not exist"), "stderr: {stderr}");
     assert_no_hangar_entry(&root.path, "greet-");
     let listed = jetpack()
@@ -1984,9 +2460,12 @@ fn disappeared_output_build_fails_without_store_state_and_retries() {
     let staging = Scratch::new("retry-greet-output");
     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
     let retried = build();
-    assert!(retried.status.success(), "stderr: {}", String::from_utf8_lossy(&retried.stderr));
+    assert!(
+        retried.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&retried.stderr)
+    );
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -2024,7 +2503,7 @@ fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
         let failed = build();
         let stderr = String::from_utf8_lossy(&failed.stderr);
         assert!(!failed.status.success(), "stderr: {stderr}");
-        assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
+        assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
         assert!(stderr.contains("Permission denied"), "stderr: {stderr}");
         assert_no_hangar_entry(&root.path, "greet-");
     }
@@ -2039,26 +2518,21 @@ fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
     let failed = build();
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert!(!failed.status.success(), "stderr: {stderr}");
-    assert!(stderr.contains("error[E1315]"), "stderr: {stderr}");
-    assert!(stderr.contains("unsupported special file"), "stderr: {stderr}");
+    assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("unsupported special file"),
+        "stderr: {stderr}"
+    );
     assert_no_hangar_entry(&root.path, "greet-");
     drop(listener);
     let _ = fs::remove_file(socket);
 }
 
-
 #[test]
 fn clean_removes_only_stale_unreferenced_hangar_objects() {
     let root = Scratch::new("root");
     let stale = write_hangar_meta(&root.path, "old-1", "old", "1.0", Some(1)).0;
-    let fresh = write_hangar_meta(
-        &root.path,
-        "fresh-1",
-        "fresh",
-        "1.0",
-        Some(now_secs()),
-    )
-    .0;
+    let fresh = write_hangar_meta(&root.path, "fresh-1", "fresh", "1.0", Some(now_secs())).0;
     fs::write(stale.join("payload"), "old bytes").unwrap();
     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
 
@@ -2080,7 +2554,6 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
         "stderr: {stderr}"
     );
 }
-
 
 #[test]
 fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
@@ -2104,7 +2577,6 @@ fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
     assert!(stderr.contains("- stale-objects"), "stderr: {stderr}");
     assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
@@ -2132,7 +2604,6 @@ fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
     );
 }
 
-
 #[test]
 fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
     let root = Scratch::new("root");
@@ -2159,26 +2630,11 @@ fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
     assert!(active.exists(), "active scratch marker protects scratch");
 }
 
-
 #[test]
 fn clean_optimizes_duplicate_files_inside_hangar_only() {
     let root = Scratch::new("root");
-    let first = write_hangar_meta(
-        &root.path,
-        "dup-a",
-        "dupa",
-        "1.0",
-        Some(now_secs()),
-    )
-    .0;
-    let second = write_hangar_meta(
-        &root.path,
-        "dup-b",
-        "dupb",
-        "1.0",
-        Some(now_secs()),
-    )
-    .0;
+    let first = write_hangar_meta(&root.path, "dup-a", "dupa", "1.0", Some(now_secs())).0;
+    let second = write_hangar_meta(&root.path, "dup-b", "dupb", "1.0", Some(now_secs())).0;
     fs::write(first.join("blob"), "same payload").unwrap();
     fs::write(second.join("blob"), "same payload").unwrap();
 
@@ -2207,7 +2663,6 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
     );
 }
 
-
 #[test]
 fn build_runs_opportunistic_clean_after_success() {
     let root = Scratch::new("root");
@@ -2232,7 +2687,6 @@ fn build_runs_opportunistic_clean_after_success() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("auto-cleaned hangar"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn run_dash_dash_executes_in_env_and_returns_status() {
@@ -2262,7 +2716,6 @@ fn run_dash_dash_executes_in_env_and_returns_status() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.trim(), "hello from jetpack");
 }
-
 
 #[test]
 fn run_explicit_package_without_command_runs_package_visibly() {
@@ -2294,7 +2747,6 @@ fn run_explicit_package_without_command_runs_package_visibly() {
     assert!(stderr.contains("(no args)"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn run_dash_dash_propagates_failure_status() {
     let root = Scratch::new("root");
@@ -2317,7 +2769,6 @@ fn run_dash_dash_propagates_failure_status() {
         .unwrap();
     assert!(!output.status.success());
 }
-
 
 #[test]
 fn parent_env_unchanged_after_run() {
@@ -2367,7 +2818,6 @@ fn parent_env_unchanged_after_run() {
     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
 }
 
-
 #[test]
 fn bad_ref_is_friendly_and_exits_2() {
     let out = jetpack()
@@ -2379,7 +2829,6 @@ fn bad_ref_is_friendly_and_exits_2() {
     assert!(stderr.contains("missing a source"), "stderr: {stderr}");
     assert!(stderr.contains("name#version@source"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn provider_first_ref_is_coded_and_snapshot_pinned() {
@@ -2396,7 +2845,6 @@ fn provider_first_ref_is_coded_and_snapshot_pinned() {
     );
 }
 
-
 #[test]
 fn retired_path_provider_is_coded_and_snapshot_pinned() {
     let root = Scratch::new("ref-path-provider");
@@ -2412,7 +2860,6 @@ fn retired_path_provider_is_coded_and_snapshot_pinned() {
     );
 }
 
-
 #[test]
 fn unknown_source_is_friendly() {
     let out = jetpack()
@@ -2424,14 +2871,15 @@ fn unknown_source_is_friendly() {
     assert!(stderr.contains("not a known source"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn add_then_remove_edits_env_file() {
     let (_base, proj, root) = core_hello_project("add-remove");
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
+        fs::read_to_string(&env_path)
+            .unwrap()
+            .replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
@@ -2468,14 +2916,15 @@ fn add_then_remove_edits_env_file() {
     );
 }
 
-
 #[test]
 fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
     let (_base, proj, root) = core_hello_project("remove-plan");
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
+        fs::read_to_string(&env_path)
+            .unwrap()
+            .replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
@@ -2502,7 +2951,6 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
     assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn remove_with_short_yes_applies_identically_to_long_yes() {
     // D-FE-CLI1: `-y` and `--yes` bypass the mutation gate identically.
@@ -2510,7 +2958,9 @@ fn remove_with_short_yes_applies_identically_to_long_yes() {
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
+        fs::read_to_string(&env_path)
+            .unwrap()
+            .replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
@@ -2549,7 +2999,6 @@ fn remove_with_short_yes_applies_identically_to_long_yes() {
         "short -y must take the yes-bypass path: {stderr}"
     );
 }
-
 
 #[test]
 fn run_with_project_env_file_resolves_declared_packages() {
@@ -2608,7 +3057,6 @@ fn nested_package_commands_use_the_nearest_package_root() {
     );
     drop(base);
 }
-
 
 #[test]
 fn typed_env_copy_adapter_realizes_local_source() {
@@ -2675,7 +3123,6 @@ module dev {
     );
 }
 
-
 #[test]
 fn typed_env_build_recipe_realizes_local_source() {
     let proj = Scratch::new("build-recipe-project");
@@ -2722,14 +3169,12 @@ module dev {
     let entries = jetpack::Store::list(&roots);
     assert!(
         entries.iter().any(|entry| {
-            fs::read_to_string(Path::new(&entry.out).join("share/payload.txt"))
-                .unwrap_or_default()
+            fs::read_to_string(Path::new(&entry.out).join("share/payload.txt")).unwrap_or_default()
                 == "built recipe\n"
         }),
         "build recipe output missing copied file: {entries:?}"
     );
 }
-
 
 #[test]
 fn typed_env_build_recipe_uses_declared_tool_dependencies() {
@@ -2783,7 +3228,6 @@ module dev {
         jetpack::Store::list(&roots)
     );
 }
-
 
 #[test]
 fn typed_env_build_hook_approval_binds_declared_dependency_refs() {
@@ -2877,10 +3321,15 @@ module dev {
         .unwrap();
     let stderr = String::from_utf8_lossy(&second.stderr);
     assert_eq!(second.status.code(), Some(1), "stderr: {stderr}");
-    assert!(stderr.contains("E1255"), "changed dependency was accepted: {stderr}");
-    assert!(stderr.contains("build hook"), "wrong trust failure: {stderr}");
+    assert!(
+        stderr.contains("E1255"),
+        "changed dependency was accepted: {stderr}"
+    );
+    assert!(
+        stderr.contains("build hook"),
+        "wrong trust failure: {stderr}"
+    );
 }
-
 
 #[test]
 fn typed_env_prebuilt_adapter_runs_from_path() {
@@ -2927,7 +3376,6 @@ module dev {
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "weird ok");
 }
 
-
 #[test]
 fn no_nix_nixpkgs_package_reports_e1272() {
     let root = Scratch::new("root");
@@ -2953,7 +3401,6 @@ fn no_nix_nixpkgs_package_reports_e1272() {
     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn package_and_environment_paths_have_no_installed_nix_shellout() {
@@ -3021,7 +3468,6 @@ fn no_nix_ad_hoc_package_reports_e1272() {
     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
     let (base, proj, root) = core_hello_project("no-nix-mixed");
@@ -3061,7 +3507,6 @@ fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
     assert!(metas.contains("\"name\": \"hello\""), "metas: {metas}");
 }
 
-
 #[test]
 fn no_nix_json_lists_realized_refs_and_holes() {
     let (base, proj, root) = core_hello_project("no-nix-json");
@@ -3094,7 +3539,6 @@ fn no_nix_json_lists_realized_refs_and_holes() {
     );
 }
 
-
 #[test]
 fn typed_env_bad_adapter_is_e1270() {
     let proj = Scratch::new("proj");
@@ -3126,7 +3570,6 @@ module dev {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1270"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn channel_update_writes_exact_lock_and_build_uses_it_offline() {
@@ -3197,7 +3640,6 @@ module dev {
     );
 }
 
-
 #[test]
 fn channel_build_without_lock_is_e1271() {
     let proj = Scratch::new("proj");
@@ -3226,7 +3668,6 @@ module dev {
         "stderr: {stderr}"
     );
 }
-
 
 #[test]
 fn channel_update_accepts_main_and_semver_mask() {
@@ -3281,7 +3722,6 @@ module dev {
     );
 }
 
-
 #[test]
 fn outdated_reports_newer_channel_without_mutating_lock() {
     let proj = Scratch::new("proj");
@@ -3332,7 +3772,6 @@ module dev {
     );
 }
 
-
 #[test]
 fn add_adapt_prints_snippet_without_editing_env() {
     let proj = Scratch::new("proj");
@@ -3350,7 +3789,6 @@ fn add_adapt_prints_snippet_without_editing_env() {
     );
     assert!(!proj.join("env.jet").exists());
 }
-
 
 #[test]
 fn named_source_env_resolves_with_pin() {
@@ -3380,7 +3818,6 @@ fn named_source_env_resolves_with_pin() {
     assert!(stderr.contains("ripgrep"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn unknown_named_source_in_env_is_friendly() {
     let proj = Scratch::new("proj");
@@ -3406,7 +3843,6 @@ fn unknown_named_source_in_env_is_friendly() {
         "should list declared names: {stderr}"
     );
 }
-
 
 #[test]
 fn jetpack_enter_runs_command_in_project_env() {
@@ -3453,6 +3889,114 @@ fn jetpack_enter_runs_command_in_project_env() {
     assert!(!shared.native_document.is_empty());
 }
 
+#[test]
+fn provider_conformance_pypi_swiftpm_maven_round_trips_the_production_carrier() {
+    use jetpack::ProviderFacts;
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let pypi = r#"{"info":{"name":"sample-pkg","version":"2.4.1","license":"MIT","requires_python":">=3.10","requires_dist":["httpx>=0.27"],"classifiers":["Programming Language :: Python :: 3"]},"urls":[{"filename":"sample_pkg-2.4.1.tar.gz","digests":{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"yanked":false}],"vulnerabilities":[{"id":"PYSEC-0000"}]}"#;
+    let swiftpm = format!(
+        r#"{{"version":1,"pins":[{{"package":"swift-log","repositoryURL":"https://github.com/apple/swift-log.git","state":{{"revision":"{revision}","version":"1.5.4"}}}}]}}"#
+    );
+    let maven = r#"<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>sample</artifactId>
+  <version>1.2.3</version>
+  <packaging>jar</packaging>
+  <licenses><license><name>Apache-2.0</name><url>https://www.apache.org/licenses/LICENSE-2.0</url></license></licenses>
+  <dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version><scope>test</scope></dependency></dependencies>
+  <build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><goals><goal>compile</goal></goals></plugin></plugins></build>
+  <profiles><profile><id>linux</id><activation><os><name>Linux</name></os></activation></profile></profiles>
+  <scm><url>https://example.invalid/sample</url></scm>
+</project>"#;
+
+    for (family, native) in [
+        (ProviderFamily::PyPI, pypi),
+        (ProviderFamily::SwiftPM, swiftpm.as_str()),
+        (ProviderFamily::Maven, maven),
+    ] {
+        let report = normalize_provider_document(family, native);
+        report
+            .validate()
+            .unwrap_or_else(|error| panic!("lossless provider report: {error}"));
+        let shared = report.shared_facts();
+        assert_eq!(shared.native_document, native);
+        assert!(shared
+            .explain_lines()
+            .iter()
+            .any(|line| line.contains("native") && line.contains("retained")));
+
+        let exported = ProviderFacts::from_json(&report.export_json())
+            .expect("provider export uses the shared carrier");
+        assert_eq!(exported, shared);
+
+        let lock = report
+            .lock_record("app", &shared.reference, "x86_64-linux")
+            .expect("provider lock uses the shared carrier");
+        let locked = ProviderFacts::from_json(
+            lock.future_fields
+                .get("provider-facts")
+                .expect("provider facts in lock"),
+        )
+        .expect("locked provider facts JSON");
+        assert_eq!(locked, shared);
+        let digest = shared.digest();
+        assert_eq!(
+            lock.future_fields.get("provider-facts-digest"),
+            Some(&digest)
+        );
+    }
+}
+
+#[test]
+fn provider_conformance_reports_loss_and_conflict_without_defaults() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let missing_version = normalize_provider_document(
+        ProviderFamily::PyPI,
+        r#"{"info":{"name":"sample-pkg"},"urls":[]}"#,
+    );
+    assert!(missing_version
+        .losses
+        .iter()
+        .any(|loss| loss.contains("exact version")));
+    assert!(missing_version.validate().is_err());
+    assert!(missing_version
+        .shared_facts()
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("exact version")));
+
+    let branch_only = normalize_provider_document(
+        ProviderFamily::SwiftPM,
+        r#"{"version":1,"pins":[{"package":"swift-log","state":{"branch":"main"}}]}"#,
+    );
+    assert!(branch_only
+        .losses
+        .iter()
+        .any(|loss| loss.contains("exact revision")));
+    assert!(branch_only.validate().is_err());
+
+    let conflicting_pom = r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>"#;
+    let conflict = normalize_provider_document(ProviderFamily::Maven, conflicting_pom);
+    assert!(conflict
+        .conflicts
+        .iter()
+        .any(|finding| finding.contains("conflicting version")));
+    assert!(conflict.validate().is_err());
+
+    let unsupported_xml = normalize_provider_document(
+        ProviderFamily::Maven,
+        r#"<m:project xmlns:m="urn:example"><m:artifactId>sample</m:artifactId></m:project>"#,
+    );
+    assert!(unsupported_xml
+        .losses
+        .iter()
+        .any(|loss| loss.contains("namespaced XML")));
+    assert!(unsupported_xml.validate().is_err());
+}
 
 #[test]
 fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
@@ -3484,7 +4028,6 @@ fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
     );
 }
 
-
 #[test]
 fn enter_dash_p_merges_with_project_declared_packages() {
     // The project's own declared package (`hello`, a `core` ref) and the
@@ -3512,7 +4055,6 @@ fn enter_dash_p_merges_with_project_declared_packages() {
     assert!(stdout.contains("hello from jetpack"), "stdout: {stdout}");
 }
 
-
 #[test]
 fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
     // The pre-U16 refusal is unchanged when there is truly nothing: no
@@ -3529,7 +4071,6 @@ fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("nothing to do"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn enter_flake_detection_ordering_project_env_wins_without_flag() {
@@ -3560,7 +4101,6 @@ fn enter_flake_detection_ordering_project_env_wins_without_flag() {
     );
 }
 
-
 #[test]
 fn enter_flake_flag_requires_trust_before_native_projection() {
     // `--flake` forces the foreign-flake projection even though the project
@@ -3581,7 +4121,6 @@ fn enter_flake_flag_requires_trust_before_native_projection() {
     assert!(stderr.contains("--trust"), "stderr: {stderr}");
     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn enter_flake_native_projection_runs_without_nix_on_path() {
@@ -3614,7 +4153,10 @@ fn enter_flake_native_projection_runs_without_nix_on_path() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "native-flake");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "native-flake"
+    );
 }
 
 #[test]
@@ -3658,14 +4200,15 @@ let marker = "flake-parts mkFlake"; in {
     let lock_path = project.join(".jet/lock");
     let before = fs::read(&lock_path).expect("successful bridge must commit a semantic lock");
     let lock_text = String::from_utf8(before.clone()).unwrap();
-    assert!(lock_text.contains("flake-composition:flake-parts"), "{lock_text}");
+    assert!(
+        lock_text.contains("flake-composition:flake-parts"),
+        "{lock_text}"
+    );
     assert!(lock_text.contains("./parts/dev.nix"), "{lock_text}");
     let previous = jetpack::SemanticLock::parse(&lock_text);
-    let previous_graph = jetpack::SemanticLock::FlakeGraph::from_semantic_lock(
-        "flake.nix",
-        &previous,
-    )
-    .expect("the committed imported-module projection must remain usable");
+    let previous_graph =
+        jetpack::SemanticLock::FlakeGraph::from_semantic_lock("flake.nix", &previous)
+            .expect("the committed imported-module projection must remain usable");
     assert!(previous_graph
         .named_dev_shells()
         .iter()
@@ -3806,29 +4349,59 @@ module env.full {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"preset\":\"host+user\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"selected_presets\":[\"host\",\"user\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"active_environment\":\"dev\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"preset\":\"host+user\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"selected_presets\":[\"host\",\"user\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"active_environment\":\"dev\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");
     assert!(stdout.contains("\"fingerprint\":\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"language_projections\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"language_projections\""),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"host\":\"native\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"platform\":\"x86_64-linux\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"license\":\"Apache-2.0 OR MIT\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"platform\":\"x86_64-linux\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"license\":\"Apache-2.0 OR MIT\""),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
     assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
     assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"services\":[{\"name\":\"redis\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"services\":[{\"name\":\"redis\""),
+        "stdout: {stdout}"
+    );
     // D-JOB-NAME2=B (card #1448): the merged `tasks` key is gone. `lint` is the
     // project's own `#Job fn`, so it reports under `jobs`; this env declares no
     // `checks:` hook records, so the environment's key is present but empty.
     // Both keys always appear, so a consumer reads the one it means.
-    assert!(stdout.contains("\"checks\":[],\"jobs\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"checks\":[],\"jobs\":[\"lint\"]"),
+        "stdout: {stdout}"
+    );
     assert!(!stdout.contains("\"tasks\":[\"lint\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"variables\":[{\"name\":\"MODE\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"variables\":[{\"name\":\"MODE\""),
+        "stdout: {stdout}"
+    );
 
     let full = jetpack()
         .args(["enter", "info", "--json", "--no-color", "--env", "full"])
@@ -3851,8 +4424,14 @@ module env.full {
         full_stdout.contains("\"active_environment_provenance\":[\"env.full\"]"),
         "stdout: {full_stdout}"
     );
-    assert!(full_stdout.contains("\"fd@nixpkgs\""), "stdout: {full_stdout}");
-    assert!(!full_stdout.contains("\"ripgrep@nixpkgs\""), "stdout: {full_stdout}");
+    assert!(
+        full_stdout.contains("\"fd@nixpkgs\""),
+        "stdout: {full_stdout}"
+    );
+    assert!(
+        !full_stdout.contains("\"ripgrep@nixpkgs\""),
+        "stdout: {full_stdout}"
+    );
 
     let missing = jetpack()
         .args(["enter", "info", "--no-color", "--env", "missing"])
@@ -3909,22 +4488,52 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(jetpack::JSON::parse(&stdout).is_ok(), "info JSON must parse: {stdout}");
+    assert!(
+        jetpack::JSON::parse(&stdout).is_ok(),
+        "info JSON must parse: {stdout}"
+    );
     assert!(
         stdout.contains("\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}"),
         "stdout: {stdout}"
     );
-    assert!(stdout.contains("\"name\":\"fixture\",\"enabled\":false"), "stdout: {stdout}");
-    assert!(stdout.contains("\"run\":[\"fixture\",\"--port\",\"8080\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"ready\":\"fixture --ready\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"data_dir\":\"state/fixture\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"name\":\"fixture\",\"enabled\":false"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"run\":[\"fixture\",\"--port\",\"8080\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"ready\":\"fixture --ready\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"data_dir\":\"state/fixture\""),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"watch\":[\"src\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"after\":[\"database\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"before_start\":[\"lint\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"sockets\":[\"run/fixture.sock\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"files\":[\"config/generated.txt\"]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"after\":[\"database\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"before_start\":[\"lint\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"sockets\":[\"run/fixture.sock\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"files\":[\"config/generated.txt\"]"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"jobs\":[\"lint\"]"), "stdout: {stdout}");
-    assert!(!project.join(".jet/services").exists(), "info must not start services");
+    assert!(
+        !project.join(".jet/services").exists(),
+        "info must not start services"
+    );
 }
 
 #[test]
@@ -3947,7 +4556,14 @@ fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
     fs::write(project.join("seed/config.txt"), "keep me\n").unwrap();
 
     let output = jetpack()
-        .args(["enter", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .args([
+            "enter",
+            "sync",
+            "--trust",
+            "--yes",
+            "--offline",
+            "--no-color",
+        ])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -3971,11 +4587,22 @@ fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
     let blocked = Scratch::new("env-sync-files-blocked");
     let blocked_root = Scratch::new("env-sync-files-blocked-root");
     let blocked_home = Scratch::new("env-sync-files-blocked-home");
-    fs::write(blocked.join("env.jet"), fs::read(project.join("env.jet")).unwrap()).unwrap();
+    fs::write(
+        blocked.join("env.jet"),
+        fs::read(project.join("env.jet")).unwrap(),
+    )
+    .unwrap();
     fs::create_dir_all(blocked.join("generated")).unwrap();
     fs::write(blocked.join("generated/config.txt"), "user-owned\n").unwrap();
     let refused = jetpack()
-        .args(["enter", "sync", "--trust", "--yes", "--offline", "--no-color"])
+        .args([
+            "enter",
+            "sync",
+            "--trust",
+            "--yes",
+            "--offline",
+            "--no-color",
+        ])
         .current_dir(&blocked.path)
         .env("JETPACK_ROOT", &blocked_root.path)
         .env("HOME", &blocked_home.path)
@@ -4029,11 +4656,20 @@ fn env_info_json_discloses_typed_integration_projection() {
     assert!(stdout.contains("\"integrations\":["), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"apple\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"kind\":\"certificates\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"kind\":\"cloud-credentials\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"kind\":\"certificates\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"kind\":\"cloud-credentials\""),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"kind\":\"vault\""), "stdout: {stdout}");
     assert!(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"kind\":\"codex-agent\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"kind\":\"codex-agent\""),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}");
     assert!(
         stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"),
@@ -4045,15 +4681,42 @@ fn env_info_json_discloses_typed_integration_projection() {
     );
     assert!(stdout.contains("\"host_checks\":["), "stdout: {stdout}");
     assert!(stdout.contains("\"grants\":["), "stdout: {stdout}");
-    assert!(stdout.contains("\"secrets\":[\"dev_certificate\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"grants\":[\"certificate.read\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"secrets\":[\"aws_production\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"grants\":[\"credential.read\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"secrets\":[\"database_password\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"grants\":[\"vault.read\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"grants\":[\"mcp.read\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"packages\":[\"vscode@nixpkgs\"]"), "stdout: {stdout}");
-    assert!(stdout.contains("\"option_keys\":[\"host.api.local\"]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"secrets\":[\"dev_certificate\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"grants\":[\"certificate.read\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"secrets\":[\"aws_production\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"grants\":[\"credential.read\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"secrets\":[\"database_password\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"grants\":[\"vault.read\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"grants\":[\"mcp.read\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"packages\":[\"vscode@nixpkgs\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"option_keys\":[\"host.api.local\"]"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -4079,8 +4742,14 @@ fn enter_requires_a_persisted_cloud_integration_grant() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1335"), "stderr: {stderr}");
-    assert!(stderr.contains("cloud-credentials:credential.read"), "stderr: {stderr}");
-    assert!(!stderr.contains("aws_production"), "secret name leaked: {stderr}");
+    assert!(
+        stderr.contains("cloud-credentials:credential.read"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("aws_production"),
+        "secret name leaked: {stderr}"
+    );
 }
 
 #[test]
@@ -4156,7 +4825,6 @@ fn env_info_rejects_unsupported_apple_integration_target() {
     assert!(stderr.contains("E1335"), "stderr: {stderr}");
     assert!(stderr.contains("apple integration"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn bridge_flake_uses_native_evaluator_without_nix() {
@@ -4270,7 +4938,10 @@ fn bridge_flake_uses_native_evaluator_without_nix() {
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert!(stderr.contains("E1256"), "stderr: {stderr}");
     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
-    assert_eq!(fs::read_to_string(dir.join(".jet/lock")).unwrap(), before_failure);
+    assert_eq!(
+        fs::read_to_string(dir.join(".jet/lock")).unwrap(),
+        before_failure
+    );
 }
 
 #[test]
@@ -4302,11 +4973,7 @@ fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
     let lock_before_budget_failure = fs::read_to_string(dir.join(".jet/lock"))
         .expect("native breadth bridge must commit a lock before the failure case");
 
-    let nested_json = format!(
-        "{}true{}",
-        "[".repeat(257),
-        "]".repeat(257)
-    );
+    let nested_json = format!("{}true{}", "[".repeat(257), "]".repeat(257));
     let over_budget = format!(
         "{{ devShells.x86_64-linux.default = pkgs.mkShell {{ packages = builtins.fromJSON \"{nested_json}\"; }}; }}"
     );
@@ -4320,7 +4987,10 @@ fn bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix() {
     assert!(!failed.status.success());
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert!(stderr.contains("E1256"), "stderr: {stderr}");
-    assert!(stderr.contains("JSON value is too deeply nested"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("JSON value is too deeply nested"),
+        "stderr: {stderr}"
+    );
     assert!(!stderr.contains("nix eval"), "stderr: {stderr}");
     assert_eq!(
         fs::read_to_string(dir.join(".jet/lock")).unwrap(),
@@ -4376,7 +5046,10 @@ fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("packages: [fd, fetched]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("packages: [fd, fetched]"),
+        "stdout: {stdout}"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("cross-package:aarch64-linux/foo"),
@@ -4388,7 +5061,8 @@ fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix
     let lock_before_failure = fs::read_to_string(&lock_path).expect("breadth bridge lock");
     assert!(
         lock_before_failure.contains("flake-devshell:devShells:x86_64-linux:default")
-            && lock_before_failure.contains("packages=fd;unsupported=cross-package:aarch64-linux/foo"),
+            && lock_before_failure
+                .contains("packages=fd;unsupported=cross-package:aarch64-linux/foo"),
         "lock: {lock_before_failure}"
     );
     assert!(
@@ -4405,7 +5079,10 @@ fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix
         .unwrap();
     assert_eq!(fetch_failed.status.code(), Some(1));
     let fetch_failure_stderr = String::from_utf8_lossy(&fetch_failed.stderr);
-    assert!(fetch_failure_stderr.contains("E1256"), "stderr: {fetch_failure_stderr}");
+    assert!(
+        fetch_failure_stderr.contains("E1256"),
+        "stderr: {fetch_failure_stderr}"
+    );
     assert!(
         fetch_failure_stderr.contains("verified fetch hash mismatch"),
         "stderr: {fetch_failure_stderr}"
@@ -4432,7 +5109,10 @@ fn bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix
         failure_stderr.contains("provider authority"),
         "stderr: {failure_stderr}"
     );
-    assert!(!failure_stderr.contains("nix eval"), "stderr: {failure_stderr}");
+    assert!(
+        !failure_stderr.contains("nix eval"),
+        "stderr: {failure_stderr}"
+    );
     assert_eq!(fs::read_to_string(lock_path).unwrap(), lock_before_failure);
 }
 
@@ -4554,12 +5234,21 @@ fn bridge_flake_native_commits_losses_and_preserves_lock_on_failure() {
         String::from_utf8_lossy(&first.stdout)
     );
     let stderr = String::from_utf8_lossy(&first.stderr);
-    assert!(stderr.contains("L0204"), "native loss was not disclosed: {stderr}");
-    assert!(stderr.contains("shellHook"), "native loss name missing: {stderr}");
+    assert!(
+        stderr.contains("L0204"),
+        "native loss was not disclosed: {stderr}"
+    );
+    assert!(
+        stderr.contains("shellHook"),
+        "native loss name missing: {stderr}"
+    );
     let lock_path = dir.join(".jet/lock");
     let before = fs::read(&lock_path).expect("native bridge must commit its lock");
     let lock_text = String::from_utf8_lossy(&before);
-    assert!(lock_text.contains("shellHook"), "lock lost native loss fact: {lock_text}");
+    assert!(
+        lock_text.contains("shellHook"),
+        "lock lost native loss fact: {lock_text}"
+    );
 
     fs::write(
         dir.join("flake.nix"),
@@ -4685,7 +5374,6 @@ fn bridge_flake_commits_transitive_locked_registry_facts_without_nix() {
     );
 }
 
-
 #[test]
 fn bridge_flake_rejects_dynamic_native_evaluator_input() {
     let dir = Scratch::new("bridge-native-unsupported");
@@ -4704,7 +5392,6 @@ fn bridge_flake_rejects_dynamic_native_evaluator_input() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("literal package list"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
@@ -4747,7 +5434,6 @@ fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
     );
 }
 
-
 #[test]
 fn bridge_flake_twice_produces_identical_shim_stdout() {
     // Drift-check (U16 plan doc): the bridge is a pure function of the
@@ -4776,7 +5462,6 @@ fn bridge_flake_twice_produces_identical_shim_stdout() {
     assert_eq!(a.stdout, b.stdout);
 }
 
-
 #[test]
 fn bridge_flake_no_flake_nix_here_is_friendly() {
     let dir = Scratch::new("bridge-noflake");
@@ -4789,7 +5474,6 @@ fn bridge_flake_no_flake_nix_here_is_friendly() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn core_provider_runs_first_party_package_without_nix() {
@@ -4838,7 +5522,6 @@ fn core_provider_runs_first_party_package_without_nix() {
         "hello from jet-pkgs"
     );
 }
-
 
 #[test]
 fn typed_core_source_inferred_from_pack_jet() {
@@ -4900,7 +5583,6 @@ fn typed_core_source_inferred_from_pack_jet() {
     );
 }
 
-
 #[test]
 fn core_provider_builds_library_package_without_nix() {
     // U10 Chunk 4: a `library` package realizes through the `core` provider
@@ -4957,7 +5639,6 @@ fn core_provider_builds_library_package_without_nix() {
     );
 }
 
-
 #[test]
 fn committed_example_builds_offline_end_to_end() {
     // I5: the committed jetpack project fixture is the executable spec for
@@ -4998,7 +5679,6 @@ fn committed_example_builds_offline_end_to_end() {
     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
 }
 
-
 #[test]
 fn failed_first_dependency_reports_zero_completed_nodes() {
     let (_base, proj, root) = core_hello_project("progress-first-failure");
@@ -5027,7 +5707,6 @@ fn failed_first_dependency_reports_zero_completed_nodes() {
         "failure must print a diagnostic after erasing the live region: {stderr}"
     );
 }
-
 
 #[test]
 fn typed_module_example_builds_offline_end_to_end() {
@@ -5068,7 +5747,6 @@ fn typed_module_example_builds_offline_end_to_end() {
     }
     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn core_provider_fetches_remote_git_package_from_env() {
@@ -5157,7 +5835,6 @@ fn core_provider_fetches_remote_git_package_from_env() {
 }
 
 // ── E7 jetos runtime: `jet os <verb> <host>` / `host@root` ─────────
-
 
 #[test]
 fn offline_without_fixtures_errors() {
@@ -5270,7 +5947,8 @@ fn env_jet_sources_resolve_without_toml() {
 #[test]
 fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let env_project = Scratch::new("transition-cli-env");
-    let env_original = "name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
+    let env_original =
+        "name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
     fs::write(env_project.join("package.jet"), env_original).unwrap();
 
     let checked = jet()
@@ -5278,7 +5956,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&env_project.path)
         .output()
         .unwrap();
-    assert!(checked.status.success(), "stderr: {}", String::from_utf8_lossy(&checked.stderr));
+    assert!(
+        checked.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
     assert!(String::from_utf8_lossy(&checked.stdout).contains("No files changed."));
     assert!(!env_project.join("package/env.jet").exists());
 
@@ -5287,7 +5969,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&env_project.path)
         .output()
         .unwrap();
-    assert!(split.status.success(), "stderr: {}", String::from_utf8_lossy(&split.stderr));
+    assert!(
+        split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&split.stderr)
+    );
     assert!(env_project.join("package/env.jet").is_file());
 
     let fold_check = jet()
@@ -5295,7 +5981,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&env_project.path)
         .output()
         .unwrap();
-    assert!(fold_check.status.success(), "stderr: {}", String::from_utf8_lossy(&fold_check.stderr));
+    assert!(
+        fold_check.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&fold_check.stderr)
+    );
     assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
 
     let fold = jet()
@@ -5303,8 +5993,15 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&env_project.path)
         .output()
         .unwrap();
-    assert!(fold.status.success(), "stderr: {}", String::from_utf8_lossy(&fold.stderr));
-    assert_eq!(fs::read_to_string(env_project.join("package.jet")).unwrap(), env_original);
+    assert!(
+        fold.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&fold.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(env_project.join("package.jet")).unwrap(),
+        env_original
+    );
     assert!(!env_project.join("package/env.jet").exists());
 
     let package_project = Scratch::new("transition-cli-package");
@@ -5315,29 +6012,52 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&package_project.path)
         .output()
         .unwrap();
-    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    assert!(
+        package_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&package_split.stderr)
+    );
     let package_json = jet()
         .args(["split", "package", "app", "--check", "--json"])
         .current_dir(&package_project.path)
         .output()
         .unwrap();
-    assert!(package_json.status.success(), "stderr: {}", String::from_utf8_lossy(&package_json.stderr));
-    let package_json = jetpack::JSON::parse(&String::from_utf8_lossy(&package_json.stdout)).unwrap();
-    assert_eq!(json_string(&package_json, "before"), json_string(&package_json, "after"));
+    assert!(
+        package_json.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&package_json.stderr)
+    );
+    let package_json =
+        jetpack::JSON::parse(&String::from_utf8_lossy(&package_json.stdout)).unwrap();
+    assert_eq!(
+        json_string(&package_json, "before"),
+        json_string(&package_json, "after")
+    );
     let package_split = jet()
         .args(["split", "package", "app"])
         .current_dir(&package_project.path)
         .output()
         .unwrap();
-    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    assert!(
+        package_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&package_split.stderr)
+    );
     assert!(package_project.join("packages/app/package.jet").is_file());
     let package_fold = jet()
         .args(["fold", "packages/app/package.jet"])
         .current_dir(&package_project.path)
         .output()
         .unwrap();
-    assert!(package_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&package_fold.stderr));
-    assert_eq!(fs::read_to_string(package_project.join("package.jet")).unwrap(), package_original);
+    assert!(
+        package_fold.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&package_fold.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(package_project.join("package.jet")).unwrap(),
+        package_original
+    );
 
     let stale_project = Scratch::new("transition-cli-stale-member");
     fs::write(stale_project.join("package.jet"), package_original).unwrap();
@@ -5346,7 +6066,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&stale_project.path)
         .output()
         .unwrap();
-    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    assert!(
+        stale_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stale_split.stderr)
+    );
     fs::OpenOptions::new()
         .append(true)
         .open(stale_project.join("packages/app/package.jet"))
@@ -5380,7 +6104,10 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     assert_eq!(duplicate.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&duplicate.stderr)
         .contains("member Package name `app` is declared more than once"));
-    assert_eq!(fs::read_to_string(duplicate_project.join("package.jet")).unwrap(), duplicate_original);
+    assert_eq!(
+        fs::read_to_string(duplicate_project.join("package.jet")).unwrap(),
+        duplicate_original
+    );
     assert!(!duplicate_project.join("packages/app/package.jet").exists());
 
     let hosts_project = Scratch::new("transition-cli-hosts");
@@ -5394,14 +6121,22 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&hosts_project.path)
         .output()
         .unwrap();
-    assert!(hosts_split.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_split.stderr));
+    assert!(
+        hosts_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&hosts_split.stderr)
+    );
     assert!(hosts_project.join("package/fleet.jet").is_file());
     let hosts_fold = jet()
         .args(["fold", "package/fleet.jet"])
         .current_dir(&hosts_project.path)
         .output()
         .unwrap();
-    assert!(hosts_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_fold.stderr));
+    assert!(
+        hosts_fold.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&hosts_fold.stderr)
+    );
 
     let unknown_hosts = Scratch::new("transition-cli-unknown-host");
     fs::write(
@@ -5429,7 +6164,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&stale_hosts.path)
         .output()
         .unwrap();
-    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    assert!(
+        stale_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stale_split.stderr)
+    );
     fs::OpenOptions::new()
         .append(true)
         .open(stale_hosts.join("package/fleet.jet"))
@@ -5455,7 +6194,11 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&ambiguous_hosts.path)
         .output()
         .unwrap();
-    assert!(ambiguous_split.status.success(), "stderr: {}", String::from_utf8_lossy(&ambiguous_split.stderr));
+    assert!(
+        ambiguous_split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ambiguous_split.stderr)
+    );
     let journal_dir = ambiguous_hosts.join(".jet/package-transition");
     let journal = fs::read_dir(&journal_dir)
         .unwrap()
@@ -5503,33 +6246,51 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         .current_dir(&legacy_project.path)
         .output()
         .unwrap();
-    assert!(init_check.status.success(), "stderr: {}", String::from_utf8_lossy(&init_check.stderr));
+    assert!(
+        init_check.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init_check.stderr)
+    );
     assert!(String::from_utf8_lossy(&init_check.stdout).contains("No files changed."));
     let init = jet()
         .args(["init"])
         .current_dir(&legacy_project.path)
         .output()
         .unwrap();
-    assert!(init.status.success(), "stderr: {}", String::from_utf8_lossy(&init.stderr));
+    assert!(
+        init.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
     assert!(legacy_project.join("package.jet").is_file());
     let restore_check = jet()
         .args(["init", "--restore-role-files", "--check"])
         .current_dir(&legacy_project.path)
         .output()
         .unwrap();
-    assert!(restore_check.status.success(), "stderr: {}", String::from_utf8_lossy(&restore_check.stderr));
+    assert!(
+        restore_check.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&restore_check.stderr)
+    );
     let restore = jet()
         .args(["init", "--restore-role-files"])
         .current_dir(&legacy_project.path)
         .output()
         .unwrap();
-    assert!(restore.status.success(), "stderr: {}", String::from_utf8_lossy(&restore.stderr));
+    assert!(
+        restore.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&restore.stderr)
+    );
     for (name, source) in originals {
-        assert_eq!(fs::read_to_string(legacy_project.join(name)).unwrap(), source);
+        assert_eq!(
+            fs::read_to_string(legacy_project.join(name)).unwrap(),
+            source
+        );
     }
     assert!(!legacy_project.join("package.jet").exists());
 }
-
 
 #[test]
 fn mono_example_has_two_package_jet_members() {
@@ -5558,7 +6319,6 @@ fn mono_example_has_two_package_jet_members() {
 }
 
 // ── Card #99 T4: build-from-source surface (build states / vendor / audit) ────
-
 
 #[test]
 fn jet_build_reports_source_states() {
@@ -5602,7 +6362,6 @@ fn jet_build_reports_source_states() {
         "summary must count the cache hit: {out2}"
     );
 }
-
 
 #[test]
 fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
@@ -5665,8 +6424,7 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     );
     let substituted_stderr = String::from_utf8_lossy(&substituted.stderr);
     assert!(
-        substituted_stderr.contains("substituted")
-            && substituted_stderr.contains("1 substituted"),
+        substituted_stderr.contains("substituted") && substituted_stderr.contains("1 substituted"),
         "production build must report the verified substitution: {substituted_stderr}"
     );
     let repaired = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
@@ -5700,7 +6458,6 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
         "an unavailable substituter must not report a cache hit: {stderr}"
     );
 }
-
 
 #[test]
 fn jet_build_rejects_cache_after_manifest_semantics_change() {
@@ -5772,9 +6529,11 @@ fn independent_root_runner_promotes_only_agreed_source_output() {
         Some(&result.attestation)
     );
     assert!(!root.join("private/unreproducible").exists());
-    assert!(!fs::read_dir(roots.hangar_dir().join("reproducibility-staging"))
-        .map(|entries| entries.flatten().next().is_some())
-        .unwrap_or(false));
+    assert!(
+        !fs::read_dir(roots.hangar_dir().join("reproducibility-staging"))
+            .map(|entries| entries.flatten().next().is_some())
+            .unwrap_or(false)
+    );
 }
 
 #[test]
@@ -5829,6 +6588,8 @@ fn independent_root_runner_rejects_divergence_before_registration() {
         .expect("divergence evidence");
     let report = fs::read_to_string(report.path()).unwrap();
     assert!(report.contains("\"kind\":\"action-identity\""), "{report}");
+    assert!(report.contains("\"left_action_key\""), "{report}");
+    assert!(report.contains("\"right_action_key\""), "{report}");
 }
 
 #[test]
@@ -5867,7 +6628,6 @@ fn independent_root_runner_cancellation_leaves_no_store_result() {
     assert!(jetpack::Store::list(&roots).is_empty());
 }
 
-
 #[test]
 fn two_process_reverse_package_order_does_not_deadlock() {
     let base = Scratch::new("reverse-order-leases");
@@ -5876,8 +6636,11 @@ fn two_process_reverse_package_order_does_not_deadlock() {
     for name in ["a", "b"] {
         let package = repo.join(format!("pkgs/{name}"));
         fs::create_dir_all(package.join("bin")).unwrap();
-        fs::write(package.join(format!("{name}.jet")), format!("module {name} {{ }}\n"))
-            .unwrap();
+        fs::write(
+            package.join(format!("{name}.jet")),
+            format!("module {name} {{ }}\n"),
+        )
+        .unwrap();
         let tool = package.join(format!("bin/{name}"));
         fs::write(&tool, format!("#!/bin/sh\necho {name}\n")).unwrap();
         #[cfg(unix)]
@@ -5918,10 +6681,22 @@ fn two_process_reverse_package_order_does_not_deadlock() {
         .env("PATH", "/usr/bin:/bin")
         .output()
         .unwrap();
-    assert!(seeded.status.success(), "stderr: {}", String::from_utf8_lossy(&seeded.stderr));
+    assert!(
+        seeded.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&seeded.stderr)
+    );
     let spawn = |project: &Path| {
         jetpack()
-            .args(["enter", "--no-color", "--trust", "--", "/bin/sh", "-c", "true"])
+            .args([
+                "enter",
+                "--no-color",
+                "--trust",
+                "--",
+                "/bin/sh",
+                "-c",
+                "true",
+            ])
             .current_dir(project)
             .env("JETPACK_ROOT", &root)
             .env("PATH", "/usr/bin:/bin")
@@ -5933,7 +6708,6 @@ fn two_process_reverse_package_order_does_not_deadlock() {
     assert!(first.wait_with_output().unwrap().status.success());
     assert!(second.wait_with_output().unwrap().status.success());
 }
-
 
 #[test]
 fn jet_build_never_reports_deleted_output_as_cached() {
@@ -5959,17 +6733,22 @@ fn jet_build_never_reports_deleted_output_as_cached() {
     let rejected = run();
     assert!(!rejected.status.success());
     let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
+    assert!(
+        rejected_stderr.contains("E2604"),
+        "stderr: {rejected_stderr}"
+    );
     let rebuilt = run();
     assert!(rebuilt.status.success());
     let stderr = String::from_utf8_lossy(&rebuilt.stderr);
-    assert!(stderr.contains("built"), "deleted output must rebuild: {stderr}");
+    assert!(
+        stderr.contains("built"),
+        "deleted output must rebuild: {stderr}"
+    );
     assert!(
         !stderr.contains("1 cached"),
         "deleted output must never count as cache hit: {stderr}"
     );
 }
-
 
 #[test]
 fn jet_build_never_reports_tampered_output_as_cached() {
@@ -5995,17 +6774,22 @@ fn jet_build_never_reports_tampered_output_as_cached() {
     let rejected = run();
     assert!(!rejected.status.success());
     let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
+    assert!(
+        rejected_stderr.contains("E2604"),
+        "stderr: {rejected_stderr}"
+    );
     let rebuilt = run();
     assert!(rebuilt.status.success());
     let stderr = String::from_utf8_lossy(&rebuilt.stderr);
-    assert!(stderr.contains("built"), "tampered output must rebuild: {stderr}");
+    assert!(
+        stderr.contains("built"),
+        "tampered output must rebuild: {stderr}"
+    );
     assert!(
         !stderr.contains("1 cached"),
         "tampered output must never count as cache hit: {stderr}"
     );
 }
-
 
 #[test]
 fn jet_vendor_writes_pinned_sources() {
@@ -6046,7 +6830,6 @@ fn jet_vendor_writes_pinned_sources() {
         "vendor must copy the package source tree"
     );
 }
-
 
 #[test]
 fn jet_audit_reads_without_exec() {
@@ -6090,7 +6873,6 @@ fn jet_audit_reads_without_exec() {
         "audit must not realize anything: {report}"
     );
 }
-
 
 #[test]
 fn jet_inspect_audit_missing_inputs_fails_closed() {
@@ -6506,7 +7288,14 @@ outputs: .{
 
     let run = || {
         jet()
-            .args(["os", "plan", "workstation", "--json", "--no-color", "--offline"])
+            .args([
+                "os",
+                "plan",
+                "workstation",
+                "--json",
+                "--no-color",
+                "--offline",
+            ])
             .current_dir(&project.path)
             .env("JETPACK_ROOT", project.join("jet-root"))
             .output()
@@ -6526,7 +7315,10 @@ outputs: .{
     );
     assert_eq!(first.stdout, second.stdout);
     let json = String::from_utf8_lossy(&first.stdout);
-    let compact: String = json.chars().filter(|ch| !ch.is_ascii_whitespace()).collect();
+    let compact: String = json
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect();
     assert!(compact.contains("\"host\":\"workstation\""), "{json}");
     assert!(compact.contains("\"target\":\"linux.x64\""), "{json}");
     assert!(compact.contains("\"graph_identity\":\""), "{json}");
@@ -6554,7 +7346,14 @@ outputs: .{ workstation: .System.{ target: linux.x64, services: .{ ssh: .{} } } 
     .unwrap();
 
     let output = jet()
-        .args(["os", "plan", "workstation", "--json", "--no-color", "--offline"])
+        .args([
+            "os",
+            "plan",
+            "workstation",
+            "--json",
+            "--no-color",
+            "--offline",
+        ])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", project.join("jet-root"))
         .output()
@@ -6562,7 +7361,10 @@ outputs: .{ workstation: .System.{ target: linux.x64, services: .{ ssh: .{} } } 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1340"), "{stderr}");
-    assert!(stderr.contains("outputs.workstation.services.ssh.enable"), "{stderr}");
+    assert!(
+        stderr.contains("outputs.workstation.services.ssh.enable"),
+        "{stderr}"
+    );
     assert!(
         !project.join("jet-root/systems").exists(),
         "a rejected projection must not publish JetOS state"
@@ -6624,6 +7426,70 @@ fn remote_scheduler_selects_capabilities_then_fails_over_in_order() {
     assert_eq!(dispatch.builder, "safe");
     assert_eq!(dispatch.attempted, vec!["fast", "safe"]);
     assert_eq!(dispatch.value, "safe");
+}
+
+#[test]
+fn remote_ineligible_builder_honors_local_fallback() {
+    use jet::Comptime::Build::{
+        execute_build_plan_with_front_end_and_remote, ActionSpec, BuildCapability, BuildContext,
+        BuildExecutionEvent, BuildResourcePool, FrontEndCompletion, RemoteBuildBinding,
+    };
+
+    let project = Scratch::new("remote-ineligible-fallback");
+    let mut context = BuildContext::new();
+    let action = context
+        .action(
+            "local-fallback",
+            ActionSpec::cached(["sh", "-c", "printf fallback > build/fallback.txt"])
+                .with_outputs(["build/fallback.txt"])
+                .with_cap(BuildCapability::Exec)
+                .with_cap(BuildCapability::FS)
+                .with_cap(BuildCapability::Net)
+                .with_pool(BuildResourcePool::GPU),
+        )
+        .unwrap();
+    let target = context
+        .add_executable(
+            "fallback",
+            jet::Comptime::Build::TargetSpec::new().with_action(action),
+        )
+        .unwrap();
+    let plan = context.plan_with_default(target).unwrap();
+    let grants = [
+        BuildCapability::Exec,
+        BuildCapability::FS,
+        BuildCapability::Net,
+    ]
+    .into_iter()
+    .collect();
+    let binding = RemoteBuildBinding::new("gpu-builder", project.join("remote"), b"fallback-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_execute(true)
+        .with_local_fallback(true);
+
+    let execution = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &project.path,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(project.join("build/fallback.txt")).unwrap(),
+        "fallback"
+    );
+    assert!(execution.report.events.iter().any(|event| {
+        matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action: finished,
+                outcome: jet::Comptime::Build::ActionOutcome::Succeeded { exit_code: 0 },
+            } if *finished == action.id()
+        )
+    }));
 }
 
 #[test]

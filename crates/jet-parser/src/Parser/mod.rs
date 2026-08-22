@@ -847,8 +847,8 @@ mod s61_tests {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) => @param :: ~self.value
-    fn type_name(self) => String :: T.@name
+    fn get_value(self) @param -> ~self.value
+    fn type_name(self) String -> T.@name
 }
 "#,
         );
@@ -884,7 +884,7 @@ derive T.TypeName {
         let source = r#"
 derive T.Debug {
     impl Thing.Debug {
-        fn debug(self) => String :: "nested"
+        fn debug(self) String -> "nested"
     }
 }
 "#;
@@ -899,7 +899,7 @@ derive T.Debug {
 fn build(b: BuildContext) {
     b.generate("made") {
         impl Thing.Debug {
-            fn debug(self) => String :: "generated"
+            fn debug(self) String -> "generated"
         }
     }
 }
@@ -1421,11 +1421,11 @@ fn build(b: BuildContext) {
     fn pub_file_marker_sets_default_visibility() {
         let src = r#"#PubFile
 
-fn greet() => String {
+fn greet() String -> {
     return "hi"
 }
 
-priv fn secret() => Int {
+priv fn secret() Int -> {
     return 0
 }
 

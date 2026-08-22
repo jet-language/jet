@@ -1050,16 +1050,32 @@ fn report_json(
         "producer_action".to_string(),
         json_object(BTreeMap::from([
             (
+                "left_action_key".to_string(),
+                crate::JSON::quote(left_action_key),
+            ),
+            (
                 "left_provider".to_string(),
                 crate::JSON::quote(&left_producer.provider),
+            ),
+            (
+                "left_source_digest".to_string(),
+                crate::JSON::quote(&left_producer.source_digest),
             ),
             (
                 "left_source".to_string(),
                 crate::JSON::quote(&left_producer.immutable_source),
             ),
             (
+                "right_action_key".to_string(),
+                crate::JSON::quote(right_action_key),
+            ),
+            (
                 "right_provider".to_string(),
                 crate::JSON::quote(&right_producer.provider),
+            ),
+            (
+                "right_source_digest".to_string(),
+                crate::JSON::quote(&right_producer.source_digest),
             ),
             (
                 "right_source".to_string(),
@@ -1089,7 +1105,10 @@ fn side_json(entry: &StoreEntry, producer: &ProducerRecord, action_key: &str) ->
                     .unwrap_or(""),
             ),
         ),
-        ("entry".to_string(), crate::JSON::quote(&entry.id)),
+        (
+            "entry".to_string(),
+            crate::JSON::quote(&report_entry_id(entry, action_key)),
+        ),
         (
             "output_hash".to_string(),
             crate::JSON::quote(&entry.envelope.output_hash),
@@ -1117,6 +1136,15 @@ fn side_json(entry: &StoreEntry, producer: &ProducerRecord, action_key: &str) ->
             crate::JSON::quote(&entry.cache_identity.policy_fingerprint),
         ),
     ]))
+}
+
+fn report_entry_id(entry: &StoreEntry, action_key: &str) -> String {
+    let mut identity = b"jet-reproducibility-candidate-v1\0".to_vec();
+    for value in [action_key, entry.envelope.output_hash.as_str()] {
+        identity.extend_from_slice(&(value.len() as u64).to_be_bytes());
+        identity.extend_from_slice(value.as_bytes());
+    }
+    format!("sha256-{}", SHA256::sha256_hex(&identity))
 }
 
 fn persist_report(roots: &Roots, action_key: &str, report: &str) -> io::Result<PathBuf> {

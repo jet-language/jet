@@ -1173,7 +1173,9 @@ pub(super) fn parse_policy(
             if name == "lints"
                 || (package_only_fields
                     && (name == Syntax::POLICY_FIELD_CONTAIN
-                        || name == Syntax::POLICY_FIELD_HARDEN))
+                        || name == Syntax::POLICY_FIELD_HARDEN
+                        || name == Syntax::POLICY_FIELD_LICENSES
+                        || name == Syntax::POLICY_FIELD_SOURCES))
             {
                 continue;
             }
@@ -1212,6 +1214,99 @@ pub(super) fn parse_policy(
             .map_err(|error| bad_mem(format!("conflicting `{}` declarations: {error:?}", key.name())))?;
     }
     Ok(out)
+}
+
+/// Parse the package-policy fields that govern package metadata rather than
+/// source-level policy declarations. These fields stay in the one `policy:`
+/// namespace but are carried as typed package facts for the resolver.
+pub(super) fn parse_package_policy_surface(
+    body: &str,
+) -> Result<(Option<Vec<String>>, Vec<(String, Vec<String>)>), PackageParseError> {
+    let mut licenses = None;
+    let mut source_maps = Vec::new();
+    let mut seen_sources = HashSet::new();
+    let mut sources_seen = false;
+    for (name, raw) in key_value_entries(body)? {
+        match name.as_str() {
+            Syntax::POLICY_FIELD_LICENSES => {
+                if licenses.is_some() {
+                    return Err(bad_policy("`policy.licenses` is declared more than once"));
+                }
+                let value = raw.trim();
+                let Some(value) = value
+                    .strip_prefix(".Allow(")
+                    .and_then(|value| value.strip_suffix(')'))
+                else {
+                    return Err(bad_policy(
+                        "`policy.licenses` must use `.Allow([\"MIT\", \"Apache-2.0\"])`",
+                    ));
+                };
+                let values = parse_string_list(value).map_err(|_| {
+                    bad_policy("`policy.licenses` must contain a non-empty string list")
+                })?;
+                if values.is_empty() || values.iter().any(|value| value.trim().is_empty()) {
+                    return Err(bad_policy("`policy.licenses` must contain a non-empty string list"));
+                }
+                let mut unique = BTreeSet::new();
+                if values.iter().any(|value| !unique.insert(value.clone())) {
+                    return Err(bad_policy("`policy.licenses` cannot repeat an SPDX identifier"));
+                }
+                licenses = Some(values);
+            }
+            Syntax::POLICY_FIELD_SOURCES => {
+                if sources_seen {
+                    return Err(bad_policy("`policy.sources` is declared more than once"));
+                }
+                sources_seen = true;
+                let source_body = raw
+                    .trim()
+                    .strip_prefix('{')
+                    .and_then(|value| value.strip_suffix('}'))
+                    .ok_or_else(|| bad_policy("`policy.sources` must be a record"))?;
+                for (raw_pattern, value) in key_value_entries(source_body)? {
+                    let pattern = unquote(&raw_pattern);
+                    if pattern.trim().is_empty()
+                        || (pattern.contains('*') && !pattern.ends_with('*'))
+                        || pattern.matches('*').count() > 1
+                    {
+                        return Err(bad_policy(
+                            "`policy.sources` patterns must be exact names or one trailing `*`",
+                        ));
+                    }
+                    if !seen_sources.insert(pattern.clone()) {
+                        return Err(bad_policy(&format!(
+                            "`policy.sources.{pattern}` is declared more than once"
+                        )));
+                    }
+                    let sources = parse_string_list(value.trim()).map_err(|_| {
+                        bad_policy(&format!(
+                            "`policy.sources.{pattern}` must contain a non-empty source list"
+                        ))
+                    })?;
+                    if sources.is_empty() || sources.iter().any(|source| source.trim().is_empty()) {
+                        return Err(bad_policy(&format!(
+                            "`policy.sources.{pattern}` must contain a non-empty source list"
+                        )));
+                    }
+                    let mut unique = BTreeSet::new();
+                    if sources.iter().any(|source| !unique.insert(source.clone())) {
+                        return Err(bad_policy(&format!(
+                            "`policy.sources.{pattern}` cannot repeat a source authority"
+                        )));
+                    }
+                    source_maps.push((pattern, sources));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok((licenses, source_maps))
+}
+
+fn bad_policy(detail: impl Into<String>) -> PackageParseError {
+    PackageParseError::BadPackagePolicy {
+        detail: detail.into(),
+    }
 }
 
 /// Parse the package-only dependency guarantee dial. The source policy

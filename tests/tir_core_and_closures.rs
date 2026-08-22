@@ -673,7 +673,7 @@ fn run() {
     assert_eq!(stdout, "5\n7\n0\n");
 }
 
-/// c109 Phase 13: fn-typed values. A fn with a `fn(Int)=>Int` parameter routes
+/// c109 Phase 13: fn-typed values. A fn with a `fn(Int) Int` parameter routes
 /// through the TIR (the Box-coercion arg form); a bare fn-name value, a lambda arg,
 /// and a direct call through the fn-value (`f(x)` where `f` is the local param) all lower
 /// in subset. Proves the `Box::new(…) as <fn-type>` coercion + the fn-value call.
@@ -704,7 +704,7 @@ fn run() {
 
 /// c109 Phase 13: a struct field call through a fn-typed field uses the existing
 /// function-value lowering (`w.step(x)`). The struct's fn field, the
-/// `apply_twice((x)=>…, …)` call site, and a fn-value stored in a local then called all
+/// `apply_twice((x) -> …, …)` call site, and a fn-value stored in a local then called all
 /// route through TIR.
 #[test]
 fn fn_value_call_through_local() {
@@ -729,7 +729,7 @@ fn run() {
     assert_eq!(stdout, "11\n100\n");
 }
 
-/// c109 Phase 13: `scope.guard(() => { … })` — a closure-taking core call (NOT in
+/// c109 Phase 13: `scope.guard(() -> { … })` — a closure-taking core call (NOT in
 /// `core_fixed_sig`). The guard fires on scope exit (LIFO). Routes through the TIR with
 /// the bespoke `jet_scope_guard(<closure>)` emit shape.
 #[test]

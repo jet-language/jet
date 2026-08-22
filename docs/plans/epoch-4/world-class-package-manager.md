@@ -396,6 +396,10 @@ Shipped slice evidence:
   exhausted. Remote output restoration rolls back staged files if later local
   cache or provenance publication fails, so a failed attempt cannot leave a
   partial output.
+- If the selected binding has no eligible remote capacity for the action's
+  declared resource pools, the same explicit local fallback is honored before
+  any output is published; without that grant, the scheduler error remains
+  terminal.
 
 ### E4-JP8 — Nix derivation compatibility
 
@@ -524,12 +528,15 @@ compatibility fixture is accepted only through the real Provider/Store path;
 it does not replace the native bridge or unsupported-input product checks.
 The Store registration boundary copies external Nix outputs through the
 no-follow Hangar ingest, re-hashes them, and records the original canonical
-path only as producer provenance. Linux command consumers receive that
-verified snapshot through a rootless `/nix/store` namespace projection. The
-producer record also carries the fixed Nix build facts (`/build`,
-`/homeless-shelter`, store path, unprivileged UID policy, deterministic time,
-and `C` locale) and the runtime environment projection never replaces
-Jetpack's composed `PATH`.
+path only as producer provenance. Linux command consumers receive the verified
+snapshot through a rootless `/nix/store` namespace projection.
+The projection supports both directory and flat-file output nodes. The helper
+uses absolute host tool paths, so an empty `PATH` cannot hide a shell-out
+dependency. The producer record also carries the fixed Nix build facts
+(`/build`, `/homeless-shelter`, store path, unprivileged UID policy,
+deterministic time, and `C` locale) under one content digest. Jetpack rejects a
+missing or changed fact before it projects the runtime environment, which
+never replaces Jetpack's composed `PATH`.
 
 ### E4-JP12 — live registry, solver, and package delivery
 
@@ -650,13 +657,60 @@ Shipped slice evidence:
   npm, Cargo, and Jet registry dependency kinds, hooks, variants, platforms,
   source ownership, lock checksums, signatures, yanks, and advisory facts into
   the shared typed carrier.
+- The Nix provider lowers realization/package JSON and flake-lock source facts
+  into the same carrier. Derivation paths, output hashes, dependency roles,
+  hooks, platforms, signatures, advisories, licenses, and source ownership stay
+  typed beside the retained native bytes. Missing exact selectors, malformed
+  fields, multiple identities, and conflicting records remain explicit loss or
+  conflict findings.
+- NuGet XML/package metadata and lock JSON retain package identities, target
+  framework groups, dependency requests and resolutions, licenses, repository
+  ownership, content hashes, signatures, deprecation, and advisory fields.
+  Multiple package identities, unresolved ranges, malformed groups, and mutable
+  versions remain explicit loss findings.
+- Conan recipes and graph-lock JSON retain recipe/package refs, runtime/tool/
+  build dependencies, settings, options, generators, revisions, package IDs,
+  and native hook lines. Missing refs, malformed dependency shapes, graph nodes,
+  and executable recipe hooks remain explicit loss or conflict findings.
+- vcpkg manifests retain version variants, baseline, overrides, features,
+  supports, license, dependency constraints, host/platform facts, and the full
+  native JSON projection. Malformed dependency entries, feature/override shapes,
+  missing names, and conflicting version fields are explicit findings.
+- PyPI JSON and Core Metadata retain native bytes while lowering distribution
+  identities, requirements, classifiers, artifacts, hashes, yanks, signatures,
+  vulnerabilities, and source fields. Missing or dynamic identity remains an
+  explicit loss.
+- SwiftPM Package.resolved v1/v2/v3 pins retain the lock document and lower
+  revisions, versions, branches, locations, and pin state. Branch-only pins,
+  malformed locks, and ambiguous multi-pin inputs remain explicit loss or
+  conflict findings.
+- Maven POMs retain XML and lower GAV coordinates, dependency scopes, licenses,
+  build goals, profiles, repositories, SCM, and audit fields. Missing
+  coordinates, unsupported namespaces, and conflicting declarations refuse
+  losslessly with a finding.
+- Homebrew imports retain formula versions, dependency kinds, tap/source
+  ownership, bottle platform hashes, relocatability, hooks, and deprecation
+  facts. GitHub imports retain release/tag and commit identity, source URLs,
+  release status, signatures, advisories, and per-asset platform/digest facts.
+  Binary imports require an exact content digest and target platform while
+  retaining signature, provenance, SBOM, variant, and source facts.
 - `import_npm` and `import_cargo` emit exact provider refs only when the source
   contains an exact identity. Mutable requests, missing locks, ambiguous locks,
   malformed fields, and conflicting native records remain explicit loss,
   conflict, or migration findings.
+- `import_nix_facts` emits a Nix provider ref only when a package entry carries
+  an exact version, revision, or digest. Mutable package names remain source-
+  linked findings and never enter generated Jet source.
+- Real-project import checks retain Cargo manifest/lock bytes, target and dev
+  dependency roles, npm dependency-kind facts, and exact source identities.
+  Every refused generated ref carries a source-linked migration finding;
+  unresolved or bundled npm inputs never become silent defaults.
 - Provider graph unit tests and package importer tests exercise both
   lossless lock/explain projection and the failure path that refuses a mutable
   generated ref.
+- NuGet, Conan, and vcpkg conformance tests exercise the production normalizer,
+  shared-carrier export, exact lock identity, and explicit malformed/conflicting
+  provider findings.
 
 ### E4-JP18 — reproducibility certification
 
@@ -674,6 +728,17 @@ Shipped slice evidence:
   output tree, named outputs, and producer facts agree; retries and
   cancellation discard both private roots, and a mismatch remains untrusted
   evidence until a later fresh agreeing certification replaces it.
+
+Shipped slice evidence:
+
+- `Store::realize_verified` sends uncached source candidates through two
+  private Hangar roots before closure or cache publication. The same gate
+  checks output bytes, named outputs, action identity, capabilities, and
+  producer facts.
+- `jet-reproducibility-report-v1` stores deterministic first-difference JSON
+  under `private/unreproducible/<action-key>.json`; its producer-action record
+  carries both action keys and source digests. E1315 points to that report and
+  trusted cache operations reject its action until a fresh agreeing build.
 
 ### E4-JP19 — explain and store-operation parity-plus
 
@@ -714,9 +779,28 @@ Shipped slice evidence:
   freshness policy. The
   accepted sequence, digest, key, and maturity window are carried into the
   Hangar provenance for explain/audit output.
-- SPDX license expression policy, source mapping, yanks/retractions, release
-  maturity, and trust-evidence no-downgrade.
+- SPDX license expression policy and package source mapping use the ratified
+  `policy:` namespace. `policy.licenses: .Allow([...])` limits candidate
+  identifiers. `policy.sources` maps exact package names or trailing `*`
+  patterns to source authorities. Jet requires a concrete SPDX expression,
+  checks both fields after registry identity, signature, and artifact checks,
+  and rejects the candidate before Hangar ingest when a rule fails.
+- The allow or deny result carries the matched source rule and policy
+  fingerprint into Hangar provenance, cache identity, and semantic-lock
+  explanation. Locked and offline resolution repeat the metadata check.
+- Yanks/retractions, release maturity, and trust-evidence no-downgrade remain
+  part of the same fail-closed policy path.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.
+- The git registry stores one immutable referrer set at
+  referrers/<content-hash>/: a subject-bound index.json and four
+  content-addressed blobs. The SBOM uses canonical lock bytes when a lock is
+  present, while the signature, provenance, and reproducibility blobs bind the
+  exact index entry.
+- Publication stages the referrer set in the same explicit git transaction as
+  the artifact, index line, sparse metadata, checkpoint, and transparency log.
+  Fetch verifies every descriptor, blob digest, subject, and bound fact before
+  a candidate is usable; missing, stale, mixed, or tampered evidence fails
+  closed and asks for republish or restoration of the immutable evidence set.
 - Policy failures explain exact owner, edge, evidence, and smallest source fix.
 
 ### E4-JP21 — explicit finite staged planning

@@ -8,6 +8,25 @@ use super::JSON::{self, JSONValue};
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 use std::collections::BTreeMap;
 
+fn source_path_for_finding(source: &str, fallback: &str) -> String {
+    if !fallback.trim().is_empty()
+        && (matches!(
+            source,
+            "" | "provider.native_document" | "reference.provider" | "reference.selector"
+        ) || source.starts_with("package.json."))
+    {
+        return fallback.to_string();
+    }
+    if source.trim().is_empty() {
+        return if fallback.trim().is_empty() {
+            "provider facts".to_string()
+        } else {
+            fallback.to_string()
+        };
+    }
+    source.to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPlan {
     pub source_kind: String,
@@ -39,7 +58,106 @@ impl ImportPlan {
     }
 
     fn retain_provider_facts(&mut self, facts: ProviderFacts) {
-        self.provider_facts.insert(facts.reference.clone(), facts);
+        self.retain_provider_facts_with_source(facts, "");
+    }
+
+    fn retain_provider_facts_with_source(&mut self, facts: ProviderFacts, source_path: &str) {
+        for loss in &facts.losses {
+            self.record_provider_finding(
+                source_path_for_finding(&loss.source, source_path),
+                format!(
+                    "provider fact `{}` is lossy: {}; migration remains unresolved",
+                    loss.key, loss.reason
+                ),
+            );
+        }
+        for conflict in &facts.conflicts {
+            self.record_provider_finding(
+                source_path_for_finding(&conflict.source, source_path),
+                format!(
+                    "provider fact `{}` conflicts: {} vs {}; migration is unresolved",
+                    conflict.key, conflict.left, conflict.right
+                ),
+            );
+        }
+        let reference = facts.reference.clone();
+        let Some(existing) = self.provider_facts.get_mut(&reference) else {
+            self.provider_facts.insert(reference, facts);
+            return;
+        };
+        if existing.provider != facts.provider {
+            let left = existing.provider.clone();
+            let right = facts.provider.clone();
+            existing.add_conflict("provider", &left, &right, "provider.import");
+        }
+        if existing.target != facts.target {
+            let left = existing.target.clone();
+            let right = facts.target.clone();
+            existing.add_conflict("target", &left, &right, "provider.import");
+        }
+        if !facts.resolved_source.is_empty() {
+            existing.set_resolved_source(&facts.resolved_source);
+        }
+        if !facts.native_format.is_empty() {
+            existing.set_native_document(&facts.native_format, &facts.native_document);
+        }
+        for (key, value) in &facts.facts {
+            let source = facts
+                .provenance
+                .get(key)
+                .map(String::as_str)
+                .unwrap_or("provider.import");
+            existing.add_fact(key, value.clone(), source);
+        }
+        for loss in facts.losses {
+            if !existing.losses.contains(&loss) {
+                existing.losses.push(loss);
+            }
+        }
+        for conflict in facts.conflicts {
+            if !existing.conflicts.contains(&conflict) {
+                existing.conflicts.push(conflict);
+            }
+        }
+        let merged_losses = self
+            .provider_facts
+            .get(&reference)
+            .map(|merged| merged.losses.clone())
+            .unwrap_or_default();
+        let merged_conflicts = self
+            .provider_facts
+            .get(&reference)
+            .map(|merged| merged.conflicts.clone())
+            .unwrap_or_default();
+        for loss in merged_losses {
+            self.record_provider_finding(
+                source_path_for_finding(&loss.source, source_path),
+                format!(
+                    "provider fact `{}` is lossy: {}; migration remains unresolved",
+                    loss.key, loss.reason
+                ),
+            );
+        }
+        for conflict in merged_conflicts {
+            self.record_provider_finding(
+                source_path_for_finding(&conflict.source, source_path),
+                format!(
+                    "provider fact `{}` conflicts: {} vs {}; migration is unresolved",
+                    conflict.key, conflict.left, conflict.right
+                ),
+            );
+        }
+    }
+
+    fn record_provider_finding(&mut self, source_path: String, message: String) {
+        let todo = ImportTodo {
+            source_path,
+            message,
+            suggested_surface: None,
+        };
+        if !self.todos.contains(&todo) {
+            self.todos.push(todo);
+        }
     }
 
     pub fn emit_pkg_jet(&self) -> String {
@@ -58,19 +176,37 @@ impl ImportPlan {
             self.source_kind
         );
         out.push_str("\ndeps: {\n");
+        let unresolved_root = self.provider_facts.iter().any(|(reference, facts)| {
+            !facts.is_lossless()
+                && !self
+                    .deps
+                    .iter()
+                    .any(|dependency| dependency.provider_ref == *reference)
+        });
+        if unresolved_root {
+            out.push_str("}\n");
+            return out;
+        }
         let mut deps = self.deps.clone();
         deps.sort_by(|a, b| a.name.cmp(&b.name));
         for dep in deps {
-            let Some(provider_ref) = self
-                .provider_facts
-                .get(&dep.provider_ref)
-                .filter(|facts| facts.is_lossless())
-                .map(ProviderFacts::qualified_reference)
-            else {
-                // A mutable foreign selector belongs in the source-linked
-                // migration finding, never in generated Jet source.
+            let Some(facts) = self.provider_facts.get(&dep.provider_ref) else {
                 continue;
             };
+            if !facts.is_lossless()
+                || matches!(
+                    facts.facts.get("package.dependency_kind"),
+                    Some(ProviderFactValue::Text(kind)) if kind != "runtime"
+                )
+            {
+                // A mutable foreign selector belongs in the source-linked
+                // migration finding, never in generated Jet source.  The
+                // canonical manifest has no dev/optional/peer dependency
+                // section, so those roles also stay as provider facts plus a
+                // migration finding instead of becoming runtime dependencies.
+                continue;
+            }
+            let provider_ref = facts.qualified_reference();
             out.push_str(&format!("    {}: {},\n", dep.name, provider_ref));
         }
         out.push_str("}\n");
@@ -142,33 +278,104 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     let mut plan = ImportPlan::empty("nix");
     let parsed = JSON::parse(facts_json).ok();
     let obj = parsed.as_ref().and_then(|j| j.as_object().ok());
+    let report = normalize_provider_document(ProviderFamily::Nix, facts_json);
+    let report_name = report.facts.name.clone();
+    let name = if report_name.is_empty() {
+        obj.and_then(|object| nix_import_string(object, "name"))
+            .unwrap_or_else(|| "nix-import".to_string())
+    } else {
+        report_name
+    };
+    let version = if report.facts.version.is_empty() || report.facts.version == "set" {
+        "0.1.0".to_string()
+    } else {
+        report.facts.version.clone()
+    };
+    let root_reference = if !report.facts.name.is_empty()
+        && !report.facts.version.is_empty()
+        && report.facts.version != "set"
+    {
+        report.shared_facts().qualified_reference()
+    } else {
+        format!("{name}@nix")
+    };
     plan.packages.push(ImportedPackage {
-        name: obj
-            .and_then(|m| m.get("name"))
-            .and_then(|v| v.as_str().ok())
-            .unwrap_or("nix-import")
-            .to_string(),
-        version: "0.1.0".to_string(),
+        name,
+        version,
     });
+    retain_normalized_root(
+        &mut plan,
+        ProviderFamily::Nix,
+        facts_json,
+        &root_reference,
+        source_path,
+    );
     if let Some(JSONValue::Array(pkgs)) = obj.and_then(|m| m.get("packages")) {
-        for pkg in pkgs {
-            if let Ok(name) = pkg.as_str() {
-                plan.deps.push(ImportedDep {
-                    name: name.to_string(),
-                    provider_ref: format!("{name}@nixpkgs"),
-                    locked_version: String::new(),
-                    dev: false,
-                });
-                let mut facts = ProviderFacts::for_reference("nix", &format!("{name}@nixpkgs"));
-                facts.set_native_document("flake-facts.json", facts_json);
+        for (index, pkg) in pkgs.iter().enumerate() {
+            let Some((name, provider_ref, locked, source, exact)) = nix_import_package(pkg) else {
+                plan.record_provider_finding(
+                    source_path.to_string(),
+                    format!(
+                        "Nix provider package entry {index} has no usable package identity; migration is unresolved"
+                    ),
+                );
+                continue;
+            };
+            plan.deps.push(ImportedDep {
+                name: name.clone(),
+                provider_ref: provider_ref.clone(),
+                locked_version: locked,
+                dev: false,
+            });
+            let mut facts = ProviderFacts::for_reference("nix", &provider_ref);
+            facts.set_native_document("flake-facts.json", facts_json);
+            facts.add_fact(
+                "package.name",
+                ProviderFactValue::Text(name),
+                source_path,
+            );
+            if let Some(source) = source {
+                facts.set_resolved_source(&source);
+            } else {
                 facts.add_loss(
-                    "provider.selector",
-                    "imported Nix package has no exact package selector; retain the flake lock before realization",
+                    "provider.source",
+                    "Nix package entry has no immutable source or source authority",
                     source_path,
                 );
-                plan.retain_provider_facts(facts);
             }
+            if !exact {
+                facts.add_loss(
+                    "provider.selector",
+                    "imported Nix package has no exact version, revision, or digest; retain the flake lock before realization",
+                    source_path,
+                );
+            }
+            if let JSONValue::Object(package) = pkg {
+                for key in [
+                    "pname",
+                    "version",
+                    "revision",
+                    "rev",
+                    "narHash",
+                    "hash",
+                    "drvPath",
+                ] {
+                    if let Some(value) = nix_import_string(package, key) {
+                        facts.add_fact(
+                            &format!("provider.nix.import.{key}"),
+                            ProviderFactValue::Text(value),
+                            source_path,
+                        );
+                    }
+                }
+            }
+            plan.retain_provider_facts_with_source(facts, source_path);
         }
+    } else if obj.is_some_and(|object| object.contains_key("packages")) {
+        plan.record_provider_finding(
+            source_path.to_string(),
+            "Nix `packages` must be an array of package names or exact records".to_string(),
+        );
     }
     if obj.and_then(|m| m.get("shellHook")).is_some() {
         plan.todos.push(ImportTodo {
@@ -183,6 +390,92 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
         owned: true,
     });
     plan
+}
+
+fn nix_import_string(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    key: &str,
+) -> Option<String> {
+    object
+        .get(key)
+        .and_then(|value| value.as_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn nix_import_package(
+    value: &JSONValue,
+) -> Option<(String, String, String, Option<String>, bool)> {
+    let (name, source, version, revision, digest, reference) = match value {
+        JSONValue::String(raw) => {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            let name = raw
+                .split_once('#')
+                .map(|(name, _)| name)
+                .or_else(|| raw.split_once('@').map(|(name, _)| name))
+                .unwrap_or(raw)
+                .to_string();
+            let reference = if raw.contains('@') || raw.contains('#') {
+                raw.to_string()
+            } else {
+                format!("{raw}@nixpkgs")
+            };
+            (name, None, None, None, None, Some(reference))
+        }
+        JSONValue::Object(object) => (
+            nix_import_string(object, "name")
+                .or_else(|| nix_import_string(object, "pname"))
+                .or_else(|| nix_import_string(object, "package"))?,
+            nix_import_string(object, "source")
+                .or_else(|| nix_import_string(object, "provider")),
+            nix_import_string(object, "version"),
+            nix_import_string(object, "revision").or_else(|| nix_import_string(object, "rev")),
+            nix_import_string(object, "digest")
+                .or_else(|| nix_import_string(object, "narHash"))
+                .or_else(|| nix_import_string(object, "hash"))
+                .or_else(|| nix_import_string(object, "outputHash")),
+            nix_import_string(object, "reference")
+                .or_else(|| nix_import_string(object, "provider_ref")),
+        ),
+        _ => return None,
+    };
+    let name = name.trim().to_string();
+    let provider_ref = if let Some(reference) = reference {
+        reference
+    } else {
+        let authority = source.clone().unwrap_or_else(|| "nixpkgs".to_string());
+        let selector = version
+            .as_ref()
+            .map(|value| format!("#version={value}"))
+            .or_else(|| revision.as_ref().map(|value| format!("#revision={value}")))
+            .or_else(|| digest.as_ref().map(|value| format!("#digest={value}")))
+            .unwrap_or_default();
+        format!("{name}{selector}@{authority}")
+    };
+    let selector_facts = ProviderFacts::for_reference("nix", &provider_ref);
+    let locked = if !selector_facts.selector.version.is_empty() {
+        selector_facts.selector.version.clone()
+    } else if !selector_facts.selector.revision.is_empty() {
+        selector_facts.selector.revision.clone()
+    } else {
+        selector_facts.selector.digest.clone()
+    };
+    let exact = selector_facts.selector.is_exact();
+    let source = source
+        .or_else(|| match value {
+            JSONValue::Object(object) => nix_import_string(object, "drvPath")
+                .or_else(|| nix_import_string(object, "immutableSource")),
+            _ => None,
+        })
+        .or_else(|| {
+            provider_ref
+                .rsplit_once('@')
+                .map(|(_, authority)| authority.to_string())
+        });
+    Some((name, provider_ref, locked, source, exact))
 }
 
 pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
@@ -207,26 +500,35 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
         name: name.clone(),
         version: version.clone(),
     });
-    retain_normalized_root(
+    let root_facts = retain_normalized_root(
         &mut plan,
         ProviderFamily::Cargo,
         &format!("Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"),
         &root_reference,
+        "Cargo.toml",
     );
-    for (section, dev, kind) in [
-        ("[dependencies]", false, "runtime"),
-        ("[dev-dependencies]", true, "dev"),
-        ("[build-dependencies]", true, "build"),
-    ] {
-        for dep in dependency_keys(cargo_toml, section) {
+    let native_document = format!("Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}");
+    for (section, dev, kind, platform) in cargo_dependency_sections(cargo_toml) {
+        for dep in dependency_keys(cargo_toml, &section) {
             let versions = lock_versions(cargo_lock, &dep);
             let locked = (versions.len() == 1)
                 .then(|| versions.first().cloned().unwrap_or_default())
                 .unwrap_or_default();
+            let platform_selector = platform
+                .as_deref()
+                .map(|platform| format!("&platform={platform}"))
+                .unwrap_or_default();
             let provider_ref = if locked.is_empty() {
-                format!("{dep}@cargo")
+                if platform_selector.is_empty() {
+                    format!("{dep}@cargo")
+                } else {
+                    format!(
+                        "{dep}#platform={}{platform_selector}@cargo",
+                        platform.as_deref().unwrap_or_default()
+                    )
+                }
             } else {
-                format!("{dep}#version={locked}@cargo")
+                format!("{dep}#version={locked}{platform_selector}@cargo")
             };
             plan.deps.push(ImportedDep {
                 name: dep.clone(),
@@ -234,21 +536,34 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
                 locked_version: locked.clone(),
                 dev,
             });
+            if kind != "runtime" {
+                plan.record_provider_finding(
+                    "Cargo.toml".to_string(),
+                    format!(
+                        "Cargo `{kind}` dependency `{dep}` has no canonical Jet runtime dependency output; migration remains unresolved"
+                    ),
+                );
+            }
             let mut facts = ProviderFacts::for_reference("cargo", &provider_ref);
-            facts.set_native_document(
-                "Cargo.toml+Cargo.lock",
-                &format!("Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"),
-            );
+            facts.set_native_document("Cargo.toml+Cargo.lock", &native_document);
+            copy_provider_projection(&mut facts, &root_facts, "provider.cargo.");
             facts.add_fact(
                 "package.name",
                 ProviderFactValue::Text(dep.clone()),
-                "Cargo.toml.dependencies",
+                &format!("Cargo.toml.{section}"),
             );
             facts.add_fact(
                 "package.dependency_kind",
                 ProviderFactValue::Text(kind.to_string()),
-                "Cargo.toml.dependencies",
+                &format!("Cargo.toml.{section}"),
             );
+            if let Some(platform) = &platform {
+                facts.add_fact(
+                    "package.platform",
+                    ProviderFactValue::Text(platform.clone()),
+                    &format!("Cargo.toml.{section}"),
+                );
+            }
             if versions.len() > 1 {
                 facts.add_conflict(
                     "provider.selector.version",
@@ -283,13 +598,8 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
                     "Cargo.lock has no exact version for this dependency",
                     "Cargo.lock",
                 );
-                plan.todos.push(ImportTodo {
-                    source_path: "Cargo.lock".to_string(),
-                    message: format!("dependency `{dep}` remains unresolved until Cargo.lock supplies an exact version"),
-                    suggested_surface: Some("pin the Cargo provider ref with #version=<exact>@cargo".to_string()),
-                });
             }
-            plan.retain_provider_facts(facts);
+            plan.retain_provider_facts_with_source(facts, "Cargo.toml");
             plan.ffi_stubs.push(FFIStub {
                 path: format!("ffi/{dep}.jet"),
                 symbol: dep,
@@ -341,16 +651,25 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
         name: name.clone(),
         version: version.clone(),
     });
-    retain_normalized_root(
+    let root_facts = retain_normalized_root(
         &mut plan,
         ProviderFamily::Npm,
         package_json,
         &root_reference,
+        "package.json",
     );
-    if let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
+    for (field, dev, kind) in [
+        ("dependencies", false, "runtime"),
+        ("devDependencies", true, "dev"),
+        ("optionalDependencies", false, "optional"),
+        ("peerDependencies", false, "peer"),
+    ] {
+        let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get(field)) else {
+            continue;
+        };
         for (name, val) in deps {
-            let requested = val.as_str().ok().unwrap_or_default().to_string();
-            let exact = exact_npm_version(&requested);
+            let requested = val.as_str().ok().map(str::to_string);
+            let exact = requested.as_deref().and_then(exact_npm_version);
             let provider_ref = exact
                 .as_deref()
                 .map(|version| format!("{name}#version={version}@npm"))
@@ -359,43 +678,81 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
                 name: name.clone(),
                 provider_ref: provider_ref.clone(),
                 locked_version: exact.clone().unwrap_or_default(),
-                dev: false,
+                dev,
             });
+            if kind != "runtime" {
+                plan.record_provider_finding(
+                    "package.json".to_string(),
+                    format!(
+                        "npm `{kind}` dependency `{name}` has no canonical Jet runtime dependency output; migration remains unresolved"
+                    ),
+                );
+            }
             let mut facts = ProviderFacts::for_reference("npm", &provider_ref);
             facts.set_native_document("package.json", package_json);
             facts.add_fact(
                 "package.name",
                 ProviderFactValue::Text(name.clone()),
-                "package.json.dependencies",
+                &format!("package.json.{field}"),
             );
-            if !requested.is_empty() {
-                facts.add_fact(
+            facts.add_fact(
+                "package.dependency_kind",
+                ProviderFactValue::Text(kind.to_string()),
+                &format!("package.json.{field}"),
+            );
+            copy_provider_projection(&mut facts, &root_facts, "provider.npm.");
+            match (requested, exact) {
+                (Some(requested), Some(version)) => {
+                    facts.add_fact(
+                        "package.request",
+                        ProviderFactValue::Text(requested),
+                        &format!("package.json.{field}"),
+                    );
+                    facts.set_resolved_source(&format!("npm:{name}@{version}"));
+                    facts.add_fact(
+                        "package.version",
+                        ProviderFactValue::Text(version),
+                        "package.json exact selector",
+                    );
+                }
+                (Some(requested), None) => {
+                    facts.add_fact(
+                        "package.request",
+                        ProviderFactValue::Text(requested),
+                        &format!("package.json.{field}"),
+                    );
+                    facts.add_loss(
+                        "provider.selector",
+                        "npm dependency request is not an exact lock identity",
+                        &format!("package.json.{field}"),
+                    );
+                }
+                (None, None) => facts.add_loss(
                     "package.request",
-                    ProviderFactValue::Text(requested.clone()),
-                    "package.json.dependencies",
-                );
+                    "npm dependency request must be a string",
+                    &format!("package.json.{field}"),
+                ),
+                (None, Some(_)) => unreachable!("an exact npm version needs a string request"),
             }
-            if let Some(version) = exact {
-                facts.set_resolved_source(&format!("npm:{name}@{version}"));
-                facts.add_fact(
-                    "package.version",
-                    ProviderFactValue::Text(version),
-                    "package.json exact selector",
-                );
-                plan.retain_provider_facts(facts);
-            } else {
-                facts.add_loss(
-                    "provider.selector",
-                    "npm dependency request is not an exact lock identity",
-                    "package.json.dependencies",
-                );
-                plan.retain_provider_facts(facts);
-                plan.todos.push(ImportTodo {
-                    source_path: "package.json".to_string(),
-                    message: format!("dependency `{name}` keeps npm request `{requested}`; resolve an exact package lock before realization"),
-                    suggested_surface: Some("pin the npm provider ref with #version=<exact>@npm".to_string()),
-                });
+            plan.retain_provider_facts_with_source(facts, "package.json");
+        }
+    }
+    if let Some(JSONValue::Array(bundled)) = obj.and_then(|m| m.get("bundledDependencies")) {
+        if !bundled.is_empty() {
+            for (index, value) in bundled.iter().enumerate() {
+                if !matches!(value, JSONValue::String(_)) {
+                    plan.record_provider_finding(
+                        "package.json".to_string(),
+                        format!(
+                            "npm `bundledDependencies[{index}]` is not a package name; migration is unresolved"
+                        ),
+                    );
+                }
             }
+            plan.record_provider_finding(
+                "package.json".to_string(),
+                "npm bundled dependencies need an explicit vendored migration mapping".to_string(),
+            );
         }
     }
     if let Some(JSONValue::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
@@ -415,9 +772,26 @@ fn retain_normalized_root(
     family: ProviderFamily,
     document: &str,
     reference: &str,
-) {
+    source_path: &str,
+) -> ProviderFacts {
     let report = normalize_provider_document(family, document);
-    plan.retain_provider_facts(report.shared_facts_for(reference));
+    let facts = report.shared_facts_for(reference);
+    plan.retain_provider_facts_with_source(facts.clone(), source_path);
+    facts
+}
+
+fn copy_provider_projection(target: &mut ProviderFacts, source: &ProviderFacts, prefix: &str) {
+    for (key, value) in &source.facts {
+        if !key.starts_with(prefix) {
+            continue;
+        }
+        let provenance = source
+            .provenance
+            .get(key)
+            .map(String::as_str)
+            .unwrap_or("provider.import");
+        target.add_fact(key, value.clone(), provenance);
+    }
 }
 
 pub fn import_python_metadata(name: &str, dynamic_fields: &[&str]) -> ImportPlan {
@@ -498,13 +872,59 @@ fn toml_string(raw: &str, key: &str) -> Option<String> {
     })
 }
 
+fn cargo_dependency_sections(raw: &str) -> Vec<(String, bool, &'static str, Option<String>)> {
+    let mut sections = Vec::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if !line.starts_with('[') || line.starts_with("[[") || !line.ends_with(']') {
+            continue;
+        }
+        let section = line[1..line.len() - 1].trim();
+        let Some((kind, suffix)) = [
+            ("runtime", ".dependencies"),
+            ("dev", ".dev-dependencies"),
+            ("build", ".build-dependencies"),
+        ]
+        .into_iter()
+        .find_map(|(kind, suffix)| {
+            if section == suffix.trim_start_matches('.') {
+                Some((kind, suffix))
+            } else {
+                section
+                    .strip_prefix("target.")
+                    .and_then(|target| target.strip_suffix(suffix))
+                    .map(|_| (kind, suffix))
+            }
+        })
+        else {
+            continue;
+        };
+        let platform = section
+            .strip_prefix("target.")
+            .and_then(|target| target.strip_suffix(suffix))
+            .map(|target| target.trim_matches(['\'', '"']).to_string());
+        let header = format!("[{section}]");
+        if !sections.iter().any(|(known, _, _, _)| known == &header) {
+            sections.push((
+                header,
+                kind == "dev" || kind == "build",
+                kind,
+                platform,
+            ));
+        }
+    }
+    sections
+}
+
 fn dependency_keys(raw: &str, section: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_section = false;
+    let wanted = section.trim_start_matches('[').trim_end_matches(']');
     for line in raw.lines() {
         let line = line.trim();
         if line.starts_with('[') {
-            in_section = line == section;
+            let current = line.trim_start_matches('[').trim_end_matches(']');
+            in_section = current == wanted;
             continue;
         }
         if in_section {
@@ -606,4 +1026,43 @@ fn lock_field(raw: &str, package: &str, field: &str) -> Option<String> {
         }
     }
     (in_package && name == package).then_some(value).flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_nix_facts;
+
+    #[test]
+    fn nix_import_production_path_retains_exact_provider_facts() {
+        let plan = import_nix_facts(
+            "flake.lock",
+            r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv"}]}"#,
+        );
+        let facts = &plan.provider_facts["ripgrep#version=14.1.1@nixpkgs"];
+        facts.validate().expect("exact Nix import is lossless");
+        assert!(plan
+            .emit_pkg_jet()
+            .contains("ripgrep: ripgrep#version=14.1.1@nixpkgs"));
+        assert!(facts.native_document.contains("drvPath"));
+        assert!(facts
+            .facts
+            .contains_key("provider.nix.import.drvPath"));
+    }
+
+    #[test]
+    fn nix_import_production_path_reports_mutable_provider_facts() {
+        let plan = import_nix_facts(
+            "flake.nix",
+            r#"{"name":"app","packages":["ripgrep"]}"#,
+        );
+        assert!(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"));
+        assert!(plan.provider_facts["ripgrep@nixpkgs"]
+            .losses
+            .iter()
+            .any(|loss| loss.reason.contains("no exact version")));
+        assert!(plan
+            .todos
+            .iter()
+            .any(|todo| todo.message.contains("migration remains unresolved")));
+    }
 }

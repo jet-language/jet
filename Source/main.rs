@@ -125,8 +125,8 @@ fn cli_diagnostic_copy(code: &str) -> (&'static str, &'static str) {
             "run `jet fetch`, then run the command again",
         ),
         "E1235" => (
-            "the registry git operation failed because of network, authentication, or local-clone state",
-            "check registry network access and credentials, then run the command again",
+            "the registry endpoint contains credentials or URL parameters, or its git operation failed because of network, authentication, or local-clone state; rendered endpoint details are redacted",
+            "remove URL credentials and parameters, configure the host Git credential provider for the registry path, then check network access",
         ),
         "E2101" => (
             "Jet command groups accept only commands in their named area",

@@ -4,8 +4,8 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 
 The Jet Core library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
-enough to write real command-line tools. Every fallible call returns a
-`T E!` value; nothing in Core panics on its own.
+enough to write real command-line tools. Every fallible call uses the
+`[Success?] [ErrorUnion!]` suffix zone; nothing in Core panics on its own.
 
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
@@ -119,7 +119,7 @@ not their items, so importing an item this way is **E1001** — keep qualified
 access through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
-Failure-returning core functions return `T E!` and must be handled with `?`, `??`, or
+Failure-returning core functions return a suffix-zone value such as `T? E!` or `E!` and must be handled with `?`, `??`, or
 a pattern test like any other Jet result. `core.files` has both whole-file
 helpers (`read`/`write`/…) and streaming handles (`open`/`create`); path
 arguments accept `String | Path`; binary APIs use `U8` and `[U8]`.
@@ -128,7 +128,7 @@ arguments accept `String | Path`; binary APIs use `U8` and `[U8]`.
 
 ## Errors and results
 
-Failure-returning Core functions return `T E!`. Handle them like any other Jet
+Failure-returning Core functions use the suffix zone (`T? E!`, `E!`, or bare `!`). Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet

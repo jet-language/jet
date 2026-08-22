@@ -1334,7 +1334,7 @@ fn run() {
     );
 }
 
-/// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
+/// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() -> { … })` — the mirror of
 /// `on_commit`. A zero-param lambda on a `#Transact` handle compiles clean and lowers
 /// to a boxed rollback hook on the transaction guard.
 #[test]
@@ -1471,7 +1471,7 @@ fn run() {
 // D-EFF2 expert levers: callback param effect bounds + `#(via f)` pass-through.
 // ---------------------------------------------------------------------------
 
-/// Lever 1: a `fn(…) =[]=>` parameter handed a pure callback compiles clean.
+/// Lever 1: a `fn(…) -[]>` parameter handed a pure callback compiles clean.
 #[test]
 fn callback_pure_bound_pure_arg_ok() {
     let src = r#"
@@ -1488,7 +1488,7 @@ fn run() { print("{transform([1, 2], inc)}"); }
     );
 }
 
-/// Lever 1: a `fn(…) =[]=>` parameter handed an impure callback is E0747.
+/// Lever 1: a `fn(…) -[]>` parameter handed an impure callback is E0747.
 #[test]
 fn callback_pure_bound_impure_arg_is_e0747() {
     let src = r#"
@@ -1505,7 +1505,7 @@ fn run() { print("{transform([1, 2], noisy)}"); }
     );
 }
 
-/// Lever 1: a `fn(…) =[E]=>` parameter handed a callback within `E` compiles clean.
+/// Lever 1: a `fn(…) -[E]>` parameter handed a callback within `E` compiles clean.
 #[test]
 fn callback_set_bound_within_ok() {
     let src = r#"
@@ -1522,7 +1522,7 @@ fn run() { invoke(5, show); }
     );
 }
 
-/// Lever 1: a `fn(…) =[E]=>` parameter handed a callback that reaches an effect
+/// Lever 1: a `fn(…) -[E]>` parameter handed a callback that reaches an effect
 /// outside `E` is E0747.
 #[test]
 fn callback_set_bound_exceeded_is_e0747() {
@@ -1617,7 +1617,7 @@ fn run() { invoke(5); }
     );
 }
 
-/// I3: the D-EFF2 levers are erased — a program using `fn(…) =[]=>` callback
+/// I3: the D-EFF2 levers are erased — a program using `fn(…) -[]>` callback
 /// bounds and `#(via f)` generates the same Rust as its annotation-stripped twin.
 #[test]
 fn eff2_levers_are_erased() {

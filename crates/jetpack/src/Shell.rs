@@ -169,21 +169,35 @@ pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>)
     run_command_in_mode(env, cmd_args, cwd, false, true)
 }
 
+struct NixProjection {
+    command: Command,
+    keepers: Vec<std::fs::File>,
+}
+
 #[cfg(target_os = "linux")]
 fn nix_projection_command(
     env: &Env,
     program: &str,
     rest: &[String],
-) -> std::io::Result<Option<Command>> {
+) -> std::io::Result<Option<NixProjection>> {
     let mut projections = Vec::new();
     for lease in &env.cache_leases {
         for (logical, source) in lease.nix_store_projection() {
-            if !projections
+            if let Some((_, existing)) = projections
                 .iter()
-                .any(|(seen, path): &(String, PathBuf)| seen == logical && path == source)
+                .find(|entry| {
+                    let (seen, _) = &**entry;
+                    seen == logical
+                })
             {
-                projections.push((logical.clone(), source.clone()));
+                if existing != source {
+                    return Err(std::io::Error::other(format!(
+                        "conflicting `/nix/store` projection for `{logical}`"
+                    )));
+                }
+                continue;
             }
+            projections.push((logical.clone(), source.clone()));
         }
     }
     if projections.is_empty() {
@@ -204,17 +218,53 @@ fn nix_projection_command(
         .map(PathBuf::from)
         .find(|path| path.is_file())
         .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `sh`"))?;
+    let mkdir = [
+        "/run/current-system/sw/bin/mkdir",
+        "/usr/bin/mkdir",
+        "/bin/mkdir",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|path| path.is_file())
+    .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `mkdir`"))?;
+    let (mount, mount_file, _) = inherited_tool_path(&mount, None)?;
+    let (mkdir, mkdir_file, mkdir_mode) = inherited_tool_path(&mkdir, Some("mkdir"))?;
+    let mut keepers = vec![mount_file, mkdir_file];
     let binary = env
         .cache_leases
         .iter()
         .find_map(|lease| lease.projected_executable(program))
         .unwrap_or_else(|| PathBuf::from(program));
+    let binary = if binary.is_file() {
+        let (path, file, mode) = inherited_tool_path(&binary, Some(program))?;
+        keepers.push(file);
+        (path, mode)
+    } else if !binary.is_absolute() {
+        if let Some(fallback) = find_system_tool(program).ok() {
+            let (path, file, mode) = inherited_tool_path(&fallback, Some(program))?;
+            keepers.push(file);
+            (path, mode)
+        } else {
+            (binary, None)
+        }
+    } else {
+        (binary, None)
+    };
     let script = r#"set -eu
 mount="$1"
-shift
-mkdir -p /nix
+mkdir="$2"
+mkdir_mode="$3"
+shift 3
+make_dir() {
+    if [ -n "$mkdir_mode" ]; then
+        "$mkdir" --coreutils-prog="$mkdir_mode" "$@"
+    else
+        "$mkdir" "$@"
+    fi
+}
+make_dir -p /nix
 "$mount" -t tmpfs -o mode=0755 jetpack-nix-store /nix
-mkdir -p /nix/store
+make_dir -p /nix/store
 count="$1"
 shift
 i=0
@@ -228,14 +278,25 @@ while [ "$i" -lt "$count" ]; do
             exit 125
             ;;
     esac
-    mkdir -p "/nix/store/$name"
-    "$mount" --bind "$source" "/nix/store/$name"
-    "$mount" -o remount,bind,ro "/nix/store/$name"
+    target="/nix/store/$name"
+    if [ -d "$source" ]; then
+        "$mkdir" -p "$target"
+    else
+        : > "$target"
+    fi
+    "$mount" --bind "$source" "$target"
+    "$mount" -o remount,bind,ro "$target"
     i=$((i + 1))
 done
 binary="$1"
 shift
-exec "$binary" "$@"
+binary_mode="$1"
+shift
+if [ -n "$binary_mode" ]; then
+    exec "$binary" --coreutils-prog="$binary_mode" "$@"
+else
+    exec "$binary" "$@"
+fi
 "#;
     let mut command = Command::new(unshare);
     command
@@ -243,12 +304,66 @@ exec "$binary" "$@"
         .arg(shell)
         .args(["-c", script, "jetpack-nix-run"])
         .arg(mount)
+        .arg(mkdir)
+        .arg(mkdir_mode.as_deref().unwrap_or(""))
         .arg(projections.len().to_string());
     for (logical, source) in projections {
         command.arg(logical).arg(source);
     }
-    command.arg(binary).args(rest);
-    Ok(Some(command))
+    command
+        .arg(binary.0)
+        .arg(binary.1.as_deref().unwrap_or(""))
+        .args(rest);
+    Ok(Some(NixProjection { command, keepers }))
+}
+
+#[cfg(target_os = "linux")]
+fn inherited_tool_path(
+    path: &Path,
+    coreutils_program: Option<&str>,
+) -> std::io::Result<(PathBuf, std::fs::File, Option<String>)> {
+    use std::os::fd::AsRawFd as _;
+
+    let file = std::fs::File::open(path)?;
+    clear_close_on_exec(&file)?;
+    let fd = file.as_raw_fd();
+    let is_coreutils = std::fs::canonicalize(path)
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name == "coreutils"))
+        .unwrap_or(false);
+    let mode = is_coreutils
+        .then(|| coreutils_program.map(str::to_string))
+        .flatten();
+    Ok((PathBuf::from(format!("/proc/self/fd/{fd}")), file, mode))
+}
+
+#[cfg(target_os = "linux")]
+fn clear_close_on_exec(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+
+    const F_SETFD: i32 = 2;
+    unsafe extern "C" {
+        fn fcntl(fd: i32, command: i32, ...) -> i32;
+    }
+    if unsafe { fcntl(file.as_raw_fd(), F_SETFD, 0) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn find_system_tool(name: &str) -> std::io::Result<PathBuf> {
+    ["/run/current-system/sw/bin", "/usr/bin", "/bin"]
+        .into_iter()
+        .map(PathBuf::from)
+        .map(|dir| dir.join(name))
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("required system tool `{name}` not found"),
+            )
+        })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -256,7 +371,7 @@ fn nix_projection_command(
     env: &Env,
     _program: &str,
     _rest: &[String],
-) -> std::io::Result<Option<Command>> {
+) -> std::io::Result<Option<NixProjection>> {
     if env
         .cache_leases
         .iter()
@@ -282,8 +397,8 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let mut cmd = match nix_projection_command(env, program, rest) {
-        Ok(Some(command)) => command,
+    let (mut cmd, _projection_keepers) = match nix_projection_command(env, program, rest) {
+        Ok(Some(projection)) => (projection.command, projection.keepers),
         Ok(None) => {
             let stable_program = env
                 .cache_leases
@@ -293,7 +408,7 @@ fn run_command_in_mode(
                 .as_ref()
                 .map_or_else(|| Command::new(program), Command::new);
             command.args(rest);
-            command
+            (command, Vec::new())
         }
         Err(error) => {
             Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
@@ -389,9 +504,9 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         "nothing is installed",
     ]);
 
-    let mut cmd = match nix_projection_command(env, kind.binary(), &[]) {
-        Ok(Some(command)) => command,
-        Ok(None) => Command::new(kind.binary()),
+    let (mut cmd, _projection_keepers) = match nix_projection_command(env, kind.binary(), &[]) {
+        Ok(Some(projection)) => (projection.command, projection.keepers),
+        Ok(None) => (Command::new(kind.binary()), Vec::new()),
         Err(error) => {
             theme.error(
                 "could not project the temporary shell through `/nix/store`",

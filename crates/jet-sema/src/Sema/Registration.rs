@@ -518,7 +518,7 @@ impl<'a> Checker<'a> {
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
-        // D-STREAMYIELD1: a generator (`=> Stream<T>`) falling off the end is
+        // D-STREAMYIELD1: a generator (`Stream<T> ->`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");

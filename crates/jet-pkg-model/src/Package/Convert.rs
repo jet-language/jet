@@ -69,6 +69,7 @@ pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::M
             layer: facts.layer,
             allocator: facts.allocator.clone(),
         },
+        policy: facts.policy.clone(),
         authority: facts.authority.clone(),
         boundaries: facts.boundaries.clone(),
         dependencies,

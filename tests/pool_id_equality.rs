@@ -19,14 +19,14 @@ fn run() {
 fn pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable() {
     let source = r#"
 struct Payload {
-    callback: fn(Int) => Int
+    callback: fn(Int) Int
 }
 
-fn identity(value: Int) => Int {
+fn identity(value: Int) Int -> {
     return value
 }
 
-fn equal<T: Equatable>(left: T, right: T) => Bool {
+fn equal<T: Equatable>(left: T, right: T) Bool -> {
     return left == right
 }
 

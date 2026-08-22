@@ -1,11 +1,11 @@
 //! Local transport for Jet's sparse TUF registry shape.
 //!
 //! The hosted HTTP transport is deliberately outside the compiler crate. The
-//! registry's git publication path still carries the same four facts: signed
-//! per-package targets, a signed snapshot/checkpoint, an append-only witness
-//! log, and immutable content-addressed source artifacts. This module keeps
-//! that wire contract deterministic for the native git transport and for
-//! offline locked resolution.
+//! registry's git publication path carries signed per-package targets, a
+//! signed snapshot/checkpoint, an append-only witness log, immutable
+//! content-addressed source artifacts, and their subject-bound OCI referrers.
+//! This module keeps that wire contract deterministic for the native git
+//! transport and for offline locked resolution.
 
 use super::Index::{self, IndexEntry};
 use crate::Diagnostics::Diagnostic;
@@ -190,6 +190,10 @@ pub fn verify_registry_package(
             io::ErrorKind::InvalidData,
             "sparse package metadata has no witnessed log inclusion",
         )));
+    }
+    for entry in &metadata.entries {
+        super::Registry::verify_oci_referrers(repo, entry)
+            .map_err(|error| metadata_diagnostic(&error))?;
     }
     accept_checkpoint(registry_name, repo, &checkpoint)
         .map_err(|error| metadata_diagnostic(&error))?;
@@ -874,5 +878,12 @@ fn invalid(message: &str) -> io::Error {
 }
 
 fn metadata_diagnostic(error: &io::Error) -> Diagnostic {
-    super::Advisory::e2607("registry TUF metadata", &error.to_string())
+    let detail = error.to_string();
+    let mut diagnostic = super::Advisory::e2607("registry TUF metadata", &detail);
+    if detail.contains("OCI referrer") {
+        diagnostic.fix =
+            "restore the immutable OCI referrer set from a trusted registry mirror or republish the exact package version; do not use a partial evidence set."
+                .to_string();
+    }
+    diagnostic
 }

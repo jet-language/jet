@@ -13,7 +13,7 @@
 //! package = mathkit
 //! published_version = 1.2.0
 //! fn scale(v: &Vec3, factor: Float)
-//! fn length(v: Vec3) => Float
+//! fn length(v: Vec3) Float
 //! ```
 //!
 //! Each `fn` line is the canonical signature: every public function's
@@ -178,20 +178,47 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         ),
         Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
         Type::Option(inner) => format!("{}?", canonical_api_type_name(inner, dimensions)),
-        Type::Result { ok, err } => format!(
-            "{} ! {}",
-            canonical_api_type_name(ok, dimensions),
-            canonical_api_type_name(err, dimensions)
-        ),
+        Type::Result { ok, err } => {
+            let ok = canonical_api_type_name(ok, dimensions);
+            let default_error =
+                matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR);
+            let err_name = canonical_api_type_name(err, dimensions);
+            let err = if matches!(err.as_ref(), Type::Union(_)) {
+                format!("({err_name})")
+            } else {
+                err_name
+            };
+            let unit_success = ok == crate::Syntax::INTERNAL_UNIT_TYPE;
+            if unit_success {
+                if default_error {
+                    "!".to_string()
+                } else {
+                    format!("{err}!")
+                }
+            } else if default_error {
+                format!("{ok} !")
+            } else {
+                format!("{ok} {err}!")
+            }
+        }
         Type::Fn { params, ret, effect_bound, .. } => {
             let params = params.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ");
-            let effects = effect_bound.as_ref().map(|row| row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
-            match (effects, ret) {
-                (Some(row), Some(ret)) => format!("fn({params}) =[{row}]=> {}", canonical_api_type_name(ret, dimensions)),
-                (Some(row), None) => format!("fn({params}) =[{row}]=>"),
-                (None, Some(ret)) => format!("fn({params}) => {}", canonical_api_type_name(ret, dimensions)),
-                (None, None) => format!("fn({params})"),
+            let mut signature = format!("fn({params})");
+            if let Some(ret) = ret {
+                signature.push(' ');
+                signature.push_str(&canonical_api_type_name(ret, dimensions));
             }
+            if let Some(row) = effect_bound {
+                signature.push_str(" -[");
+                signature.push_str(
+                    &row.iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                signature.push_str("]>");
+            }
+            signature
         }
         Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
             format!("*{}", canonical_api_type_name(&args[0], dimensions))
@@ -212,6 +239,11 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             canonical_api_type_name(inner, dimensions)
         }
         Type::Tagged { marker, inner } => format!("#{marker} {}", canonical_api_type_name(inner, dimensions)),
+        Type::Union(members) => members
+            .iter()
+            .map(|member| canonical_api_type_name(member, dimensions))
+            .collect::<Vec<_>>()
+            .join(" | "),
         _ => ty.name(),
     }
 }
@@ -234,25 +266,22 @@ pub fn canonical_fn_signature_with_effects(
         .iter()
         .map(|p| format!("{}: {}{}", p.name, p.convention.sigil(), canonical_api_type_name(&p.ty, dimensions)))
         .collect();
-    let ret = match inferred {
-        Some(row) => format!(
-            " =[{}]=>{}",
-            normalized_public_effect_row(f, row)
+    let mut signature = format!("fn {}{}({})", f.name, type_params, params.join(", "));
+    if let Some(return_type) = &f.return_type {
+        signature.push(' ');
+        signature.push_str(&canonical_api_type_name(return_type, dimensions));
+    }
+    if let Some(row) = inferred {
+        signature.push_str(" -[");
+        signature.push_str(
+            &normalized_public_effect_row(f, row)
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", "),
-            f.return_type
-                .as_ref()
-                .map(|t| format!(" {}", canonical_api_type_name(t, dimensions)))
-                .unwrap_or_default()
-        ),
-        None => f
-            .return_type
-            .as_ref()
-            .map(|t| format!(" => {}", canonical_api_type_name(t, dimensions)))
-            .unwrap_or_default(),
-    };
+        );
+        signature.push_str("]>");
+    }
     let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
         if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
             format!(" ; view_source = {}", direct.canonical())
@@ -263,7 +292,8 @@ pub fn canonical_fn_signature_with_effects(
             )
         }
     });
-    format!("fn {}{}({}){}{}", f.name, type_params, params.join(", "), ret, provenance)
+    signature.push_str(&provenance);
+    signature
 }
 
 pub fn canonical_type_params(params: &[crate::AST::TypeParam]) -> String {
@@ -303,39 +333,33 @@ pub fn trait_method_signature(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let arrow = method.declared_effects.as_ref().map_or_else(
-        || {
-            method
-                .return_type
-                .as_ref()
-                .map(|_| " =>".to_string())
-                .unwrap_or_default()
-        },
-        |row| {
-            format!(
-                " =[{}]=>",
-                row.iter()
-                    .map(|(name, _)| name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        },
-    );
-    let result = method
-        .return_type
-        .as_ref()
-        .map(|ty| format!(" {}", canonical_api_type_name(ty, dimensions)))
-        .unwrap_or_default();
-    format!("fn {owner}.{}({params}){arrow}{result}", method.name)
+    let mut signature = format!("fn {owner}.{}({params})", method.name);
+    if let Some(return_type) = &method.return_type {
+        signature.push(' ');
+        signature.push_str(&canonical_api_type_name(return_type, dimensions));
+    }
+    if let Some(row) = &method.declared_effects {
+        signature.push_str(" -[");
+        signature.push_str(
+            &row.iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        signature.push_str("]>");
+    }
+    signature
 }
 
 /// Compare a new effect-bearing signature to a pre-v3 snapshot without
 /// treating the metadata-format upgrade itself as an API break.
 pub fn signature_without_effect_row(signature: &str) -> String {
-    let (start, marker_len, close_marker) = if let Some(start) = signature.find(" =[") {
-        (start, 3, "]=>")
-    } else if let Some(start) = signature.find(" --[") {
-        (start, 4, "]->")
+    let (start, marker_len, close_marker, current) = if let Some(start) = signature.rfind(" -[") {
+        (start, 3, "]>", true)
+    } else if let Some(start) = signature.rfind(" =[") {
+        (start, 3, "]=>", false)
+    } else if let Some(start) = signature.rfind(" --[") {
+        (start, 4, "]->", false)
     } else {
         return signature.to_string();
     };
@@ -344,6 +368,9 @@ pub fn signature_without_effect_row(signature: &str) -> String {
     };
     let end = start + marker_len + close + close_marker.len();
     let suffix = &signature[end..];
+    if current {
+        return format!("{}{}", &signature[..start], suffix);
+    }
     let arrow = if suffix.starts_with(' ') { " ->" } else { "" };
     format!("{}{}{}", &signature[..start], arrow, suffix)
 }
@@ -929,11 +956,42 @@ mod tests {
         let effects = EffectSet::from(["FS.Read".to_string(), "IO".to_string()]);
         assert_eq!(
             fn_signature_with_effects(&f, Some(&effects)),
-            "fn load() =[FS.Read, IO]=> String"
+            "fn load() String -[FS.Read, IO]>"
         );
         assert_eq!(
             fn_signature_with_effects(&f, Some(&EffectSet::new())),
-            "fn load() =[]=> String"
+            "fn load() String -[]>"
+        );
+    }
+
+    #[test]
+    fn canonical_api_types_use_failure_suffixes_in_alias_and_function_type_shapes() {
+        let fallible = Type::Result {
+            ok: Box::new(Type::Option(Box::new(Type::Int))),
+            err: Box::new(Type::Union(vec![
+                Type::Named("DbError".into()),
+                Type::Named("TimeoutError".into()),
+            ])),
+        };
+        assert_eq!(
+            canonical_api_type_name(&fallible, &HashMap::new()),
+            "Int? (DbError | TimeoutError)!"
+        );
+
+        let callback = Type::Fn {
+            params: vec![fallible.clone()],
+            ret: Some(Box::new(Type::Result {
+                ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.into())),
+                err: Box::new(Type::Named("IOError".into())),
+            })),
+            effect_bound: Some(Vec::new()),
+            param_contract: None,
+            call_metadata: None,
+            return_view_provenance: None,
+        };
+        assert_eq!(
+            canonical_api_type_name(&callback, &HashMap::new()),
+            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
         );
     }
 
@@ -970,7 +1028,7 @@ mod tests {
         assert_eq!(snapshot.api_version, API_SNAPSHOT_VERSION);
         assert_eq!(
             snapshot.funcs[0].signature,
-            "fn files.load() =[FS.Read]=> String"
+            "fn files.load() String -[FS.Read]>"
         );
         let parsed = ApiSnapshot::parse(&snapshot.write()).expect("v3 snapshot round trip");
         assert_eq!(parsed.funcs[0].name, "files.load");
@@ -978,6 +1036,10 @@ mod tests {
 
     #[test]
     fn pre_v3_comparison_normalizes_added_metadata_and_type_glosses() {
+        assert_eq!(
+            signature_without_effect_row("fn load() String -[FS.Read, IO]>"),
+            "fn load() String"
+        );
         assert_eq!(
             signature_without_effect_row("fn load(path: String) =[FS.Read, IO]=> String"),
             "fn load(path: String) -> String"
@@ -1018,7 +1080,7 @@ mod tests {
         );
         assert_eq!(
             fn_signature(&f),
-            "fn pace(value: Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>) => Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>"
+            "fn pace(value: Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>) Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>"
         );
     }
 
@@ -1052,7 +1114,7 @@ mod tests {
         );
         assert_eq!(
             api.funcs[0].signature,
-            "fn distance() => Meter{family=Length; base=Float; dimension=api%3A%3ALength:1}"
+            "fn distance() Meter{family=Length; base=Float; dimension=api%3A%3ALength:1}"
         );
         assert_eq!(api.api_version, API_SNAPSHOT_VERSION - 1);
     }

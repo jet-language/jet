@@ -83,14 +83,17 @@ pub fn fetch(
     // Resolve the full dependency graph. Load an offline advisory feed only
     // when a new registry candidate needs authorization; an exact existing
     // lock remains the explicit freshness escape.
-    let mut resolver = Resolver::new(project_root, existing_lock, opts);
+    let mut resolver = Resolver::new(project_root, existing_lock, opts, &manifest.policy);
     let (mut new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
     if let Err(d) = enforce_provenance_policy(&new_lock, manifest) {
         return Err(vec![d]);
     }
     Lock::ensure_build_stamp(project_root, &mut new_lock);
 
-    let semantic_update = if opts.update {
+    let semantic_update = if opts.update
+        || manifest.policy.licenses.is_some()
+        || semantic_policy_needs_update(project_root, manifest)
+    {
         Some(
             registry_update_rationales(project_root, &new_lock, manifest, opts)
                 .map_err(|diagnostic| vec![diagnostic])?,
@@ -216,6 +219,7 @@ struct Resolver<'a> {
     project_root: &'a Path,
     existing_lock: Option<&'a LockFile>,
     opts: &'a FetchOptions,
+    policy: &'a crate::Package::PackagePolicy,
     advisory_policy: Option<Result<Option<Publish::AdvisoryPolicy>, Diagnostic>>,
     /// name → (version, source_dir, fingerprint, content hash, deps, provenance)
     resolved: BTreeMap<String, ResolvedPkg>,
@@ -243,11 +247,13 @@ impl<'a> Resolver<'a> {
         project_root: &'a Path,
         existing_lock: Option<&'a LockFile>,
         opts: &'a FetchOptions,
+        policy: &'a crate::Package::PackagePolicy,
     ) -> Self {
         Resolver {
             project_root,
             existing_lock,
             opts,
+            policy,
             advisory_policy: None,
             resolved: BTreeMap::new(),
             version_seen: HashMap::new(),
@@ -445,6 +451,16 @@ impl<'a> Resolver<'a> {
                         "republish a new immutable version with matching payload identity",
                     )]);
                 }
+                Publish::authorize_package_candidate(
+                    self.policy,
+                    &name,
+                    &entry.version,
+                    dep_manifest.package.license.as_deref(),
+                    &registry.name,
+                )
+                .map_err(|error| {
+                    vec![registry_diagnostic(&name, &error.detail, &error.fix)]
+                })?;
                 let mut dependencies = Vec::new();
                 for (dependency, spec) in &dep_manifest.dependencies {
                     let DepSpec::Registry(requirement) = spec else {
@@ -884,6 +900,14 @@ impl<'a> Resolver<'a> {
                         "republish a new immutable version with matching payload identity",
                     )]);
                 }
+                let policy_receipt = Publish::authorize_package_candidate(
+                    self.policy,
+                    dep_name,
+                    &selected.version,
+                    dep_manifest.package.license.as_deref(),
+                    &registry.name,
+                )
+                .map_err(|error| vec![registry_diagnostic(dep_name, &error.detail, &error.fix)])?;
                 if selected.content_hash.is_empty() || selected.fingerprint.is_empty() {
                     return Err(vec![registry_diagnostic(
                         dep_name,
@@ -953,6 +977,7 @@ impl<'a> Resolver<'a> {
                     &artifact,
                     &hangar_references,
                     advisory_receipt,
+                    Some(&policy_receipt),
                 )
                 .map_err(|error| {
                     vec![registry_diagnostic(
@@ -1009,31 +1034,36 @@ impl<'a> Resolver<'a> {
     }
 
     fn load_dep_manifest(&self, dir: &Path, dep_name: &str) -> Result<Manifest, Vec<Diagnostic>> {
-        let result = crate::Manifest::load(dir);
-        match result {
-            None => Err(vec![Diagnostic::error(
-                "E1206",
-                format!(
-                    "dependency `{}` has no `{}`",
-                    dep_name,
-                    crate::Syntax::PACKAGE_FILE
-                ),
-                format!(
-                    "every Jet package must have a `{}` manifest",
-                    crate::Syntax::PACKAGE_FILE
-                ),
-                format!(
-                    "add a `{}` to `{}`",
-                    crate::Syntax::PACKAGE_FILE,
-                    dir.display()
-                ),
-                None,
-            )]),
-            Some(Err(d)) => Err(vec![d]),
-            Some(Ok(m)) => Ok(m),
-        }
+        load_dep_manifest(dir, dep_name)
     }
+}
 
+fn load_dep_manifest(dir: &Path, dep_name: &str) -> Result<Manifest, Vec<Diagnostic>> {
+    match crate::Manifest::load(dir) {
+        None => Err(vec![Diagnostic::error(
+            "E1206",
+            format!(
+                "dependency `{}` has no `{}`",
+                dep_name,
+                crate::Syntax::PACKAGE_FILE
+            ),
+            format!(
+                "every Jet package must have a `{}` manifest",
+                crate::Syntax::PACKAGE_FILE
+            ),
+            format!(
+                "add a `{}` to `{}`",
+                crate::Syntax::PACKAGE_FILE,
+                dir.display()
+            ),
+            None,
+        )]),
+        Some(Err(d)) => Err(vec![d]),
+        Some(Ok(m)) => Ok(m),
+    }
+}
+
+impl<'a> Resolver<'a> {
     fn resolve_git_rev(
         &self,
         dep_name: &str,
@@ -1044,7 +1074,7 @@ impl<'a> Resolver<'a> {
             GitSelector::Rev(r) => Ok(r.clone()),
             GitSelector::Tag(t) if t != "@latest" => {
                 // If we have an existing lock and not updating, use locked rev.
-                if !self.opts.update && !self.should_update(dep_name) {
+                if !self.dependency_update_requested(dep_name) {
                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
                         return Ok(locked_rev);
                     }
@@ -1054,7 +1084,7 @@ impl<'a> Resolver<'a> {
             }
             GitSelector::Branch(b) | GitSelector::Tag(b) => {
                 // Moving selector: always re-resolve if updating.
-                if !self.opts.update && !self.should_update(dep_name) {
+                if !self.dependency_update_requested(dep_name) {
                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
                         return Ok(locked_rev);
                     }
@@ -1064,13 +1094,13 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn should_update(&self, dep_name: &str) -> bool {
-        self.opts.update_dep.as_deref() == Some(dep_name)
+    fn dependency_update_requested(&self, dep_name: &str) -> bool {
+        self.opts.update
+            && (self.opts.update_dep.is_none() || self.update_scope.contains(dep_name))
     }
 
     fn registry_update_requested(&self, dep_name: &str) -> bool {
-        self.opts.update
-            && (self.opts.update_dep.is_none() || self.update_scope.contains(dep_name))
+        self.dependency_update_requested(dep_name)
     }
 
     fn load_advisory_policy(
@@ -1193,6 +1223,15 @@ fn registry_update_rationales(
         .filter(|package| matches!(&package.source, LockSource::Registry { .. }))
         .collect::<Vec<_>>();
     let mut semantic = jetpack::SemanticLock::load(project_root).unwrap_or_default();
+    semantic.source_maps = manifest
+        .policy
+        .source_maps
+        .iter()
+        .map(|(pattern, sources)| jetpack::SemanticLock::SourceMapEntry {
+            pattern: pattern.clone(),
+            sources: sources.clone(),
+        })
+        .collect();
     if packages.is_empty() {
         return Ok(semantic);
     }
@@ -1228,7 +1267,7 @@ fn registry_update_rationales(
             jetpack::SemanticLock::LockRationale {
                 owner_package: manifest.package.name.clone(),
                 reason: format!(
-                    "selected `{}` with {} resolution; registry subtree update",
+                    "selected `{}` with {} resolution; registry policy record",
                     package.version,
                     opts.resolution.label()
                 ),
@@ -1239,7 +1278,7 @@ fn registry_update_rationales(
                 provider: "jet-registry".to_string(),
                 channel_input: opts.resolution.label().to_string(),
                 exact_output: output.clone(),
-                policy_fingerprint: String::new(),
+                policy_fingerprint: Publish::policy_fingerprint(&manifest.policy),
                 recipe_id: String::new(),
                 adapter_id: "registry.pubgrub".to_string(),
                 signature: String::new(),
@@ -1269,6 +1308,33 @@ fn registry_update_rationales(
     Ok(semantic)
 }
 
+fn semantic_policy_needs_update(project_root: &Path, manifest: &Manifest) -> bool {
+    let mut expected_maps = manifest
+        .policy
+        .source_maps
+        .iter()
+        .map(|(pattern, sources)| jetpack::SemanticLock::SourceMapEntry {
+            pattern: pattern.clone(),
+            sources: sources.clone(),
+        })
+        .collect::<Vec<_>>();
+    expected_maps.sort_by(|left, right| left.pattern.cmp(&right.pattern));
+    let semantic = jetpack::SemanticLock::load(project_root).unwrap_or_default();
+    if semantic.source_maps != expected_maps {
+        return true;
+    }
+    let fingerprint = Publish::policy_fingerprint(&manifest.policy);
+    semantic.records.iter().any(|record| {
+        record.identity.kind == jetpack::SemanticLock::LockRecordKind::Package
+            && record.identity.key.starts_with("registry:")
+            && record
+                .rationales
+                .first()
+                .map(|rationale| rationale.policy_fingerprint.as_str())
+                != Some(fingerprint.as_str())
+    })
+}
+
 fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
     Diagnostic::error(
         "E1207",
@@ -1288,6 +1354,7 @@ fn ingest_registry_artifact(
     artifact: &Path,
     references: &[String],
     advisory_receipt: Option<&Publish::AdvisoryReceipt>,
+    package_policy: Option<&Publish::PackagePolicyReceipt>,
 ) -> Result<PathBuf, String> {
     let roots = jetpack::Store::resolve();
     let policy = format!(
@@ -1307,12 +1374,27 @@ fn ingest_registry_artifact(
         entry.public_key,
         entry.signature,
     );
+    let referrer_receipt = format!(
+        "subject={};sbom=verified;signature-binding=verified;provenance=verified;reproducibility=verified",
+        entry.content_hash
+    );
+    let policy = format!("{policy};oci-referrers={referrer_receipt}");
+    let provenance = format!("{provenance};oci-referrers={referrer_receipt}");
     let advisory = advisory_receipt.map(|receipt| {
         format!(
             "sequence={},digest={},key={},maturity={}s",
             receipt.sequence, receipt.digest, receipt.key_id, receipt.maturity_seconds
         )
     });
+    let package_policy = package_policy.map(Publish::PackagePolicyReceipt::summary);
+    let policy = package_policy
+        .as_deref()
+        .map(|receipt| format!("{policy};package-policy={receipt}"))
+        .unwrap_or(policy);
+    let provenance = package_policy
+        .as_deref()
+        .map(|receipt| format!("{provenance};package-policy={receipt}"))
+        .unwrap_or(provenance);
     let policy = advisory
         .as_deref()
         .map(|receipt| format!("{policy};advisory-feed={receipt}"))
@@ -1337,14 +1419,19 @@ fn ingest_registry_artifact(
         .unwrap_or_else(|| references.to_vec());
     let policy_fingerprint = existing
         .as_ref()
-        .filter(|_| advisory_receipt.is_none())
+        .filter(|_| advisory_receipt.is_none() && package_policy.is_none())
         .map(|existing| existing.cache_identity.policy_fingerprint.clone())
         .unwrap_or_else(|| format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())));
     let provenance = existing
         .as_ref()
-        .filter(|_| advisory_receipt.is_none())
+        .filter(|_| advisory_receipt.is_none() && package_policy.is_none())
         .map(|existing| existing.envelope.provenance.clone())
         .unwrap_or(provenance);
+    let provenance = if provenance.contains("oci-referrers=") {
+        provenance
+    } else {
+        format!("{provenance};oci-referrers={referrer_receipt}")
+    };
     let request = jetpack::Store::IngestRequest {
         name: entry.name.clone(),
         version: entry.version.clone(),
@@ -1510,7 +1597,33 @@ fn build_dep_dirs_from_lock(
                         "restore the artifact in the local registry mirror; locked mode stays offline",
                     )]
                 })?;
-                ingest_registry_artifact(&config, &entry, &artifact, &[], None).map_err(|error| {
+                let dep_manifest = load_dep_manifest(&artifact, dep_name)?;
+                if dep_manifest.package.name != *dep_name
+                    || dep_manifest.package.version != locked.version
+                {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked source metadata disagrees with its registry identity",
+                        "refresh the lock from a trusted immutable registry artifact",
+                    )]);
+                }
+                let policy_receipt = crate::Publish::authorize_package_candidate(
+                    &manifest.policy,
+                    dep_name,
+                    &locked.version,
+                    dep_manifest.package.license.as_deref(),
+                    &config.name,
+                )
+                .map_err(|error| vec![registry_diagnostic(dep_name, &error.detail, &error.fix)])?;
+                ingest_registry_artifact(
+                    &config,
+                    &entry,
+                    &artifact,
+                    &[],
+                    None,
+                    Some(&policy_receipt),
+                )
+                .map_err(|error| {
                     vec![registry_diagnostic(
                         dep_name,
                         &error,

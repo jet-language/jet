@@ -2,6 +2,7 @@ use super::Boundary::NativeBoundary;
 
 const STAGE_A_DERIVATION_FIXTURE: &str =
     include_str!("../../../../tests/fixtures/nix-compat/stage-a-derivation.json");
+const BREADTH_FIXTURE: &str = include_str!("../../../../tests/fixtures/nix-compat/breadth.json");
 
 #[test]
 fn private_integration_has_pinned_product_ready_evaluator() {
@@ -177,6 +178,103 @@ fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
         assert!(error
             .to_string()
             .contains(case.get("jet_error_contains").unwrap().as_str().unwrap()));
+    }
+}
+
+#[test]
+fn private_integration_matches_pinned_breadth_fixture() {
+    let fixture = crate::JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
+    let root = fixture.as_object().expect("breadth fixture root");
+    let boundary = NativeBoundary::embedded().expect("committed manifest must validate");
+
+    for case in root
+        .get("values")
+        .expect("breadth values")
+        .as_array()
+        .expect("breadth value array")
+    {
+        let case = case.as_object().expect("breadth value object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let output = case
+            .get("output")
+            .and_then(|value| value.as_str().ok())
+            .unwrap_or("default");
+        let evaluated = boundary
+            .evaluate_devshell_output(source, system, output)
+            .expect("breadth value must evaluate through Jetpack");
+        let expected = case
+            .get("jet_packages")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        let nix_packages = case
+            .get("nix_value")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("packages")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(nix_packages, expected);
+        assert_eq!(evaluated.packages(), expected.as_slice());
+        let expected_unsupported = case
+            .get("jet_unsupported")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(evaluated.unsupported(), expected_unsupported.as_slice());
+    }
+
+    for case in root
+        .get("errors")
+        .expect("breadth errors")
+        .as_array()
+        .expect("breadth error array")
+    {
+        let case = case.as_object().expect("breadth error object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let expected = case.get("jet_error").unwrap().as_str().unwrap();
+        let error = boundary
+            .evaluate_devshell(source, system)
+            .expect_err("breadth error must fail through Jetpack");
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    for case in root
+        .get("derivations")
+        .expect("breadth derivations")
+        .as_array()
+        .expect("breadth derivation array")
+    {
+        let case = case.as_object().expect("breadth derivation object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let evaluated = boundary
+            .evaluate_derivation(source, system)
+            .expect("breadth derivation must materialize through Jetpack");
+        let nix_value = case.get("nix_value").unwrap().as_object().unwrap();
+        assert_eq!(
+            evaluated.drv_path(),
+            nix_value.get("drvPath").unwrap().as_str().unwrap()
+        );
+        for name in ["out", "dev", "doc"] {
+            assert_eq!(
+                evaluated.outputs().get(name).map(String::as_str),
+                Some(nix_value.get(name).unwrap().as_str().unwrap())
+            );
+        }
     }
 }
 

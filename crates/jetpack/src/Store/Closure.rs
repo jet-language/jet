@@ -40,17 +40,29 @@ pub fn du(roots: &Roots) -> Vec<DuEntry> {
 
 /// Total bytes on disk of a directory tree (0 if it isn't a local directory).
 pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
-    if !path.is_dir() {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if metadata.file_type().is_symlink() {
+        return 0;
+    }
+    if !metadata.is_dir() {
         return 0;
     }
     let mut total = 0u64;
     if let Ok(rd) = fs::read_dir(path) {
         for ent in rd.flatten() {
             let p = ent.path();
-            if p.is_dir() {
+            let Ok(metadata) = fs::symlink_metadata(&p) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
                 total += dir_size(&p);
-            } else if let Ok(meta) = p.metadata() {
-                total += meta.len();
+            } else if metadata.is_file() {
+                total += metadata.len();
             }
         }
     }

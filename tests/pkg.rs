@@ -373,10 +373,10 @@ fn replacement_surface(
     };
     let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
     surface.public_symbols = vec![
-        PublicSymbol::new("pad_left", "fn(String, Int) => String")
+        PublicSymbol::new("pad_left", "fn(String, Int) String")
             .with_effects(&["pure"])
             .with_errors(&["ValueError"]),
-        PublicSymbol::new("trim", "fn(String) => String").with_effects(&["pure"]),
+        PublicSymbol::new("trim", "fn(String) String").with_effects(&["pure"]),
     ];
     surface.examples = vec!["examples/replacement/pad.jet".to_string()];
     surface.goldens = vec![GoldenFixture::new("pad_left_basic", "  hi\n")];
@@ -716,6 +716,47 @@ fn nix_import_emits_role_modules_and_todos() {
 }
 
 #[test]
+fn nix_import_emits_exact_refs_and_retains_native_facts() {
+    let plan = jetpack::MigrationImport::import_nix_facts(
+        "flake.lock",
+        r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv"}]}"#,
+    );
+    assert_eq!(
+        plan.deps[0].provider_ref,
+        "ripgrep#version=14.1.1@nixpkgs"
+    );
+    assert_eq!(plan.deps[0].locked_version, "14.1.1");
+    assert!(plan
+        .emit_pkg_jet()
+        .contains("ripgrep: ripgrep#version=14.1.1@nixpkgs"));
+    let facts = &plan.provider_facts["ripgrep#version=14.1.1@nixpkgs"];
+    facts.validate().expect("exact Nix import is lossless");
+    assert_eq!(facts.native_format, "flake-facts.json");
+    assert!(facts.native_document.contains("drvPath"));
+    assert!(facts
+        .facts
+        .contains_key("provider.nix.import.drvPath"));
+}
+
+#[test]
+fn nix_import_keeps_mutable_refs_out_of_generated_source() {
+    let plan = jetpack::MigrationImport::import_nix_facts(
+        "flake.nix",
+        r#"{"name":"app","packages":["ripgrep"]}"#,
+    );
+    assert_eq!(plan.deps[0].provider_ref, "ripgrep@nixpkgs");
+    assert!(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"));
+    assert!(plan.provider_facts["ripgrep@nixpkgs"]
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("no exact version")));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| todo.message.contains("migration remains unresolved")));
+}
+
+#[test]
 fn cargo_import_preserves_locked_versions() {
     let plan = jetpack::MigrationImport::import_cargo(
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
@@ -866,12 +907,33 @@ fn migration_status_feeds_lock_explain() {
 #[test]
 fn provider_contract_covers_core_nix_path_github() {
     use jetpack::ProviderGraph::{built_in_contracts, ProviderFamily};
-    let families: Vec<ProviderFamily> =
-        built_in_contracts().into_iter().map(|c| c.family).collect();
+    let contracts = built_in_contracts();
+    let families: Vec<ProviderFamily> = contracts.iter().map(|c| c.family.clone()).collect();
     assert!(families.contains(&ProviderFamily::Core));
     assert!(families.contains(&ProviderFamily::Nix));
     assert!(families.contains(&ProviderFamily::Path));
     assert!(families.contains(&ProviderFamily::Github));
+    assert!(
+        !contracts
+            .iter()
+            .find(|contract| contract.family == ProviderFamily::Homebrew)
+            .expect("Homebrew contract")
+            .fetches_bytes
+    );
+    assert!(
+        !contracts
+            .iter()
+            .find(|contract| contract.family == ProviderFamily::Github)
+            .expect("GitHub contract")
+            .fetches_bytes
+    );
+    assert!(
+        contracts
+            .iter()
+            .find(|contract| contract.family == ProviderFamily::Binary)
+            .expect("binary contract")
+            .fetches_bytes
+    );
 }
 
 #[test]
@@ -929,6 +991,41 @@ fn provider_report_surfaces_missing_identity_as_loss() {
 }
 
 #[test]
+fn provider_report_preserves_alias_resolution_and_typed_native_facts() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    use jetpack::{ProviderFactValue, ProviderFacts};
+    let native = r#"{"name":"web","version":"1.0.0","yanked":false}"#;
+    let report = normalize_provider_document(ProviderFamily::Npm, native);
+    let shared = report.shared_facts_for("web@catalog");
+    shared.validate().expect("catalog alias remains lossless");
+    assert_eq!(shared.qualified_reference(), "web#version=1.0.0@catalog");
+    assert_eq!(shared.native_document, native);
+    assert_eq!(
+        shared.facts.get("provider.resolved_selector"),
+        Some(&ProviderFactValue::Text("#version=1.0.0".to_string()))
+    );
+    assert_eq!(
+        shared.facts.get("provider.npm.native.yanked"),
+        Some(&ProviderFactValue::List(vec![ProviderFactValue::Bool(
+            false
+        )]))
+    );
+
+    let lock = report
+        .lock_record("app", "web@catalog", "any")
+        .expect("alias lock retains source authority");
+    assert_eq!(lock.identity.exact, "web#version=1.0.0@catalog");
+    let locked = ProviderFacts::from_json(
+        lock.future_fields
+            .get("provider-facts")
+            .expect("provider facts in lock"),
+    )
+    .expect("locked provider facts");
+    locked.validate().expect("locked alias facts");
+    assert_eq!(locked.reference, "web@catalog");
+}
+
+#[test]
 fn swiftpm_v2_report_keeps_revision_and_native_bytes() {
     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
     let revision = "0123456789abcdef0123456789abcdef01234567";
@@ -960,6 +1057,140 @@ fn homebrew_report_reads_stable_version_and_dependencies() {
     assert_eq!(report.facts.version, "1.7.1");
     assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
     assert_eq!(report.shared_facts().native_document, native);
+}
+
+#[test]
+fn homebrew_conformance_retains_bottle_source_and_hook_facts() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let native = r##"{"name":"jq","full_name":"jq","version":"1.7.1","versions":{"stable":"1.7.1","head":"HEAD"},"license":"MIT","tap":"homebrew/core","dependencies":["oniguruma"],"build_dependencies":["pkg-config"],"test_dependencies":["bats-core"],"recommended_dependencies":[{"name":"less","version":"1.0"}],"source":{"url":"https://example.invalid/jq.tar.gz","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"bottle":{"stable":{"files":{"arm64_sonoma":{"url":"https://example.invalid/jq.arm64.bottle.tar.gz","sha256":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}},"relocatable":true,"test":"system \"#{bin}/jq\", \"--version\"","deprecated":false}"##;
+    let report = normalize_provider_document(ProviderFamily::Homebrew, native);
+    report.validate().expect("Homebrew formula is lossless");
+    assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
+    assert_eq!(
+        report.facts.build_dependencies,
+        vec!["pkg-config".to_string()]
+    );
+    assert_eq!(report.facts.dev_dependencies, vec!["bats-core".to_string()]);
+    assert!(report
+        .facts
+        .typed
+        .contains_key("provider.homebrew.bottle.arm64_sonoma.sha256"));
+    assert!(report
+        .shared_facts()
+        .facts
+        .contains_key("provider.homebrew.hook.test"));
+    let shared = report.shared_facts();
+    let lock = report
+        .lock_record("app", "jq#1.7.1@homebrew", "x86_64-linux")
+        .expect("Homebrew provider lock");
+    let locked = jetpack::ProviderFacts::from_json(
+        lock.future_fields
+            .get("provider-facts")
+            .expect("provider facts in Homebrew lock"),
+    )
+    .expect("Homebrew provider facts JSON");
+    assert_eq!(locked, shared);
+    assert_eq!(locked.native_document, native);
+}
+
+#[test]
+fn homebrew_conformance_reports_conflicting_identity_facts() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let report = normalize_provider_document(
+        ProviderFamily::Homebrew,
+        r#"{"name":"jq","version":"1.7.1","versions":{"stable":"1.7.2"}}"#,
+    );
+    assert!(report
+        .conflicts
+        .iter()
+        .any(|conflict| conflict.contains("conflicting version")));
+    assert!(report.validate().is_err());
+}
+
+#[test]
+fn github_conformance_retains_release_assets_source_and_status() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let native = format!(
+        r#"{{"name":"tool","tag_name":"v1.2.3","target_commitish":"{revision}","license":"MIT","repository":{{"full_name":"acme/tool"}},"draft":false,"prerelease":false,"assets":[{{"name":"tool-linux","platform":"x86_64-linux","digest":"{digest}","browser_download_url":"https://example.invalid/tool"}}],"signature":{{"key":"pk","value":"sig"}},"advisories":["CVE-0000-0000"],"hooks":{{"build":"reviewed"}}}}"#
+    );
+    let report = normalize_provider_document(ProviderFamily::Github, &native);
+    report.validate().expect("GitHub release is lossless");
+    assert_eq!(report.facts.version, "v1.2.3");
+    assert!(report.facts.platforms.contains(&"x86_64-linux".to_string()));
+    assert!(report.facts.typed.contains_key("provider.github.revision"));
+    assert!(report
+        .shared_facts()
+        .facts
+        .contains_key("provider.github.asset.tool-linux.browser_download_url"));
+    let shared = report.shared_facts();
+    let lock = report
+        .lock_record("app", "tool#v1.2.3@github", "x86_64-linux")
+        .expect("GitHub provider lock");
+    let locked = jetpack::ProviderFacts::from_json(
+        lock.future_fields
+            .get("provider-facts")
+            .expect("provider facts in GitHub lock"),
+    )
+    .expect("GitHub provider facts JSON");
+    assert_eq!(locked, shared);
+    assert_eq!(locked.native_document, native);
+}
+
+#[test]
+fn github_conformance_reports_unhashed_release_assets() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let report = normalize_provider_document(
+        ProviderFamily::Github,
+        r#"{"name":"tool","tag_name":"v1.2.3","assets":[{"name":"tool-linux","browser_download_url":"https://example.invalid/tool"}]}"#,
+    );
+    assert!(report
+        .losses
+        .iter()
+        .any(|loss| loss.contains("no content digest")));
+    assert!(report.validate().is_err());
+}
+
+#[test]
+fn binary_conformance_retains_platform_signature_and_provenance() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let native = format!(
+        r#"{{"name":"tool","version":"2.0.0","hash":"{digest}","platforms":["x86_64-linux"],"license":"MIT","url":"https://example.invalid/tool","signature":{{"key":"pk","value":"sig"}},"provenance":{{"builder":"ci"}},"sbom":{{"format":"spdx"}},"variants":{{"debug":{{"features":["trace"]}}}}}}"#
+    );
+    let report = normalize_provider_document(ProviderFamily::Binary, &native);
+    report
+        .validate()
+        .expect("binary provider facts are lossless");
+    assert_eq!(report.shared_facts().selector.digest, digest);
+    assert!(report
+        .shared_facts()
+        .facts
+        .contains_key("provider.binary.signature"));
+    assert!(report
+        .shared_facts()
+        .facts
+        .contains_key("provider.binary.provenance"));
+    assert_eq!(report.shared_facts().native_document, native);
+}
+
+#[test]
+fn binary_conformance_reports_missing_platform_and_weak_hash() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let report = normalize_provider_document(
+        ProviderFamily::Binary,
+        r#"{"name":"tool","hash":"sha256-aa"}"#,
+    );
+    assert!(report
+        .losses
+        .iter()
+        .any(|loss| loss.contains("not an exact digest")));
+    assert!(report
+        .losses
+        .iter()
+        .any(|loss| loss.contains("no target platform")));
+    assert!(report.validate().is_err());
 }
 
 #[test]
@@ -3501,7 +3732,7 @@ fn semver_break_e2601() {
     let old_api = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) => Int".into(),
+        signature: "fn parse(raw: String) Int".into(),
     }];
     let new_api: Vec<ApiItem> = vec![]; // removed
 
@@ -3531,7 +3762,7 @@ fn returned_view_source_union_change_feeds_e1218_and_e2601() {
         kind: "fn".into(),
         name: "pick".into(),
         signature: format!(
-            "fn pick(left: [Int], right: [Int]) => View<Int> ; view_source = {source}"
+            "fn pick(left: [Int], right: [Int]) View<Int> ; view_source = {source}"
         ),
     };
     let changes = diff_public_api(
@@ -3567,7 +3798,7 @@ fn capability_sigil_frozen_in_public_api() {
 
     let write_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: &Account, amount: Int) => Int {
+pub fn deposit(a: &Account, amount: Int) Int -> {
     a.balance = a.balance + amount
     return a.balance
 }
@@ -3588,7 +3819,7 @@ pub fn deposit(a: &Account, amount: Int) => Int {
     // Same signature, only the capability sigil differs (read instead of write).
     let read_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: Account, amount: Int) => Int { return a.balance + amount }
+pub fn deposit(a: Account, amount: Int) Int -> { return a.balance + amount }
 ";
     let f2 = dir.join("read.jet");
     fs::write(&f2, read_src).unwrap();
@@ -3626,7 +3857,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() => Millimeter { return Millimeter.from_float(1.0)? }\n";
+    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0)? }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = jet::Publish::extract_public_api_for_package(
@@ -3661,7 +3892,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() => Millimeter { return Millimeter.from_float(1.0)? }\n";
+    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0)? }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
     let changed_api = jet::Publish::extract_public_api_for_package(
@@ -3677,7 +3908,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
 
-    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() => CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() CelsiusPoint -> { return CelsiusPoint.from_float(20.0) }\n";
     let affine_path = dir.join("affine.jet");
     fs::write(&affine_path, affine).unwrap();
     let affine_api = jet::Publish::extract_public_api_for_package(
@@ -3685,7 +3916,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         affine_path.to_str().unwrap(),
         "physics",
     );
-    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() => CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() CelsiusPoint -> { return CelsiusPoint.from_float(20.0) }\n";
     let shifted_path = dir.join("shifted.jet");
     fs::write(&shifted_path, shifted).unwrap();
     let shifted_api = jet::Publish::extract_public_api_for_package(
@@ -3696,8 +3927,8 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
 
     let length_generic =
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }\n";
-    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) => Q { return value }\n";
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -> { return value }\n";
+    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) Q -> { return value }\n";
     let length_path = dir.join("length_generic.jet");
     let time_path = dir.join("time_generic.jet");
     fs::write(&length_path, length_generic).unwrap();
@@ -3714,7 +3945,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(
         length_api[0].signature,
-        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) =[]=> Q"
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q -[]>"
     );
     assert_eq!(diff_public_api(&length_api, &time_api).len(), 1);
     let _ = fs::remove_dir_all(&dir);
@@ -3747,15 +3978,15 @@ fn inferred_public_effect_drift_is_breaking() {
     let dir = tmp_dir("effect_api_drift");
     let pure_path = dir.join("pure.jet");
     let io_path = dir.join("io.jet");
-    let pure = "pub fn report() => Int { return 1 }\n";
-    let io = "pub fn report() => Int { print(\"report\"); return 1 }\n";
+    let pure = "pub fn report() Int -> { return 1 }\n";
+    let io = "pub fn report() Int -> { print(\"report\"); return 1 }\n";
     fs::write(&pure_path, pure).unwrap();
     fs::write(&io_path, io).unwrap();
 
     let pure_api = extract_public_api(pure, pure_path.to_str().unwrap());
     let io_api = extract_public_api(io, io_path.to_str().unwrap());
-    assert!(pure_api[0].signature.contains("=[]=>"));
-    assert!(io_api[0].signature.contains("=[IO]=>"));
+    assert!(pure_api[0].signature.contains("-[]>"));
+    assert!(io_api[0].signature.contains("-[IO]>"));
     assert_eq!(diff_public_api(&pure_api, &io_api).len(), 1);
 
     let _ = fs::remove_dir_all(&dir);
@@ -3783,7 +4014,7 @@ fn inferred_inline_module_effects_are_published() {
         .iter()
         .find(|item| item.name == "files.report")
         .expect("inline module function is public API");
-    assert!(report.signature.contains("=[IO]=>"), "{}", report.signature);
+    assert!(report.signature.contains("-[IO]>"), "{}", report.signature);
     assert!(old_api.iter().any(|item| item.name == "bench.report"));
     assert_eq!(diff_public_api(&old_api, &new_api).len(), 1);
 
@@ -3839,12 +4070,12 @@ fn public_effect_metadata_preserves_symbolic_rows() {
 
     let dir = tmp_dir("effect_api_open_row");
     let path = dir.join("open.jet");
-    let source = "pub fn invoke<E>(act: fn() =[..E]=> Int) =[..E]=> Int { return act(); }\n";
+    let source = "pub fn invoke<E>(act: fn() Int -[..E]>) Int -[..E]> { return act(); }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
     assert!(
-        api[0].signature.contains("=[..E]=>"),
+        api[0].signature.contains("-[..E]>"),
         "{}",
         api[0].signature
     );
@@ -3859,15 +4090,15 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) =[IO]=> Int; }\n";
-    let new = "pub trait Render { fn draw(self) =[GPU]=> Int; }\n";
+    let old = "pub trait Render { fn draw(self) Int -[IO]>; }\n";
+    let new = "pub trait Render { fn draw(self) Int -[GPU]>; }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
     let old_api = extract_public_api(old, old_path.to_str().unwrap());
     let new_api = extract_public_api(new, new_path.to_str().unwrap());
-    assert!(old_api[0].signature.contains("=[IO]=>"));
-    assert!(new_api[0].signature.contains("=[GPU]=>"));
+    assert!(old_api[0].signature.contains("-[IO]>"));
+    assert!(new_api[0].signature.contains("-[GPU]>"));
     assert!(
         !diff_public_api(&old_api, &new_api).is_empty(),
         "trait method effect drift must be breaking"
@@ -3891,7 +4122,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
     // canonical Length family instead (card #1765/#1769 root cause: the
     // prior fixture redeclared the family and shadowed the very identity
     // it meant to assert on).
-    let source = "pub trait Measure { fn scale(value: Meter) => Meter; }\n";
+    let source = "pub trait Measure { fn scale(value: Meter) Meter; }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -3901,7 +4132,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
         .expect("public trait method");
     assert_eq!(
         method.signature,
-        "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) => Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}"
+        "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}"
     );
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
@@ -4225,7 +4456,7 @@ fn e1218_breaking_change_under_minor_bump() {
     let old = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) => Int".into(),
+        signature: "fn parse(raw: String) Int".into(),
     }];
     let new: Vec<ApiItem> = vec![]; // parse removed
     let breaking = diff_public_api(&old, &new);
@@ -4433,6 +4664,20 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
         "index line:\n{index}"
     );
     assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
+    let entry = index
+        .lines()
+        .find_map(jet::Publish::IndexEntry::parse_line)
+        .expect("published index line must parse");
+    let referrer = format!("referrers/{}/index.json", entry.content_hash);
+    let referrer_probe = Command::new("git")
+        .args(["--git-dir", bare.to_str().unwrap(), "cat-file", "-e"])
+        .arg(format!("HEAD:{referrer}"))
+        .output()
+        .unwrap();
+    assert!(
+        referrer_probe.status.success(),
+        "publish must commit the OCI referrer index at {referrer}"
+    );
 
     // S2/D-MEM1: `jet registry publish` now unconditionally snapshots the public-fn
     // surface to `.jet/cache/api/<pkg>.api` — a committed, durable interface
@@ -4609,7 +4854,10 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         String::from_utf8_lossy(&publish.stderr)
     );
 
-    let raw = manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,");
+    let raw = format!(
+        "{}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"jet\"] }} }}\n",
+        manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,")
+    );
     write(&consumer, "package.jet", &raw);
     let manifest = jet::Manifest::parse(&consumer.join("package.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
@@ -4618,6 +4866,43 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         update_dep: None,
         resolution: jet::Publish::ResolveMode::Conservative,
     };
+
+    let denied_raw = format!(
+        "{}\npolicy: {{ licenses: .Allow([\"MIT\"]), sources: {{ \"textkit\": [\"other\"] }} }}\n",
+        manifest_with_deps("consumer", "0.1.0", "    textkit: textkit#1.2.0,")
+    );
+    let denied_manifest = jet::Manifest::parse(&consumer.join("package.jet"), &denied_raw)
+        .expect("denied policy manifest parses");
+    let denied = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &denied_manifest, None, &opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result
+    })
+    .expect_err("wrong source mapping must deny before Hangar ingest");
+    assert_eq!(denied[0].code, "E1207");
+    assert!(denied[0].what.contains("source authority"));
+    assert!(jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+        .into_iter()
+        .all(|entry| !(entry.name == "textkit" && entry.version == "1.2.0")));
 
     let (lock, dep_dirs) = with_store(&store, || {
         let previous = [
@@ -4687,6 +4972,27 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
             .contains("package=textkit#1.2.0"),
         "Hangar provenance must retain the immutable registry package identity"
     );
+    assert!(
+        hangar_entry
+            .envelope
+            .provenance
+            .contains("package-policy=package=textkit#1.2.0;license=MIT;source=jet;source-rule=textkit => [jet];fingerprint=sha256-"),
+        "Hangar provenance must retain the package policy receipt"
+    );
+    assert!(
+        hangar_entry
+            .cache_identity
+            .policy_fingerprint
+            .starts_with("sha256-"),
+        "Hangar cache identity must bind the package policy"
+    );
+    assert!(
+        hangar_entry
+            .envelope
+            .provenance
+            .contains("oci-referrers=subject="),
+        "Hangar provenance must retain the verified OCI referrer receipt"
+    );
 
     let update_opts = jet::Fetch::FetchOptions {
         locked: false,
@@ -4722,6 +5028,8 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
     assert!(semantic_lock.contains("adapter-id = \"registry.pubgrub\""));
     assert!(semantic_lock.contains("update-command = \"jet update textkit\""));
     assert!(semantic_lock.contains("exact = \"textkit#1.2.0\""));
+    assert!(semantic_lock.contains("pattern = \"textkit\""));
+    assert!(semantic_lock.contains("sources = [\"jet\"]"));
 
     let locked_opts = jet::Fetch::FetchOptions {
         locked: true,
@@ -5101,6 +5409,29 @@ fn registry_transport_rejects_and_redacts_embedded_credentials() {
     assert!(
         !query_rendered.contains("super-secret"),
         "registry credential leaked in query diagnostic:\n{query_rendered}"
+    );
+
+    let file_registry = jet::Publish::RegistryConfig::private(
+        "scratch",
+        "file:///tmp/registry.git?access_token=super-secret",
+        false,
+    );
+    let file_diagnostic = jet::Publish::ensure_index_clone(&file_registry)
+        .expect_err("credential-bearing file URLs must fail before transport");
+    let file_rendered = jet::Diagnostics::render_all("package.jet", "", &[file_diagnostic]);
+    assert!(
+        !file_rendered.contains("super-secret"),
+        "credential leaked: {file_rendered}"
+    );
+
+    let detail = jet::Publish::e1235(
+        "https://example.invalid/registry.git",
+        "git helper failed after receiving password super-secret",
+    );
+    let detail_rendered = jet::Diagnostics::render_all("package.jet", "", &[detail]);
+    assert!(
+        !detail_rendered.contains("super-secret"),
+        "raw credential-bearing transport detail leaked:\n{detail_rendered}"
     );
 }
 

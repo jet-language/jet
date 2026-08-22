@@ -673,7 +673,6 @@ fn build_generation(
         }
     }
     let selected = choose_output_nodes(plan, &groups, &previous)?;
-    fs::create_dir(&generation_dir)?;
     fs::create_dir(&rootfs)?;
     copy_projection(&rootfs, &selected)?;
     for package in &realized {

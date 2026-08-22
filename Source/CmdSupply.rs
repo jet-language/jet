@@ -172,6 +172,22 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     let version = &mf.package.version;
     let name = &mf.package.name;
 
+    if let Err(error) = jet::Publish::validate_published_license(
+        name,
+        version,
+        mf.package.license.as_deref(),
+    ) {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(
+                jet::Syntax::PACKAGE_FILE,
+                &raw,
+                &[jet::Publish::package_policy_diagnostic(&error)],
+            )
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
     // Pre-publish gate step 0: dirty working tree (E2605, D-PUBLISH1A).
     // A dirty tree means uncommitted changes would be silently excluded from
     // the published artifact, making it unreproducible.

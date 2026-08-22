@@ -927,9 +927,11 @@ fn remote_for_action(
             "remote builder binding has no canonical scheduler".to_string(),
         )
     })?;
-    let selected = scheduler
-        .select(&request)
-        .map_err(|error| remote_action(action, error.to_string()))?;
+    let selected = match scheduler.select(&request) {
+        Ok(selected) => selected,
+        Err(_error) if binding.fallback_local => return Ok(None),
+        Err(error) => return Err(remote_action(action, error.to_string())),
+    };
     let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
     let lease = scheduler.acquire(selected);
     Ok(Some((transport, policy, binding.execute, lease)))
@@ -1708,6 +1710,50 @@ mod tests {
         };
         restore.commit();
         assert_eq!(fs::read(&path).unwrap(), b"new");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remote_ineligible_builder_honors_declared_local_fallback() {
+        use crate::Comptime::Build::{ActionSpec, BuildContext, BuildResourcePool, TargetSpec};
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-remote-ineligible-fallback-{}",
+            std::process::id()
+        ));
+        let mut context = BuildContext::new();
+        let action = context
+            .action(
+                "gpu-action",
+                ActionSpec::cached(["remote-tool"])
+                    .with_cap(BuildCapability::Net)
+                    .with_pool(BuildResourcePool::GPU),
+            )
+            .unwrap();
+        let target = context
+            .add_executable("gpu-target", TargetSpec::new().with_action(action))
+            .unwrap();
+        let plan = context.plan_with_default(target).unwrap();
+        let binding = RemoteBuildBinding::new("cpu-builder", &root, b"fallback-key")
+            .unwrap()
+            .with_trust_domain("trusted")
+            .with_execute(true)
+            .with_local_fallback(true);
+        let scheduler =
+            RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())]).unwrap();
+        let grants = [BuildCapability::Net].into_iter().collect();
+
+        let result = remote_for_action(
+            &plan,
+            plan.action(action).unwrap(),
+            &ActionKey::new("gpu-action-key"),
+            &grants,
+            Some(&binding),
+            Some(&scheduler),
+        )
+        .unwrap();
+
+        assert!(result.is_none());
         let _ = fs::remove_dir_all(root);
     }
 }

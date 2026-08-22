@@ -214,7 +214,7 @@ fn core_browser_locked_reads_project_pin() {
     let source = r#"
 use core.web.browser as browser
 
-fn run() =[FS, IO]=> {
+fn run() -[FS, IO]> {
     locked :: browser.locked("chromium") ?? panic("missing lock")
     print("engine:{locked.engine()}")
     print("version:{locked.version()}")
@@ -234,7 +234,7 @@ fn run() =[FS, IO]=> {
     let hostile = r#"
 use core.web.browser as browser
 
-fn run() =[FS, IO]=> {
+fn run() -[FS, IO]> {
     if browser.locked("chromium") == .Err(_) {
         print("outcome:caught")
     } else {
@@ -254,7 +254,7 @@ fn core_browser_locked_requires_fs_effect() {
     let missing_effect = r#"
 use core.web.browser as browser
 
-fn run() =[IO]=> {
+fn run() -[IO]> {
     locked :: browser.locked("chromium") ?? return
 }
 "#;

@@ -31,7 +31,7 @@ Codegen does not read the AST plus side registries; it lowers the checked AST to
 Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
 is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
 body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
-`impl Old => New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
+`impl Old -> New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
 coverage, and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE),
 never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/`emit_stmt`/
 `emit_stmts`/`emit_lambda`) was deleted (c109) once a whole-test-suite byte-parity check proved

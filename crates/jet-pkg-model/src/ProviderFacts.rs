@@ -63,6 +63,10 @@ impl ProviderFactValue {
                 .map(Self::Map),
         }
     }
+
+    pub fn from_json_value(value: &JSONValue) -> Result<Self, String> {
+        Self::from_json(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -171,6 +175,7 @@ struct SelectorDetails {
     selector: ProviderSelector,
     unknown: Vec<String>,
     conflicts: Vec<(String, String, String)>,
+    duplicates: Vec<String>,
 }
 
 fn parse_selector_details(raw: &str) -> SelectorDetails {
@@ -182,6 +187,10 @@ fn parse_selector_details(raw: &str) -> SelectorDetails {
         ..Default::default()
     };
     let body = raw.strip_prefix('#').unwrap_or(raw);
+    if !raw.is_empty() && body.trim().is_empty() {
+        details.unknown.push("empty selector".to_string());
+        return details;
+    }
     for group in body.split('&') {
         let mut start = 0;
         for (offset, character) in group.char_indices() {
@@ -202,47 +211,61 @@ fn parse_selector_part(details: &mut SelectorDetails, part: &str) {
     let (key, value) = part.split_once('=').unwrap_or(("version", part));
     let key = key.trim();
     let value = value.trim();
+    if value.is_empty() {
+        details
+            .unknown
+            .push(format!("empty selector fact `{part}`"));
+        return;
+    }
     match key {
         "version" => set_selector_value(
             &mut details.selector.version,
             "version",
             value,
             &mut details.conflicts,
+            &mut details.duplicates,
         ),
         "revision" | "rev" => set_selector_value(
             &mut details.selector.revision,
             "revision",
             value,
             &mut details.conflicts,
+            &mut details.duplicates,
         ),
         "baseline" => set_selector_value(
             &mut details.selector.baseline,
             "baseline",
             value,
             &mut details.conflicts,
+            &mut details.duplicates,
         ),
         "feature" | "features" => {
-            details.selector.features.extend(
-                value
-                    .split(['+', ','])
-                    .map(str::trim)
-                    .filter(|feature| !feature.is_empty())
-                    .map(str::to_string),
-            );
+            for feature in value
+                .split(['+', ','])
+                .map(str::trim)
+                .filter(|feature| !feature.is_empty())
+            {
+                if details.selector.features.iter().any(|seen| seen == feature) {
+                    details.duplicates.push(format!("{key}={feature}"));
+                } else {
+                    details.selector.features.push(feature.to_string());
+                }
+            }
             details.selector.features.sort();
-            details.selector.features.dedup();
         }
         "digest" | "hash" | "sha256" => set_selector_value(
             &mut details.selector.digest,
             "digest",
             value,
             &mut details.conflicts,
+            &mut details.duplicates,
         ),
         "platform" | "target" => set_selector_value(
             &mut details.selector.platform,
             "platform",
             value,
             &mut details.conflicts,
+            &mut details.duplicates,
         ),
         _ => details.unknown.push(part.to_string()),
     }
@@ -253,10 +276,15 @@ fn set_selector_value(
     key: &str,
     value: &str,
     conflicts: &mut Vec<(String, String, String)>,
+    duplicates: &mut Vec<String>,
 ) {
-    if !slot.is_empty() && slot != value {
-        conflicts.push((key.to_string(), slot.clone(), value.to_string()));
-    } else if slot.is_empty() {
+    if !slot.is_empty() {
+        if slot != value {
+            conflicts.push((key.to_string(), slot.clone(), value.to_string()));
+        } else {
+            duplicates.push(format!("{key}={value}"));
+        }
+    } else {
         *slot = value.to_string();
     }
 }
@@ -422,6 +450,13 @@ impl ProviderFacts {
                 "reference.selector",
             );
         }
+        for duplicate in selector_details.duplicates {
+            facts.add_loss(
+                "provider.selector",
+                &format!("duplicate selector fact `{duplicate}` cannot be normalized losslessly"),
+                "reference.selector",
+            );
+        }
         for (key, value, kind) in [
             (
                 "version",
@@ -519,7 +554,32 @@ impl ProviderFacts {
     /// Retain the exact selector resolved by a named source authority while
     /// keeping the user's intentionally unpinned reference unchanged.
     pub fn set_resolved_selector(&mut self, selector: &str, source: &str) {
-        let resolved = ProviderSelector::parse(selector);
+        let details = parse_selector_details(selector);
+        for unknown in &details.unknown {
+            self.add_loss(
+                "provider.resolved_selector",
+                &format!(
+                    "unsupported resolved selector fact `{unknown}` cannot be normalized losslessly"
+                ),
+                source,
+            );
+        }
+        for (key, left, right) in &details.conflicts {
+            self.add_conflict(
+                &format!("provider.resolved_selector.{key}"),
+                left,
+                right,
+                source,
+            );
+        }
+        for duplicate in &details.duplicates {
+            self.add_loss(
+                "provider.resolved_selector",
+                &format!("duplicate resolved selector fact `{duplicate}` cannot be normalized losslessly"),
+                source,
+            );
+        }
+        let resolved = details.selector;
         self.add_fact(
             "provider.resolved_selector",
             ProviderFactValue::Text(selector.to_string()),
@@ -608,24 +668,57 @@ impl ProviderFacts {
                 self.target
             ));
         }
-        if let Some(raw_selector) = reference_selector {
-            let parsed = parse_selector_details(&format!("#{raw_selector}")).selector;
-            if parsed.version != self.selector.version
-                || parsed.revision != self.selector.revision
-                || parsed.baseline != self.selector.baseline
-                || parsed.features != self.selector.features
-                || parsed.digest != self.selector.digest
-                || parsed.platform != self.selector.platform
-            {
+        let expected_selector_raw = reference_selector
+            .as_ref()
+            .map(|selector| format!("#{selector}"))
+            .unwrap_or_default();
+        if self.selector.raw != expected_selector_raw {
+            return Err(
+                "provider fact selector raw spelling disagrees with its fully qualified reference"
+                    .to_string(),
+            );
+        }
+        let selector_details = parse_selector_details(&self.selector.raw);
+        if let Some(unknown) = selector_details.unknown.first() {
+            return Err(format!(
+                "provider fact selector contains unsupported fact `{unknown}`"
+            ));
+        }
+        if let Some((key, left, right)) = selector_details.conflicts.first() {
+            return Err(format!(
+                "provider fact selector `{key}` conflicts: {left} vs {right}"
+            ));
+        }
+        if let Some(duplicate) = selector_details.duplicates.first() {
+            return Err(format!(
+                "provider fact selector contains duplicate fact `{duplicate}`"
+            ));
+        }
+        let parsed = selector_details.selector;
+        if parsed.version != self.selector.version
+            || parsed.revision != self.selector.revision
+            || parsed.baseline != self.selector.baseline
+            || parsed.features != self.selector.features
+            || parsed.digest != self.selector.digest
+            || parsed.platform != self.selector.platform
+        {
+            return Err(
+                "provider fact selector fields disagree with their raw spelling".to_string(),
+            );
+        }
+        if !reference_provider.is_empty() && reference_provider != self.provider {
+            let Some(ProviderFactValue::Text(authority)) = self.facts.get("provider.authority")
+            else {
                 return Err(
-                    "provider fact selector disagrees with its fully qualified reference"
+                    "provider authority differs from the provider and lacks a typed authority fact"
                         .to_string(),
                 );
+            };
+            if authority != reference_provider {
+                return Err("provider authority fact disagrees with its reference".to_string());
             }
-        } else if !self.selector.raw.is_empty() {
-            return Err(
-                "provider fact selector is present but the reference has no selector".to_string(),
-            );
+        } else if self.facts.contains_key("provider.authority") {
+            return Err("provider authority fact is not present in its reference".to_string());
         }
         if is_external_provider(&self.provider) {
             if reference_provider.is_empty() {
@@ -651,7 +744,23 @@ impl ProviderFacts {
             let ProviderFactValue::Text(raw) = value else {
                 return Err("resolved provider selector fact must be text".to_string());
             };
-            let resolved = ProviderSelector::parse(raw);
+            let details = parse_selector_details(raw);
+            if let Some(unknown) = details.unknown.first() {
+                return Err(format!(
+                    "resolved provider selector contains unsupported fact `{unknown}`"
+                ));
+            }
+            if let Some((key, left, right)) = details.conflicts.first() {
+                return Err(format!(
+                    "resolved provider selector `{key}` conflicts: {left} vs {right}"
+                ));
+            }
+            if let Some(duplicate) = details.duplicates.first() {
+                return Err(format!(
+                    "resolved provider selector contains duplicate fact `{duplicate}`"
+                ));
+            }
+            let resolved = details.selector;
             if !resolved.is_exact() {
                 return Err(
                     "resolved provider selector must be an exact version, revision, or digest"
@@ -688,6 +797,9 @@ impl ProviderFacts {
                     "provider identity field `{key}` disagrees with its typed fact"
                 ));
             }
+        }
+        if self.selector.raw.is_empty() && self.facts.contains_key("provider.selector") {
+            return Err("provider selector fact is present without a selector".to_string());
         }
         for (key, expected) in [
             ("provider.resolved_source", self.resolved_source.as_str()),
@@ -1208,6 +1320,41 @@ mod tests {
             .losses
             .iter()
             .any(|loss| loss.reason.contains("unsupported selector fact")));
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
+    fn selector_carrier_tampering_is_rejected() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad#version=2.0.17@npm");
+        facts.selector.raw = "#version=2.0.17&channel=next".to_string();
+        assert!(facts.validate().is_err());
+
+        let mut facts = ProviderFacts::for_reference("core", "profile@core");
+        facts.selector.version = "2.0.17".to_string();
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
+    fn resolved_selector_rejects_unsupported_facts() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad@catalog");
+        facts.set_resolved_selector("#version=2.0.17&channel=next", "policy.providers.catalog");
+        assert!(facts
+            .losses
+            .iter()
+            .any(|loss| loss.reason.contains("unsupported resolved selector fact")));
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
+    fn duplicate_selector_facts_are_explicit_loss() {
+        let facts = ProviderFacts::for_reference(
+            "npm",
+            "left-pad#version=2.0.17&version=2.0.17&features=ssl+ssl@npm",
+        );
+        assert!(facts
+            .losses
+            .iter()
+            .any(|loss| loss.reason.contains("duplicate selector fact")));
         assert!(facts.validate().is_err());
     }
 }

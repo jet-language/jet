@@ -169,8 +169,18 @@ fn endpoint_reachable(url: &str, online: bool) -> Result<bool, &'static str> {
 }
 
 fn git_registry_probe(url: &str) -> Result<(), &'static str> {
-    let mut child = Command::new("git").args(["-c", "credential.useHttpPath=true", "ls-remote", url, "HEAD"])
-        .env("GIT_TERMINAL_PROMPT", "0").stdout(Stdio::null()).stderr(Stdio::null())
+    let mut git = Command::new("git");
+    git.args(["-c", "credential.useHttpPath=true", "ls-remote", url, "HEAD"])
+        .env("GIT_TERMINAL_PROMPT", "0");
+    for (key, _) in std::env::vars_os() {
+        let key = key.to_string_lossy();
+        if key.starts_with("JET_REGISTRY_") {
+            git.env_remove(&*key);
+        }
+    }
+    let mut child = git
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn().map_err(|_| "git registry client unavailable")?;
     let deadline = Instant::now() + Duration::from_secs(4);
     loop {
@@ -184,6 +194,9 @@ fn git_registry_probe(url: &str) -> Result<(), &'static str> {
 }
 
 fn registry_url_has_credentials(value: &str) -> bool {
+    if value.contains(['?', '#']) {
+        return true;
+    }
     let Some(separator) = value.find("://") else {
         return false;
     };
@@ -193,7 +206,6 @@ fn registry_url_has_credentials(value: &str) -> bool {
         .map(|offset| authority_start + offset)
         .unwrap_or(value.len());
     value[authority_start..authority_end].contains('@')
-        || value[authority_end..].contains(['?', '#'])
 }
 
 fn check_locks(project: &Path, roots: &Store::Roots) -> Check {

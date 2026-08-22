@@ -142,6 +142,36 @@ mod tests {
             assert_eq!(diagnostic.code, "E1221");
         }
     }
+
+    #[test]
+    fn package_policy_surface_parses_and_rejects_duplicate_license_entries() {
+        let raw = r#"
+name: "consumer"
+version: "0.1.0"
+license: "MIT"
+policy: {
+    licenses: .Allow(["MIT", "Apache-2.0"]),
+    sources: { "Acme.*": ["internal"] },
+}
+"#;
+        let manifest = parse(Path::new("package.jet"), raw).expect("package policy parses");
+        assert_eq!(
+            manifest.policy.licenses,
+            Some(vec!["MIT".to_string(), "Apache-2.0".to_string()])
+        );
+        assert_eq!(
+            manifest.policy.source_maps,
+            vec![("Acme.*".to_string(), vec!["internal".to_string()])]
+        );
+
+        let duplicate = "name: \"consumer\"\nversion: \"0.1.0\"\npolicy: { licenses: .Allow([\"MIT\", \"MIT\"]) }\n";
+        let diagnostic = parse(Path::new("package.jet"), duplicate)
+            .expect_err("duplicate license policy entries must fail");
+        assert_eq!(diagnostic.code, "E1206");
+        assert!(diagnostic.what.contains("package.jet"));
+        assert!(diagnostic.why.contains("package metadata policy is malformed"));
+        assert!(diagnostic.fix.contains("syntax-decisions.md"));
+    }
 }
 
 // ──────────────────────────────────────────────
@@ -151,6 +181,8 @@ mod tests {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
     pub package: PackageMeta,
+    /// D-JPK-POLICYSURFACE1=D: root metadata policy carried into fetch.
+    pub policy: crate::Package::PackagePolicy,
     /// D-AUTHORITY-MANIFEST1=A: package authority policy, including the
     /// D-BOUND-PROV1 provenance requirement.
     pub authority: crate::Package::PackageAuthority,
@@ -443,6 +475,10 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::BadGuaranteePolicy { detail } => e1206(
             &file,
             &format!("package guarantee policy is malformed: {detail}"),
+        ),
+        PackageParseError::BadPackagePolicy { detail } => e1206(
+            &file,
+            &format!("package metadata policy is malformed: {detail}"),
         ),
         PackageParseError::BadAllocatorPolicy { detail } => Diagnostic::error(
             "E1206",

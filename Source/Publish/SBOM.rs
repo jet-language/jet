@@ -1,4 +1,5 @@
 use crate::Lock::LockFile;
+use crate::SHA256;
 use jet_foundation::JSON::json_escape;
 
 // ──────────────────────────────────────────────
@@ -8,14 +9,12 @@ use jet_foundation::JSON::json_escape;
 /// Generate an SPDX 2.3 tag-value SBOM from a lockfile.
 ///
 /// Format: https://spdx.github.io/spdx-spec/v2.3/ (tag-value subset)
-/// We emit the mandatory fields plus packages. The document namespace
-/// is `https://jet-lang.org/spdx/<root-package>-<timestamp>`.
+/// We emit the mandatory fields plus packages. The document namespace is
+/// derived from the canonical lock bytes, so publishing the same lock twice
+/// produces the same SBOM and cannot hide a changed dependency graph behind a
+/// new wall-clock value.
 pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let lock_digest = lock_digest(lock);
 
     let mut out = String::new();
 
@@ -25,11 +24,11 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
     out.push_str(&format!("SPDXID: SPDXRef-DOCUMENT\n"));
     out.push_str(&format!(
         "DocumentNamespace: https://jet-lang.org/spdx/{}-{}-{}\n",
-        root_name, root_version, ts
+        root_name, root_version, lock_digest
     ));
     out.push_str(&format!("DocumentName: {}-{}\n", root_name, root_version));
     out.push_str("Creator: Tool: jet\n");
-    out.push_str(&format!("Created: {}\n", spdx_timestamp(ts)));
+    out.push_str("Created: 1970-01-01T00:00:00Z\n");
     out.push_str("\n");
 
     // Root package.
@@ -38,7 +37,20 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
     out.push_str("SPDXID: SPDXRef-root\n");
     out.push_str(&format!("PackageVersion: {}\n", root_version));
     out.push_str("FilesAnalyzed: false\n");
-    out.push_str("PackageChecksum: NOASSERTION\n");
+    let root_checksum = lock
+        .packages
+        .iter()
+        .find(|pkg| pkg.name == root_name)
+        .and_then(|pkg| {
+            pkg.content_hash
+                .as_deref()
+                .or(Some(pkg.fingerprint.as_str()))
+        })
+        .and_then(spdx_checksum);
+    out.push_str(&format!(
+        "PackageChecksum: {}\n",
+        root_checksum.as_deref().unwrap_or("NOASSERTION")
+    ));
     out.push_str("PackageDownloadLocation: NOASSERTION\n");
     out.push_str("\n");
 
@@ -50,11 +62,13 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
         out.push_str(&format!("SPDXID: {}\n", spdx_id));
         out.push_str(&format!("PackageVersion: {}\n", pkg.version));
         out.push_str("FilesAnalyzed: false\n");
-        // The fingerprint is sha256-<hex>; SPDX uses SHA256: <hex>.
+        // Prefer the immutable source hash. The fingerprint is the fallback
+        // for older lock records that predate content-hash.
         let checksum = pkg
-            .fingerprint
-            .strip_prefix("sha256-")
-            .map(|h| format!("SHA256: {}", h))
+            .content_hash
+            .as_deref()
+            .or(Some(pkg.fingerprint.as_str()))
+            .and_then(spdx_checksum)
             .unwrap_or_else(|| "NOASSERTION".to_string());
         out.push_str(&format!("PackageChecksum: {}\n", checksum));
         out.push_str("PackageDownloadLocation: NOASSERTION\n");
@@ -72,18 +86,21 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
 
 /// Generate a CycloneDX 1.5 JSON SBOM from a lockfile.
 pub fn emit_cyclonedx(lock: &LockFile, root_name: &str, root_version: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let lock_digest = lock_digest(lock);
 
     let mut components = Vec::new();
     for (i, pkg) in lock.packages.iter().enumerate() {
         let hash_val = pkg
-            .fingerprint
-            .strip_prefix("sha256-")
-            .unwrap_or(&pkg.fingerprint);
+            .content_hash
+            .as_deref()
+            .or(Some(pkg.fingerprint.as_str()))
+            .and_then(|value| value.strip_prefix("sha256-"))
+            .unwrap_or_else(|| {
+                pkg.content_hash
+                    .as_deref()
+                    .or(Some(pkg.fingerprint.as_str()))
+                    .unwrap_or("")
+            });
         components.push(format!(
             r#"    {{
       "type": "library",
@@ -103,10 +120,10 @@ pub fn emit_cyclonedx(lock: &LockFile, root_name: &str, root_version: &str) -> S
         r#"{{
   "bomFormat": "CycloneDX",
   "specVersion": "1.5",
-  "serialNumber": "urn:uuid:jet-{ts}",
+  "serialNumber": "urn:uuid:jet-{lock_digest}",
   "version": 1,
   "metadata": {{
-    "timestamp": "{timestamp}",
+    "timestamp": "1970-01-01T00:00:00Z",
     "tools": [{{ "name": "jet" }}],
     "component": {{
       "type": "library",
@@ -119,17 +136,49 @@ pub fn emit_cyclonedx(lock: &LockFile, root_name: &str, root_version: &str) -> S
   ]
 }}
 "#,
-        ts = ts,
-        timestamp = iso8601(ts),
+        lock_digest = lock_digest,
         root_name = json_escape(root_name),
         root_version = json_escape(root_version),
         components = components.join(",\n"),
     )
 }
 
-fn spdx_timestamp(secs: u64) -> String {
-    // Simple ISO8601: 2026-01-01T00:00:00Z (we don't have chrono — I6)
-    iso8601(secs)
+fn lock_digest(lock: &LockFile) -> String {
+    format!(
+        "sha256-{}",
+        SHA256::sha256_hex(crate::Lock::write(lock).as_bytes())
+    )
+}
+
+fn spdx_checksum(value: &str) -> Option<String> {
+    value
+        .strip_prefix("sha256-")
+        .map(|hex| format!("SHA256: {hex}"))
+}
+
+/// Build the deterministic SPDX referrer payload used by a registry publish.
+/// The subject marker is outside SPDX's semantic fields and lets the registry
+/// verifier bind the document to the exact OCI subject digest.
+pub(super) fn registry_spdx(
+    lock: Option<&LockFile>,
+    root_name: &str,
+    root_version: &str,
+    subject: &str,
+) -> String {
+    let mut out = match lock {
+        Some(lock) => emit_spdx(lock, root_name, root_version),
+        None => format!(
+            "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.org/spdx/{root_name}-{root_version}-{subject}\nDocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\nPackageName: {root_name}\nSPDXID: SPDXRef-root\nPackageVersion: {root_version}\nFilesAnalyzed: false\nPackageChecksum: SHA256: {}\nPackageDownloadLocation: NOASSERTION\n",
+            subject.strip_prefix("sha256-").unwrap_or(subject)
+        ),
+    };
+    out.push_str(&format!("# JetSubject: {subject}\n"));
+    if let Some(lock) = lock {
+        out.push_str(&format!("# JetLockDigest: {}\n", lock_digest(lock)));
+    } else {
+        out.push_str("# JetLockDigest: absent\n");
+    }
+    out
 }
 
 pub(crate) fn iso8601(secs: u64) -> String {

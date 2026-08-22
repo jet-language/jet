@@ -274,28 +274,35 @@ fn check_registry() -> Check {
             )
         };
     }
-    match Command::new("git")
-        .args(["-c", "credential.useHttpPath=true", "ls-remote", &registry.url])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-    {
+    let mut git = Command::new("git");
+    git.args([
+        "-c",
+        "credential.useHttpPath=true",
+        "ls-remote",
+        &registry.url,
+    ])
+    .env("GIT_TERMINAL_PROMPT", "0");
+    for (key, _) in std::env::vars_os() {
+        let key = key.to_string_lossy();
+        if key.starts_with("JET_REGISTRY_") {
+            git.env_remove(&*key);
+        }
+    }
+    match git.output() {
         Ok(output) if output.status.success() => {
             Check::ok("registry", registry.name, format!("{safe_url} (reachable)"))
         }
-        Ok(output) => Check::problem(
+        Ok(_) => Check::problem(
             "registry",
             registry.name,
-            format!(
-                "{safe_url} (unreachable: {})",
-                crate::Publish::redact_registry_url(&String::from_utf8_lossy(&output.stderr)),
-            ),
+            format!("{safe_url} (unreachable; transport details omitted)"),
             "check JET_REGISTRY_URL, credentials, and network access, then retry",
             false,
         ),
-        Err(error) => Check::problem(
+        Err(_) => Check::problem(
             "registry",
             registry.name,
-            format!("{safe_url} (git unavailable: {error})"),
+            format!("{safe_url} (git unavailable; transport details omitted)"),
             "install git or configure a local registry index",
             false,
         ),

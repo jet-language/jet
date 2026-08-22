@@ -94,6 +94,39 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
     assert!(!proof.trusted(), "{proof:?}");
     fs::remove_file(outside).ok();
 }
+
+#[cfg(unix)]
+#[test]
+fn optimizer_rejects_symlinked_object_pool_without_touching_outside_data() {
+    let (roots, _g) = temp_roots();
+    let hangar = roots.hangar_dir();
+    let outside = roots.root.join("optimizer-outside");
+    fs::create_dir_all(&hangar).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("live"), "must survive").unwrap();
+    std::os::unix::fs::symlink(&outside, hangar.join("objects")).unwrap();
+
+    let error = optimize_cas_pool(&roots).unwrap_err();
+    assert!(error.to_string().contains("object pool"), "{error}");
+    assert_eq!(fs::read_to_string(outside.join("live")).unwrap(), "must survive");
+    assert!(!hangar.join("cas").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn clean_plan_rejects_symlinked_build_scratch_without_following_it() {
+    let (roots, _g) = temp_roots();
+    let hangar = roots.hangar_dir();
+    let outside = roots.root.join("scratch-outside");
+    fs::create_dir_all(&hangar).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("live"), "must survive").unwrap();
+    std::os::unix::fs::symlink(&outside, hangar.join("build-scratch")).unwrap();
+
+    let error = clean_plan(&roots).unwrap_err();
+    assert!(error.to_string().contains("build scratch"), "{error}");
+    assert_eq!(fs::read_to_string(outside.join("live")).unwrap(), "must survive");
+}
 #[cfg(target_os = "linux")]
 #[test]
 fn ingest_rejects_semantic_xattr_without_platform_artifact_kind() {

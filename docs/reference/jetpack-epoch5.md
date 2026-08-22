@@ -87,6 +87,9 @@ records; they do not become invented defaults. Core, Nix, local path, Jet
 registry, and verified binary paths expose byte/lock abilities. The foreign
 ecosystem importers expose metadata facts until a dedicated verified transport
 adapter exists; they do not claim network fetch or offline substitution.
+Homebrew retains bottle/source and relocatability facts, GitHub retains
+release/asset identity and digest facts, and binary metadata fails closed
+without an exact digest and target platform.
 The shared carrier preserves direct-root selectors and canonicalizes bare
 version shorthand to `#version=<exact>` for lock output. Native bytes,
 provenance, resolved source selectors, and the carrier digest are retained in

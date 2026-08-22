@@ -7,7 +7,8 @@
 //!   - PubGrub-style conflict detection → E2602.
 //!   - Signed advisory feed and policy check → E2603/E2609/E2610.
 //!   - Artifact integrity verification → E2604.
-//!   - SBOM emission (SPDX 2.3 tag-value format from a lockfile).
+//!   - Deterministic SBOM emission and OCI referrer evidence for registry
+//!     publication (SBOM, signature, provenance, reproducibility).
 //!   - `jet registry vendor` (copy resolved deps into a `vendor/` tree).
 //!   - Private / mirror registry configuration.
 
@@ -26,6 +27,7 @@ pub use Schema::write_schema_snapshots_for_entry;
 mod Diff;
 pub mod Index;
 mod NamePolicy;
+pub mod Policy;
 mod Registry;
 mod Resolve;
 mod SBOM;
@@ -40,6 +42,7 @@ pub use Advisory::*;
 pub use Diff::*;
 pub use Index::IndexEntry;
 pub use NamePolicy::*;
+pub use Policy::*;
 pub use Registry::*;
 pub use Resolve::*;
 pub use SemVer::*;
@@ -518,6 +521,7 @@ mod tests {
     fn spdx_sbom_has_required_fields() {
         let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
         let sbom = emit_spdx(&lock, "myapp", "0.1.0");
+        assert_eq!(sbom, emit_spdx(&lock, "myapp", "0.1.0"));
         assert!(
             sbom.contains("SPDXVersion: SPDX-2.3"),
             "must have version header"
@@ -529,6 +533,59 @@ mod tests {
         assert!(sbom.contains("PackageVersion: 1.0.0"));
         assert!(sbom.contains("SHA256: abcd1234"));
         assert!(sbom.contains("DEPENDS_ON"), "must have relationship");
+    }
+
+    #[test]
+    fn registry_publish_writes_and_rejects_tampered_oci_referrers() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_registry_referrers_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = root.join("registry");
+        let source = root.join("source");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(source.join(".jet")).unwrap();
+        std::fs::write(source.join("package.jet"), "package bytes\n").unwrap();
+        let lock = make_lock(vec![make_lock_pkg(
+            "helpers",
+            "1.0.0",
+            "sha256-abcd1234",
+        )]);
+        std::fs::write(source.join(".jet").join("lock"), crate::Lock::write(&lock)).unwrap();
+
+        let content_hash = crate::SHA256::tree_hash(&source);
+        Registry::publish_artifact(&repo, &source, "ref-kit", "1.0.0", &content_hash).unwrap();
+        let entry = IndexEntry {
+            name: "ref-kit".into(),
+            version: "1.0.0".into(),
+            content_hash: content_hash.clone(),
+            fingerprint: "sha256-fingerprint".into(),
+            yanked: false,
+            tier: RegistryTier::Core,
+            gate_status: GateStatus::core_reviewed(),
+            public_key: String::new(),
+            signature: String::new(),
+        };
+        Index::write_index_entry(&repo, &entry).unwrap();
+        Registry::verify_oci_referrers(&repo, &entry).unwrap();
+
+        let blobs = repo.join("referrers").join(&content_hash).join("blobs");
+        let blob = std::fs::read_dir(&blobs)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mut bytes = std::fs::read(&blob).unwrap();
+        bytes.push(b'\n');
+        std::fs::write(blob, bytes).unwrap();
+        let error = Registry::verify_oci_referrers(&repo, &entry)
+            .expect_err("a tampered OCI referrer must fail closed");
+        assert!(error.to_string().contains("digest"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

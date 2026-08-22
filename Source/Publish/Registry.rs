@@ -6,13 +6,23 @@ use crate::Diagnostics::Diagnostic;
 use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use super::Tuf::verify_registry_package;
 use super::Tier::{RegistryTier, community_gate_error};
 use std::cell::Cell;
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const OCI_SBOM_TYPE: &str = "application/vnd.jet.sbom.v1";
+const OCI_SIGNATURE_TYPE: &str = "application/vnd.jet.signature.v1";
+const OCI_PROVENANCE_TYPE: &str = "application/vnd.jet.provenance.v1";
+const OCI_REPRODUCIBILITY_TYPE: &str = "application/vnd.jet.reproducibility.v1";
+const OCI_REFERRER_INDEX: &str = "index.json";
+const OCI_PENDING_SBOM: &str = ".sbom.pending";
+const MAX_OCI_REFERRER_BYTES: usize = 4 * 1024 * 1024;
 
 /// Registry endpoint configuration. Mirrors proxy the public registry;
 /// private registries host organisation-internal packages.
@@ -131,6 +141,12 @@ pub fn redact_registry_url(value: &str) -> String {
 }
 
 fn registry_url_has_credentials(value: &str) -> bool {
+    // Query and fragment text is never part of a registry identity. Reject it
+    // even for transports without a `://` authority (for example file URLs),
+    // so it cannot reach Git, locks, or provenance as a hidden credential.
+    if value.contains(['?', '#']) {
+        return true;
+    }
     let Some(separator) = value.find("://") else {
         return false;
     };
@@ -140,7 +156,6 @@ fn registry_url_has_credentials(value: &str) -> bool {
         .map(|offset| authority_start + offset)
         .unwrap_or(value.len());
     value[authority_start..authority_end].contains('@')
-        || value[authority_end..].contains(['?', '#'])
 }
 
 fn validate_registry_transport(registry: &RegistryConfig) -> Result<(), Diagnostic> {
@@ -160,10 +175,13 @@ fn git_command() -> Command {
     // helper pipe and never becomes a Jet argument or environment value.
     command.args(["-c", "credential.useHttpPath=true"]);
     command.env("GIT_TERMINAL_PROMPT", "0");
-    command.env_remove("JET_REGISTRY_URL");
+    // Registry configuration is an input to Jet, not to Git. In particular,
+    // do not let a secret-shaped registry variable cross into a credential
+    // helper's process environment; the host helper receives only Git's
+    // path-scoped stdin request.
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy();
-        if key.starts_with("JET_REGISTRY_") && key.ends_with("_URL") {
+        if key.starts_with("JET_REGISTRY_") {
             command.env_remove(&*key);
         }
     }
@@ -739,14 +757,9 @@ fn cleanup_publish_checkout(path: &Path, owned: bool) -> io::Result<()> {
 }
 
 fn clone_output_detail(output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if !stderr.is_empty() {
-        return stderr;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !stdout.is_empty() {
-        return stdout;
-    }
+    // Git and its host credential helper may write arbitrary sensitive text.
+    // Exit status is enough for the typed E1235 diagnostic; raw tool output
+    // belongs outside Jet's user-visible error surface.
     format!("git clone exited with {}", output.status)
 }
 
@@ -843,9 +856,21 @@ fn push_index_inner(
     if paths.is_empty() {
         return Err(e1235(&registry.url, "publication has no explicit paths"));
     }
+    let mut stage_paths = paths.to_vec();
+    if let Some(entry) = expected.filter(|entry| !entry.yanked) {
+        let referrers = existing_oci_referrer_root(repo, &entry.content_hash)
+            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        if !referrers.join(OCI_REFERRER_INDEX).is_file() {
+            return Err(e1235(
+                &registry.url,
+                "publication has no complete OCI referrer set; restore or rebuild the package evidence",
+            ));
+        }
+        stage_paths.push(referrers);
+    }
     let mut add = git_command();
     add.args(["add", "--"]);
-    for path in paths {
+    for path in &stage_paths {
         let relative = path
             .strip_prefix(repo)
             .map_err(|_| e1235(&registry.url, "publication path escapes its checkout"))?;
@@ -853,20 +878,14 @@ fn push_index_inner(
     }
     let add = add.current_dir(repo).output().map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !add.status.success() {
-        return Err(e1235(
-            &registry.url,
-            String::from_utf8_lossy(&add.stderr).trim(),
-        ));
+        return Err(e1235(&registry.url, "git add failed"));
     }
     let staged = run(&["diff", "--cached", "--name-only"])
         .map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !staged.status.success() {
-        return Err(e1235(
-            &registry.url,
-            String::from_utf8_lossy(&staged.stderr).trim(),
-        ));
+        return Err(e1235(&registry.url, "git staged-path inspection failed"));
     }
-    let allowed = paths
+    let allowed = stage_paths
         .iter()
         .filter_map(|path| path.strip_prefix(repo).ok())
         .map(|path| path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
@@ -889,10 +908,7 @@ fn push_index_inner(
     if !commit.status.success() {
         let so = String::from_utf8_lossy(&commit.stdout);
         if !so.contains("nothing to commit") {
-            return Err(e1235(
-                &registry.url,
-                String::from_utf8_lossy(&commit.stderr).trim(),
-            ));
+            return Err(e1235(&registry.url, "git commit failed"));
         }
     }
     let branch = run(&["rev-parse", "--abbrev-ref", "HEAD"])
@@ -911,10 +927,7 @@ fn push_index_inner(
         let fetch = run(&["fetch", "origin"])
             .map_err(|e| e1235(&registry.url, &e.to_string()))?;
         if !fetch.status.success() {
-            return Err(e1235(
-                &registry.url,
-                String::from_utf8_lossy(&fetch.stderr).trim(),
-            ));
+            return Err(e1235(&registry.url, "git fetch failed after a concurrent push"));
         }
         let remote = format!("origin/{branch}");
         if let Some(entry) = expected {
@@ -1171,6 +1184,8 @@ pub fn publish_artifact(
                 "registry artifact already exists with conflicting source bytes",
             ));
         }
+        stage_oci_sbom(repo, source, name, version, &actual)?;
+        finalize_oci_referrers_for_package(repo, name, version)?;
         return Ok(destination);
     }
     if destination.exists() {
@@ -1212,7 +1227,11 @@ pub fn publish_artifact(
         std::fs::rename(&staging, &destination)
     })();
     match result {
-        Ok(()) => Ok(destination),
+        Ok(()) => {
+            stage_oci_sbom(repo, source, name, version, &actual)?;
+            finalize_oci_referrers_for_package(repo, name, version)?;
+            Ok(destination)
+        }
         Err(error) => match remove_staging_path(&staging) {
             Ok(()) => Err(error),
             Err(cleanup_error) => Err(io::Error::new(
@@ -1224,6 +1243,541 @@ pub fn publish_artifact(
             )),
         },
     }
+}
+
+fn load_publish_lock(source: &Path) -> io::Result<Option<crate::Lock::LockFile>> {
+    let managed = source.join(".jet");
+    match std::fs::symlink_metadata(&managed) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "package .jet metadata directory must be a real directory",
+            ))
+        }
+        Ok(_) => {
+            let path = managed.join("lock");
+            match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "package lock must be a regular file",
+                    ))
+                }
+                Ok(_) => {
+                    let raw = std::fs::read_to_string(&path)?;
+                    crate::Lock::parse(&raw).map(Some).map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("package lock is malformed: {error}"),
+                        )
+                    })
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn oci_referrer_root(repo: &Path, subject: &str) -> io::Result<PathBuf> {
+    validate_oci_digest(subject)?;
+    let root = repo.join("referrers");
+    match std::fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry OCI referrer root is not a real directory",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(&root)?;
+        }
+        Err(error) => return Err(error),
+    }
+    let root_metadata = std::fs::symlink_metadata(&root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry OCI referrer root is not a real directory",
+        ));
+    }
+    let subject_root = root.join(subject);
+    match std::fs::symlink_metadata(&subject_root) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry OCI subject referrers are not a real directory",
+            ))
+        }
+        Ok(_) => Ok(subject_root),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::fs::create_dir(&subject_root)?;
+            Ok(subject_root)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn existing_oci_referrer_root(repo: &Path, subject: &str) -> io::Result<PathBuf> {
+    validate_oci_digest(subject)?;
+    let root = repo.join("referrers");
+    let root_metadata = std::fs::symlink_metadata(&root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry OCI referrer root is not a real directory",
+        ));
+    }
+    let subject_root = root.join(subject);
+    let subject_metadata = std::fs::symlink_metadata(&subject_root)?;
+    if subject_metadata.file_type().is_symlink() || !subject_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry OCI subject referrers are not a real directory",
+        ));
+    }
+    Ok(subject_root)
+}
+
+fn validate_oci_digest(value: &str) -> io::Result<()> {
+    let Some(hex) = value.strip_prefix("sha256-") else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI referrer subject is not a sha256- digest",
+        ));
+    };
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI referrer subject is not a complete sha256- digest",
+        ));
+    }
+    Ok(())
+}
+
+fn stage_oci_sbom(
+    repo: &Path,
+    source: &Path,
+    name: &str,
+    version: &str,
+    subject: &str,
+) -> io::Result<()> {
+    let root = oci_referrer_root(repo, subject)?;
+    let lock = load_publish_lock(source)?;
+    let sbom = super::SBOM::registry_spdx(lock.as_ref(), name, version, subject);
+    write_oci_file(&root.join(OCI_PENDING_SBOM), sbom.as_bytes(), "pending OCI SBOM")
+}
+
+fn finalize_oci_referrers_for_package(repo: &Path, name: &str, version: &str) -> io::Result<()> {
+    let Some(entry) = Index::find_entry(repo, name, version)? else {
+        return Ok(());
+    };
+    finalize_oci_referrers(repo, &entry)
+}
+
+/// Finish the referrer set after both the immutable artifact and index line
+/// exist. Index::write_index_entry also calls this for the normal publish
+/// order; publish_artifact calls it for the race-rebuild order.
+pub(super) fn finalize_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
+    let artifact = artifact_path(repo, &entry.name, &entry.version)?;
+    let artifact_metadata = match std::fs::symlink_metadata(&artifact) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if artifact_metadata.file_type().is_symlink() || !artifact_metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry OCI referrers require a real source artifact",
+        ));
+    }
+    validate_oci_digest(&entry.content_hash)?;
+    let root = oci_referrer_root(repo, &entry.content_hash)?;
+    let pending = root.join(OCI_PENDING_SBOM);
+    let sbom = match read_oci_file(&pending, MAX_OCI_REFERRER_BYTES) {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, "registry OCI SBOM is not UTF-8")
+        })?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            super::SBOM::registry_spdx(None, &entry.name, &entry.version, &entry.content_hash)
+        }
+        Err(error) => return Err(error),
+    };
+    if !sbom.contains(&format!("# JetSubject: {}\n", entry.content_hash))
+        || !sbom.contains(&format!("PackageName: {}\n", entry.name))
+        || !sbom.contains(&format!("PackageVersion: {}\n", entry.version))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry OCI SBOM is not bound to its package subject",
+        ));
+    }
+    let signature = oci_signature_payload(entry)?;
+    let provenance = oci_provenance_payload(entry)?;
+    let reproducibility = oci_reproducibility_payload(entry)?;
+    let payloads = [
+        (OCI_SBOM_TYPE, sbom.into_bytes()),
+        (OCI_SIGNATURE_TYPE, signature.into_bytes()),
+        (OCI_PROVENANCE_TYPE, provenance.into_bytes()),
+        (OCI_REPRODUCIBILITY_TYPE, reproducibility.into_bytes()),
+    ];
+    let mut descriptors = Vec::with_capacity(payloads.len());
+    for (artifact_type, bytes) in &payloads {
+        let digest = format!("sha256-{}", SHA256::sha256_hex(bytes));
+        write_oci_file(
+            &root.join("blobs").join(&digest),
+            bytes,
+            "OCI referrer blob",
+        )?;
+        descriptors.push((*artifact_type, digest.clone(), bytes.len()));
+    }
+    let index = render_oci_index(&entry.content_hash, &descriptors);
+    write_oci_file(
+        &root.join(OCI_REFERRER_INDEX),
+        index.as_bytes(),
+        "OCI referrer index",
+    )?;
+    if std::fs::symlink_metadata(&pending).is_ok() {
+        std::fs::remove_file(&pending)?;
+    }
+    Ok(())
+}
+
+fn oci_signature_payload(entry: &IndexEntry) -> io::Result<String> {
+    validate_evidence_value(&entry.name, "package name")?;
+    validate_evidence_value(&entry.version, "package version")?;
+    validate_evidence_value(&entry.public_key, "publisher key")?;
+    validate_evidence_value(&entry.signature, "publisher signature")?;
+    Ok(format!(
+        "jet-oci-signature-v1\nsubject={}\nname={}\nversion={}\npublic-key={}\nsignature={}\nstatus={}\n",
+        entry.content_hash,
+        entry.name,
+        entry.version,
+        entry.public_key,
+        entry.signature,
+        if entry.signature.is_empty() { "unsigned" } else { "signed" },
+    ))
+}
+
+fn oci_provenance_payload(entry: &IndexEntry) -> io::Result<String> {
+    let tier = entry.tier.label();
+    let gate_status = entry.gate_status.summary();
+    validate_evidence_value(tier, "registry tier")?;
+    validate_evidence_value(&gate_status, "registry gate status")?;
+    Ok(format!(
+        "jet-oci-provenance-v1\nsubject={}\npackage={}#{}\ncontent-hash={}\nfingerprint={}\ntier={}\ngate-status={}\n",
+        entry.content_hash,
+        entry.name,
+        entry.version,
+        entry.content_hash,
+        entry.fingerprint,
+        tier,
+        gate_status,
+    ))
+}
+
+fn oci_reproducibility_payload(entry: &IndexEntry) -> io::Result<String> {
+    validate_evidence_value(&entry.fingerprint, "package fingerprint")?;
+    Ok(format!(
+        "jet-oci-reproducibility-v1\nsubject={}\nsource-hash={}\nfingerprint={}\nstatus=verified\n",
+        entry.content_hash, entry.content_hash, entry.fingerprint,
+    ))
+}
+
+fn validate_evidence_value(value: &str, label: &str) -> io::Result<()> {
+    if value.bytes().any(|byte| byte == b'\n' || byte == b'\r') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("registry {label} contains a line break"),
+        ));
+    }
+    Ok(())
+}
+
+fn write_oci_file(path: &Path, bytes: &[u8], label: &str) -> io::Result<()> {
+    if bytes.len() > MAX_OCI_REFERRER_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} exceeds the 4 MiB limit"),
+        ));
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{label} path is not a regular file"),
+            ));
+        }
+        let existing = std::fs::read(path)?;
+        if existing == bytes {
+            return Ok(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("immutable {label} changed"),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, format!("{label} has no parent"))
+    })?;
+    std::fs::create_dir_all(parent)?;
+    ensure_real_directory(parent, "OCI referrer parent")?;
+    let partial = parent.join(format!(".partial-{}-{}", std::process::id(), unique_suffix()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&partial, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            write_oci_file(path, bytes, label)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_oci_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI referrer payload is not a regular file",
+        ));
+    }
+    if metadata.len() > limit as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI referrer payload exceeds its size limit",
+        ));
+    }
+    std::fs::read(path)
+}
+
+fn render_oci_index(
+    subject: &str,
+    descriptors: &[(&str, String, usize)],
+) -> String {
+    let manifests = descriptors
+        .iter()
+        .map(|(artifact_type, digest, size)| {
+            format!(
+                "{{\"artifactType\":\"{}\",\"digest\":\"{}\",\"mediaType\":\"{}\",\"size\":{}}}",
+                json_escape(*artifact_type),
+                json_escape(digest),
+                json_escape(*artifact_type),
+                size,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schemaVersion\":2,\"subject\":{{\"digest\":\"{}\"}},\"manifests\":[{}]}}\n",
+        json_escape(subject), manifests
+    )
+}
+
+/// Verify the complete immutable OCI referrer set before a registry result is
+/// allowed into resolution. Every descriptor is subject-bound, content
+/// addressed, and cross-checked against the index entry's signed facts.
+pub(super) fn verify_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
+    validate_oci_digest(&entry.content_hash)?;
+    let root = existing_oci_referrer_root(repo, &entry.content_hash).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "OCI referrer set is unavailable: {error}; restore it from the registry or republish the immutable package"
+            ),
+        )
+    })?;
+    let index = read_oci_file(&root.join(OCI_REFERRER_INDEX), MAX_OCI_REFERRER_BYTES)?;
+    let descriptors = parse_oci_index(&index, &entry.content_hash)?;
+    let blobs = root.join("blobs");
+    ensure_real_directory(&blobs, "OCI referrer blob store")?;
+    let mut referenced = BTreeSet::new();
+    for (artifact_type, digest, size) in &descriptors {
+        if !referenced.insert(digest.clone()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "OCI referrer index repeats a blob digest",
+            ));
+        }
+        let bytes = read_oci_file(&blobs.join(digest), MAX_OCI_REFERRER_BYTES)?;
+        if bytes.len() as u64 != *size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("OCI referrer {artifact_type} has the wrong blob size"),
+            ));
+        }
+        let actual = format!("sha256-{}", SHA256::sha256_hex(&bytes));
+        if actual != *digest {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("OCI referrer {artifact_type} failed its blob digest"),
+            ));
+        }
+        let expected = match artifact_type.as_str() {
+            OCI_SBOM_TYPE => None,
+            OCI_SIGNATURE_TYPE => Some(oci_signature_payload(entry)?.into_bytes()),
+            OCI_PROVENANCE_TYPE => Some(oci_provenance_payload(entry)?.into_bytes()),
+            OCI_REPRODUCIBILITY_TYPE => Some(oci_reproducibility_payload(entry)?.into_bytes()),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "OCI referrer index contains an unknown artifact type",
+                ));
+            }
+        };
+        if let Some(expected) = expected {
+            if bytes != expected {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("OCI referrer {artifact_type} is not bound to the index entry"),
+                ));
+            }
+        } else {
+            let sbom = String::from_utf8(bytes).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "OCI SBOM referrer is not UTF-8")
+            })?;
+            if !sbom.contains(&format!("# JetSubject: {}\n", entry.content_hash))
+                || !sbom.contains(&format!("PackageName: {}\n", entry.name))
+                || !sbom.contains(&format!("PackageVersion: {}\n", entry.version))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "OCI SBOM referrer is not bound to the index entry",
+                ));
+            }
+        }
+    }
+    let expected_blobs = referenced;
+    for child in std::fs::read_dir(&blobs)? {
+        let child = child?;
+        let name = child.file_name().to_string_lossy().into_owned();
+        let metadata = std::fs::symlink_metadata(child.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() || !expected_blobs.contains(&name) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "OCI referrer blob store contains an unreferenced or unsafe blob",
+            ));
+        }
+    }
+    for child in std::fs::read_dir(&root)? {
+        let child = child?;
+        let name = child.file_name().to_string_lossy().into_owned();
+        if name != OCI_REFERRER_INDEX && name != "blobs" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "OCI subject referrer directory contains unexpected metadata",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_oci_index(
+    bytes: &[u8],
+    subject: &str,
+) -> io::Result<Vec<(String, String, u64)>> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "OCI referrer index is not UTF-8"))?;
+    let value = parse_json(text).map_err(|_| invalid_oci("OCI referrer index is malformed"))?;
+    let object = value
+        .as_object()
+        .map_err(|_| invalid_oci("OCI referrer index is not an object"))?;
+    require_oci_keys(object, &["schemaVersion", "subject", "manifests"], "index")?;
+    if !matches!(object.get("schemaVersion"), Some(JSONValue::Number(2))) {
+        return Err(invalid_oci("OCI referrer index has an unsupported schema version"));
+    }
+    let subject_object = object
+        .get("subject")
+        .ok_or_else(|| invalid_oci("OCI referrer index has no subject"))?
+        .as_object()
+        .map_err(|_| invalid_oci("OCI referrer subject is not an object"))?;
+    require_oci_keys(subject_object, &["digest"], "subject")?;
+    let recorded_subject = subject_object
+        .get("digest")
+        .ok_or_else(|| invalid_oci("OCI referrer subject has no digest"))?
+        .as_str()
+        .map_err(|_| invalid_oci("OCI referrer subject digest is not a string"))?;
+    if recorded_subject != subject {
+        return Err(invalid_oci("OCI referrer subject does not match the index entry"));
+    }
+    let manifests = object
+        .get("manifests")
+        .ok_or_else(|| invalid_oci("OCI referrer index has no manifests"))?
+        .as_array()
+        .map_err(|_| invalid_oci("OCI referrer manifests is not an array"))?;
+    if manifests.len() != 4 {
+        return Err(invalid_oci("OCI referrer index must contain SBOM, signature, provenance, and reproducibility"));
+    }
+    let mut seen = BTreeSet::new();
+    let mut descriptors = Vec::with_capacity(manifests.len());
+    for manifest in manifests {
+        let manifest = manifest
+            .as_object()
+            .map_err(|_| invalid_oci("OCI referrer descriptor is not an object"))?;
+        require_oci_keys(manifest, &["artifactType", "digest", "mediaType", "size"], "descriptor")?;
+        let artifact_type = manifest
+            .get("artifactType")
+            .ok_or_else(|| invalid_oci("OCI referrer descriptor has no artifact type"))?
+            .as_str()
+            .map_err(|_| invalid_oci("OCI referrer artifact type is not a string"))?
+            .to_string();
+        let media_type = manifest
+            .get("mediaType")
+            .ok_or_else(|| invalid_oci("OCI referrer descriptor has no media type"))?
+            .as_str()
+            .map_err(|_| invalid_oci("OCI referrer media type is not a string"))?;
+        if media_type != artifact_type
+            || !matches!(
+                artifact_type.as_str(),
+                OCI_SBOM_TYPE | OCI_SIGNATURE_TYPE | OCI_PROVENANCE_TYPE | OCI_REPRODUCIBILITY_TYPE
+            )
+            || !seen.insert(artifact_type.clone())
+        {
+            return Err(invalid_oci("OCI referrer descriptor has an unknown or repeated artifact type"));
+        }
+        let digest = manifest
+            .get("digest")
+            .ok_or_else(|| invalid_oci("OCI referrer descriptor has no digest"))?
+            .as_str()
+            .map_err(|_| invalid_oci("OCI referrer digest is not a string"))?
+            .to_string();
+        validate_oci_digest(&digest)?;
+        let size = match manifest.get("size") {
+            Some(JSONValue::Number(value)) if *value >= 0 => *value as u64,
+            _ => return Err(invalid_oci("OCI referrer descriptor size is not a non-negative integer")),
+        };
+        descriptors.push((artifact_type, digest, size));
+    }
+    Ok(descriptors)
+}
+
+fn require_oci_keys(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    keys: &[&str],
+    label: &str,
+) -> io::Result<()> {
+    if object.len() != keys.len() || object.keys().any(|key| !keys.contains(&key.as_str())) {
+        return Err(invalid_oci(&format!("OCI {label} has unknown or missing fields")));
+    }
+    Ok(())
+}
+
+fn invalid_oci(detail: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, detail)
 }
 
 fn unique_suffix() -> String {
@@ -1260,6 +1814,7 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
             format!("registry source artifact for {} {} failed its content hash", entry.name, entry.version),
         ));
     }
+    verify_oci_referrers(repo, entry)?;
     Ok(path)
 }
 
@@ -1494,16 +2049,13 @@ pub fn e1234(name: &str, version: &str) -> Diagnostic {
 }
 
 /// E1235 — the registry index could not be reached (clone/pull/push failed).
-pub fn e1235(url: &str, detail: &str) -> Diagnostic {
+pub fn e1235(url: &str, _detail: &str) -> Diagnostic {
     let safe_url = redact_registry_url(url);
-    let safe_detail = detail.replace(url, &safe_url);
     Diagnostic::error(
         "E1235",
         format!("couldn't reach the registry index at `{safe_url}`"),
-        format!(
-            "the git operation against the registry failed (network, auth, or a stale local \
-             clone): {safe_detail}"
-        ),
+        "the git operation against the registry failed (network, auth, or a stale local clone)"
+            .to_string(),
         format!(
             "check network access and credentials for `{safe_url}`, or set `JET_REGISTRY_URL` to a \
              reachable mirror."

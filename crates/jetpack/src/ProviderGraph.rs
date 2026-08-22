@@ -5,7 +5,7 @@
 
 pub use super::Replacement::ReplacementCandidate as ReplacementOverlay;
 use super::JSON::{self, JSONValue};
-use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts, ProviderSelector};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProviderFamily {
@@ -165,16 +165,23 @@ impl ProviderFactReport {
         shared.set_resolved_source(&self.facts.source_identity);
         shared.set_native_document(&self.native_format, &self.native_document);
         add_metadata_facts(&mut shared, &self.facts);
-        let selector_identity = if !shared.selector.version.is_empty() {
-            Some(shared.selector.version.clone())
-        } else if !shared.selector.revision.is_empty() {
-            Some(shared.selector.revision.clone())
-        } else if !shared.selector.digest.is_empty() {
-            Some(shared.selector.digest.clone())
+        let (selector_key, expected_identity) = metadata_identity_selector(&self.facts);
+        if !shared.selector.is_exact() && !expected_identity.is_empty() {
+            shared.set_resolved_selector(
+                &format!("#{selector_key}={expected_identity}"),
+                "provider.metadata",
+            );
+        }
+        let selector = shared.effective_selector();
+        let selector_identity = if !selector.version.is_empty() {
+            Some(selector.version)
+        } else if !selector.revision.is_empty() {
+            Some(selector.revision)
+        } else if !selector.digest.is_empty() {
+            Some(selector.digest)
         } else {
             None
         };
-        let (_, expected_identity) = metadata_identity_selector(&self.facts);
         if selector_identity.as_deref() != Some(expected_identity.as_str()) {
             shared.add_conflict(
                 "provider.selector.identity",
@@ -203,13 +210,17 @@ impl ProviderFactReport {
 
     pub fn shared_facts(&self) -> ProviderFacts {
         let (selector_key, selector_value) = metadata_identity_selector(&self.facts);
-        let reference = format!(
-            "{}#{}={}@{}",
-            self.facts.name,
-            selector_key,
-            selector_value,
-            self.facts.family.label()
-        );
+        let reference = if selector_value.is_empty() {
+            format!("{}@{}", self.facts.name, self.facts.family.label())
+        } else {
+            format!(
+                "{}#{}={}@{}",
+                self.facts.name,
+                selector_key,
+                selector_value,
+                self.facts.family.label()
+            )
+        };
         self.shared_facts_for(&reference)
     }
 
@@ -229,19 +240,27 @@ impl ProviderFactReport {
         requested.validate()?;
         let shared = self.shared_facts();
         shared.validate()?;
-        if requested.qualified_reference() != shared.qualified_reference() {
+        let preserve_source_authority = requested.facts.contains_key("provider.authority");
+        if !preserve_source_authority
+            && requested.qualified_reference() != shared.qualified_reference()
+        {
             return Err(format!(
                 "provider lock reference `{reference}` disagrees with metadata identity `{}`",
                 shared.qualified_reference()
             ));
         }
-        let qualified_reference = shared.qualified_reference();
+        let locked = if preserve_source_authority {
+            &requested
+        } else {
+            &shared
+        };
+        let qualified_reference = locked.qualified_reference();
         let mut record = crate::SemanticLock::SemanticRecord::new(
             crate::SemanticLock::LockIdentity {
                 kind: crate::SemanticLock::LockRecordKind::Package,
                 key: format!("provider:{qualified_reference}"),
                 exact: qualified_reference.clone(),
-                hash: shared.digest(),
+                hash: locked.digest(),
                 platform: platform.to_string(),
             },
             crate::SemanticLock::LockRationale {
@@ -255,10 +274,10 @@ impl ProviderFactReport {
         );
         record
             .future_fields
-            .insert("provider-facts".to_string(), shared.to_json());
+            .insert("provider-facts".to_string(), locked.to_json());
         record
             .future_fields
-            .insert("provider-facts-digest".to_string(), shared.digest());
+            .insert("provider-facts-digest".to_string(), locked.digest());
         Ok(record)
     }
 }
@@ -308,7 +327,7 @@ fn add_metadata_facts(shared: &mut ProviderFacts, facts: &MetadataFacts) {
             ProviderFactValue::List(
                 values
                     .iter()
-                    .map(|value| ProviderFactValue::Text(value.clone()))
+                    .map(|value| typed_projection_value(value))
                     .collect(),
             ),
             "provider.native_projection",
@@ -367,6 +386,13 @@ fn add_metadata_facts(shared: &mut ProviderFacts, facts: &MetadataFacts) {
     }
 }
 
+fn typed_projection_value(value: &str) -> ProviderFactValue {
+    JSON::parse(value)
+        .ok()
+        .and_then(|value| ProviderFactValue::from_json_value(&value).ok())
+        .unwrap_or_else(|| ProviderFactValue::Text(value.to_string()))
+}
+
 fn add_typed_json_fact(facts: &mut MetadataFacts, key: impl Into<String>, value: &JSONValue) {
     facts.typed.insert(key.into(), vec![json_value_json(value)]);
 }
@@ -411,12 +437,25 @@ fn json_bool(value: Option<&JSONValue>) -> Option<bool> {
 }
 
 fn metadata_identity_selector(facts: &MetadataFacts) -> (&'static str, String) {
+    if facts.family == ProviderFamily::Binary {
+        return ("digest", facts.integrity_hash.clone());
+    }
     if facts.family == ProviderFamily::SwiftPM {
         if let Some(revision) = facts
             .typed
             .get("provider.revision")
             .and_then(|values| values.first())
             .filter(|revision| !revision.is_empty())
+        {
+            return ("revision", revision.clone());
+        }
+    }
+    if facts.family == ProviderFamily::Github && facts.version.is_empty() {
+        if let Some(revision) = facts
+            .typed
+            .get("provider.github.revision")
+            .and_then(|values| values.first())
+            .filter(|revision| ProviderSelector::parse(&format!("#revision={revision}")).is_exact())
         {
             return ("revision", revision.clone());
         }
@@ -428,6 +467,12 @@ fn metadata_identity_selector(facts: &MetadataFacts) -> (&'static str, String) {
         return ("digest", facts.integrity_hash.clone());
     }
     ("version", String::new())
+}
+
+fn exact_provider_version(value: &str) -> bool {
+    !value.contains("$(")
+        && !value.contains("${")
+        && ProviderSelector::parse(&format!("#version={value}")).is_exact()
 }
 
 /// Normalize one provider-native metadata document into the shared fact model.
@@ -450,7 +495,8 @@ pub fn normalize_provider_document(family: ProviderFamily, document: &str) -> Pr
         ProviderFamily::JetRegistry => jet_registry_report(document),
         ProviderFamily::Github => github_report(document),
         ProviderFamily::Binary => binary_report(document),
-        ProviderFamily::Core | ProviderFamily::Nix | ProviderFamily::Path => {
+        ProviderFamily::Nix => nix_report(document),
+        ProviderFamily::Core | ProviderFamily::Path => {
             let mut facts = MetadataFacts::empty(family, "");
             facts.source_identity = format!("{}:document", facts.family.label());
             ProviderFactReport {
@@ -875,16 +921,23 @@ fn cargo_report(document: &str) -> ProviderFactReport {
     }
     let mut losses = Vec::new();
     let mut native_values = std::collections::BTreeMap::new();
-    for entry in &assignments {
+    for (assignment_index, entry) in assignments.iter().enumerate() {
         let native_namespace = if entry.array_table {
             "lock"
         } else {
             "manifest"
         };
-        let native_key = format!(
-            "provider.cargo.native.{native_namespace}.{}.{}",
-            entry.section, entry.key
-        );
+        let native_key = if entry.array_table {
+            format!(
+                "provider.cargo.native.{native_namespace}.{}.{}.{}",
+                entry.section, assignment_index, entry.key
+            )
+        } else {
+            format!(
+                "provider.cargo.native.{native_namespace}.{}.{}",
+                entry.section, entry.key
+            )
+        };
         if let Some(previous) = native_values.insert(native_key.clone(), entry.value.clone()) {
             if previous != entry.value {
                 conflicts.push(format!(
@@ -978,6 +1031,20 @@ fn cargo_report(document: &str) -> ProviderFactReport {
             losses.push("Cargo.lock package has no name".to_string());
             continue;
         };
+        let record_version = record
+            .get("version")
+            .map(|value| toml_value_text(value))
+            .unwrap_or_default();
+        if name == facts.name
+            && !facts.version.is_empty()
+            && !record_version.is_empty()
+            && record_version != facts.version
+        {
+            conflicts.push(format!(
+                "Cargo.lock package `{name}` version `{record_version}` conflicts with manifest version `{}`",
+                facts.version
+            ));
+        }
         for key in ["version", "source", "checksum", "dependencies"] {
             if let Some(value) = record.get(key) {
                 let projection_key = format!("provider.cargo.lock.{name}.{key}");
@@ -1117,92 +1184,827 @@ fn cargo_lock_records(
 }
 
 fn pypi_report(document: &str) -> ProviderFactReport {
-    let name = metadata_line(document, "name").or_else(|| toml_string(document, "name"));
-    let version = metadata_line(document, "version").or_else(|| toml_string(document, "version"));
-    let mut facts = MetadataFacts::empty(ProviderFamily::PyPI, name.unwrap_or_default());
-    facts.version = version.unwrap_or_default();
-    facts.dependencies = metadata_list(document, "requires-dist");
+    if let Ok(JSONValue::Object(object)) = JSON::parse(document) {
+        return pypi_json_report(&object);
+    }
+
+    let fields = metadata_fields(document);
+    let names = metadata_values(&fields, "name");
+    let versions = metadata_values(&fields, "version");
+    let mut facts = MetadataFacts::empty(
+        ProviderFamily::PyPI,
+        names
+            .first()
+            .cloned()
+            .or_else(|| toml_string(document, "name"))
+            .unwrap_or_default(),
+    );
+    facts.version = versions
+        .first()
+        .cloned()
+        .or_else(|| toml_string(document, "version"))
+        .unwrap_or_default();
+    facts.dependencies = metadata_values(&fields, "requires-dist");
+    facts.license = metadata_values(&fields, "license")
+        .first()
+        .cloned()
+        .unwrap_or_default();
+
+    for (index, (key, value)) in fields.iter().enumerate() {
+        let normalized = key.to_ascii_lowercase().replace('-', "_");
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.pypi.native.{normalized}.{index}"),
+            value,
+        );
+        match normalized.as_str() {
+            "requires_python" => {
+                add_typed_text_fact(&mut facts, "provider.pypi.variant.requires_python", value)
+            }
+            "project_url" | "home_page" | "download_url" | "author" | "author_email"
+            | "maintainer" | "maintainer_email" => add_typed_text_fact(
+                &mut facts,
+                format!("provider.pypi.source.{normalized}.{index}"),
+                value,
+            ),
+            "classifier" => {
+                if value.starts_with("Operating System ::") || value.starts_with("Platform ::") {
+                    facts.platforms.push(value.clone());
+                }
+                if facts.license.is_empty() && value.starts_with("License ::") {
+                    facts.license = value.clone();
+                }
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.pypi.variant.classifier.{index}"),
+                    value,
+                );
+            }
+            "provides_extra" => add_typed_text_fact(
+                &mut facts,
+                format!("provider.pypi.variant.extra.{index}"),
+                value,
+            ),
+            "dynamic" => {
+                add_typed_text_fact(&mut facts, format!("provider.pypi.dynamic.{index}"), value)
+            }
+            "yanked" | "yanked_reason" | "signature" | "gpg_signature" => {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.pypi.advisory.{normalized}.{index}"),
+                    value,
+                );
+            }
+            _ => {}
+        }
+    }
+    facts.platforms.sort();
+    facts.platforms.dedup();
     facts.source_identity = format!("pypi:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
-    if document.contains("dynamic =") || document.contains("dynamic:") {
+    for (field, values) in [("Name", names), ("Version", versions)] {
+        let distinct = distinct_values(&values);
+        if distinct.len() > 1 {
+            report.conflicts.push(format!(
+                "PyPI Core Metadata declares conflicting {field} values: {}",
+                distinct.join(", ")
+            ));
+        }
+    }
+    if !metadata_values(&fields, "dynamic").is_empty()
+        || document.contains("dynamic =")
+        || document.contains("dynamic:")
+    {
         report
             .losses
             .push("dynamic Python metadata must be resolved to an exact lock".to_string());
     }
+    if document.lines().any(|line| {
+        !line.trim().is_empty()
+            && !line
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_whitespace())
+            && !line.contains(':')
+            && !line.contains('=')
+    }) {
+        report
+            .losses
+            .push("PyPI metadata contains an unrecognized non-field line".to_string());
+    }
+    report
+}
+
+fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
+    let info = object
+        .get("info")
+        .and_then(|value| value.as_object().ok())
+        .unwrap_or(object);
+    let mut facts = MetadataFacts::empty(
+        ProviderFamily::PyPI,
+        json_string(info, "name")
+            .or_else(|| json_string(object, "name"))
+            .unwrap_or_default(),
+    );
+    facts.version = json_string(info, "version")
+        .or_else(|| json_string(object, "version"))
+        .unwrap_or_default();
+    facts.license = json_string(info, "license").unwrap_or_default();
+    add_json_projection(&mut facts, "provider.pypi.native", object);
+    if info != object {
+        add_json_projection(&mut facts, "provider.pypi.info", info);
+    }
+
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    if object
+        .get("info")
+        .is_some_and(|value| value.as_object().is_err())
+    {
+        losses.push("PyPI `info` must be an object".to_string());
+    }
+    for (key, value) in [
+        ("summary", "summary"),
+        ("home_page", "home_page"),
+        ("download_url", "download_url"),
+        ("author", "author"),
+        ("author_email", "author_email"),
+        ("maintainer", "maintainer"),
+        ("maintainer_email", "maintainer_email"),
+        ("requires_python", "requires_python"),
+        ("description_content_type", "description_content_type"),
+    ] {
+        if let Some(value) = json_string(info, value) {
+            let namespace = if matches!(
+                key,
+                "home_page"
+                    | "download_url"
+                    | "author"
+                    | "author_email"
+                    | "maintainer"
+                    | "maintainer_email"
+            ) {
+                "provider.pypi.source"
+            } else if key == "requires_python" {
+                "provider.pypi.variant"
+            } else {
+                "provider.pypi.metadata"
+            };
+            add_typed_text_fact(&mut facts, format!("{namespace}.{key}"), &value);
+        }
+    }
+    for (field, kind) in [
+        ("requires_dist", "runtime"),
+        ("provides_extra", "extra"),
+        ("classifiers", "classifier"),
+        ("project_urls", "project_url"),
+    ] {
+        let Some(value) = info.get(field) else {
+            continue;
+        };
+        match value {
+            JSONValue::Array(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    if let JSONValue::String(value) = value {
+                        if field == "requires_dist" {
+                            facts.dependencies.push(value.clone());
+                            add_typed_text_fact(
+                                &mut facts,
+                                format!("provider.pypi.dependency.{kind}.{index}"),
+                                value,
+                            );
+                        } else if field == "classifiers" {
+                            add_typed_text_fact(
+                                &mut facts,
+                                format!("provider.pypi.variant.{kind}.{index}"),
+                                value,
+                            );
+                            if value.starts_with("Operating System ::")
+                                || value.starts_with("Platform ::")
+                            {
+                                facts.platforms.push(value.clone());
+                            }
+                            if facts.license.is_empty() && value.starts_with("License ::") {
+                                facts.license = value.clone();
+                            }
+                        } else {
+                            add_typed_text_fact(
+                                &mut facts,
+                                format!("provider.pypi.variant.{kind}.{index}"),
+                                value,
+                            );
+                        }
+                    } else {
+                        losses.push(format!("PyPI `{field}[{index}]` must be a string"));
+                    }
+                }
+            }
+            JSONValue::Object(values) if field == "project_urls" => {
+                for (name, value) in values {
+                    if let JSONValue::String(value) = value {
+                        add_typed_text_fact(
+                            &mut facts,
+                            format!("provider.pypi.source.project_url.{name}"),
+                            value,
+                        );
+                    } else {
+                        losses.push(format!("PyPI project URL `{name}` must be a string"));
+                    }
+                }
+            }
+            _ => losses.push(format!("PyPI `{field}` has an unsupported shape")),
+        }
+    }
+    if let Some(JSONValue::Array(values)) = info.get("dynamic") {
+        for (index, value) in values.iter().enumerate() {
+            add_typed_json_fact(&mut facts, format!("provider.pypi.dynamic.{index}"), value);
+        }
+        if !values.is_empty() {
+            losses.push("dynamic Python metadata must be resolved to an exact lock".to_string());
+        }
+    } else if info.contains_key("dynamic") {
+        losses.push("PyPI `dynamic` must be an array of fields".to_string());
+    }
+    for (field, target) in [
+        ("obsoletes_dist", "provider.pypi.advisory.obsoletes"),
+        ("provides_dist", "provider.pypi.metadata.provides"),
+        ("license_files", "provider.pypi.metadata.license_files"),
+        ("import_name", "provider.pypi.metadata.import_name"),
+        (
+            "import_namespaces",
+            "provider.pypi.metadata.import_namespaces",
+        ),
+    ] {
+        if let Some(value) = info.get(field) {
+            add_typed_json_fact(&mut facts, target, value);
+        }
+    }
+
+    let mut artifact_hashes = Vec::new();
+    if let Some(JSONValue::Array(urls)) = object.get("urls") {
+        for (index, value) in urls.iter().enumerate() {
+            let JSONValue::Object(url) = value else {
+                losses.push(format!("PyPI `urls[{index}]` must be an object"));
+                continue;
+            };
+            add_json_projection(&mut facts, &format!("provider.pypi.artifact.{index}"), url);
+            let filename = json_string(url, "filename").unwrap_or_else(|| {
+                losses.push(format!("PyPI artifact {index} has no filename"));
+                index.to_string()
+            });
+            if let Some(JSONValue::Object(digests)) = url.get("digests") {
+                if let Some(sha256) = json_string(digests, "sha256") {
+                    artifact_hashes.push((filename.clone(), sha256.clone()));
+                    add_typed_text_fact(
+                        &mut facts,
+                        format!("provider.pypi.artifact.{index}.sha256"),
+                        &sha256,
+                    );
+                }
+                for algorithm in ["md5", "sha256", "sha384", "sha512"] {
+                    if let Some(value) = json_string(digests, algorithm) {
+                        add_typed_text_fact(
+                            &mut facts,
+                            format!("provider.pypi.signature.{index}.{algorithm}"),
+                            &value,
+                        );
+                    }
+                }
+            } else if url.contains_key("digests") {
+                losses.push(format!(
+                    "PyPI artifact `{filename}` digests must be an object"
+                ));
+            }
+            if let Some(value) = url.get("yanked") {
+                if matches!(value, JSONValue::Bool(_)) {
+                    add_typed_json_fact(
+                        &mut facts,
+                        format!("provider.pypi.advisory.yanked.{index}"),
+                        value,
+                    );
+                } else {
+                    losses.push(format!("PyPI artifact `{filename}` yanked must be boolean"));
+                }
+            }
+            if let Some(reason) = json_string(url, "yanked_reason") {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.pypi.advisory.yanked_reason.{index}"),
+                    &reason,
+                );
+            } else if url.contains_key("yanked_reason") {
+                losses.push(format!(
+                    "PyPI artifact `{filename}` yanked_reason must be a string"
+                ));
+            }
+        }
+    }
+    artifact_hashes.sort();
+    for pair in artifact_hashes.windows(2) {
+        if pair[0].0 == pair[1].0 && pair[0].1 != pair[1].1 {
+            conflicts.push(format!(
+                "PyPI artifact `{}` has conflicting sha256 digests",
+                pair[0].0
+            ));
+        }
+    }
+    if artifact_hashes.len() == 1 {
+        facts.integrity_hash = artifact_hashes[0].1.clone();
+    }
+    if let Some(JSONValue::Array(vulnerabilities)) = object.get("vulnerabilities") {
+        for (index, vulnerability) in vulnerabilities.iter().enumerate() {
+            add_typed_json_fact(
+                &mut facts,
+                format!("provider.pypi.advisory.vulnerability.{index}"),
+                vulnerability,
+            );
+        }
+    }
+    if object
+        .get("urls")
+        .is_some_and(|value| !matches!(value, JSONValue::Array(_)))
+    {
+        losses.push("PyPI `urls` must be an array of artifacts".to_string());
+    }
+    if object
+        .get("vulnerabilities")
+        .is_some_and(|value| !matches!(value, JSONValue::Array(_)))
+    {
+        losses.push("PyPI `vulnerabilities` must be an array".to_string());
+    }
+    facts.source_identity = format!("pypi:{}@{}", facts.name, facts.version);
+    facts.dependencies.sort();
+    facts.dependencies.dedup();
+    facts.platforms.sort();
+    facts.platforms.dedup();
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
     report
 }
 
 fn swiftpm_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
+    let Some(JSONValue::Object(root)) = parsed else {
+        return empty_report(
+            ProviderFamily::SwiftPM,
+            "swiftpm",
+            "Package.resolved is not valid JSON",
+        );
+    };
+    let pins = match root.get("pins").or_else(|| {
+        root.get("object")
+            .and_then(|value| value.as_object().ok())
+            .and_then(|object| object.get("pins"))
+    }) {
+        Some(JSONValue::Array(pins)) => pins,
+        Some(_) => {
+            return empty_report(
+                ProviderFamily::SwiftPM,
+                "swiftpm",
+                "Package.resolved `pins` must be an array",
+            )
+        }
+        None => {
+            return empty_report(
+                ProviderFamily::SwiftPM,
+                "swiftpm",
+                "Package.resolved has no `pins` array",
+            )
+        }
+    };
+
     let mut facts = MetadataFacts::empty(ProviderFamily::SwiftPM, String::new());
-    if let Some(JSONValue::Object(root)) = parsed {
-        if let Some(JSONValue::Array(pins)) = root.get("pins") {
-            if pins.len() == 1 {
-                if let Some(JSONValue::Object(pin)) = pins.first() {
-                    facts.name = json_string(pin, "identity").unwrap_or_default();
-                    let (version, revision) = match pin.get("state") {
-                        Some(JSONValue::Object(state)) => (
-                            json_string(state, "version"),
-                            json_string(state, "revision"),
-                        ),
-                        _ => (None, json_string(pin, "revision")),
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    add_json_projection(&mut facts, "provider.swiftpm.native", &root);
+    if root
+        .get("version")
+        .is_some_and(|value| !matches!(value, JSONValue::Number(_)))
+    {
+        losses.push("SwiftPM lock `version` must be numeric".to_string());
+    }
+    if let Some(JSONValue::Number(version)) = root.get("version") {
+        add_typed_text_fact(
+            &mut facts,
+            "provider.swiftpm.lock.version",
+            &version.to_string(),
+        );
+    }
+
+    if pins.len() == 1 {
+        let Some(JSONValue::Object(pin)) = pins.first() else {
+            return empty_report(
+                ProviderFamily::SwiftPM,
+                "swiftpm",
+                "Package.resolved pin is not an object",
+            );
+        };
+        add_json_projection(&mut facts, "provider.swiftpm.pin", pin);
+        facts.name = json_string(pin, "identity")
+            .or_else(|| json_string(pin, "package"))
+            .unwrap_or_default();
+        let state = pin.get("state").and_then(|value| value.as_object().ok());
+        let version = state
+            .and_then(|state| json_string(state, "version"))
+            .or_else(|| json_string(pin, "version"));
+        let revision = state
+            .and_then(|state| json_string(state, "revision"))
+            .or_else(|| json_string(pin, "revision"));
+        let branch = state
+            .and_then(|state| json_string(state, "branch"))
+            .or_else(|| json_string(pin, "branch"));
+        facts.version = version
+            .clone()
+            .or_else(|| revision.clone())
+            .unwrap_or_default();
+        if let Some(revision) = revision {
+            facts.integrity_hash = revision.clone();
+            add_typed_text_fact(&mut facts, "provider.revision", &revision);
+        }
+        if let Some(branch) = branch {
+            add_typed_text_fact(&mut facts, "provider.swiftpm.variant.branch", &branch);
+            if facts.integrity_hash.is_empty() {
+                losses.push(format!(
+                    "SwiftPM pin `{}` has branch `{branch}` but no exact revision",
+                    facts.name
+                ));
+            }
+        }
+        if let Some(kind) = json_string(pin, "kind") {
+            add_typed_text_fact(&mut facts, "provider.swiftpm.variant.kind", &kind);
+        }
+        if let Some(location) =
+            json_string(pin, "location").or_else(|| json_string(pin, "repositoryURL"))
+        {
+            add_typed_text_fact(&mut facts, "provider.swiftpm.source.location", &location);
+        }
+        if state.is_none() {
+            losses.push(format!("SwiftPM pin `{}` has no state object", facts.name));
+        }
+        let source_identity = facts
+            .typed
+            .get("provider.revision")
+            .and_then(|values| values.first())
+            .filter(|revision| !revision.is_empty())
+            .cloned()
+            .unwrap_or_else(|| facts.version.clone());
+        facts.source_identity = format!("swiftpm:{}@{}", facts.name, source_identity);
+    } else {
+        facts.name = "swiftpm-lock".to_string();
+        facts.dependencies = pins
+            .iter()
+            .enumerate()
+            .filter_map(|(index, pin)| {
+                let JSONValue::Object(pin) = pin else {
+                    losses.push(format!("SwiftPM pin {index} is not an object"));
+                    return None;
+                };
+                let identity = json_string(pin, "identity").or_else(|| json_string(pin, "package"));
+                if identity.is_none() {
+                    losses.push(format!("SwiftPM pin {index} has no package identity"));
+                }
+                identity
+            })
+            .collect();
+        facts.source_identity = "swiftpm:lock".to_string();
+        if pins.len() > 1 {
+            losses.push(
+                "Package.resolved contains multiple pins; normalize each pin before realization"
+                    .to_string(),
+            );
+            for (left_index, left) in pins.iter().enumerate() {
+                let JSONValue::Object(left) = left else {
+                    continue;
+                };
+                let left_identity =
+                    json_string(left, "identity").or_else(|| json_string(left, "package"));
+                for right in pins.iter().skip(left_index + 1) {
+                    let JSONValue::Object(right) = right else {
+                        continue;
                     };
-                    facts.version = version
-                        .clone()
-                        .or_else(|| revision.clone())
-                        .unwrap_or_default();
-                    if let Some(revision) = revision {
-                        facts.integrity_hash = revision.clone();
-                        facts
-                            .typed
-                            .insert("provider.revision".to_string(), vec![revision]);
-                    } else {
-                        facts.integrity_hash = facts.version.clone();
+                    let right_identity =
+                        json_string(right, "identity").or_else(|| json_string(right, "package"));
+                    if left_identity.is_some() && left_identity == right_identity && left != right {
+                        conflicts.push(format!(
+                            "SwiftPM pin `{}` has conflicting native states",
+                            left_identity.clone().unwrap_or_default()
+                        ));
                     }
                 }
-            } else if pins.len() > 1 {
-                facts.name = "swiftpm-lock".to_string();
-                facts.version = "set".to_string();
-                facts.dependencies = pins
-                    .iter()
-                    .filter_map(|pin| match pin {
-                        JSONValue::Object(pin) => json_string(pin, "identity"),
-                        _ => None,
-                    })
-                    .collect();
             }
         }
     }
-    let source_revision = facts
-        .typed
-        .get("provider.revision")
-        .and_then(|values| values.first())
-        .filter(|revision| !revision.is_empty())
-        .cloned()
-        .unwrap_or_else(|| facts.version.clone());
-    facts.source_identity = format!("swiftpm:{}@{}", facts.name, source_revision);
     let mut report = report_with_identity(facts);
-    if report.facts.version == "set" {
-        report.losses.push(
-            "Package.resolved contains multiple pins; normalize each pin before realization"
-                .to_string(),
-        );
-    }
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
     report
 }
 
+fn maven_exact_value(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && !value.contains("${")
+        && !value.contains(',')
+        && !value.contains('[')
+        && !value.contains(']')
+        && !value.contains('(')
+        && !value.contains(')')
+        && !value.eq_ignore_ascii_case("latest")
+        && !value.eq_ignore_ascii_case("release")
+}
+
 fn maven_report(document: &str) -> ProviderFactReport {
-    let name = xml_tag(document, "artifactId").unwrap_or_default();
-    let group = xml_tag(document, "groupId").unwrap_or_default();
-    let version = xml_tag(document, "version").unwrap_or_default();
+    if !document.contains("<project") {
+        return empty_report(
+            ProviderFamily::Maven,
+            "maven",
+            "Maven POM has no project element",
+        );
+    }
+    if document.contains("<m:project") || document.contains("<pom:") {
+        return empty_report(
+            ProviderFamily::Maven,
+            "maven",
+            "Maven POM uses a namespaced XML vocabulary that this provider cannot normalize",
+        );
+    }
+
+    let project_group = xml_direct_child_values(document, "project", "groupId");
+    let project_artifact = xml_direct_child_values(document, "project", "artifactId");
+    let project_version = xml_direct_child_values(document, "project", "version");
+    let parent = xml_blocks(document, "parent")
+        .into_iter()
+        .next()
+        .map(|(_, block)| block);
+    let group = project_group
+        .first()
+        .cloned()
+        .or_else(|| {
+            parent
+                .as_deref()
+                .and_then(|parent| xml_tag(parent, "groupId"))
+        })
+        .unwrap_or_default();
+    let name = project_artifact.first().cloned().unwrap_or_default();
+    let version = project_version.first().cloned().unwrap_or_default();
     let mut facts = MetadataFacts::empty(ProviderFamily::Maven, name);
     facts.version = version;
-    facts.source_identity = format!("maven:{}:{}@{}", group, facts.name, facts.version);
-    facts.dependencies = xml_tag_values(document, "artifactId")
+    facts.license = xml_blocks(document, "license")
         .into_iter()
-        .filter(|dependency| dependency != &facts.name)
-        .collect();
-    report_with_identity(facts)
+        .filter_map(|(_, block)| xml_tag(&block, "name"))
+        .next()
+        .unwrap_or_default();
+    facts.source_identity = format!("maven:{}:{}@{}", group, facts.name, facts.version);
+    let artifact_name = facts.name.clone();
+    let gav = facts.source_identity.clone();
+    add_typed_text_fact(&mut facts, "provider.maven.coordinate.group", &group);
+    add_typed_text_fact(
+        &mut facts,
+        "provider.maven.coordinate.artifact",
+        &artifact_name,
+    );
+    add_typed_text_fact(&mut facts, "provider.maven.coordinate.gav", &gav);
+    for (key, values) in [
+        (
+            "packaging",
+            xml_direct_child_values(document, "project", "packaging"),
+        ),
+        ("name", xml_direct_child_values(document, "project", "name")),
+        (
+            "description",
+            xml_direct_child_values(document, "project", "description"),
+        ),
+        ("url", xml_direct_child_values(document, "project", "url")),
+    ] {
+        for (index, value) in values.iter().enumerate() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.project.{key}.{index}"),
+                value,
+            );
+        }
+    }
+    for (index, value) in xml_tag_values(document, "license").iter().enumerate() {
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.maven.license.raw.{index}"),
+            value,
+        );
+    }
+    for (index, (_, block)) in xml_blocks(document, "license").iter().enumerate() {
+        for field in ["name", "url", "distribution"] {
+            if let Some(value) = xml_tag(block, field) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.maven.license.{field}.{index}"),
+                    &value,
+                );
+            }
+        }
+    }
+
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    for (field, values) in [
+        ("groupId", project_group),
+        ("artifactId", project_artifact),
+        ("version", project_version),
+    ] {
+        let distinct = distinct_values(&values);
+        if distinct.len() > 1 {
+            conflicts.push(format!(
+                "Maven project declares conflicting {field} values: {}",
+                distinct.join(", ")
+            ));
+        }
+    }
+    if group.is_empty() {
+        losses.push("Maven project has no exact groupId".to_string());
+    }
+    if facts.name.is_empty() {
+        losses.push("Maven project has no exact artifactId".to_string());
+    }
+    if !maven_exact_value(&facts.version) {
+        losses.push(format!(
+            "Maven project version `{}` is not an exact version",
+            facts.version
+        ));
+    }
+    if !group.is_empty() && !maven_exact_value(&group) {
+        losses.push(format!(
+            "Maven project groupId `{group}` is not an exact identity"
+        ));
+    }
+
+    for (index, (_, block)) in xml_blocks(document, "dependency").iter().enumerate() {
+        let artifact = xml_tag(block, "artifactId").unwrap_or_default();
+        let dependency_group = xml_tag(block, "groupId").unwrap_or_default();
+        let dependency_version = xml_tag(block, "version").unwrap_or_default();
+        let scope_defaulted = xml_tag(block, "scope").is_none();
+        let scope = xml_tag(block, "scope").unwrap_or_else(|| "compile".to_string());
+        let coordinate = format_dependency(
+            &format!("{dependency_group}:{artifact}"),
+            &dependency_version,
+        );
+        if artifact.is_empty() || dependency_group.is_empty() {
+            losses.push(format!(
+                "Maven dependency {index} lacks an exact groupId or artifactId"
+            ));
+        }
+        if dependency_version.is_empty() {
+            losses.push(format!(
+                "Maven dependency `{coordinate}` has no exact version"
+            ));
+        } else if !maven_exact_value(&dependency_version) {
+            losses.push(format!(
+                "Maven dependency `{coordinate}` has a non-exact version"
+            ));
+        }
+        facts.dependencies.push(coordinate.clone());
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.maven.dependency.{index}.coordinate"),
+            &coordinate,
+        );
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.maven.dependency.{index}.kind"),
+            &scope,
+        );
+        if scope_defaulted {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.dependency.{index}.scope.defaulted"),
+                "true",
+            );
+        }
+        for field in ["optional", "type", "classifier", "systemPath"] {
+            if let Some(value) = xml_tag(block, field) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.maven.dependency.{index}.{field}"),
+                    &value,
+                );
+            }
+        }
+        match scope.as_str() {
+            "test" => facts.dev_dependencies.push(coordinate),
+            "provided" | "system" => facts.build_dependencies.push(coordinate),
+            _ => {}
+        }
+    }
+    for (index, (_, block)) in xml_blocks(document, "plugin").iter().enumerate() {
+        let artifact = xml_tag(block, "artifactId").unwrap_or_default();
+        let plugin_group_defaulted = xml_tag(block, "groupId").is_none();
+        let plugin_group =
+            xml_tag(block, "groupId").unwrap_or_else(|| "org.apache.maven.plugins".to_string());
+        let plugin_version = xml_tag(block, "version").unwrap_or_default();
+        let plugin = format_dependency(&format!("{plugin_group}:{artifact}"), &plugin_version);
+        if artifact.is_empty() {
+            losses.push(format!("Maven build plugin {index} has no artifactId"));
+        }
+        if !maven_exact_value(&plugin_version) {
+            losses.push(format!(
+                "Maven build plugin `{plugin}` has no exact version"
+            ));
+        }
+        facts.scripts.push(plugin.clone());
+        add_typed_text_fact(&mut facts, format!("provider.maven.hook.{index}"), &plugin);
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.maven.hook.{index}.group"),
+            &plugin_group,
+        );
+        if plugin_group_defaulted {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.hook.{index}.group.defaulted"),
+                "true",
+            );
+        }
+        for (goal_index, goal) in xml_tag_values(block, "goal").iter().enumerate() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.hook.{index}.goal.{goal_index}"),
+                goal,
+            );
+        }
+    }
+    for (index, (_, block)) in xml_blocks(document, "profile").iter().enumerate() {
+        if let Some(id) = xml_tag(block, "id") {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.variant.profile.{index}.id"),
+                &id,
+            );
+        }
+        for field in ["os", "arch", "jdk", "activeByDefault"] {
+            if let Some(value) = xml_tag(block, field) {
+                let value = if field == "os" {
+                    xml_tag(&value, "name").unwrap_or(value)
+                } else {
+                    value
+                };
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.maven.variant.profile.{index}.{field}"),
+                    &value,
+                );
+                if field == "os" || field == "arch" {
+                    facts.platforms.push(value);
+                }
+            }
+        }
+    }
+    for (index, (_, block)) in xml_blocks(document, "scm").iter().enumerate() {
+        for field in ["url", "connection", "developerConnection", "tag"] {
+            if let Some(value) = xml_tag(block, field) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.maven.source.scm.{field}.{index}"),
+                    &value,
+                );
+            }
+        }
+    }
+    for (index, (_, block)) in xml_blocks(document, "repository").iter().enumerate() {
+        if let Some(url) = xml_tag(block, "url") {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.source.repository.{index}"),
+                &url,
+            );
+        }
+    }
+    for tag in [
+        "signature",
+        "sha1",
+        "sha256",
+        "yanked",
+        "vulnerability",
+        "advisory",
+    ] {
+        for (index, value) in xml_tag_values(document, tag).iter().enumerate() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.maven.audit.{tag}.{index}"),
+                value,
+            );
+        }
+    }
+    facts.dependencies.sort();
+    facts.dependencies.dedup();
+    facts.dev_dependencies.sort();
+    facts.dev_dependencies.dedup();
+    facts.build_dependencies.sort();
+    facts.build_dependencies.dedup();
+    facts.platforms.sort();
+    facts.platforms.dedup();
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
+    report
 }
 
 fn nuget_report(document: &str) -> ProviderFactReport {
@@ -1210,42 +2012,46 @@ fn nuget_report(document: &str) -> ProviderFactReport {
         return nuget_json_report(&object);
     }
     let mut facts = MetadataFacts::empty(ProviderFamily::NuGet, String::new());
-    let mut packages = Vec::new();
-    let root_package = match (xml_tag(document, "id"), xml_tag(document, "version")) {
-        (Some(name), Some(version)) => {
-            let package = (name, version);
-            packages.push(package.clone());
-            Some(package)
-        }
+    let root_package = match (
+        xml_tag(document, "id").or_else(|| xml_tag(document, "Id")),
+        xml_tag(document, "version").or_else(|| xml_tag(document, "Version")),
+    ) {
+        (Some(name), Some(version)) => Some((name, version)),
         _ => None,
     };
-    for tag in xml_opening_tags(document, "PackageReference") {
-        if let Some(name) = xml_attribute(&tag, "Include") {
-            packages.push((name, xml_attribute(&tag, "Version").unwrap_or_default()));
-        }
-    }
+    let package_references = xml_opening_tags(document, "PackageReference")
+        .into_iter()
+        .filter_map(|tag| {
+            let name = xml_attribute(&tag, "Include").or_else(|| xml_attribute(&tag, "Update"))?;
+            let version = xml_attribute(&tag, "Version").unwrap_or_default();
+            Some((name, version, tag))
+        })
+        .collect::<Vec<_>>();
     let dependency_values = xml_opening_tags(document, "dependency")
         .into_iter()
         .filter_map(|tag| {
-            let name = xml_attribute(&tag, "id")?;
+            let name = xml_attribute(&tag, "id").or_else(|| xml_attribute(&tag, "name"))?;
             let version = xml_attribute(&tag, "version").unwrap_or_default();
             let dependency = format_dependency(&name, &version);
-            packages.push((name, version));
             Some(dependency)
         })
         .collect::<Vec<_>>();
-    packages.sort();
-    packages.dedup();
-    if packages.len() == 1 {
-        let (name, version) = packages.remove(0);
+    if let Some((name, version)) = root_package.clone() {
         facts.name = name;
         facts.version = version;
+    } else if package_references.len() == 1 {
+        facts.name = package_references[0].0.clone();
+        facts.version = package_references[0].1.clone();
     } else {
         facts.name = "nuget-lock".to_string();
         facts.version = "set".to_string();
-        facts.dependencies = packages.iter().map(|(name, _)| name.clone()).collect();
+        facts.dependencies = package_references
+            .iter()
+            .map(|(name, version, _)| format_dependency(name, version))
+            .collect();
     }
     facts.license = xml_tag(document, "license")
+        .or_else(|| xml_tag(document, "licenseExpression"))
         .or_else(|| xml_tag(document, "licenseUrl"))
         .unwrap_or_default();
     facts.platforms = xml_opening_tags(document, "group")
@@ -1254,14 +2060,107 @@ fn nuget_report(document: &str) -> ProviderFactReport {
         .collect();
     facts.dependencies = if !dependency_values.is_empty() {
         dependency_values
-    } else if root_package.is_none() && packages.len() > 1 {
-        packages
+    } else if root_package.is_none() && package_references.len() > 1 {
+        package_references
             .iter()
-            .map(|(name, version)| format_dependency(name, version))
+            .map(|(name, version, _)| format_dependency(name, version))
             .collect()
     } else {
         Vec::new()
     };
+    for (index, (name, version, tag)) in package_references.iter().enumerate() {
+        add_typed_text_fact(
+            &mut facts,
+            format!("provider.nuget.dependency.reference.{index}"),
+            &format_dependency(name, version),
+        );
+        for key in [
+            "Condition",
+            "PrivateAssets",
+            "IncludeAssets",
+            "ExcludeAssets",
+        ] {
+            if let Some(value) = xml_attribute(tag, key) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.nuget.dependency.reference.{index}.{key}"),
+                    &value,
+                );
+            }
+        }
+    }
+    for (index, dependency) in xml_opening_tags(document, "dependency")
+        .into_iter()
+        .enumerate()
+    {
+        for key in ["id", "name", "version", "exclude"] {
+            if let Some(value) = xml_attribute(&dependency, key) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.nuget.dependency.nuspec.{index}.{key}"),
+                    &value,
+                );
+            }
+        }
+    }
+    for (tag, key) in [
+        ("authors", "authors"),
+        ("owners", "owners"),
+        ("license", "license"),
+        ("licenseExpression", "license_expression"),
+        ("licenseUrl", "license_url"),
+        ("projectUrl", "project_url"),
+        ("repositoryUrl", "repository_url"),
+        ("description", "description"),
+        ("summary", "summary"),
+        ("releaseNotes", "release_notes"),
+        ("copyright", "copyright"),
+        ("tags", "tags"),
+        ("contentHash", "content_hash"),
+    ] {
+        for (index, value) in xml_tag_values(document, tag).into_iter().enumerate() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.nuget.metadata.{key}.{index}"),
+                &value,
+            );
+        }
+    }
+    for (index, tag) in xml_opening_tags(document, "group").into_iter().enumerate() {
+        if let Some(target) = xml_attribute(&tag, "targetFramework") {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.nuget.platform.group.{index}"),
+                &target,
+            );
+        }
+    }
+    for (index, tag) in xml_opening_tags(document, "repository")
+        .into_iter()
+        .enumerate()
+    {
+        for key in ["type", "url", "commit"] {
+            if let Some(value) = xml_attribute(&tag, key) {
+                add_typed_text_fact(
+                    &mut facts,
+                    format!("provider.nuget.source.repository.{index}.{key}"),
+                    &value,
+                );
+            }
+        }
+    }
+    for (index, tag) in xml_opening_tags(document, "file").into_iter().enumerate() {
+        if let Some(source) = xml_attribute(&tag, "src") {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.nuget.hook.file.{index}"),
+                &source,
+            );
+            if source.contains("tools/") || source.contains("tools\\") {
+                facts.scripts.push(source);
+            }
+        }
+    }
     if let Some(repository) = xml_opening_tags(document, "repository")
         .into_iter()
         .find_map(|tag| xml_attribute(&tag, "url"))
@@ -1273,9 +2172,18 @@ fn nuget_report(document: &str) -> ProviderFactReport {
     facts.integrity_hash = xml_tag(document, "contentHash").unwrap_or_default();
     facts.source_identity = format!("nuget:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
-    if packages.len() > 1 || report.facts.version == "set" {
+    if root_package.is_none() && package_references.len() > 1 {
         report.losses.push(
             "NuGet metadata contains multiple packages; lock each package identity separately"
+                .to_string(),
+        );
+    }
+    if report.facts.version != "set"
+        && !report.facts.version.is_empty()
+        && !exact_provider_version(&report.facts.version)
+    {
+        report.losses.push(
+            "NuGet package version is a range or mutable selector, not an exact identity"
                 .to_string(),
         );
     }
@@ -1284,38 +2192,96 @@ fn nuget_report(document: &str) -> ProviderFactReport {
 
 fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
     let mut packages = Vec::new();
+    let mut dependency_values = Vec::new();
+    let mut losses = Vec::new();
     if let Some(JSONValue::Object(dependencies)) = object.get("dependencies") {
-        for packages_for_framework in dependencies.values() {
+        for (framework, packages_for_framework) in dependencies {
             if let JSONValue::Object(entries) = packages_for_framework {
                 for (name, value) in entries {
                     if let JSONValue::Object(entry) = value {
-                        let version = json_string(entry, "resolved")
+                        let requested = json_string(entry, "requested").unwrap_or_default();
+                        let resolved = json_string(entry, "resolved")
                             .or_else(|| json_string(entry, "version"))
-                            .or_else(|| json_string(entry, "requested"))
                             .unwrap_or_default();
-                        packages.push((name.clone(), version));
+                        let selected = if resolved.is_empty() {
+                            requested.clone()
+                        } else {
+                            resolved.clone()
+                        };
+                        packages.push((name.clone(), selected.clone()));
+                        dependency_values.push(format_dependency(name, &selected));
+                        if resolved.is_empty() || !exact_provider_version(&selected) {
+                            losses.push(format!(
+                                "NuGet dependency `{name}` on framework `{framework}` has no resolved exact version"
+                            ));
+                        }
+                    } else {
+                        losses.push(format!(
+                            "NuGet dependency `{name}` on framework `{framework}` is not an object"
+                        ));
                     }
                 }
+            } else {
+                losses.push(format!(
+                    "NuGet dependency group `{framework}` is not an object"
+                ));
             }
         }
+    } else if object.contains_key("dependencies") {
+        losses.push("NuGet `dependencies` must be an object keyed by target framework".to_string());
     }
-    if let Some(JSONValue::Object(package)) = object.get("package") {
-        if let (Some(name), Some(version)) = (
-            json_string(package, "id").or_else(|| json_string(package, "name")),
-            json_string(package, "version"),
-        ) {
-            packages.push((name, version));
+    if let Some(JSONValue::Object(libraries)) = object.get("libraries") {
+        for (identity, value) in libraries {
+            let Some((name, version)) = identity.rsplit_once('/') else {
+                losses.push(format!(
+                    "NuGet library identity `{identity}` is not `name/version`"
+                ));
+                continue;
+            };
+            if name.trim().is_empty() || version.trim().is_empty() {
+                losses.push(format!(
+                    "NuGet library identity `{identity}` has an empty name or version"
+                ));
+                continue;
+            }
+            packages.push((name.to_string(), version.to_string()));
+            dependency_values.push(format_dependency(name, version));
+            if !matches!(value, JSONValue::Object(_)) {
+                losses.push(format!(
+                    "NuGet library `{identity}` metadata is not an object"
+                ));
+            }
         }
+    } else if object.contains_key("libraries") {
+        losses.push("NuGet `libraries` must be an object keyed by name/version".to_string());
     }
+    let root_identity = match (
+        json_string(object, "id").or_else(|| json_string(object, "name")),
+        json_string(object, "version"),
+    ) {
+        (Some(name), Some(version)) => Some((name, version)),
+        _ => object.get("package").and_then(|value| match value {
+            JSONValue::Object(package) => Some((
+                json_string(package, "id").or_else(|| json_string(package, "name"))?,
+                json_string(package, "version")?,
+            )),
+            _ => None,
+        }),
+    };
+    let has_root_identity = root_identity.is_some();
     packages.sort();
     packages.dedup();
     let mut facts = MetadataFacts::empty(
         ProviderFamily::NuGet,
-        json_string(object, "id")
-            .or_else(|| json_string(object, "name"))
+        root_identity
+            .as_ref()
+            .map(|(name, _)| name.clone())
             .unwrap_or_default(),
     );
-    if packages.len() == 1 {
+    if let Some((name, version)) = root_identity {
+        facts.name = name;
+        facts.version = version;
+    } else if packages.len() == 1 {
         facts.name = packages[0].0.clone();
         facts.version = packages[0].1.clone();
     } else if packages.len() > 1 {
@@ -1328,14 +2294,61 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     } else {
         facts.version = json_string(object, "version").unwrap_or_default();
     }
+    facts.dependencies = if dependency_values.is_empty() && facts.version == "set" {
+        packages
+            .iter()
+            .map(|(name, version)| format_dependency(name, version))
+            .collect()
+    } else {
+        dependency_values
+    };
     facts.integrity_hash = json_string(object, "contentHash")
         .or_else(|| json_string(object, "hash"))
         .unwrap_or_default();
+    facts.license = json_string(object, "licenseExpression")
+        .or_else(|| json_string(object, "license"))
+        .or_else(|| json_string(object, "licenseUrl"))
+        .unwrap_or_default();
+    if let Some(JSONValue::Object(dependencies)) = object.get("dependencies") {
+        facts.platforms = dependencies
+            .keys()
+            .map(|framework| format!("framework:{framework}"))
+            .collect();
+    }
+    add_json_projection(&mut facts, "provider.nuget.native", object);
+    for key in [
+        "licenseExpression",
+        "licenseUrl",
+        "authors",
+        "owners",
+        "repository",
+        "listed",
+        "isListed",
+        "deprecated",
+        "vulnerabilities",
+        "signature",
+        "signatures",
+        "contentHash",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(&mut facts, format!("provider.nuget.{key}"), value);
+        }
+    }
     facts.source_identity = format!("nuget:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
-    if packages.len() > 1 {
+    report.losses.append(&mut losses);
+    if packages.len() > 1 && !has_root_identity {
         report.losses.push(
             "NuGet lock metadata contains multiple package identities; lock each package separately"
+                .to_string(),
+        );
+    }
+    if report.facts.version != "set"
+        && !report.facts.version.is_empty()
+        && !exact_provider_version(&report.facts.version)
+    {
+        report.losses.push(
+            "NuGet package version is a range or mutable selector, not an exact identity"
                 .to_string(),
         );
     }
@@ -1363,10 +2376,28 @@ fn conan_report(document: &str) -> ProviderFactReport {
         .build_dependencies
         .extend(quoted_values_after_all(document, "build_requires"));
     facts.platforms = quoted_values_after_all(document, "settings");
-    for key in ["options", "generators", "settings"] {
+    for key in [
+        "options",
+        "generators",
+        "settings",
+        "revision",
+        "rrev",
+        "package_id",
+        "prev",
+    ] {
         let values = quoted_values_after_all(document, key);
         if !values.is_empty() {
             facts.typed.insert(format!("conan.{key}"), values);
+        }
+    }
+    for (index, line) in document.lines().enumerate() {
+        let line = line.trim();
+        if !line.is_empty() {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.conan.native.line.{index}"),
+                line,
+            );
         }
     }
     facts.source_identity = format!("conan:{}@{}", facts.name, facts.version);
@@ -1380,6 +2411,27 @@ fn conan_report(document: &str) -> ProviderFactReport {
         report
             .conflicts
             .push("Conan recipe declares conflicting package versions".to_string());
+    }
+    if !report.facts.version.is_empty() && !exact_provider_version(&report.facts.version) {
+        report
+            .losses
+            .push("Conan package version is not an exact identity".to_string());
+    }
+    for (field, values) in [
+        ("requires", &report.facts.dependencies),
+        ("tool_requires", &report.facts.build_dependencies),
+    ] {
+        if document.lines().any(|line| {
+            let trimmed = line.trim_start();
+            (trimmed.starts_with(field) || trimmed.starts_with(&format!("self.{field}")))
+                && !trimmed.contains('"')
+                && !trimmed.contains('\'')
+        }) && values.is_empty()
+        {
+            report.losses.push(format!(
+                "Conan `{field}` contains no parseable dependency identity"
+            ));
+        }
     }
     if document.lines().any(|line| {
         let line = line.trim();
@@ -1396,24 +2448,218 @@ fn conan_report(document: &str) -> ProviderFactReport {
 }
 
 fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
     let mut facts = MetadataFacts::empty(
         ProviderFamily::Conan,
         json_string(object, "name").unwrap_or_default(),
     );
+    add_json_projection(&mut facts, "provider.conan.native", object);
+
+    let top_level_ref = json_string(object, "ref");
+    let ref_name = top_level_ref
+        .as_deref()
+        .and_then(|value| conan_ref_part(value, 0));
+    let ref_version = top_level_ref
+        .as_deref()
+        .and_then(|value| conan_ref_part(value, 1));
+    if facts.name.is_empty() {
+        facts.name = ref_name.clone().unwrap_or_default();
+    } else if let Some(ref_name) = &ref_name {
+        if ref_name != &facts.name {
+            conflicts.push(format!(
+                "Conan package name `{}` conflicts with ref name `{ref_name}`",
+                facts.name
+            ));
+        }
+    }
     facts.version = json_string(object, "version")
-        .or_else(|| json_string(object, "ref").and_then(|value| conan_ref_part(&value, 1)))
+        .or(ref_version.clone())
         .unwrap_or_default();
-    facts.license = json_string(object, "license").unwrap_or_default();
-    facts.dependencies = json_array_strings(object, "requires");
-    facts.build_dependencies = json_array_strings(object, "tool_requires");
+    if let (Some(version), Some(ref_version)) = (json_string(object, "version"), ref_version) {
+        if version != ref_version {
+            conflicts.push(format!(
+                "Conan package version `{version}` conflicts with ref version `{ref_version}`"
+            ));
+        }
+    }
+    match object.get("license") {
+        Some(JSONValue::String(license)) => facts.license = license.clone(),
+        Some(JSONValue::Array(values)) => {
+            for (index, value) in values.iter().enumerate() {
+                if let JSONValue::String(value) = value {
+                    add_typed_text_fact(
+                        &mut facts,
+                        format!("provider.conan.metadata.license.{index}"),
+                        value,
+                    );
+                } else {
+                    losses.push(format!("Conan `license[{index}]` must be a string"));
+                }
+            }
+            facts.license = values
+                .iter()
+                .find_map(|value| match value {
+                    JSONValue::String(value) => Some(value.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+        }
+        Some(_) => losses.push("Conan `license` must be a string or array of strings".to_string()),
+        None => {}
+    }
+    let dependencies =
+        conan_json_dependencies(&mut facts, object.get("requires"), "runtime", &mut losses);
+    facts.dependencies = dependencies;
+    let mut build_dependencies =
+        conan_json_dependencies(&mut facts, object.get("tool_requires"), "tool", &mut losses);
+    build_dependencies.extend(conan_json_dependencies(
+        &mut facts,
+        object.get("build_requires"),
+        "build",
+        &mut losses,
+    ));
+    facts.build_dependencies = build_dependencies;
+
+    if let Some(JSONValue::Object(nodes)) = object
+        .get("graph_lock")
+        .and_then(|value| value.as_object().ok())
+        .and_then(|graph| graph.get("nodes"))
+    {
+        let mut node_identities = Vec::new();
+        for (node_id, node_value) in nodes {
+            let Some(node) = node_value.as_object().ok() else {
+                losses.push(format!("Conan graph node `{node_id}` must be an object"));
+                continue;
+            };
+            add_json_projection(
+                &mut facts,
+                &format!("provider.conan.graph.node.{node_id}"),
+                node,
+            );
+            if let Some(reference) = json_string(node, "ref") {
+                let name = conan_ref_part(&reference, 0).unwrap_or_default();
+                let version = conan_ref_part(&reference, 1).unwrap_or_default();
+                if !name.is_empty() && !version.is_empty() {
+                    node_identities.push((name, version, reference));
+                } else {
+                    losses.push(format!(
+                        "Conan graph node `{node_id}` has an incomplete package ref"
+                    ));
+                }
+            } else {
+                losses.push(format!("Conan graph node `{node_id}` has no package ref"));
+            }
+            if let Some(requires) = node.get("requires") {
+                let _ = conan_json_dependencies(
+                    &mut facts,
+                    Some(requires),
+                    &format!("graph.{node_id}"),
+                    &mut losses,
+                );
+            }
+        }
+        node_identities.sort();
+        node_identities.dedup();
+        if facts.name.is_empty() && node_identities.len() == 1 {
+            facts.name = node_identities[0].0.clone();
+            facts.version = node_identities[0].1.clone();
+            facts.typed.insert(
+                "provider.conan.source.ref".to_string(),
+                vec![node_identities[0].2.clone()],
+            );
+        } else if node_identities.len() > 1 {
+            losses.push(
+                "Conan graph lock contains multiple package identities; lock each node separately"
+                    .to_string(),
+            );
+        }
+    } else if object.contains_key("graph_lock") {
+        losses.push("Conan `graph_lock.nodes` must be an object".to_string());
+    }
+
+    for key in [
+        "settings",
+        "options",
+        "generators",
+        "package_id",
+        "rrev",
+        "prev",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(&mut facts, format!("provider.conan.variant.{key}"), value);
+        }
+    }
+    if let Some(reference) = top_level_ref {
+        add_typed_text_fact(&mut facts, "provider.conan.source.ref", &reference);
+    }
     facts.source_identity = format!("conan:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
-    if object.contains_key("requires") && report.facts.dependencies.is_empty() {
+    report.losses.append(&mut losses);
+    report.conflicts.append(&mut conflicts);
+    if !report.facts.version.is_empty() && !exact_provider_version(&report.facts.version) {
         report
             .losses
-            .push("Conan lock requires are not a string array".to_string());
+            .push("Conan package version is not an exact identity".to_string());
     }
     report
+}
+
+fn conan_json_dependencies(
+    facts: &mut MetadataFacts,
+    value: Option<&JSONValue>,
+    kind: &str,
+    losses: &mut Vec<String>,
+) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Some(values) = value.as_array().ok() else {
+        losses.push(format!("Conan `{kind}` dependencies must be an array"));
+        return Vec::new();
+    };
+    let mut dependencies = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        match value {
+            JSONValue::String(reference) if !reference.trim().is_empty() => {
+                dependencies.push(reference.clone());
+                add_typed_text_fact(
+                    facts,
+                    format!("provider.conan.dependency.{kind}.{index}"),
+                    reference,
+                );
+            }
+            JSONValue::String(_) => {
+                losses.push(format!(
+                    "Conan `{kind}[{index}]` has an empty dependency ref"
+                ));
+            }
+            JSONValue::Object(dependency) => {
+                let reference =
+                    json_string(dependency, "ref").or_else(|| json_string(dependency, "name"));
+                let Some(reference) = reference else {
+                    losses.push(format!(
+                        "Conan `{kind}[{index}]` has no dependency ref or name"
+                    ));
+                    continue;
+                };
+                let version = json_string(dependency, "version")
+                    .or_else(|| conan_ref_part(&reference, 1))
+                    .unwrap_or_default();
+                let name = conan_ref_part(&reference, 0).unwrap_or(reference);
+                dependencies.push(format_dependency(&name, &version));
+                add_typed_json_fact(
+                    facts,
+                    format!("provider.conan.dependency.{kind}.{index}"),
+                    value,
+                );
+            }
+            _ => losses.push(format!(
+                "Conan `{kind}[{index}]` must be a string or object"
+            )),
+        }
+    }
+    dependencies
 }
 
 fn vcpkg_report(document: &str) -> ProviderFactReport {
@@ -1425,42 +2671,103 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
             "vcpkg.json is not valid JSON",
         );
     };
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
     let mut facts = MetadataFacts::empty(
         ProviderFamily::Vcpkg,
         json_string(&object, "name").unwrap_or_default(),
     );
+    add_json_projection(&mut facts, "provider.vcpkg.native", &object);
+    if facts.name.is_empty() {
+        losses.push("vcpkg manifest has no package name".to_string());
+    }
+    if let Some(value) = object.get("name") {
+        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+            losses.push("vcpkg `name` must be a non-empty string".to_string());
+        }
+    }
     let version_fields = [
         "version",
         "version-string",
         "version-semver",
         "version-date",
     ];
-    let versions = version_fields
-        .iter()
-        .filter_map(|key| json_string(&object, key).map(|value| (*key, value)))
-        .collect::<Vec<_>>();
+    let mut versions = Vec::new();
+    for key in version_fields {
+        if let Some(value) = object.get(key) {
+            match value {
+                JSONValue::String(value) if !value.trim().is_empty() => {
+                    versions.push((key, value.clone()));
+                }
+                JSONValue::String(_) => {
+                    losses.push(format!("vcpkg `{key}` must not be empty"));
+                }
+                _ => losses.push(format!("vcpkg `{key}` must be a string")),
+            }
+        }
+    }
     facts.version = versions
         .first()
         .map(|(_, version)| version.clone())
         .unwrap_or_default();
-    facts.dependencies = vcpkg_dependencies(&object, &mut facts.typed);
-    facts.platforms = json_string(&object, "supports")
-        .map(|value| vec![value])
-        .unwrap_or_default();
-    facts.license = json_string(&object, "license").unwrap_or_default();
+    facts.dependencies = vcpkg_dependencies(&object, &mut facts.typed, &mut losses);
+    if let Some(value) = object.get("supports") {
+        match value {
+            JSONValue::String(value) if !value.trim().is_empty() => {
+                facts.platforms.push(value.clone());
+            }
+            JSONValue::String(_) => losses.push("vcpkg `supports` must not be empty".to_string()),
+            _ => losses.push("vcpkg `supports` must be a string".to_string()),
+        }
+    }
+    if let Some(value) = object.get("license") {
+        match value {
+            JSONValue::String(value) => facts.license = value.clone(),
+            _ => losses.push("vcpkg `license` must be a string".to_string()),
+        }
+    }
     for key in ["builtin-baseline", "overrides", "features"] {
         if let Some(value) = object.get(key) {
-            facts
-                .typed
-                .insert(format!("vcpkg.{key}"), vec![json_value_text(value)]);
+            add_typed_json_fact(&mut facts, format!("vcpkg.{key}"), value);
+        }
+    }
+    if let Some(value) = object.get("port-version") {
+        add_typed_json_fact(&mut facts, "provider.vcpkg.variant.port-version", value);
+    }
+    if let Some(value) = object.get("builtin-baseline") {
+        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+            losses.push("vcpkg `builtin-baseline` must be a non-empty string".to_string());
+        }
+    }
+    if let Some(JSONValue::Object(features)) = object.get("features") {
+        for (name, value) in features {
+            if !matches!(value, JSONValue::Array(values) if values.iter().all(|item| matches!(item, JSONValue::String(_))))
+            {
+                losses.push(format!(
+                    "vcpkg feature `{name}` must be an array of strings"
+                ));
+            }
+        }
+    } else if object.contains_key("features") {
+        losses.push("vcpkg `features` must be an object".to_string());
+    }
+    if let Some(value) = object.get("overrides") {
+        if !matches!(value, JSONValue::Array(values) if values.iter().all(|item| item.as_object().is_ok()))
+        {
+            losses.push("vcpkg `overrides` must be an array of objects".to_string());
         }
     }
     facts.source_identity = format!("vcpkg:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
     if versions.windows(2).any(|values| values[0].1 != values[1].1) {
+        conflicts.push("vcpkg manifest declares conflicting version fields".to_string());
+    }
+    report.losses.append(&mut losses);
+    report.conflicts.append(&mut conflicts);
+    if !report.facts.version.is_empty() && !exact_provider_version(&report.facts.version) {
         report
-            .conflicts
-            .push("vcpkg manifest declares conflicting version fields".to_string());
+            .losses
+            .push("vcpkg package version is not an exact identity".to_string());
     }
     report
 }
@@ -1474,22 +2781,119 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
             "formula metadata is not valid JSON",
         );
     };
-    let mut facts = MetadataFacts::empty(
-        ProviderFamily::Homebrew,
-        json_string(&object, "name").unwrap_or_default(),
-    );
-    facts.version = json_string(&object, "version")
-        .or_else(|| {
-            object
-                .get("versions")
-                .and_then(|value| value.as_object().ok())
-                .and_then(|versions| json_string(versions, "stable"))
-        })
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    let name = json_string(&object, "name")
+        .or_else(|| json_string(&object, "full_name"))
         .unwrap_or_default();
-    facts.license = json_string(&object, "license").unwrap_or_default();
-    facts.dependencies = json_array_strings(&object, "dependencies");
+    if name.is_empty() {
+        losses.push("Homebrew formula has no name or full_name".to_string());
+    }
+    let mut facts = MetadataFacts::empty(ProviderFamily::Homebrew, name);
+    add_json_projection(&mut facts, "provider.homebrew.native", &object);
+
+    let mut versions = Vec::new();
+    if let Some(value) = object.get("version") {
+        match value {
+            JSONValue::String(version) if !version.trim().is_empty() => {
+                versions.push(("version", version.clone()));
+            }
+            JSONValue::String(_) => losses.push("Homebrew formula version is empty".to_string()),
+            _ => losses.push("Homebrew formula `version` must be a string".to_string()),
+        }
+    }
+    if let Some(value) = object.get("versions") {
+        let Some(versions_object) = value.as_object().ok() else {
+            losses.push("Homebrew formula `versions` must be an object".to_string());
+            facts.version = String::new();
+            facts.source_identity = format!("homebrew:{}@", facts.name);
+            let mut report = report_with_identity(facts);
+            report.losses.extend(losses);
+            report.conflicts.extend(conflicts);
+            return report;
+        };
+        if let Some(stable) = versions_object.get("stable") {
+            match stable {
+                JSONValue::String(version) if !version.trim().is_empty() => {
+                    versions.push(("versions.stable", version.clone()));
+                }
+                JSONValue::String(_) => {
+                    losses.push("Homebrew `versions.stable` is empty".to_string())
+                }
+                _ => losses.push("Homebrew `versions.stable` must be a string".to_string()),
+            }
+        }
+        for (key, value) in versions_object {
+            add_typed_json_fact(
+                &mut facts,
+                format!("provider.homebrew.variant.version.{key}"),
+                value,
+            );
+        }
+    }
+    if versions.windows(2).any(|pair| pair[0].1 != pair[1].1) {
+        conflicts.push("Homebrew formula declares conflicting version facts".to_string());
+    }
+    facts.version = versions
+        .first()
+        .map(|(_, version)| version.clone())
+        .unwrap_or_default();
+
+    if let Some(value) = object.get("license") {
+        match value {
+            JSONValue::String(license) => facts.license = license.clone(),
+            _ => losses.push("Homebrew formula `license` must be a string".to_string()),
+        }
+    }
+    facts.dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "dependencies",
+        "runtime",
+        "homebrew",
+        &mut losses,
+    );
+    facts.build_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "build_dependencies",
+        "build",
+        "homebrew",
+        &mut losses,
+    );
+    facts.dev_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "test_dependencies",
+        "test",
+        "homebrew",
+        &mut losses,
+    );
+    for (field, kind) in [
+        ("recommended_dependencies", "recommended"),
+        ("optional_dependencies", "optional"),
+        ("uses_from_macos", "platform"),
+        ("requirements", "requirement"),
+        ("conflicts", "conflict"),
+    ] {
+        provider_dependency_field(&mut facts, &object, field, kind, "homebrew", &mut losses);
+    }
+    if let Some(value) = object.get("platforms") {
+        match json_string_list(value) {
+            Some(platforms) => facts.platforms = platforms,
+            None => losses.push("Homebrew formula `platforms` must be strings".to_string()),
+        }
+    }
+    if let Some(value) = object.get("bottle") {
+        homebrew_bottle_facts(&mut facts, value, &mut losses);
+    }
+    facts.integrity_hash = homebrew_source_hash(&object, &mut losses).unwrap_or_default();
+    add_homebrew_named_facts(&mut facts, &object);
     facts.source_identity = format!("homebrew:{}@{}", facts.name, facts.version);
-    report_with_identity(facts)
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
+    report
 }
 
 fn jet_registry_report(document: &str) -> ProviderFactReport {
@@ -1615,15 +3019,150 @@ fn github_report(document: &str) -> ProviderFactReport {
             "release metadata is not valid JSON",
         );
     };
-    let mut facts = MetadataFacts::empty(
-        ProviderFamily::Github,
-        json_string(&object, "name").unwrap_or_default(),
-    );
-    facts.version = json_string(&object, "tag_name")
-        .or_else(|| json_string(&object, "version"))
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    let name = json_string(&object, "name")
+        .or_else(|| json_string(&object, "full_name"))
+        .or_else(|| {
+            object
+                .get("repository")
+                .and_then(|value| value.as_object().ok())
+                .and_then(|repository| json_string(repository, "full_name"))
+        })
         .unwrap_or_default();
+    if name.is_empty() {
+        losses.push("GitHub release has no package or repository name".to_string());
+    }
+    let mut facts = MetadataFacts::empty(ProviderFamily::Github, name);
+    add_json_projection(&mut facts, "provider.github.native", &object);
+
+    let tag = json_string(&object, "tag_name");
+    let version = json_string(&object, "version");
+    if let (Some(tag), Some(version)) = (&tag, &version) {
+        if tag != version {
+            conflicts.push(format!(
+                "GitHub release declares conflicting tag/version facts: {tag} vs {version}"
+            ));
+        }
+    }
+    facts.version = tag.or(version).unwrap_or_default();
+    if let Some(value) = object.get("target_commitish") {
+        match value {
+            JSONValue::String(revision) if !revision.trim().is_empty() => {
+                add_typed_text_fact(
+                    &mut facts,
+                    "provider.github.source.target_commitish",
+                    revision,
+                );
+                if ProviderSelector::parse(&format!("#revision={revision}")).is_exact() {
+                    add_typed_text_fact(&mut facts, "provider.github.revision", revision);
+                }
+            }
+            JSONValue::String(_) => losses.push("GitHub `target_commitish` is empty".to_string()),
+            _ => losses.push("GitHub `target_commitish` must be a string".to_string()),
+        }
+    }
+    if let Some(value) = object.get("license") {
+        facts.license = match value {
+            JSONValue::String(license) => license.clone(),
+            JSONValue::Object(license) => json_string(license, "spdx_id").unwrap_or_default(),
+            _ => {
+                losses.push("GitHub `license` must be a string or object".to_string());
+                String::new()
+            }
+        };
+        if matches!(value, JSONValue::Object(_)) && facts.license.is_empty() {
+            losses.push("GitHub license object has no spdx_id".to_string());
+        }
+    }
+    facts.dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "dependencies",
+        "runtime",
+        "github",
+        &mut losses,
+    );
+    facts.build_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "build_dependencies",
+        "build",
+        "github",
+        &mut losses,
+    );
+    facts.dev_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "dev_dependencies",
+        "dev",
+        "github",
+        &mut losses,
+    );
+    for key in ["platforms", "os", "architectures"] {
+        if let Some(value) = object.get(key) {
+            match json_string_list(value) {
+                Some(values) => facts.platforms.extend(values),
+                None => losses.push(format!("GitHub `{key}` must be strings")),
+            }
+        }
+    }
+    if let Some(value) = object.get("assets") {
+        github_asset_facts(&mut facts, value, &mut losses);
+    }
+    for (field, target) in [
+        ("html_url", "provider.github.source.html_url"),
+        ("tarball_url", "provider.github.source.tarball_url"),
+        ("zipball_url", "provider.github.source.zipball_url"),
+        ("repository", "provider.github.source.repository"),
+        ("owner", "provider.github.source.owner"),
+        ("url", "provider.github.source.api_url"),
+        ("node_id", "provider.github.identity.node_id"),
+        ("id", "provider.github.identity.id"),
+        ("draft", "provider.github.release.draft"),
+        ("prerelease", "provider.github.release.prerelease"),
+        ("immutable", "provider.github.release.immutable"),
+        ("created_at", "provider.github.release.created_at"),
+        ("published_at", "provider.github.release.published_at"),
+        ("body", "provider.github.release.notes"),
+        ("signature", "provider.github.signature"),
+        ("verification", "provider.github.signature.verification"),
+        ("provenance", "provider.github.provenance"),
+        ("advisories", "provider.github.advisories"),
+        ("yanked", "provider.github.yanked"),
+        ("hooks", "provider.github.hooks"),
+        ("variants", "provider.github.variants"),
+    ] {
+        if let Some(value) = object.get(field) {
+            add_typed_json_fact(&mut facts, target, value);
+        }
+    }
+    for (key, target) in [
+        ("sha256", "provider.github.digest"),
+        ("digest", "provider.github.digest"),
+        ("hash", "provider.github.digest"),
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(&mut facts, target, value);
+            if let Some(digest) = json_string(&object, key) {
+                if !ProviderSelector::parse(&format!("#digest={digest}")).is_exact() {
+                    losses.push(format!("GitHub `{key}` is not an exact digest"));
+                } else if facts.integrity_hash.is_empty() {
+                    facts.integrity_hash = digest;
+                } else if facts.integrity_hash != digest {
+                    conflicts
+                        .push("GitHub release declares conflicting content digests".to_string());
+                }
+            } else {
+                losses.push(format!("GitHub `{key}` must be a string"));
+            }
+        }
+    }
     facts.source_identity = format!("github:{}@{}", facts.name, facts.version);
-    report_with_identity(facts)
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
+    report
 }
 
 fn binary_report(document: &str) -> ProviderFactReport {
@@ -1635,28 +3174,1109 @@ fn binary_report(document: &str) -> ProviderFactReport {
             "binary metadata is not valid JSON",
         );
     };
-    let mut facts = MetadataFacts::empty(
-        ProviderFamily::Binary,
-        json_string(&object, "name").unwrap_or_default(),
-    );
-    facts.version = json_string(&object, "version").unwrap_or_default();
-    facts.integrity_hash = json_string(&object, "hash")
-        .or_else(|| json_string(&object, "sha256"))
-        .unwrap_or_default();
-    facts.platforms = json_array_strings(&object, "platforms");
-    let identity = if facts.version.is_empty() {
-        facts.integrity_hash.clone()
-    } else {
-        facts.version.clone()
-    };
-    facts.source_identity = format!("binary:{}@{}", facts.name, identity);
-    let mut report = report_with_identity(facts);
-    if report.facts.integrity_hash.is_empty() {
-        report
-            .losses
-            .push("binary metadata has no content hash".to_string());
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    let name = json_string(&object, "name").unwrap_or_default();
+    if name.is_empty() {
+        losses.push("binary metadata has no package name".to_string());
     }
+    let mut facts = MetadataFacts::empty(ProviderFamily::Binary, name);
+    add_json_projection(&mut facts, "provider.binary.native", &object);
+    if let Some(value) = object.get("version") {
+        match value {
+            JSONValue::String(version) => facts.version = version.clone(),
+            _ => losses.push("binary metadata `version` must be a string".to_string()),
+        }
+    }
+    let mut digests = Vec::new();
+    for key in ["hash", "sha256", "digest"] {
+        if let Some(value) = object.get(key) {
+            match value {
+                JSONValue::String(digest) if !digest.trim().is_empty() => {
+                    digests.push((key, digest.clone()));
+                    add_typed_text_fact(
+                        &mut facts,
+                        format!("provider.binary.identity.{key}"),
+                        digest,
+                    );
+                }
+                JSONValue::String(_) => losses.push(format!("binary metadata `{key}` is empty")),
+                _ => losses.push(format!("binary metadata `{key}` must be a string")),
+            }
+        }
+    }
+    if digests.windows(2).any(|pair| pair[0].1 != pair[1].1) {
+        conflicts.push("binary metadata declares conflicting content hashes".to_string());
+    }
+    facts.integrity_hash = digests
+        .first()
+        .map(|(_, digest)| digest.clone())
+        .unwrap_or_default();
+    if facts.integrity_hash.is_empty() {
+        losses.push("binary metadata has no content hash".to_string());
+    } else if !ProviderSelector::parse(&format!("#digest={}", facts.integrity_hash)).is_exact() {
+        losses.push("binary metadata content hash is not an exact digest".to_string());
+    }
+    let mut platforms = Vec::new();
+    for key in ["platform", "target"] {
+        if let Some(value) = object.get(key) {
+            match value {
+                JSONValue::String(platform) if !platform.trim().is_empty() => {
+                    platforms.push(platform.clone());
+                }
+                JSONValue::String(_) => losses.push(format!("binary metadata `{key}` is empty")),
+                _ => losses.push(format!("binary metadata `{key}` must be a string")),
+            }
+        }
+    }
+    if let Some(value) = object.get("platforms") {
+        match json_string_list(value) {
+            Some(values) => platforms.extend(values),
+            None => losses.push("binary metadata `platforms` must be strings".to_string()),
+        }
+    }
+    platforms.sort();
+    platforms.dedup();
+    facts.platforms = platforms;
+    if facts.platforms.is_empty() {
+        losses.push("binary metadata has no target platform".to_string());
+    }
+    facts.dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "dependencies",
+        "runtime",
+        "binary",
+        &mut losses,
+    );
+    facts.build_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "build_dependencies",
+        "build",
+        "binary",
+        &mut losses,
+    );
+    facts.dev_dependencies = provider_dependency_field(
+        &mut facts,
+        &object,
+        "dev_dependencies",
+        "dev",
+        "binary",
+        &mut losses,
+    );
+    if let Some(value) = object.get("bins") {
+        match json_string_list(value) {
+            Some(values) => facts.bins = values,
+            None => losses.push("binary metadata `bins` must be strings".to_string()),
+        }
+    }
+    for (field, target) in [
+        ("license", "provider.binary.license"),
+        ("url", "provider.binary.source.url"),
+        ("urls", "provider.binary.source.urls"),
+        ("source", "provider.binary.source.identity"),
+        ("owner", "provider.binary.source.owner"),
+        ("signature", "provider.binary.signature"),
+        ("signatures", "provider.binary.signature.set"),
+        ("provenance", "provider.binary.provenance"),
+        ("sbom", "provider.binary.sbom"),
+        ("advisories", "provider.binary.advisories"),
+        ("yanked", "provider.binary.yanked"),
+        ("revoked", "provider.binary.revoked"),
+        ("variants", "provider.binary.variants"),
+        ("hooks", "provider.binary.hooks"),
+    ] {
+        if let Some(value) = object.get(field) {
+            add_typed_json_fact(&mut facts, target, value);
+        }
+    }
+    if let Some(value) = object.get("artifacts") {
+        binary_artifact_facts(&mut facts, value, &mut losses);
+    }
+    facts.source_identity = format!("binary:{}@{}", facts.name, facts.integrity_hash);
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
     report
+}
+
+fn nix_report(document: &str) -> ProviderFactReport {
+    let parsed = match JSON::parse(document) {
+        Ok(value) => value,
+        Err(_) => {
+            return empty_report(
+                ProviderFamily::Nix,
+                "nix",
+                "Nix provider metadata is not valid JSON",
+            )
+        }
+    };
+    match parsed {
+        JSONValue::Object(object) => nix_object_report(&object),
+        JSONValue::Array(entries) => {
+            let Some(JSONValue::Object(first)) = entries.first() else {
+                return empty_report(
+                    ProviderFamily::Nix,
+                    "nix",
+                    "Nix provider metadata entries must be JSON objects",
+                );
+            };
+            let mut report = nix_object_report(first);
+            for (index, entry) in entries.iter().enumerate().skip(1) {
+                let JSONValue::Object(other) = entry else {
+                    report.losses.push(format!(
+                        "Nix provider metadata entry {} is not a JSON object",
+                        index + 1
+                    ));
+                    continue;
+                };
+                if nix_identity_key(first) != nix_identity_key(other) {
+                    report.losses.push(format!(
+                        "Nix provider metadata contains multiple package identities; entry {} needs its own lock record",
+                        index + 1
+                    ));
+                } else if other != first {
+                    report.conflicts.push(format!(
+                        "Nix provider metadata entry {} conflicts with the first native record",
+                        index + 1
+                    ));
+                }
+            }
+            report
+        }
+        _ => empty_report(
+            ProviderFamily::Nix,
+            "nix",
+            "Nix provider metadata must be a JSON object or realization array",
+        ),
+    }
+}
+
+fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
+    let meta = object.get("meta").and_then(|value| value.as_object().ok());
+    let locked = object
+        .get("locked")
+        .and_then(|value| value.as_object().ok());
+    let mut losses = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut facts = MetadataFacts::empty(ProviderFamily::Nix, "");
+    add_json_projection(&mut facts, "provider.nix.native", object);
+
+    if let Some(meta) = meta {
+        add_json_projection(&mut facts, "provider.nix.native.meta", meta);
+    } else if object.contains_key("meta") {
+        losses.push("Nix `meta` must be a JSON object".to_string());
+    }
+    if let Some(locked) = locked {
+        add_json_projection(&mut facts, "provider.nix.locked", locked);
+    } else if object.contains_key("locked") {
+        losses.push("Nix `locked` source facts must be a JSON object".to_string());
+    }
+
+    let top_name = nix_string_field(object, "name", "name", &mut losses);
+    let pname = nix_string_field(object, "pname", "pname", &mut losses);
+    let package = nix_string_field(object, "package", "package", &mut losses);
+    let meta_name =
+        meta.and_then(|value| nix_string_field(value, "name", "meta.name", &mut losses));
+    nix_conflicting_values(
+        &mut conflicts,
+        "Nix metadata declares conflicting package names",
+        [
+            ("pname", pname.clone()),
+            ("package", package.clone()),
+            ("meta.name", meta_name.clone()),
+        ],
+    );
+    if let (Some(top_name), Some(pname)) = (top_name.as_deref(), pname.as_deref()) {
+        if top_name != pname && nix_version_suffix(top_name, pname).is_none() {
+            conflicts.push(format!(
+                "Nix metadata declares conflicting package names: name={top_name} disagrees with pname={pname}"
+            ));
+        }
+    }
+
+    let top_version = nix_string_field(object, "version", "version", &mut losses);
+    let meta_version =
+        meta.and_then(|value| nix_string_field(value, "version", "meta.version", &mut losses));
+    nix_conflicting_values(
+        &mut conflicts,
+        "Nix metadata declares conflicting package versions",
+        [
+            ("version", top_version.clone()),
+            ("meta.version", meta_version.clone()),
+        ],
+    );
+
+    let drv_path = nix_string_field(object, "drvPath", "drvPath", &mut losses)
+        .or_else(|| nix_string_field(object, "derivationPath", "derivationPath", &mut losses));
+    let output_path = nix_output_path(object, &mut losses);
+    let path_identity = output_path
+        .as_deref()
+        .or(drv_path.as_deref())
+        .and_then(nix_path_identity);
+    let raw_name = pname
+        .clone()
+        .or(meta_name.clone())
+        .or(package.clone())
+        .or(top_name.clone());
+    let (path_name, path_version) = path_identity.unwrap_or_default();
+    let path_name = (!path_name.is_empty()).then_some(path_name);
+    let path_version = (!path_version.is_empty()).then_some(path_version);
+    let selected_name = if pname.is_none() && meta_name.is_none() && package.is_none() {
+        path_name.clone().or(raw_name)
+    } else {
+        raw_name.or(path_name)
+    };
+    facts.name = selected_name
+        .unwrap_or_default()
+        .trim_end_matches(".drv")
+        .to_string();
+    facts.version = top_version
+        .or(meta_version)
+        .or(path_version)
+        .or_else(|| {
+            top_name
+                .as_deref()
+                .and_then(|name| nix_version_suffix(name, facts.name.as_str()))
+        })
+        .unwrap_or_default();
+
+    let top_hash = nix_hash_field(object, &mut losses);
+    let output_hash = object
+        .get("outputs")
+        .and_then(|value| value.as_object().ok())
+        .and_then(|outputs| outputs.get("out").or_else(|| outputs.get("bin")))
+        .and_then(|value| value.as_object().ok())
+        .and_then(|output| {
+            ["narHash", "outputHash", "hash", "sha256"]
+                .iter()
+                .find_map(|key| {
+                    nix_string_field(output, key, &format!("outputs.out.{key}"), &mut losses)
+                })
+        });
+    nix_conflicting_values(
+        &mut conflicts,
+        "Nix metadata declares conflicting integrity hashes",
+        [
+            ("native", top_hash.clone()),
+            ("outputs.out", output_hash.clone()),
+        ],
+    );
+    facts.integrity_hash = top_hash.or(output_hash).unwrap_or_default();
+
+    nix_dependencies(
+        &mut facts,
+        object,
+        &mut losses,
+        &[
+            ("dependencies", "runtime"),
+            ("runtimeInputs", "runtime"),
+            ("propagatedBuildInputs", "propagated"),
+            ("devDependencies", "dev"),
+            ("devInputs", "dev"),
+            ("buildInputs", "build"),
+            ("nativeBuildInputs", "native-build"),
+            ("checkInputs", "check"),
+            ("inputDrvs", "input"),
+        ],
+    );
+    nix_hooks(&mut facts, object, &mut losses);
+    nix_variants(&mut facts, object, meta, &mut losses);
+    nix_license(&mut facts, object, meta, &mut losses);
+    nix_signatures(&mut facts, object, &mut losses);
+    nix_advisories(&mut facts, object, meta, &mut losses);
+    nix_sources(&mut facts, object, locked, drv_path.as_deref(), &mut losses);
+
+    if let Some(JSONValue::Object(nodes)) = object.get("nodes") {
+        add_json_projection(&mut facts, "provider.nix.lock.nodes", nodes);
+        for (name, node) in nodes {
+            add_typed_json_fact(&mut facts, format!("provider.nix.lock.node.{name}"), node);
+        }
+        if nodes.len() > 1 && (facts.name.is_empty() || facts.version.is_empty()) {
+            facts.name = "nix-lock".to_string();
+            facts.version = "set".to_string();
+            losses.push(
+                "Nix flake lock contains multiple source nodes; select one exact package identity"
+                    .to_string(),
+            );
+        }
+    } else if object.contains_key("nodes") {
+        losses.push("Nix flake lock `nodes` must be a JSON object".to_string());
+    }
+    if let Some(value) = object.get("packages") {
+        add_typed_json_fact(&mut facts, "provider.nix.packages", value);
+        match value {
+            JSONValue::Array(packages) => {
+                for package in packages {
+                    match package {
+                        JSONValue::String(name) => facts.dependencies.push(name.clone()),
+                        JSONValue::Object(package) => {
+                            if let Some(name) = json_string(package, "name") {
+                                facts.dependencies.push(name.clone());
+                                add_typed_json_fact(
+                                    &mut facts,
+                                    format!("provider.nix.package.{name}"),
+                                    package.get("version").unwrap_or(value),
+                                );
+                            } else {
+                                losses.push(
+                                    "Nix package entry has no exact package name".to_string(),
+                                );
+                            }
+                        }
+                        _ => losses.push(
+                            "Nix package entries must be strings or JSON objects".to_string(),
+                        ),
+                    }
+                }
+            }
+            _ => losses.push("Nix `packages` must be an array".to_string()),
+        }
+    }
+
+    let source_identity = nix_source_identity(object, locked, drv_path.as_deref());
+    facts.source_identity = source_identity.unwrap_or_else(|| {
+        if facts.name.is_empty() || facts.version.is_empty() {
+            String::new()
+        } else {
+            format!("nix:{}@{}", facts.name, facts.version)
+        }
+    });
+    if facts.source_identity.is_empty() {
+        losses.push("Nix metadata has no immutable source identity".to_string());
+    }
+    let mut report = report_with_identity(facts);
+    report.losses.append(&mut losses);
+    report.conflicts.append(&mut conflicts);
+    report
+}
+
+fn nix_identity_key(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    (
+        object
+            .get("pname")
+            .and_then(|value| value.as_str().ok())
+            .map(str::to_string)
+            .or_else(|| {
+                object
+                    .get("name")
+                    .and_then(|value| value.as_str().ok())
+                    .map(str::to_string)
+            }),
+        object
+            .get("version")
+            .and_then(|value| value.as_str().ok())
+            .map(str::to_string),
+        object
+            .get("drvPath")
+            .and_then(|value| value.as_str().ok())
+            .map(str::to_string)
+            .or_else(|| {
+                object
+                    .get("narHash")
+                    .and_then(|value| value.as_str().ok())
+                    .map(str::to_string)
+            }),
+    )
+}
+
+fn nix_string_field(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    key: &str,
+    label: &str,
+    losses: &mut Vec<String>,
+) -> Option<String> {
+    match object.get(key) {
+        None => None,
+        Some(JSONValue::String(value)) if !value.trim().is_empty() => Some(value.clone()),
+        Some(JSONValue::String(_)) => {
+            losses.push(format!("Nix `{label}` must not be empty"));
+            None
+        }
+        Some(_) => {
+            losses.push(format!("Nix `{label}` must be a string"));
+            None
+        }
+    }
+}
+
+fn nix_conflicting_values<const N: usize>(
+    conflicts: &mut Vec<String>,
+    message: &str,
+    values: [(&str, Option<String>); N],
+) {
+    let mut selected: Option<(&str, String)> = None;
+    for (label, value) in values
+        .into_iter()
+        .filter_map(|(label, value)| value.map(|value| (label, value)))
+    {
+        if let Some((selected_label, selected_value)) = selected.as_ref() {
+            if selected_value != &value {
+                conflicts.push(format!(
+                    "{message}: {selected_label}={selected_value} disagrees with {label}={value}"
+                ));
+            }
+        } else {
+            selected = Some((label, value));
+        }
+    }
+}
+
+fn nix_output_path(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    losses: &mut Vec<String>,
+) -> Option<String> {
+    let Some(outputs) = object.get("outputs") else {
+        return None;
+    };
+    let Ok(outputs) = outputs.as_object() else {
+        losses.push("Nix `outputs` must be a JSON object".to_string());
+        return None;
+    };
+    let key = if outputs.contains_key("out") {
+        "out"
+    } else {
+        "bin"
+    };
+    nix_string_field(outputs, key, &format!("outputs.{key}"), losses)
+}
+
+fn nix_hash_field(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    losses: &mut Vec<String>,
+) -> Option<String> {
+    for key in ["narHash", "outputHash", "hash", "sha256", "contentHash"] {
+        if object.contains_key(key) {
+            return nix_string_field(object, key, key, losses);
+        }
+    }
+    None
+}
+
+fn nix_path_identity(path: &str) -> Option<(String, String)> {
+    let base = path.rsplit('/').next()?.trim_end_matches(".drv");
+    let payload = base.split_once('-')?.1;
+    let payload = payload.strip_suffix("-bin").unwrap_or(payload);
+    let mut candidate = None;
+    for (index, _) in payload.match_indices('-') {
+        let suffix = &payload[index + 1..];
+        if suffix
+            .chars()
+            .next()
+            .is_some_and(|value| value.is_ascii_digit())
+        {
+            candidate = Some((payload[..index].to_string(), suffix.to_string()));
+            break;
+        }
+    }
+    candidate.or_else(|| Some((payload.to_string(), String::new())))
+}
+
+fn nix_version_suffix(name: &str, package: &str) -> Option<String> {
+    name.strip_prefix(&format!("{package}-"))
+        .filter(|value| {
+            value
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_digit())
+        })
+        .map(str::to_string)
+}
+
+fn nix_dependency_values(value: &JSONValue, losses: &mut Vec<String>, label: &str) -> Vec<String> {
+    match value {
+        JSONValue::String(value) => vec![value.clone()],
+        JSONValue::Array(values) => values
+            .iter()
+            .filter_map(|value| match value {
+                JSONValue::String(value) => Some(value.clone()),
+                JSONValue::Object(object) => json_string(object, "name")
+                    .or_else(|| json_string(object, "drvPath"))
+                    .or_else(|| {
+                        losses.push(format!(
+                            "Nix `{label}` contains an object without a name or drvPath"
+                        ));
+                        None
+                    }),
+                _ => {
+                    losses.push(format!("Nix `{label}` entries must be strings or objects"));
+                    None
+                }
+            })
+            .collect(),
+        JSONValue::Object(values) => {
+            if label == "inputDrvs"
+                && values.values().any(|value| {
+                    !matches!(
+                        value,
+                        JSONValue::Array(outputs)
+                            if outputs
+                                .iter()
+                                .all(|output| matches!(output, JSONValue::String(_)))
+                    )
+                })
+            {
+                losses.push("Nix `inputDrvs` values must be arrays of output names".to_string());
+            }
+            values.keys().cloned().collect()
+        }
+        _ => {
+            losses.push(format!("Nix `{label}` must be a string, array, or object"));
+            Vec::new()
+        }
+    }
+}
+
+fn nix_dependencies(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    losses: &mut Vec<String>,
+    fields: &[(&str, &str)],
+) {
+    for (field, kind) in fields {
+        let Some(value) = object.get(*field) else {
+            continue;
+        };
+        add_typed_json_fact(facts, format!("provider.nix.dependency.{kind}"), value);
+        let values = nix_dependency_values(value, losses, field);
+        match *kind {
+            "runtime" | "propagated" => facts.dependencies.extend(values),
+            "dev" => facts.dev_dependencies.extend(values),
+            _ => facts.build_dependencies.extend(values),
+        }
+    }
+    for values in [
+        &mut facts.dependencies,
+        &mut facts.dev_dependencies,
+        &mut facts.build_dependencies,
+    ] {
+        values.sort();
+        values.dedup();
+    }
+}
+
+fn nix_hooks(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    _losses: &mut Vec<String>,
+) {
+    for key in [
+        "builder",
+        "args",
+        "buildCommand",
+        "shellHook",
+        "setupHook",
+        "hooks",
+        "configurePhase",
+        "buildPhase",
+        "checkPhase",
+        "installPhase",
+        "postInstall",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(facts, format!("provider.nix.hook.{key}"), value);
+            facts.scripts.push(key.to_string());
+        }
+    }
+    facts.scripts.sort();
+    facts.scripts.dedup();
+}
+
+fn nix_variants(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    losses: &mut Vec<String>,
+) {
+    for key in [
+        "system",
+        "platform",
+        "hostPlatform",
+        "buildPlatform",
+        "targetPlatform",
+        "crossSystem",
+        "features",
+        "platforms",
+        "outputs",
+        "variants",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(facts, format!("provider.nix.variant.{key}"), value);
+            let values = nix_string_list_value(value, key, losses);
+            facts.platforms.extend(values);
+        }
+    }
+    if let Some(meta) = meta {
+        if let Some(value) = meta.get("platforms") {
+            add_typed_json_fact(facts, "provider.nix.variant.meta.platforms", value);
+            facts
+                .platforms
+                .extend(nix_string_list_value(value, "meta.platforms", losses));
+        }
+    }
+    facts.platforms.sort();
+    facts.platforms.dedup();
+}
+
+fn nix_string_list_value(value: &JSONValue, label: &str, losses: &mut Vec<String>) -> Vec<String> {
+    match value {
+        JSONValue::String(value) => vec![value.clone()],
+        JSONValue::Array(values) => values
+            .iter()
+            .filter_map(|value| match value {
+                JSONValue::String(value) => Some(value.clone()),
+                _ => {
+                    losses.push(format!("Nix `{label}` entries must be strings"));
+                    None
+                }
+            })
+            .collect(),
+        JSONValue::Object(_)
+            if matches!(
+                label,
+                "crossSystem"
+                    | "features"
+                    | "outputs"
+                    | "variants"
+                    | "signature"
+                    | "signatures"
+                    | "publicKey"
+                    | "public_key"
+                    | "signingKey"
+                    | "signedBy"
+                    | "trustedKeys"
+            ) =>
+        {
+            Vec::new()
+        }
+        _ => {
+            losses.push(format!(
+                "Nix `{label}` must be a string or array of strings"
+            ));
+            Vec::new()
+        }
+    }
+}
+
+fn nix_license(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    _losses: &mut Vec<String>,
+) {
+    let license = object
+        .get("license")
+        .or_else(|| meta.and_then(|value| value.get("license")));
+    if let Some(value) = license {
+        add_typed_json_fact(facts, "provider.nix.license", value);
+        facts.license = json_value_text(value);
+    }
+}
+
+fn nix_signatures(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    losses: &mut Vec<String>,
+) {
+    for key in [
+        "signature",
+        "signatures",
+        "publicKey",
+        "public_key",
+        "signingKey",
+        "signedBy",
+        "trustedKeys",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(facts, format!("provider.nix.signature.{key}"), value);
+            facts
+                .trust_roots
+                .extend(nix_string_list_value(value, key, losses));
+        }
+    }
+    facts.trust_roots.sort();
+    facts.trust_roots.dedup();
+}
+
+fn nix_advisories(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    losses: &mut Vec<String>,
+) {
+    for key in ["yanked", "broken", "insecure", "unfree", "available"] {
+        if let Some(value) = object.get(key).or_else(|| meta.and_then(|m| m.get(key))) {
+            add_typed_json_fact(facts, format!("provider.nix.advisory.{key}"), value);
+            if !matches!(value, JSONValue::Bool(_)) {
+                losses.push(format!("Nix `{key}` advisory flag must be a boolean"));
+            }
+        }
+    }
+    for key in ["advisories", "knownVulnerabilities", "vulnerabilities"] {
+        if let Some(value) = object.get(key).or_else(|| meta.and_then(|m| m.get(key))) {
+            add_typed_json_fact(facts, format!("provider.nix.advisory.{key}"), value);
+            if !matches!(value, JSONValue::String(_) | JSONValue::Array(_)) {
+                losses.push(format!("Nix `{key}` advisories must be a string or array"));
+            }
+            if let Some(values) = json_string_list(value) {
+                facts.todos.extend(values);
+            }
+        }
+    }
+}
+
+fn nix_sources(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    drv_path: Option<&str>,
+    _losses: &mut Vec<String>,
+) {
+    for key in [
+        "source",
+        "sourceInfo",
+        "sourceProvenance",
+        "origin",
+        "owner",
+        "repository",
+        "repo",
+        "url",
+        "homepage",
+        "downloadPage",
+    ] {
+        if let Some(value) = object.get(key) {
+            add_typed_json_fact(facts, format!("provider.nix.source.{key}"), value);
+        }
+    }
+    if let Some(locked) = locked {
+        for key in ["type", "owner", "repo", "rev", "narHash", "lastModified"] {
+            if let Some(value) = locked.get(key) {
+                add_typed_json_fact(facts, format!("provider.nix.source.locked.{key}"), value);
+            }
+        }
+    }
+    if let Some(drv_path) = drv_path {
+        add_typed_text_fact(facts, "provider.nix.source.drv_path", drv_path);
+    }
+}
+
+fn nix_source_identity(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    drv_path: Option<&str>,
+) -> Option<String> {
+    for key in ["sourceIdentity", "immutableSource", "sourcePath", "flake"] {
+        if let Some(value) = object.get(key).and_then(|value| value.as_str().ok()) {
+            if !value.trim().is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    if let Some(locked) = locked {
+        let kind = json_string(locked, "type").unwrap_or_else(|| "flake".to_string());
+        let owner = json_string(locked, "owner");
+        let repo = json_string(locked, "repo");
+        let revision = json_string(locked, "rev").or_else(|| json_string(locked, "narHash"));
+        let name = match (owner, repo) {
+            (Some(owner), Some(repo)) => format!("{owner}/{repo}"),
+            (Some(owner), None) | (None, Some(owner)) => owner,
+            (None, None) => String::new(),
+        };
+        if !name.is_empty() {
+            return Some(format!("{kind}:{name}@{}", revision.unwrap_or_default()));
+        }
+    }
+    drv_path.map(|path| format!("nix:drv:{path}"))
+}
+
+fn provider_dependency_field(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    field: &str,
+    kind: &str,
+    namespace: &str,
+    losses: &mut Vec<String>,
+) -> Vec<String> {
+    let Some(value) = object.get(field) else {
+        return Vec::new();
+    };
+    let Some(values) = value.as_array().ok() else {
+        losses.push(format!("{namespace} `{field}` must be an array"));
+        return Vec::new();
+    };
+    let mut dependencies = Vec::new();
+    for (index, value) in values.iter().enumerate() {
+        add_typed_json_fact(
+            facts,
+            format!("provider.{namespace}.dependency.{kind}.{index}"),
+            value,
+        );
+        match value {
+            JSONValue::String(name) if !name.trim().is_empty() => {
+                dependencies.push(name.clone());
+                add_typed_json_fact(
+                    facts,
+                    format!("provider.{namespace}.dependency.{kind}.{name}"),
+                    value,
+                );
+            }
+            JSONValue::Object(dependency) => {
+                let Some(name) =
+                    json_string(dependency, "name").or_else(|| json_string(dependency, "id"))
+                else {
+                    losses.push(format!(
+                        "{namespace} `{field}[{index}]` has no dependency name"
+                    ));
+                    continue;
+                };
+                let requirement = ["version", "version_requirement", "requirement"]
+                    .iter()
+                    .find_map(|key| json_string(dependency, key))
+                    .unwrap_or_default();
+                dependencies.push(format_dependency(&name, &requirement));
+                add_typed_json_fact(
+                    facts,
+                    format!("provider.{namespace}.dependency.{kind}.{name}"),
+                    value,
+                );
+            }
+            _ => losses.push(format!(
+                "{namespace} `{field}[{index}]` must be a dependency name or object"
+            )),
+        }
+    }
+    dependencies
+}
+
+fn add_homebrew_named_facts(
+    facts: &mut MetadataFacts,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+) {
+    for (field, category) in [
+        ("homepage", "source"),
+        ("tap", "source"),
+        ("full_name", "source"),
+        ("urls", "source"),
+        ("source", "source"),
+        ("head", "source"),
+        ("bottle", "variant"),
+        ("variations", "variant"),
+        ("keg_only", "variant"),
+        ("relocatable", "variant"),
+        ("cellar", "variant"),
+        ("prefix", "variant"),
+        ("install", "hook"),
+        ("post_install", "hook"),
+        ("service", "hook"),
+        ("test", "hook"),
+        ("caveats", "hook"),
+        ("deprecated", "advisory"),
+        ("disabled", "advisory"),
+        ("deprecation_date", "advisory"),
+        ("disable_date", "advisory"),
+        ("replacement", "advisory"),
+    ] {
+        if let Some(value) = object.get(field) {
+            add_typed_json_fact(
+                facts,
+                format!("provider.homebrew.{category}.{field}"),
+                value,
+            );
+        }
+    }
+}
+
+fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+    let Some(bottle) = value.as_object().ok() else {
+        losses.push("Homebrew `bottle` must be an object".to_string());
+        return;
+    };
+    let Some(stable) = bottle.get("stable") else {
+        losses.push("Homebrew `bottle` has no stable artifact set".to_string());
+        return;
+    };
+    let Some(stable) = stable.as_object().ok() else {
+        losses.push("Homebrew `bottle.stable` must be an object".to_string());
+        return;
+    };
+    let files = stable
+        .get("files")
+        .and_then(|value| value.as_object().ok())
+        .unwrap_or(stable);
+    for (platform, artifact) in files {
+        let Some(artifact) = artifact.as_object().ok() else {
+            if platform != "rebuild" {
+                losses.push(format!(
+                    "Homebrew bottle entry `{platform}` must be an object"
+                ));
+            }
+            continue;
+        };
+        add_typed_json_fact(
+            facts,
+            format!("provider.homebrew.bottle.{platform}"),
+            &JSONValue::Object(artifact.clone()),
+        );
+        let Some(hash) = json_string(artifact, "sha256") else {
+            losses.push(format!(
+                "Homebrew bottle entry `{platform}` has no content hash"
+            ));
+            continue;
+        };
+        if !ProviderSelector::parse(&format!("#digest={hash}")).is_exact() {
+            losses.push(format!(
+                "Homebrew bottle entry `{platform}` has a non-exact digest"
+            ));
+        }
+        add_typed_text_fact(
+            facts,
+            format!("provider.homebrew.bottle.{platform}.sha256"),
+            &hash,
+        );
+    }
+}
+
+fn homebrew_source_hash(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    losses: &mut Vec<String>,
+) -> Option<String> {
+    let mut hashes = Vec::new();
+    for (field, value) in [
+        ("sha256", object.get("sha256")),
+        ("source", object.get("source")),
+    ] {
+        let Some(value) = value else {
+            continue;
+        };
+        let hash = if field == "sha256" {
+            match value {
+                JSONValue::String(hash) if !hash.trim().is_empty() => Some(hash.clone()),
+                JSONValue::String(_) => {
+                    losses.push("Homebrew `sha256` must not be empty".to_string());
+                    None
+                }
+                _ => {
+                    losses.push("Homebrew `sha256` must be a string".to_string());
+                    None
+                }
+            }
+        } else {
+            let Some(source) = value.as_object().ok() else {
+                losses.push("Homebrew `source` must be an object".to_string());
+                continue;
+            };
+            match source.get("sha256") {
+                Some(JSONValue::String(hash)) if !hash.trim().is_empty() => Some(hash.clone()),
+                Some(JSONValue::String(_)) => {
+                    losses.push("Homebrew `source.sha256` must not be empty".to_string());
+                    None
+                }
+                Some(_) => {
+                    losses.push("Homebrew `source.sha256` must be a string".to_string());
+                    None
+                }
+                None => None,
+            }
+        };
+        if let Some(hash) = hash {
+            if !ProviderSelector::parse(&format!("#digest={hash}")).is_exact() {
+                losses.push(format!("Homebrew {field} hash is not an exact digest"));
+            }
+            hashes.push(hash);
+        }
+    }
+    if let Some(urls_value) = object.get("urls") {
+        let Some(urls) = urls_value.as_object().ok() else {
+            losses.push("Homebrew `urls` must be an object".to_string());
+            return hashes.into_iter().next();
+        };
+        if let Some(stable_value) = urls.get("stable") {
+            let Some(stable) = stable_value.as_object().ok() else {
+                losses.push("Homebrew `urls.stable` must be an object".to_string());
+                return hashes.into_iter().next();
+            };
+            if let Some(hash) = json_string(stable, "sha256") {
+                if !ProviderSelector::parse(&format!("#digest={hash}")).is_exact() {
+                    losses.push("Homebrew `urls.stable.sha256` is not an exact digest".to_string());
+                }
+                hashes.push(hash);
+            } else if stable.contains_key("sha256") {
+                losses.push("Homebrew `urls.stable.sha256` must be a string".to_string());
+            }
+        }
+    }
+    if hashes.windows(2).any(|pair| pair[0] != pair[1]) {
+        losses.push("Homebrew source metadata declares conflicting hashes".to_string());
+    }
+    hashes.into_iter().next()
+}
+
+fn github_asset_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+    let Some(assets) = value.as_array().ok() else {
+        losses.push("GitHub `assets` must be an array".to_string());
+        return;
+    };
+    for (index, value) in assets.iter().enumerate() {
+        let Some(asset) = value.as_object().ok() else {
+            losses.push(format!("GitHub asset {index} must be an object"));
+            continue;
+        };
+        let Some(name) = json_string(asset, "name") else {
+            losses.push(format!("GitHub asset {index} has no name"));
+            continue;
+        };
+        add_json_projection(facts, &format!("provider.github.asset.{name}"), asset);
+        if let Some(platform) = json_string(asset, "platform") {
+            facts.platforms.push(platform);
+        }
+        let digest = asset
+            .get("digest")
+            .or_else(|| asset.get("sha256"))
+            .or_else(|| asset.get("hash"));
+        match digest {
+            Some(JSONValue::String(digest))
+                if ProviderSelector::parse(&format!("#digest={digest}")).is_exact() => {}
+            Some(JSONValue::String(_)) => {
+                losses.push(format!("GitHub asset `{name}` has a non-exact digest"))
+            }
+            Some(_) => losses.push(format!("GitHub asset `{name}` digest must be a string")),
+            None => losses.push(format!("GitHub asset `{name}` has no content digest")),
+        }
+    }
+}
+
+fn binary_artifact_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+    let Some(artifacts) = value.as_object().ok() else {
+        losses.push("binary metadata `artifacts` must be an object".to_string());
+        return;
+    };
+    for (platform, artifact) in artifacts {
+        facts.platforms.push(platform.clone());
+        let Some(artifact) = artifact.as_object().ok() else {
+            losses.push(format!("binary artifact `{platform}` must be an object"));
+            continue;
+        };
+        add_json_projection(
+            facts,
+            &format!("provider.binary.artifact.{platform}"),
+            artifact,
+        );
+        if let Some(digest) = json_string(artifact, "sha256")
+            .or_else(|| json_string(artifact, "hash"))
+            .or_else(|| json_string(artifact, "digest"))
+        {
+            if !ProviderSelector::parse(&format!("#digest={digest}")).is_exact() {
+                losses.push(format!(
+                    "binary artifact `{platform}` has a non-exact digest"
+                ));
+            }
+        } else {
+            losses.push(format!("binary artifact `{platform}` has no content hash"));
+        }
+    }
 }
 
 fn report_with_identity(facts: MetadataFacts) -> ProviderFactReport {
@@ -1690,20 +4310,23 @@ fn empty_report(family: ProviderFamily, name: &str, loss: &str) -> ProviderFactR
 fn provider_document_format(family: &ProviderFamily, document: &str) -> String {
     match family {
         ProviderFamily::Npm
-        | ProviderFamily::SwiftPM
         | ProviderFamily::Vcpkg
         | ProviderFamily::Homebrew
         | ProviderFamily::JetRegistry
         | ProviderFamily::Github
         | ProviderFamily::Binary => "json".to_string(),
+        ProviderFamily::SwiftPM => "json".to_string(),
+        ProviderFamily::PyPI if JSON::parse(document).is_ok() => "json".to_string(),
         ProviderFamily::NuGet if JSON::parse(document).is_ok() => "json".to_string(),
         ProviderFamily::NuGet => "xml".to_string(),
         ProviderFamily::Conan if JSON::parse(document).is_ok() => "json".to_string(),
         ProviderFamily::Conan => "conan".to_string(),
+        ProviderFamily::Nix if JSON::parse(document).is_ok() => "json".to_string(),
+        ProviderFamily::Nix => "nix".to_string(),
         ProviderFamily::Cargo => "toml".to_string(),
         ProviderFamily::PyPI => "python-metadata".to_string(),
         ProviderFamily::Maven => "xml".to_string(),
-        ProviderFamily::Core | ProviderFamily::Nix | ProviderFamily::Path => "provider".to_string(),
+        ProviderFamily::Core | ProviderFamily::Path => "provider".to_string(),
     }
 }
 
@@ -1747,16 +4370,25 @@ fn json_array_strings(
 fn vcpkg_dependencies(
     object: &std::collections::BTreeMap<String, JSONValue>,
     typed: &mut std::collections::BTreeMap<String, Vec<String>>,
+    losses: &mut Vec<String>,
 ) -> Vec<String> {
-    let Some(JSONValue::Array(values)) = object.get("dependencies") else {
+    let Some(value) = object.get("dependencies") else {
+        return Vec::new();
+    };
+    let Some(values) = value.as_array().ok() else {
+        losses.push("vcpkg `dependencies` must be an array".to_string());
         return Vec::new();
     };
     let mut dependencies = Vec::new();
-    for value in values {
+    for (index, value) in values.iter().enumerate() {
         match value {
-            JSONValue::String(name) => dependencies.push(name.clone()),
+            JSONValue::String(name) if !name.trim().is_empty() => dependencies.push(name.clone()),
+            JSONValue::String(_) => {
+                losses.push(format!("vcpkg dependency {index} has an empty name"));
+            }
             JSONValue::Object(dependency) => {
                 let Some(name) = json_string(dependency, "name") else {
+                    losses.push(format!("vcpkg dependency {index} has no non-empty `name`"));
                     continue;
                 };
                 let version = ["version>=", "version>", "version"]
@@ -1764,7 +4396,7 @@ fn vcpkg_dependencies(
                     .find_map(|key| json_string(dependency, key))
                     .unwrap_or_default();
                 dependencies.push(format_dependency(&name, &version));
-                for key in ["features", "platform", "host"] {
+                for key in ["features", "platform", "host", "default-features"] {
                     if let Some(value) = dependency.get(key) {
                         typed.insert(
                             format!("vcpkg.dependency.{name}.{key}"),
@@ -1772,8 +4404,19 @@ fn vcpkg_dependencies(
                         );
                     }
                 }
+                for key in ["version>=", "version>", "version"] {
+                    if let Some(value) = dependency.get(key) {
+                        if !matches!(value, JSONValue::String(_)) {
+                            losses.push(format!(
+                                "vcpkg dependency `{name}` field `{key}` must be a string"
+                            ));
+                        }
+                    }
+                }
             }
-            _ => {}
+            _ => losses.push(format!(
+                "vcpkg dependency {index} must be a string or object"
+            )),
         }
     }
     dependencies
@@ -1818,6 +4461,105 @@ fn json_value_json(value: &JSONValue) -> String {
 
 // ponytail: bounded tag/attribute scan; add an XML parser if namespaces or
 // entity decoding become part of provider identity.
+fn xml_blocks(document: &str, tag: &str) -> Vec<(usize, String)> {
+    let closing = format!("</{tag}>");
+    xml_opening_tag_ranges(document, tag)
+        .into_iter()
+        .filter_map(|(start, end, opening)| {
+            if opening.trim_end().ends_with("/>") {
+                return None;
+            }
+            let body_start = end + 1;
+            let close = document.get(body_start..)?.find(&closing)?;
+            let body_end = body_start + close + closing.len();
+            Some((start, document.get(start..body_end)?.to_string()))
+        })
+        .collect()
+}
+
+fn xml_direct_child_values(document: &str, parent: &str, child: &str) -> Vec<String> {
+    let Some((_, parent_end, _)) = xml_opening_tag_ranges(document, parent).into_iter().next()
+    else {
+        return Vec::new();
+    };
+    let closing = format!("</{parent}>");
+    let body_start = parent_end + 1;
+    let Some(close) = document
+        .get(body_start..)
+        .and_then(|body| body.find(&closing))
+    else {
+        return Vec::new();
+    };
+    let body_end = body_start + close;
+    let mut values = Vec::new();
+    let mut depth = 0usize;
+    let mut cursor = body_start;
+    while cursor < body_end {
+        let Some(relative_start) = document[cursor..body_end].find('<') else {
+            break;
+        };
+        let start = cursor + relative_start;
+        if document[start..].starts_with("<!--") {
+            cursor = document[start + 4..body_end]
+                .find("-->")
+                .map(|end| start + 4 + end + 3)
+                .unwrap_or(body_end);
+            continue;
+        }
+        if document[start..].starts_with("<![CDATA[") {
+            cursor = document[start + 9..body_end]
+                .find("]]>")
+                .map(|end| start + 9 + end + 3)
+                .unwrap_or(body_end);
+            continue;
+        }
+        let Some(relative_end) = xml_opening_tag_end(&document[start..body_end]) else {
+            break;
+        };
+        let end = start + relative_end;
+        let opening = &document[start..=end];
+        if opening.starts_with("</") {
+            depth = depth.saturating_sub(1);
+            cursor = end + 1;
+            continue;
+        }
+        if opening.starts_with("<?") || opening.starts_with("<!") {
+            cursor = end + 1;
+            continue;
+        }
+        let name = xml_opening_name(opening);
+        let self_closing = opening.trim_end().ends_with("/>");
+        if depth == 0 && name == child && !self_closing {
+            let child_closing = format!("</{child}>");
+            if let Some(relative_close) = document[end + 1..body_end].find(&child_closing) {
+                let value_start = end + 1;
+                values.push(
+                    document[value_start..value_start + relative_close]
+                        .trim()
+                        .to_string(),
+                );
+                cursor = value_start + relative_close + child_closing.len();
+                continue;
+            }
+        }
+        if !self_closing {
+            depth += 1;
+        }
+        cursor = end + 1;
+    }
+    values
+}
+
+fn xml_opening_name(opening: &str) -> &str {
+    opening
+        .strip_prefix('<')
+        .unwrap_or(opening)
+        .trim_start_matches('/')
+        .split(|character: char| character.is_whitespace() || matches!(character, '>' | '/'))
+        .next()
+        .unwrap_or_default()
+}
+
 fn xml_tag(document: &str, tag: &str) -> Option<String> {
     xml_tag_values(document, tag).into_iter().next()
 }
@@ -1911,25 +4653,47 @@ fn xml_attribute(opening: &str, key: &str) -> Option<String> {
     None
 }
 
-fn metadata_line(document: &str, key: &str) -> Option<String> {
-    document.lines().find_map(|line| {
-        let (left, right) = line.split_once(':')?;
-        left.trim()
-            .eq_ignore_ascii_case(key)
-            .then(|| right.trim().to_string())
-    })
+fn metadata_fields(document: &str) -> Vec<(String, String)> {
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for line in document.lines() {
+        if line
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_whitespace())
+        {
+            if let Some((_, value)) = fields.last_mut() {
+                value.push(' ');
+                value.push_str(line.trim());
+            }
+            continue;
+        }
+        let Some((left, right)) = line.split_once(':') else {
+            continue;
+        };
+        let key = left.trim();
+        if !key.is_empty() {
+            fields.push((key.to_string(), right.trim().to_string()));
+        }
+    }
+    fields
 }
 
-fn metadata_list(document: &str, key: &str) -> Vec<String> {
-    document
-        .lines()
-        .filter_map(|line| {
-            let (left, right) = line.split_once(':')?;
-            left.trim()
-                .eq_ignore_ascii_case(key)
-                .then(|| right.trim().to_string())
-        })
+fn metadata_values(fields: &[(String, String)], key: &str) -> Vec<String> {
+    fields
+        .iter()
+        .filter(|(field, _)| field.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.clone())
         .collect()
+}
+
+fn distinct_values(values: &[String]) -> Vec<String> {
+    let mut distinct = Vec::new();
+    for value in values {
+        if !distinct.contains(value) {
+            distinct.push(value.clone());
+        }
+    }
+    distinct
 }
 
 fn format_dependency(name: &str, version: &str) -> String {
@@ -2040,7 +4804,7 @@ fn dependency_keys(raw: &str, section: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{normalize_provider_document, ProviderFamily};
-    use jet_pkg_model::ProviderFacts::ProviderFacts;
+    use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 
     #[test]
     fn lock_uses_canonical_carrier_and_retains_raw_reference() {
@@ -2059,6 +4823,38 @@ mod tests {
         .expect("locked provider facts JSON");
         assert_eq!(locked, shared);
         assert_eq!(lock.rationales[0].source_ref, "web#1.0.0@npm".to_string());
+    }
+
+    #[test]
+    fn unpinned_alias_lowers_resolved_selector_and_typed_native_facts() {
+        let native = r#"{"name":"web","version":"1.0.0","yanked":false}"#;
+        let report = normalize_provider_document(ProviderFamily::Npm, native);
+        let shared = report.shared_facts_for("web@catalog");
+        shared.validate().expect("provider alias remains lossless");
+        assert_eq!(shared.qualified_reference(), "web#version=1.0.0@catalog");
+        assert_eq!(
+            shared.facts.get("provider.resolved_selector"),
+            Some(&ProviderFactValue::Text("#version=1.0.0".to_string()))
+        );
+        assert_eq!(
+            shared.facts.get("provider.npm.native.yanked"),
+            Some(&ProviderFactValue::List(vec![ProviderFactValue::Bool(
+                false
+            )]))
+        );
+
+        let lock = report
+            .lock_record("app", "web@catalog", "any")
+            .expect("provider alias lock");
+        assert_eq!(lock.identity.exact, "web#version=1.0.0@catalog");
+        let locked = ProviderFacts::from_json(
+            lock.future_fields
+                .get("provider-facts")
+                .expect("provider facts in lock"),
+        )
+        .expect("locked provider facts");
+        locked.validate().expect("locked alias provider facts");
+        assert_eq!(locked.reference, "web@catalog");
     }
 
     #[test]
@@ -2135,6 +4931,86 @@ checksum = "abc123"
     }
 
     #[test]
+    fn nix_conformance_retains_native_and_typed_provider_facts() {
+        let native = r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","narHash":"sha256-0123456789012345678901234567890123456789012=","inputDrvs":{"/nix/store/hash-openssl.drv":["out"]},"buildInputs":["openssl"],"nativeBuildInputs":["pkg-config"],"system":"x86_64-linux","platforms":["linux"],"license":"BSD-3-Clause","builder":"/bin/bash","signatures":["cache.nixos.org"],"owner":"nixos","repository":"NixOS/nixpkgs","advisories":["CVE-0000-0000"],"meta":{"license":"BSD-3-Clause","platforms":["x86_64-linux"]}}"#;
+        let report = normalize_provider_document(ProviderFamily::Nix, native);
+        report.validate().expect("Nix provider facts are lossless");
+        assert_eq!(report.native_format, "json");
+        assert_eq!(report.native_document, native);
+        assert_eq!(report.facts.name, "ripgrep");
+        assert_eq!(report.facts.version, "14.1.1");
+        assert!(report
+            .facts
+            .build_dependencies
+            .contains(&"openssl".to_string()));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nix.dependency.build"));
+        assert!(report.facts.typed.contains_key("provider.nix.hook.builder"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nix.variant.system"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nix.signature.signatures"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.nix.source.repository"));
+        assert!(report
+            .shared_facts()
+            .facts
+            .contains_key("provider.nix.native.meta"));
+        let shared = report.shared_facts();
+        let exported = ProviderFacts::from_json(&report.export_json())
+            .expect("Nix provider export uses the shared carrier");
+        assert_eq!(exported, shared);
+        assert!(shared
+            .explain_lines()
+            .iter()
+            .any(|line| line == "native json: retained"));
+        let locked = report
+            .lock_record("app", "ripgrep#version=14.1.1@nix", "x86_64-linux")
+            .expect("Nix provider lock uses the shared carrier");
+        let locked_facts = ProviderFacts::from_json(
+            locked
+                .future_fields
+                .get("provider-facts")
+                .expect("Nix provider facts in lock"),
+        )
+        .expect("locked Nix provider facts");
+        assert_eq!(locked_facts, shared);
+    }
+
+    #[test]
+    fn nix_conformance_reports_loss_and_conflict_in_native_facts() {
+        let lossy = normalize_provider_document(
+            ProviderFamily::Nix,
+            r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","platforms":1,"yanked":"unknown","inputDrvs":[1]}"#,
+        );
+        assert!(lossy.validate().is_err());
+        assert!(lossy.losses.iter().any(|loss| loss.contains("platforms")));
+        assert!(lossy.losses.iter().any(|loss| loss.contains("yanked")));
+        assert!(lossy.losses.iter().any(|loss| loss.contains("inputDrvs")));
+
+        let conflicting = normalize_provider_document(
+            ProviderFamily::Nix,
+            concat!(
+                r#"[{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","owner":"nixos"},"#,
+                r#"{"pname":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","owner":"other"}]"#
+            ),
+        );
+        assert!(conflicting.validate().is_err());
+        assert!(conflicting
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.contains("conflicts with the first native record")));
+    }
+
+    #[test]
     fn jet_registry_conformance_retains_attestation_and_yank_facts() {
         let native = r#"{"name":"web","version":"1.0.0","content_hash":"sha256-web","license":"MIT","platforms":["linux"],"yanked":true,"tier":"trusted","gate_status":"passed","public_key":"pk","signature":"sig","owner":"team-web","source":{"kind":"git","url":"https://example.invalid/web.git"},"advisories":["CVE-0000-0000"],"variants":{"debug":{"features":["trace"]}},"hooks":{"build":{"digest":"hook-digest"}}}"#;
         let report = normalize_provider_document(ProviderFamily::JetRegistry, native);
@@ -2184,5 +5060,171 @@ checksum = "abc123"
             .conflicts
             .iter()
             .any(|conflict| conflict.contains("conflicting native facts")));
+    }
+
+    #[test]
+    fn pypi_swiftpm_maven_reports_round_trip_through_lock_and_export() {
+        let revision = "0123456789abcdef0123456789abcdef01234567";
+        let pypi = r#"{"info":{"name":"sample","version":"1.2.3","license":"MIT","requires_dist":["httpx>=0.27"]},"urls":[{"filename":"sample.whl","digests":{"sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},"yanked":false}]}"#;
+        let swiftpm = format!(
+            r#"{{"version":1,"pins":[{{"package":"swift-log","state":{{"revision":"{revision}","version":"1.5.4"}}}}]}}"#
+        );
+        let maven = r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.2.3</version><dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version></dependency></dependencies></project>"#;
+        for (family, document) in [
+            (ProviderFamily::PyPI, pypi),
+            (ProviderFamily::SwiftPM, swiftpm.as_str()),
+            (ProviderFamily::Maven, maven),
+        ] {
+            let report = normalize_provider_document(family, document);
+            report.validate().expect("provider report is lossless");
+            let shared = report.shared_facts();
+            assert_eq!(shared.native_document, document);
+            assert_eq!(
+                ProviderFacts::from_json(&report.export_json()).unwrap(),
+                shared
+            );
+            let lock = report
+                .lock_record("app", &shared.reference, "x86_64-linux")
+                .expect("provider lock retains exact identity");
+            let locked =
+                ProviderFacts::from_json(lock.future_fields.get("provider-facts").unwrap())
+                    .unwrap();
+            assert_eq!(locked, shared);
+        }
+    }
+
+    #[test]
+    fn pypi_swiftpm_maven_reports_surface_loss_and_conflict() {
+        let pypi = normalize_provider_document(
+            ProviderFamily::PyPI,
+            r#"{"info":{"name":"sample"},"urls":[]}"#,
+        );
+        assert!(pypi.validate().is_err());
+        assert!(pypi
+            .losses
+            .iter()
+            .any(|loss| loss.contains("exact version")));
+
+        let swiftpm = normalize_provider_document(
+            ProviderFamily::SwiftPM,
+            r#"{"version":1,"pins":[{"package":"swift-log","state":{"branch":"main"}}]}"#,
+        );
+        assert!(swiftpm.validate().is_err());
+        assert!(swiftpm
+            .losses
+            .iter()
+            .any(|loss| loss.contains("exact revision")));
+
+        let maven = normalize_provider_document(
+            ProviderFamily::Maven,
+            r#"<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>"#,
+        );
+        assert!(maven.validate().is_err());
+        assert!(maven
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.contains("conflicting version")));
+    }
+
+    #[test]
+    fn nuget_conan_and_vcpkg_conformance_retains_native_facts_and_lock_identity() {
+        let nuget = r#"<package>
+  <metadata>
+    <id>widget</id>
+    <version>1.2.3</version>
+    <licenseExpression>MIT</licenseExpression>
+    <repository type="git" url="https://example.invalid/widget" commit="abc" />
+    <dependencies><group targetFramework="net8.0"><dependency id="serde" version="[1.0.0]" /></group></dependencies>
+  </metadata>
+</package>"#;
+        let conan = r#"from conan import ConanFile
+class Widget(ConanFile):
+    name = "widget"
+    version = "1.2.3"
+    license = "MIT"
+    settings = "os", "arch", "compiler", "build_type"
+    options = {"shared": [True, False]}
+    generators = "CMakeDeps"
+    def requirements(self):
+        self.requires("zlib/1.3.1")
+"#;
+        let vcpkg = r#"{
+  "name": "widget",
+  "version-string": "1.2.3",
+  "license": "MIT",
+  "builtin-baseline": "0123456789abcdef0123456789abcdef01234567",
+  "supports": "!uwp",
+  "dependencies": [{"name":"zlib","version>=":"1.3.0","features":["core"]}],
+  "features": {"tools": ["fmt"]}
+}"#;
+
+        for (family, document, reference) in [
+            (ProviderFamily::NuGet, nuget, "widget#version=1.2.3@nuget"),
+            (ProviderFamily::Conan, conan, "widget#version=1.2.3@conan"),
+            (ProviderFamily::Vcpkg, vcpkg, "widget#version=1.2.3@vcpkg"),
+        ] {
+            let report = normalize_provider_document(family, document);
+            report.validate().expect("provider report is lossless");
+            assert_eq!(report.native_document, document);
+            assert!(!report.export_json().is_empty());
+            let lock = report
+                .lock_record("app", reference, "x86_64-linux")
+                .expect("provider lock retains exact identity");
+            let locked = ProviderFacts::from_json(
+                lock.future_fields
+                    .get("provider-facts")
+                    .expect("provider facts in lock"),
+            )
+            .expect("provider facts JSON");
+            assert_eq!(locked.native_document, document);
+            assert_eq!(locked.qualified_reference(), reference);
+        }
+
+        let conan_lock = r#"{"ref":"widget/1.2.3@acme/stable#rrev","requires":[{"ref":"zlib/1.3.1"}],"settings":{"os":"Linux"},"options":{"shared":false},"package_id":"pkgid"}"#;
+        let conan_report = normalize_provider_document(ProviderFamily::Conan, conan_lock);
+        conan_report
+            .validate()
+            .expect("Conan JSON provider facts are lossless");
+        assert!(conan_report
+            .facts
+            .typed
+            .contains_key("provider.conan.variant.package_id"));
+        assert!(conan_report
+            .facts
+            .dependencies
+            .contains(&"zlib@1.3.1".to_string()));
+    }
+
+    #[test]
+    fn nuget_conan_and_vcpkg_conformance_reports_loss_and_conflict() {
+        let nuget = r#"{"dependencies":{"net8.0":{"widget":{"requested":"[1.0.0,2.0.0)"}}}}"#;
+        let conan =
+            r#"{"name":"widget","version":"1.0.0","requires":[{"package_id":"missing-ref"}]}"#;
+        let vcpkg = r#"{"name":"widget","version":"1.0.0","version-string":"1.1.0","dependencies":[{"features":["core"]}]}"#;
+
+        let nuget_report = normalize_provider_document(ProviderFamily::NuGet, nuget);
+        assert!(nuget_report.validate().is_err());
+        assert!(nuget_report
+            .losses
+            .iter()
+            .any(|loss| loss.contains("resolved exact version") || loss.contains("range")));
+
+        let conan_report = normalize_provider_document(ProviderFamily::Conan, conan);
+        assert!(conan_report.validate().is_err());
+        assert!(conan_report
+            .losses
+            .iter()
+            .any(|loss| loss.contains("no dependency ref")));
+
+        let vcpkg_report = normalize_provider_document(ProviderFamily::Vcpkg, vcpkg);
+        assert!(vcpkg_report.validate().is_err());
+        assert!(vcpkg_report
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.contains("conflicting version fields")));
+        assert!(vcpkg_report
+            .losses
+            .iter()
+            .any(|loss| loss.contains("no non-empty `name`")));
     }
 }

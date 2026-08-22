@@ -231,7 +231,7 @@ fn cache_usage(theme: &Theme, what: &str, fix: &str) -> i32 {
 /// - `hangar ingest <dir> --name <n> [--version <v>] [--ref <r>]`
 /// - `hangar verify <digest-or-id>`
 /// - `hangar referrers <digest>`
-/// - `hangar recover` — sweep crashed staging / `.partial` objects
+/// - `hangar recover` — sweep crashed Hangar/build staging and `.partial` objects
 /// - `hangar export|import|dump|restore|copy|sign|repair` — one signed archive
 pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
     let sub = parsed.positional.first().map(String::as_str);

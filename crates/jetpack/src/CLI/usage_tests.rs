@@ -57,7 +57,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} hangar sign <entry-or-archive> sign an object or archive
   {bin} hangar repair <entry> --from <archive.hangar>
                                       quarantine and repair a corrupt object
-  {bin} hangar recover                  recover interrupted Hangar publication
+  {bin} hangar recover                  recover interrupted Hangar/build publication
   {bin} cache bind <role> <mirror>...  bind ordered host-owned cache mirrors
   {bin} cache list                     list host-owned cache roles
   {bin} cache publish <entry> --role <role> --yes

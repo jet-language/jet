@@ -1288,20 +1288,30 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
                 .cloned()
                 .ok_or_else(|| format!("unlisted authority request `{request}`"))
         });
-        let evaluated = evaluate_derivation_with_import_authority(
-            source,
-            system,
-            Some(authority),
-        )
-        .expect("authorized fixed-output derivation must evaluate");
-        assert_eq!(
-            evaluated.input_sources(),
-            &fixture_strings(case.get("jet_input_sources").unwrap())
-        );
+        let expected_inputs = fixture_strings(case.get("jet_input_sources").unwrap());
+        for seed in root
+            .get("fuzz_seeds")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|seed| match seed {
+                JSONValue::Num(value) => *value as usize,
+                _ => panic!("breadth seed must be a number"),
+            })
+        {
+            let evaluated = evaluate_derivation_with_import_authority(
+                &breadth_variant(source, seed),
+                system,
+                Some(authority.clone()),
+            )
+            .expect("authorized fixed-output derivation must evaluate");
+            assert_eq!(evaluated.input_sources(), expected_inputs.as_slice());
+        }
         let nix_value = case.get("nix_value").unwrap().as_object().unwrap();
         assert_eq!(
-            evaluated.input_sources(),
-            &fixture_strings(nix_value.get("input_sources").unwrap())
+            expected_inputs,
+            fixture_strings(nix_value.get("input_sources").unwrap())
         );
     }
 }

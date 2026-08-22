@@ -75,7 +75,7 @@ fn run() {
     );
 }
 
-/// Card #1543 merge-review finding 1: an `#Impure` body inside a `=[]=>` fn
+/// Card #1543 merge-review finding 1: an `#Impure` body inside a `-[]>` fn
 /// still fires E3401. `#Impure` records/gates the ambient call at run time,
 /// it doesn't erase it — a declared-empty effect set can't silently admit
 /// one just because it's fenced.
@@ -95,7 +95,7 @@ fn run() {
     let res = jet::compile(src);
     assert!(
         res.is_err(),
-        "#Impure-gated ambient call in a `=[]=>` fn should still fail"
+        "#Impure-gated ambient call in a `-[]>` fn should still fail"
     );
     let diags = res.unwrap_err();
     assert!(
@@ -106,9 +106,9 @@ fn run() {
 }
 
 /// Card #1543 merge-review finding 2: an `@ { ... }` comptime block inside a
-/// `=[]=>` fn must NOT ALSO trip a run-time-voiced E3401 on top of the real
+/// `-[]>` fn must NOT ALSO trip a run-time-voiced E3401 on top of the real
 /// build-time one — it emits no runtime code at all (I3), so the run-time
-/// `=[]=>` walk must not descend into it a second time. `print` here is
+/// `-[]>` walk must not descend into it a second time. `print` here is
 /// genuinely invalid at compile time (comptime can't touch stdout), so the
 /// block's own build-time evaluation correctly reports E3401 once; the bug
 /// was the run-time walk piling a second, run-time-voiced E3401 on top.
@@ -664,19 +664,19 @@ fn eval_valid_typed_run_passes_sema() {
     let diags = jet::check_for_eval(src, "test_eval_valid.jet");
     assert!(
         diags.is_empty(),
-        "`fn run() =[]=> Int` with correct body should pass sema, got: {:?}",
+        "`fn run() Int -[]>` with correct body should pass sema, got: {:?}",
         diags
     );
 }
 
-/// `check_for_eval` passes for a normal `fn run() =[]=> ()` program.
+/// `check_for_eval` passes for a normal `fn run() -[]>` program.
 #[test]
 fn eval_normal_void_run_passes_sema() {
     let src = r#"fn run() -[]> { }"#;
     let diags = jet::check_for_eval(src, "test_eval_void.jet");
     assert!(
         diags.is_empty(),
-        "`fn run() =[]=>` should pass eval sema, got: {:?}",
+        "`fn run() -[]>` should pass eval sema, got: {:?}",
         diags
     );
 }

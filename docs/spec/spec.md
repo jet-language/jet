@@ -1078,9 +1078,12 @@ runtime path.
 
 ## M4 — errors as values (done)
 
-Failure-returning functions return **`T E!`** (S34): `T` is the success payload,
-`E` is any enum, struct, `String`, or the default **`Err`** type. Omitting
-the error side in a function return — **`T !`** — means **`T Err!`**.
+Failure-returning functions use the **`[Success?] [ErrorUnion!]`** suffix zone
+(S34): `T? E!` has an optional success, `E!` is unit-fallible, and bare `!`
+uses the default **`Err`** type. An ordinary `T E!` result has a non-optional
+success. `E` is any enum, struct, or `String` error type. Omitting
+the error side in a function return — **`T !`** — keeps the default-error
+meaning.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):

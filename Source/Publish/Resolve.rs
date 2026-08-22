@@ -214,6 +214,18 @@ fn solve_registry_state(
         })
         .cloned()
         .collect::<Vec<_>>();
+    // A selective update may move only the requested closure. An existing
+    // lock outside that closure is therefore an exact constraint, not merely
+    // a preference. Otherwise the solver can choose a different version and
+    // the later lock-preservation pass can hide that mismatch.
+    if matches!(mode, ResolveMode::Conservative)
+        && !update_scope.is_empty()
+        && !update_scope.contains(&package)
+    {
+        if let Some(locked_version) = locked.get(&package) {
+            viable.retain(|candidate| candidate.version.to_string() == *locked_version);
+        }
+    }
     let low_first = matches!(mode, ResolveMode::Lowest)
         || matches!(mode, ResolveMode::LowestDirect) && direct.contains(&package);
     let preserve_lock = matches!(mode, ResolveMode::Conservative);
@@ -527,5 +539,52 @@ mod tests {
         assert!(detail.contains("PubGrub branches:"));
         assert!(detail.contains("app 1.1.0"));
         assert!(detail.contains("Smallest fixes:"));
+    }
+
+    #[test]
+    fn selective_update_treats_unrelated_lock_as_exact() {
+        let roots = vec![
+            VersionConstraint {
+                package: "app".to_string(),
+                req: VersionReq::parse("*").expect("test requirement is valid"),
+                from: "root".to_string(),
+            },
+            VersionConstraint {
+                package: "shared".to_string(),
+                req: VersionReq::parse("*").expect("test requirement is valid"),
+                from: "root".to_string(),
+            },
+        ];
+        let candidates = BTreeMap::from([
+            (
+                "app".to_string(),
+                vec![SolverCandidate {
+                    version: version("1.0.0"),
+                    dependencies: Vec::new(),
+                }],
+            ),
+            (
+                "shared".to_string(),
+                vec![SolverCandidate {
+                    version: version("2.0.0"),
+                    dependencies: Vec::new(),
+                }],
+            ),
+        ]);
+        let locked = BTreeMap::from([("shared".to_string(), "1.0.0".to_string())]);
+        let update_scope = BTreeSet::from(["app".to_string()]);
+        let direct = BTreeSet::from(["app".to_string(), "shared".to_string()]);
+
+        let error = solve_registry(
+            &roots,
+            &candidates,
+            &locked,
+            &update_scope,
+            ResolveMode::Conservative,
+            &direct,
+        )
+        .expect_err("an unrelated locked package must not move");
+        assert_eq!(error.code, "E2602");
+        assert!(error.detail.unwrap_or_default().contains("shared"));
     }
 }

@@ -296,24 +296,8 @@ impl<'a> Fmt<'a> {
 
     /// Print a value-dispatch arm head, stripping `subject table_op` atoms.
     fn fmt_dispatch_value_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr) {
-        let grouped = self.expr_was_parenthesized(cond);
-        if self.src.contains("fn hex_nibble") {
-            let start = Self::expr_start(cond);
-            eprintln!(
-                "[DEBUG-arrow-group] cond {:?}..{:?} source={:?} grouped={grouped}",
-                start,
-                cond.span().end,
-                self.src.get(start..cond.span().end)
-            );
-        }
-        if grouped {
-            self.write("(");
-        }
         if self.is_all_value_alts(subject, table_op, cond) {
             self.fmt_value_alts(subject, table_op, cond);
-            if grouped {
-                self.write(")");
-            }
             return;
         }
         match cond {
@@ -339,9 +323,6 @@ impl<'a> Fmt<'a> {
                 self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, Prec::OrFallback),
-        }
-        if grouped {
-            self.write(")");
         }
     }
 
@@ -389,14 +370,6 @@ impl<'a> Fmt<'a> {
                 }
                 false
             });
-        if self.src.contains("fn hex_nibble") {
-            eprintln!(
-                "[DEBUG-arrow-group] paren end={:?} source={:?} next={:?} grouped={grouped}",
-                end,
-                self.src.get(end.saturating_sub(40)..end),
-                next_index.map(|index| &self.source_toks[index].kind)
-            );
-        }
         grouped
     }
 
@@ -1906,9 +1879,52 @@ impl<'a> Fmt<'a> {
         if !bare_param {
             self.write(")");
         }
-        self.write(" ");
-        self.write(Syntax::OP_UNIFIED_ARROW);
-        self.write(" ");
+        match (&lam.result_type, &lam.error_type) {
+            (Some(result), Some(error)) if Self::is_unit_type(result) => {
+                self.write(" ");
+                if Self::is_default_error(error) {
+                    self.write(Syntax::TYPE_FALLIBLE_SEP);
+                } else {
+                    self.fmt_error_suffix(error);
+                }
+            }
+            (Some(result), Some(error)) => {
+                self.write(" ");
+                self.fmt_type(result);
+                if Self::is_default_error(error) {
+                    self.write(" ");
+                    self.write(Syntax::TYPE_FALLIBLE_SEP);
+                } else {
+                    self.write(" ");
+                    self.fmt_error_suffix(error);
+                }
+            }
+            (Some(result), None) => {
+                self.write(" ");
+                self.fmt_type(result);
+            }
+            (None, None) => {}
+            (None, Some(error)) => {
+                self.write(" ");
+                self.fmt_error_suffix(error);
+            }
+        }
+        if let Some(effects) = &lam.effects {
+            self.write(" ");
+            self.write(Syntax::EFFECT_ARROW_OPEN);
+            for (i, (name, _)) in effects.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.write(name);
+            }
+            self.write(Syntax::EFFECT_ARROW_CLOSE);
+            self.write(" ");
+        } else {
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
+        }
         match &lam.body {
             crate::AST::LambdaBody::Expr(e) => self.fmt_expr(e, Prec::OrFallback.add_rhs()),
             crate::AST::LambdaBody::Block(stmts) => {

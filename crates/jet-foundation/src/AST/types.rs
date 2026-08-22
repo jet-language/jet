@@ -959,9 +959,9 @@ pub enum Type {
     },
     /// S47 (M8): function type `fn(T1, T2) R` (`ret` omitted = no return value).
     ///
-    /// D-EFF2 / D-SHAPE8: an optional effect row lives inside the function
-    /// type's effect row — `fn(T) -[]> U` requires purity and
-    /// `fn(T) -[Net]> U` permits at most the listed effects. `effect_bound`
+    /// D-EFF2 / D-SHAPE8: an optional effect row follows the function type's
+    /// return type — `fn(T) U -[]>` requires purity and `fn(T) U -[Net]>`
+    /// permits at most the listed effects. `effect_bound`
     /// is `None` when unannotated, `Some(empty)` for `-[]>`, and
     /// `Some([(name, span), …])` for a nonempty row. Names are validated
     /// against the effect vocabulary in sema, not the parser. The bound is a
@@ -2145,14 +2145,17 @@ impl Type {
                 ..
             } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
-                match (effect_bound, ret) {
-                    (Some(row), Some(r)) => {
-                        format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name())
-                    }
-                    (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
-                    (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
-                    (None, None) => format!("fn({})", ps),
+                let mut signature = format!("fn({ps})");
+                if let Some(r) = ret {
+                    signature.push(' ');
+                    signature.push_str(&r.name());
                 }
+                if let Some(row) = effect_bound {
+                    signature.push_str(" -[");
+                    signature.push_str(&effect_names(row));
+                    signature.push_str("]>");
+                }
+                signature
             }
             Type::Named(n) => format!("`{}`", n),
             Type::Measure(measure) => format!("{} (a compile-time measure)", measure.expression()),
@@ -2243,14 +2246,17 @@ impl Type {
                 ..
             } => {
                 let ps = fn_param_names(params, param_contract.as_deref());
-                match (effect_bound, ret) {
-                    (Some(row), Some(r)) => {
-                        format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name())
-                    }
-                    (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
-                    (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
-                    (None, None) => format!("fn({})", ps),
+                let mut signature = format!("fn({ps})");
+                if let Some(r) = ret {
+                    signature.push(' ');
+                    signature.push_str(&r.name());
                 }
+                if let Some(row) = effect_bound {
+                    signature.push_str(" -[");
+                    signature.push_str(&effect_names(row));
+                    signature.push_str("]>");
+                }
+                signature
             }
             Type::Named(n) => n.clone(),
             Type::Measure(measure) => measure.expression(),
@@ -2560,9 +2566,9 @@ mod tests {
         };
 
         assert_ne!(bare, labelled);
-        assert_eq!(bare.name(), "fn(Bool) => Int");
-        assert_eq!(labelled.name(), "fn(*, force: Bool) => Int");
-        assert_eq!(labelled.show(), "fn(*, force: Bool) => Int");
+        assert_eq!(bare.name(), "fn(Bool) Int");
+        assert_eq!(labelled.name(), "fn(*, force: Bool) Int");
+        assert_eq!(labelled.show(), "fn(*, force: Bool) Int");
         assert_eq!(Type::Named("dep.Point".to_string()).leaf_name(), "Point");
         assert_eq!(
             Type::Apply {
@@ -2571,6 +2577,46 @@ mod tests {
             }
             .leaf_name(),
             "Box<other.Item>"
+        );
+    }
+
+    #[test]
+    fn failure_surface_names_use_postfixes_in_diagnostics() {
+        let fallible = Type::Result {
+            ok: Box::new(Type::Option(Box::new(Type::Int))),
+            err: Box::new(Type::Union(vec![
+                Type::Named("DbError".to_string()),
+                Type::Named("TimeoutError".to_string()),
+            ])),
+        };
+        assert_eq!(fallible.name(), "Int? (DbError | TimeoutError)!");
+        assert_eq!(fallible.show(), "Int? (DbError | TimeoutError)!");
+
+        let unit_fallible = Type::Result {
+            ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            err: Box::new(Type::Named("IOError".to_string())),
+        };
+        assert_eq!(unit_fallible.name(), "IOError!");
+        assert_eq!(
+            Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+            }
+            .name(),
+            "Int !"
+        );
+
+        let callback = Type::Fn {
+            params: vec![fallible],
+            ret: Some(Box::new(unit_fallible)),
+            effect_bound: Some(Vec::new()),
+            param_contract: None,
+            call_metadata: None,
+            return_view_provenance: None,
+        };
+        assert_eq!(
+            callback.name(),
+            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
         );
     }
 

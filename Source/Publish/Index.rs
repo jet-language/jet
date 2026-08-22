@@ -220,6 +220,7 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
             let existing = existing?;
             if existing.name == entry.name && existing.version == entry.version {
                 if existing == *entry {
+                    super::Registry::finalize_oci_referrers(repo, entry)?;
                     return Ok(());
                 }
                 return Err(io::Error::new(
@@ -233,7 +234,8 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
         }
         text.push_str(&entry.to_jsonl());
         text.push('\n');
-        atomic_replace(&path, text.as_bytes())
+        atomic_replace(&path, text.as_bytes())?;
+        super::Registry::finalize_oci_referrers(repo, entry)
     })
 }
 

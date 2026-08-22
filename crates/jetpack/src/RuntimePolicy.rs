@@ -8,6 +8,7 @@
 use super::Output::Theme;
 use super::JSON;
 use crate::Syntax;
+use std::cell::RefCell;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -62,6 +63,27 @@ pub fn all_verb_policies() -> Vec<VerbPolicy> {
 
 pub struct FileLock {
     file: lock_platform::LockFile,
+}
+
+thread_local! {
+    static HELD_LOCK_ROOTS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+struct LockGuard {
+    root: PathBuf,
+    lock: Option<FileLock>,
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        HELD_LOCK_ROOTS.with(|roots| {
+            let mut roots = roots.borrow_mut();
+            if let Some(index) = roots.iter().rposition(|root| root == &self.root) {
+                roots.remove(index);
+            }
+        });
+        let _ = self.lock.take();
+    }
 }
 
 impl Drop for FileLock {
@@ -154,8 +176,20 @@ pub(crate) fn lock_state(path: &Path) -> io::Result<LockState> {
     }
 }
 
+// All scopes for one managed root share one kernel lock domain; nested
+// same-thread operations reuse the guard already held for that root.
 pub fn with_lock<T>(root: &Path, scope: &str, f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
-    let _lock = acquire_lock(root, scope)?;
+    let key = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if HELD_LOCK_ROOTS.with(|roots| roots.borrow().iter().any(|held| held == &key)) {
+        return f();
+    }
+    let lock = acquire_lock(root, scope)?;
+    let key = fs::canonicalize(root).unwrap_or(key);
+    HELD_LOCK_ROOTS.with(|roots| roots.borrow_mut().push(key.clone()));
+    let _guard = LockGuard {
+        root: key,
+        lock: Some(lock),
+    };
     f()
 }
 
@@ -413,6 +447,20 @@ mod tests {
         handle.join().unwrap();
         assert_eq!(fs::read_to_string(root.join("after")).unwrap(), "locked");
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn project_lock_allows_nested_same_thread_scopes() {
+        let root = scratch("nested-project-lock");
+        let result = with_project_lock(&root, "outer", || {
+            with_project_lock(&root, "inner", || {
+                fs::write(root.join("nested"), "ok")?;
+                Ok(())
+            })
+        });
+        result.unwrap();
+        assert_eq!(fs::read_to_string(root.join("nested")).unwrap(), "ok");
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

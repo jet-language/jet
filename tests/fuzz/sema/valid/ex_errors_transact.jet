@@ -2,9 +2,9 @@
 // `#Transact(name) { … }` opens a transaction. Three rollback layers (D-TXN-ROLLBACK):
 //   (1) auto-snapshot  — every value the block mutates is snapshotted on entry and
 //       restored on a `?`-failure. Magic out of the box, zero annotation.
-//   (3) `name.on_rollback(() => { … })` — an explicit hand-written undo, the mirror of
+//   (3) `name.on_rollback(() -> { … })` — an explicit hand-written undo, the mirror of
 //       `on_commit`: Drop-backed, runs LIFO on a `?`-failure, dropped on a clean commit.
-// `name.on_commit(() => { … })` runs LIFO on a clean commit, dropped on a `?`-failure.
+// `name.on_commit(() -> { … })` runs LIFO on a clean commit, dropped on a `?`-failure.
 // An irreversible effect (Net/FS/Exec) directly in the block is rejected (E0746).
 enum Fail {
     Empty

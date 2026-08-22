@@ -418,7 +418,7 @@ mod tests {
         std::fs::write(root.join(Syntax::PACKAGE_FILE), "name: \"outer\"\n").unwrap();
         std::fs::write(root.join("run.jet"), "fn run() {}\n").unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/math.jet"), "fn double() => Int :: 2\n").unwrap();
+        std::fs::write(root.join("src/math.jet"), "fn double() Int -> 2\n").unwrap();
         std::fs::create_dir_all(root.join("vendor/inner")).unwrap();
         std::fs::write(
             root.join("vendor/inner").join(Syntax::PACKAGE_FILE),
