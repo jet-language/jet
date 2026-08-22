@@ -429,4 +429,57 @@ fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {
     );
 }
 
-// ── U16: `jetpack bridge flake` ──
+// ── U16: `jet os bridge flake` → `jetpack bridge flake` ──
+#[test]
+fn jet_os_bridge_flake_delegates_to_jetpack() {
+    let project = Scratch::new("jet-bridge-flake");
+    let root = Scratch::new("jet-bridge-flake-root");
+    fs::write(
+        project.join("flake.nix"),
+        "{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ pkgs.fd ]; }; }",
+    )
+    .unwrap();
+
+    let output = jet()
+        .args(["os", "bridge", "flake", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("packages: [fd]"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        project.join(".jet/lock").is_file(),
+        "the production bridge must commit its typed foreign graph"
+    );
+}
+
+#[test]
+fn jet_os_bridge_flake_reports_missing_foreign_input() {
+    let project = Scratch::new("jet-bridge-flake-missing");
+    let root = Scratch::new("jet-bridge-flake-missing-root");
+
+    let output = jet()
+        .args(["os", "bridge", "flake", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+    assert!(
+        !project.join(".jet/lock").exists(),
+        "a failed bridge must not publish a misleading lock"
+    );
+}

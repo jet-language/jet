@@ -306,6 +306,12 @@ live acceptance, and documentation. Work order is binding.
 - Hangar receipt substrate: immutable connected package-realization objects,
   lock digest projections, atomic publication, and fail-closed corruption/path
   repair that keeps the live closure intact.
+- Receipt roots are bound back to the lock package identity and closure record;
+  GC follows the connected receipt closure and removes only unreferenced,
+  canonical receipt objects. Project-lock and Hangar lock ordering gives a
+  concurrent update one stable reachability snapshot. Receipt projections are
+  excluded from the Nix input digest, so publishing a receipt does not change
+  the realization action identity on the next reuse.
 
 ### E4-JP5 — native binary cache and Nix cache interoperability
 

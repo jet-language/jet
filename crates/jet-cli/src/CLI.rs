@@ -529,7 +529,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fmt",
-        summary: "Format Jet source files",
+        summary: "Format Jet and configured project files",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -996,6 +996,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--color", help: "color: auto | always | never" },
     FlagSpec { long: "--version", help: "print compiler version" },
     FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },
+    FlagSpec { long: "--lang", help: "with fmt: delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "with init: restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
     FlagSpec { long: "--simplify", help: "with fmt: rewrite to the simplest ratified spelling" },

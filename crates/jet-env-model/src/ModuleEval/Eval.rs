@@ -472,8 +472,21 @@ fn evaluate_integration_call(
             .as_ref()
             .map(|(name, _)| name.clone())
             .unwrap_or_else(|| format!("arg{index}"));
-        let value = integration_arg_value(&arg.expr, base_dir, funcs, globals)?;
-        lower_integration_arg(&mut integration, &key, &value);
+        let secret_reference = matches!(
+            kind,
+            IntegrationKind::Certificates
+                | IntegrationKind::CloudCredentials
+                | IntegrationKind::Vault
+        )
+        .then(|| integration_reference_names(&arg.expr));
+        // Do not evaluate an invalid secret expression. Comptime values can
+        // contain the caller's plaintext, while the only accepted secret
+        // shape is a named reference already visible in the AST.
+        let value = match secret_reference {
+            Some(Err(())) => CtValue::Int(0),
+            _ => integration_arg_value(&arg.expr, base_dir, funcs, globals)?,
+        };
+        lower_integration_arg(&mut integration, &key, &arg.expr, &value);
     }
     Ok(integration)
 }
@@ -545,13 +558,18 @@ fn expression_name(expr: &Expr) -> String {
     }
 }
 
-fn lower_integration_arg(integration: &mut EnvironmentIntegration, key: &str, value: &CtValue) {
+fn lower_integration_arg(
+    integration: &mut EnvironmentIntegration,
+    key: &str,
+    expr: &Expr,
+    value: &CtValue,
+) {
     let display = integration_value_text(value);
     match integration.kind {
         IntegrationKind::Certificates
         | IntegrationKind::CloudCredentials
         | IntegrationKind::Vault => {
-            let names = integration_names(value);
+            let names = integration_reference_names(expr).unwrap_or_default();
             if names.is_empty() {
                 integration.losses.push(format!(
                     "{key}: secret input must be a named reference; value was redacted"
@@ -584,14 +602,30 @@ fn lower_integration_arg(integration: &mut EnvironmentIntegration, key: &str, va
     }
 }
 
-fn integration_names(value: &CtValue) -> Vec<String> {
-    match value {
-        CtValue::Str(value) => vec![value.clone()],
-        CtValue::List(values) => values.iter().flat_map(integration_names).collect(),
-        CtValue::Enum { variant, .. } => {
-            vec![variant.rsplit('.').next().unwrap_or(variant).to_string()]
+fn integration_reference_names(expr: &Expr) -> Result<Vec<String>, ()> {
+    match expr.without_parens() {
+        Expr::Ident(name, _) => Ok(vec![name.clone()]),
+        Expr::Field(_, _, _) => integration_reference_path(expr)
+            .map(|name| vec![name])
+            .ok_or(()),
+        Expr::ListLit(values, _) => {
+            let mut names = Vec::new();
+            for value in values {
+                names.extend(integration_reference_names(value)?);
+            }
+            Ok(names)
         }
-        _ => Vec::new(),
+        _ => Err(()),
+    }
+}
+
+fn integration_reference_path(expr: &Expr) -> Option<String> {
+    match expr.without_parens() {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, member, _) => {
+            Some(format!("{}.{}", integration_reference_path(base)?, member))
+        }
+        _ => None,
     }
 }
 
@@ -677,6 +711,21 @@ pub(super) fn lifecycle_merge(
         }
         target.reload = incoming.reload;
         target.reload_explicit = true;
+    }
+    if let Some(formatter) = incoming.formatter {
+        if let Some(existing) = &target.formatter {
+            if existing != &formatter {
+                return Err(Diagnostic::error(
+                    "E1333",
+                    format!("formatter is declared more than once with conflicting packages in module `{module_name}`"),
+                    "one environment cannot silently choose between different external formatters".to_string(),
+                    "merge the formatter declarations so they agree, or keep one formatter owner".to_string(),
+                    None,
+                ));
+            }
+        } else {
+            target.formatter = Some(formatter);
+        }
     }
     Ok(())
 }
@@ -1150,6 +1199,7 @@ fn is_lifecycle_field(name: &str) -> bool {
             | Syntax::ENV_FIELD_ON_ENTER
             | Syntax::ENV_FIELD_CHECKS
             | Syntax::ENV_FIELD_GIT_HOOKS_PATH
+            | Syntax::ENV_FIELD_FORMATTER
             | Syntax::ENV_FIELD_RELOAD
     )
 }

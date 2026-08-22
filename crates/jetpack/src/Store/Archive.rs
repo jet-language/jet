@@ -371,10 +371,11 @@ pub fn sign_archive(
     key: Option<&str>,
 ) -> io::Result<ArchiveReport> {
     RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let key = signing_key(roots, key, true)?;
         if Path::new(target).is_file() {
             let bytes = read_bounded(Path::new(target))?;
             let archive = Archive::decode(&bytes)?;
+            verify_archive_contents(roots, &archive)?;
+            let key = signing_key(roots, key, true)?;
             let signed = sign_decoded(archive, &key)?;
             let out = destination.unwrap_or_else(|| Path::new(target));
             write_atomic(out, &signed.encode()?)?;
@@ -382,6 +383,7 @@ pub fn sign_archive(
         }
         let entry = select_entry_unlocked(roots, target)?;
         let archive = build_archive_unlocked(roots, &entry.id, false)?;
+        let key = signing_key(roots, key, true)?;
         let signed = sign_decoded(archive, &key)?;
         let sidecar = destination
             .map(PathBuf::from)
@@ -739,7 +741,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 return Err(invalid(&format!(
                     "archive output `{}` re-hashes as `{actual}`",
                     object.digest
-                )));
+                )))
             }
         }
 
@@ -1314,7 +1316,7 @@ fn validate_import_destinations(
                 return Err(invalid(&format!(
                     "existing Hangar record `{}` is not a directory",
                     entry.id
-                )))
+                )));
             }
             Ok(_) => {
                 let meta_path = destination.join("meta.json");
@@ -1983,14 +1985,17 @@ fn invalid(message: &str) -> io::Error {
 /// Stable status output used by the Hangar CLI. It uses the shared report
 /// schema and intentionally does not include host paths or timestamps.
 pub fn report_json(action: &str, report: &ArchiveReport) -> String {
-    format!(
-        "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":{},\"bytes\":{},\"objects\":{},\"root\":{},\"signed\":{}}}",
-        JSON::quote(jet_foundation::Report::REPORT_SCHEMA),
-        JSON::quote(action),
-        report.bytes,
-        report.objects,
-        JSON::quote(&report.root),
-        report.signed
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        action,
+        &format!(
+            ",\"bytes\":{},\"objects\":{},\"root\":{},\"signed\":{}",
+            report.bytes,
+            report.objects,
+            JSON::quote(&report.root),
+            report.signed
+        ),
     )
 }
 

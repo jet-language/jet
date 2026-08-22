@@ -17,12 +17,12 @@ use super::Diagnostics::{
     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
     oci_from_non_executable,
 };
-use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
     IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
     PackageProfilePlan, PackageProfileSet, PresetSet,
 };
+use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
     SystemPlan,
@@ -114,8 +114,12 @@ pub fn evaluate_package_profile(
         let spec = classify_profile_ref(&package.raw, &env.table).map_err(|error| {
             Diagnostic::error(
                 "E1335",
-                format!("package generation `{name}` contains unsupported ref `{}`: {error}", package.raw),
-                "generation package facts must retain one lossless package and provider identity".to_string(),
+                format!(
+                    "package generation `{name}` contains unsupported ref `{}`: {error}",
+                    package.raw
+                ),
+                "generation package facts must retain one lossless package and provider identity"
+                    .to_string(),
                 "use `package@source` with a built-in or declared source".to_string(),
                 None,
             )
@@ -191,7 +195,12 @@ pub fn evaluate_package_profile(
                 .losses
                 .iter()
                 .map(|loss| loss.reason.as_str())
-                .chain(facts.conflicts.iter().map(|conflict| conflict.right.as_str()))
+                .chain(
+                    facts
+                        .conflicts
+                        .iter()
+                        .map(|conflict| conflict.right.as_str()),
+                )
                 .collect::<Vec<_>>()
                 .join("; ");
             let message = if ambiguous {
@@ -291,10 +300,7 @@ fn is_external_provider(provider: &str) -> bool {
     )
 }
 
-fn classify_profile_ref(
-    raw: &str,
-    table: &SourceTable,
-) -> Result<RefSpec::RefSpec, String> {
+fn classify_profile_ref(raw: &str, table: &SourceTable) -> Result<RefSpec::RefSpec, String> {
     if let Some((package, source)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
         if source == Syntax::DEFAULT_SOURCE {
             return Ok(RefSpec::RefSpec {
@@ -413,8 +419,7 @@ pub fn evaluate_env_with_selections(
     // Package/settings selection below already used this rule; the same
     // boundary must govern services, lifecycle, files, integrations, and
     // variable disclosure.
-    let active_environment =
-        select_active_environment(&environment_names, requested_environment)?;
+    let active_environment = select_active_environment(&environment_names, requested_environment)?;
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
@@ -452,7 +457,10 @@ pub fn evaluate_env_with_selections(
                 }
             }
             for service in &contribution.dev_services {
-                if dev_services.iter().any(|existing| existing.name == service.name) {
+                if dev_services
+                    .iter()
+                    .any(|existing| existing.name == service.name)
+                {
                     return Err(Diagnostic::error(
                         "E1262",
                         format!("service `{}` is declared more than once", service.name),
@@ -502,7 +510,10 @@ pub fn evaluate_env_with_selections(
                 }
             }
             for file in &contribution.files {
-                if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
+                if let Some(existing) = files
+                    .iter()
+                    .find(|item| item.destination == file.destination)
+                {
                     if existing != file {
                         return Err(Diagnostic::error(
                             "E1326",
@@ -541,7 +552,10 @@ pub fn evaluate_env_with_selections(
                 push_unique(&mut integration_packages, package.clone());
             }
             for file in &integration.files {
-                if let Some(existing) = files.iter().find(|item| item.destination == file.destination) {
+                if let Some(existing) = files
+                    .iter()
+                    .find(|item| item.destination == file.destination)
+                {
                     if existing != file {
                         return Err(Diagnostic::error(
                             "E1326",
@@ -624,15 +638,11 @@ pub fn evaluate_env_with_selections(
                     continue;
                 }
                 let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
-                let is_executable = matches!(
-                    kind,
-                    Some(super::super::Package::PackageKind::Executable)
-                );
+                let is_executable =
+                    matches!(kind, Some(super::super::Package::PackageKind::Executable));
                 if !is_executable {
-                    let is_library = matches!(
-                        kind,
-                        Some(super::super::Package::PackageKind::Library)
-                    );
+                    let is_library =
+                        matches!(kind, Some(super::super::Package::PackageKind::Library));
                     return Err(oci_from_non_executable(
                         &image.name,
                         &image.from,
@@ -741,7 +751,8 @@ pub fn evaluate_env_with_selections(
         Diagnostic::error(
             "E1333",
             format!("environment language pack could not be expanded: {error}"),
-            "language packs expand through one closed catalog into ordinary package refs".to_string(),
+            "language packs expand through one closed catalog into ordinary package refs"
+                .to_string(),
             "choose a language name from the catalog exposed by `jet env info`".to_string(),
             None,
         )
@@ -851,8 +862,12 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
     let environment_root = std::fs::canonicalize(base_dir).map_err(|error| {
         Diagnostic::error(
             "E1331",
-            format!("environment root `{}` cannot be resolved: {error}", base_dir.display()),
-            "imports follow physical paths and cannot be evaluated from an unresolved root".to_string(),
+            format!(
+                "environment root `{}` cannot be resolved: {error}",
+                base_dir.display()
+            ),
+            "imports follow physical paths and cannot be evaluated from an unresolved root"
+                .to_string(),
             "run the command from an existing project directory".to_string(),
             None,
         )
@@ -889,7 +904,8 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
                 ));
             }
             let dir = base_dir.join(&rel);
-            let real_dir = std::fs::canonicalize(&dir).map_err(|_| find_dir_missing(&dir, imp.span()))?;
+            let real_dir =
+                std::fs::canonicalize(&dir).map_err(|_| find_dir_missing(&dir, imp.span()))?;
             if !real_dir.starts_with(&environment_root) {
                 return Err(Diagnostic::error(
                     "E1331",
@@ -900,15 +916,19 @@ fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, D
                 ));
             }
             for file in list_jet_files(&real_dir, imp)? {
-                let canonical_file = std::fs::canonicalize(&file).map_err(|_| {
-                    find_dir_missing(&real_dir, imp.span())
-                })?;
+                let canonical_file = std::fs::canonicalize(&file)
+                    .map_err(|_| find_dir_missing(&real_dir, imp.span()))?;
                 if !canonical_file.starts_with(&environment_root) || !canonical_file.is_file() {
                     return Err(Diagnostic::error(
                         "E1331",
-                        format!("discovered module `{}` resolves outside the environment root", file.display()),
-                        "imports follow physical paths and cannot cross the project boundary".to_string(),
-                        "remove the escaping symlink or move the module below the environment root".to_string(),
+                        format!(
+                            "discovered module `{}` resolves outside the environment root",
+                            file.display()
+                        ),
+                        "imports follow physical paths and cannot cross the project boundary"
+                            .to_string(),
+                        "remove the escaping symlink or move the module below the environment root"
+                            .to_string(),
                         Some(imp.span()),
                     ));
                 }
@@ -982,9 +1002,7 @@ fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
     let entries = std::fs::read_dir(dir).map_err(|_| find_dir_missing(dir, imp.span()))?;
     let mut files = Vec::new();
     for entry in entries {
-        let path = entry
-            .map_err(|_| find_dir_missing(dir, imp.span()))?
-            .path();
+        let path = entry.map_err(|_| find_dir_missing(dir, imp.span()))?.path();
         if path.extension().and_then(|e| e.to_str()) == Some(Syntax::FILE_EXT) {
             files.push(path);
         }
@@ -1095,8 +1113,7 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
             } else {
                 base_dir.join(target)
             };
-            if dir.join(Syntax::PACKAGE_FILE).is_file()
-                || dir.join(Syntax::PAYLOAD_FILE).is_file()
+            if dir.join(Syntax::PACKAGE_FILE).is_file() || dir.join(Syntax::PAYLOAD_FILE).is_file()
             {
                 ProviderKind::Core
             } else {

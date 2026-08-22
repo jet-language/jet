@@ -19,6 +19,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} run   <package>@<source> -- cmd run a command in that environment, then exit
   {bin} run                            enter the shell described by ./{pack}
   {bin} dev                            realize the env, then run the project's fn dev()
+  {bin} fmt --lang <language> [paths] delegate non-Jet files to env formatter
   {bin} tool run <ref> [-- cmd]        run a package binary ephemerally (D-JPK-TOOLRUN1)
   {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools generation)
   {bin} tool list                      list globally installed tools
@@ -272,6 +273,21 @@ mod tests {
         assert!(p.flags.assume_yes);
         assert_eq!(p.flags.fixtures, Some(fixtures));
         assert_eq!(p.positional, vec!["jq@nixpkgs"]);
+    }
+
+    #[test]
+    fn parses_environment_formatter_flags() {
+        let args = vec![
+            "--lang".to_string(),
+            "nix".to_string(),
+            "--check".to_string(),
+            "--diff".to_string(),
+        ];
+        let parsed = parse_args_for("fmt", &args);
+        assert_eq!(parsed.flags.fmt_language.as_deref(), Some("nix"));
+        assert!(parsed.flags.fmt_check);
+        assert!(parsed.flags.fmt_diff);
+        assert!(parsed.positional.is_empty());
     }
 
     #[test]

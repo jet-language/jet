@@ -268,6 +268,8 @@ const CATALOG: &[Catalog] = &[
         run: |port, data_dir| {
             vec![
                 "redis-server".to_string(),
+                "--bind".to_string(),
+                "127.0.0.1".to_string(),
                 "--port".to_string(),
                 port.to_string(),
                 "--daemonize".to_string(),
@@ -289,6 +291,8 @@ const CATALOG: &[Catalog] = &[
                 "postgres".to_string(),
                 "-D".to_string(),
                 data_dir.display().to_string(),
+                "-h".to_string(),
+                "127.0.0.1".to_string(),
                 "-p".to_string(),
                 port.to_string(),
             ]
@@ -367,7 +371,7 @@ const CATALOG: &[Catalog] = &[
                 "server".to_string(),
                 data_dir.display().to_string(),
                 "--address".to_string(),
-                format!(":{port}"),
+                format!("127.0.0.1:{port}"),
             ]
         },
         readiness: |port| {
@@ -387,6 +391,8 @@ const CATALOG: &[Catalog] = &[
                 data_dir.join("mailpit.db").display().to_string(),
                 "--listen".to_string(),
                 format!("127.0.0.1:{port}"),
+                "--smtp".to_string(),
+                "127.0.0.1:1025".to_string(),
             ]
         },
         readiness: |port| {
@@ -5579,14 +5585,26 @@ mod tests {
             assert_eq!(resolved.ports, vec![*port]);
             assert!(resolved.ready.is_none(), "preset readiness must stay typed");
             match *name {
-                "redis" => assert_eq!(
-                    resolved.ready_probe,
-                    Some(ReadyProbe::Exec("redis-cli -p 6379 ping".to_string()))
-                ),
-                "postgres" => assert_eq!(
-                    resolved.ready_probe,
-                    Some(ReadyProbe::Exec("pg_isready -h 127.0.0.1 -p 5432".to_string()))
-                ),
+                "redis" => {
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "--bind" && args[1] == "127.0.0.1"
+                    }));
+                    assert_eq!(
+                        resolved.ready_probe,
+                        Some(ReadyProbe::Exec("redis-cli -p 6379 ping".to_string()))
+                    );
+                }
+                "postgres" => {
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "-h" && args[1] == "127.0.0.1"
+                    }));
+                    assert_eq!(
+                        resolved.ready_probe,
+                        Some(ReadyProbe::Exec(
+                            "pg_isready -h 127.0.0.1 -p 5432".to_string()
+                        ))
+                    );
+                }
                 "mysql" => assert_eq!(
                     resolved.ready_probe,
                     Some(ReadyProbe::Exec(
@@ -5603,18 +5621,31 @@ mod tests {
                     resolved.ready_probe,
                     Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8080/".to_string()))
                 ),
-                "minio" => assert_eq!(
-                    resolved.ready_probe,
-                    Some(ReadyProbe::Exec(
-                        "curl -fsS http://127.0.0.1:9000/minio/health/live".to_string()
-                    ))
-                ),
-                "mailpit" => assert_eq!(
-                    resolved.ready_probe,
-                    Some(ReadyProbe::Exec(
-                        "curl -fsS http://127.0.0.1:8025/api/v1/info".to_string()
-                    ))
-                ),
+                "minio" => {
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "--address" && args[1] == "127.0.0.1:9000"
+                    }));
+                    assert_eq!(
+                        resolved.ready_probe,
+                        Some(ReadyProbe::Exec(
+                            "curl -fsS http://127.0.0.1:9000/minio/health/live".to_string()
+                        ))
+                    );
+                }
+                "mailpit" => {
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "--listen" && args[1] == "127.0.0.1:8025"
+                    }));
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "--smtp" && args[1] == "127.0.0.1:1025"
+                    }));
+                    assert_eq!(
+                        resolved.ready_probe,
+                        Some(ReadyProbe::Exec(
+                            "curl -fsS http://127.0.0.1:8025/api/v1/info".to_string()
+                        ))
+                    );
+                }
                 "adminer" => assert_eq!(
                     resolved.ready_probe,
                     Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8081/".to_string()))

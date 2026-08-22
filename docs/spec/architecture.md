@@ -115,7 +115,9 @@ carries the same identity and service facts into plan.json and the source proof.
 Hangar realization and atomic generation
 publication remain in jetpack; the projection adds no store or rollout path.
 System, Fleet, and host names are validated as safe generation path components
-before Fleet deploy facts are staged.
+before Fleet deploy facts are staged. Fleet deploy plans and host proof scripts
+carry the same graph identity; duplicate Fleet names or host paths fail before
+any generation files are published.
 
 Package splits and folds use the same checked graph and one reversible journal.
 The journal is published before a multi-file mutation, so a stale, corrupt, or

@@ -182,7 +182,8 @@ fn ready_probe_from(
                     Diagnostic::error(
                         "E1328",
                         "typed notify readiness needs a path".to_string(),
-                        "ServiceProbe.notify observes one project-relative readiness file".to_string(),
+                        "ServiceProbe.notify observes one project-relative readiness file"
+                            .to_string(),
                         "write ready: .notify(\".jet/ready/api\")".to_string(),
                         Some(call.name_span),
                     )
@@ -196,7 +197,8 @@ fn ready_probe_from(
                     return Err(Diagnostic::error(
                         "E1328",
                         "typed notify readiness path must stay inside the project".to_string(),
-                        "ServiceProbe.notify observes a project-relative readiness file".to_string(),
+                        "ServiceProbe.notify observes a project-relative readiness file"
+                            .to_string(),
                         "write a relative path without `..` or an absolute prefix".to_string(),
                         Some(call.name_span),
                     ));
@@ -229,7 +231,8 @@ fn ready_probe_from(
             "E1328",
             format!("typed {name} readiness has the wrong number of arguments"),
             "each readiness probe has a closed argument shape".to_string(),
-            "use exec(command), http(url[, status]), notify(path), or tcp(port|host, port)".to_string(),
+            "use exec(command), http(url[, status]), notify(path), or tcp(port|host, port)"
+                .to_string(),
             Some(call.name_span),
         ));
     }
@@ -261,15 +264,14 @@ fn command_from(v: &CtValue) -> Option<Vec<String>> {
     let CtValue::List(values) = v else {
         return None;
     };
-    let values = values
-        .iter()
-        .map(string_from)
-        .collect::<Option<Vec<_>>>()?;
+    let values = values.iter().map(string_from).collect::<Option<Vec<_>>>()?;
     (!values.is_empty()).then_some(values)
 }
 
 fn strings_from(v: &CtValue) -> Option<Vec<String>> {
-    let CtValue::List(values) = v else { return None };
+    let CtValue::List(values) = v else {
+        return None;
+    };
     values.iter().map(string_from).collect()
 }
 
@@ -370,7 +372,8 @@ fn backoff_value(value: &CtValue) -> Option<(u64, bool)> {
             Some((250, true))
         }
         CtValue::Enum { variant, args, .. }
-            if variant.rsplit('.').next() == Some("Fixed") && args.len() == 1 => {
+            if variant.rsplit('.').next() == Some("Fixed") && args.len() == 1 =>
+        {
             Some((nonnegative_u64(&args[0].1)?, false))
         }
         _ => None,
@@ -390,7 +393,13 @@ fn shutdown_term_args(args: &[(Option<String>, CtValue)]) -> Option<ShutdownPoli
     }
     let grace_ms = match args.first() {
         None => 3_000,
-        Some((name, value)) if named_payload_field(name.as_deref()).is_none() || matches!(named_payload_field(name.as_deref()), Some("grace" | "grace_ms")) => {
+        Some((name, value))
+            if named_payload_field(name.as_deref()).is_none()
+                || matches!(
+                    named_payload_field(name.as_deref()),
+                    Some("grace" | "grace_ms")
+                ) =>
+        {
             nonnegative_u64(value)?
         }
         Some(_) => return None,

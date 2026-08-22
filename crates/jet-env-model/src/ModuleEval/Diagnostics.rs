@@ -221,7 +221,8 @@ pub(super) fn fleet_unknown_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1244",
         format!("`{field}` isn't a field of `Fleet`"),
-        "fleet deployment remains frozen jetos research; only `hosts` is captured for planning".to_string(),
+        "fleet deployment remains frozen jetos research; only `hosts` is captured for planning"
+            .to_string(),
         format!("remove `{field}`; captured fleets use `hosts: {{ … }}`"),
         Some(span),
     )

@@ -109,6 +109,79 @@ fn info_json_is_stable_and_includes_service_options() {
     assert!(stdout.contains("\"name\":\"ready\""), "{stdout}");
 }
 
+#[test]
+fn search_matches_typed_service_options_offline() {
+    let project = Scratch::new("project");
+    let root = Scratch::new("root");
+    copy_project(&project.path);
+
+    let out = jetpack()
+        .args([
+            "search",
+            "ready",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+            "fixtures",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("default.ripgrep"), "stdout: {stdout}");
+}
+
+#[test]
+fn jet_inspect_search_routes_typed_option_queries_through_main() {
+    let project = Scratch::new("project");
+    let root = Scratch::new("root");
+    copy_project(&project.path);
+
+    let out = jet()
+        .args([
+            "inspect",
+            "search",
+            "ready",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+            "fixtures",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("default.ripgrep"), "stdout: {stdout}");
+}
+
+#[test]
+fn search_without_local_index_fails_closed() {
+    let project = Scratch::new("empty-project");
+    let root = Scratch::new("root");
+
+    let out = jetpack()
+        .args(["search", "ready", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no local discovery index"), "stderr: {stderr}");
+}
+
 /// D-CLI-SURFACE3=B: `search` moved under `jet inspect` — bare `jet search`
 /// is now a teaching error (E2101) naming the new spelling.
 #[test]

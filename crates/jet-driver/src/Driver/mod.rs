@@ -3956,7 +3956,7 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
         resolver
             .revalidate_file(&checked.file)
             .map_err(|error| vec![error.diagnostic()])?;
-        let manifest = crate::Package::PackageFacts::parse(
+        let manifest = crate::Package::PackageFacts::parse_uncomposed(
             &source,
             checked.file.path.display().to_string(),
         )

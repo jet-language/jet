@@ -72,7 +72,7 @@ spellings are migration inputs, not additional Package roots.
 | U14 | `D-JPK-IMAGE1` | A | `image.*` can build `.Oci` containers. `.Iso` installers are frozen jetos research. OCI layout is direct from hangar objects. |
 | U14a | `D-JPK-OCITOOL1` | C | Native/std-only deterministic OCI layout now; registry push gated on TLS, with temporary `skopeo` bridge allowed only as staging. |
 | U15 | `D-JPK-FLEET1` | A | Fleet host maps remain research/capture only; rollout waits for Epoch 7 jetos ballots. |
-| U16 | `D-JPK-BRIDGE1` | A | `jet env -p`, foreign `flake.nix`/`devenv.nix` consumption, `jet run tool@nixpkgs`, `jet bridge flake`. |
+| U16 | `D-JPK-BRIDGE1` | A | `jet env -p`, foreign `flake.nix`/`devenv.nix` consumption, `jet run tool@nixpkgs`, `jet os bridge flake`. |
 | U17 | `D-JPK-OSNAME1` | A | Spell the OS `jetos`. |
 | U18 | `D-JPK-TWONAMES1` + follow-ups | amended | `package.jet` is the sole reserved ecosystem file; other `.jet` files contribute Configs and role modules are shaped by declaration; engines dispatch as executables. |
 | U19 | `D-JPK-DEVCOMPOSE1` | D | `jet env [name]` enters a tools-only shell and never runs project functions; `jet dev` explicitly runs `fn dev()` inside `env(base + env.dev)`. |
@@ -154,7 +154,8 @@ Edges:
 - U20 adapters land with Phase B; `Recipe.prebuilt`/`copy` and the finite
   `Recipe.build(steps: […])` action surface use the existing digest-bound
   sandbox and trust gate. U21 channels and U27 build debugging ride the same
-  wave. U26 discovery follows once provider metadata is indexable.
+  wave. U26 option discovery consumes the local index; the cockpit and doctor
+  slices remain separate.
 - U25 platform tiers: Windows/macOS CI lanes stand up in Phase A; the Nix
   bridge is exempt (Linux/macOS by nature) and U23's diagnostic covers the gap.
 

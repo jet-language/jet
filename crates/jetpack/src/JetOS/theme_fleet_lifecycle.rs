@@ -95,6 +95,11 @@ pub(super) fn write_fleet_deploy_facts(
     let bin_dir = dir.join("sw/bin");
     fs::create_dir_all(&fleet_dir)?;
     fs::create_dir_all(&bin_dir)?;
+    let graph_identity = plan
+        .graph_identity
+        .as_deref()
+        .map(JSON::quote)
+        .unwrap_or_else(|| "null".to_string());
     let mut hosts = Vec::new();
     let mut host_names = Vec::new();
     for fleet in &plan.fleets {
@@ -163,6 +168,7 @@ pub(super) fn write_fleet_deploy_facts(
                     &switch,
                     &health_cmd,
                     &rollback,
+                    &graph_identity,
                 ),
             )?;
             make_executable(&script_path)?;
@@ -180,8 +186,9 @@ pub(super) fn write_fleet_deploy_facts(
     fs::write(
         fleet_dir.join("deploy-plan.json"),
         format!(
-            "{{\"kind\":\"jetos.fleet-deploy\",\"host\":{},\"hosts\":[{}],\"proofs\":[\"build-closure\",\"ssh-push\",\"remote-proof-before-switch\",\"health-window\",\"rollback-on-fail\"]}}",
+            "{{\"kind\":\"jetos.fleet-deploy\",\"host\":{},\"graph_identity\":{},\"hosts\":[{}],\"proofs\":[\"build-closure\",\"ssh-push\",\"remote-proof-before-switch\",\"health-window\",\"rollback-on-fail\"]}}",
             JSON::quote(&system.name),
+            graph_identity,
             hosts.join(",")
         ),
     )?;
@@ -205,13 +212,15 @@ fn render_fleet_host_script(
     switch_cmd: &str,
     health: &str,
     rollback: &str,
+    graph_identity_json: &str,
 ) -> String {
     format!(
-        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ngeneration=$(cat \"$root/generation.txt\" 2>/dev/null || basename \"$root\")\nproof_dir=${{JETOS_DEPLOY_PROOF_DIR:-$root/fleet/proofs}}\nmkdir -p \"$proof_dir\"\nproof_file=\"$proof_dir/{fleet}-{host}.json\"\npush_cmd={push}\nproof_cmd={proof}\nswitch_cmd={switch_cmd}\nhealth_cmd={health}\nrollback_cmd={rollback}\nrun_step() {{\n  name=$1\n  cmd=$2\n  printf '%s\\n' \"jetos deploy {host}: $name\"\n  sh -c \"$cmd\"\n}}\nif [ \"${{JETOS_FLEET_DRY_RUN:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"dry-run\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step push \"$push_cmd\"\nrun_step proof \"$proof_cmd\"\nif [ \"${{JETOS_FLEET_STAGE_ONLY:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"staged\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step switch \"$switch_cmd\"\nif ! sh -c \"$health_cmd\"; then\n  sh -c \"$rollback_cmd\" || true\n  printf '{{\"state\":\"rolled-back\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 2\nfi\nprintf '{{\"state\":\"deployed\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n' \"$generation\" > \"$proof_file\"\ncat \"$proof_file\"\n",
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ngeneration=$(cat \"$root/generation.txt\" 2>/dev/null || basename \"$root\")\nproof_dir=${{JETOS_DEPLOY_PROOF_DIR:-$root/fleet/proofs}}\nmkdir -p \"$proof_dir\"\nproof_file=\"$proof_dir/{fleet}-{host}.json\"\npush_cmd={push}\nproof_cmd={proof}\nswitch_cmd={switch_cmd}\nhealth_cmd={health}\nrollback_cmd={rollback}\nrun_step() {{\n  name=$1\n  cmd=$2\n  printf '%s\\n' \"jetos deploy {host}: $name\"\n  sh -c \"$cmd\"\n}}\nif [ \"${{JETOS_FLEET_DRY_RUN:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"dry-run\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"graph_identity\":{graph_identity_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step push \"$push_cmd\"\nrun_step proof \"$proof_cmd\"\nif [ \"${{JETOS_FLEET_STAGE_ONLY:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"staged\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"graph_identity\":{graph_identity_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step switch \"$switch_cmd\"\nif ! sh -c \"$health_cmd\"; then\n  sh -c \"$rollback_cmd\" || true\n  printf '{{\"state\":\"rolled-back\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"graph_identity\":{graph_identity_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 2\nfi\nprintf '{{\"state\":\"deployed\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"graph_identity\":{graph_identity_json},\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n' \"$generation\" > \"$proof_file\"\ncat \"$proof_file\"\n",
         fleet_json = JSON::quote(fleet),
         host_json = JSON::quote(host),
         system_json = JSON::quote(system),
         target_json = JSON::quote(target),
+        graph_identity_json = graph_identity_json,
         push = shell_single_quote(push),
         proof = shell_single_quote(proof),
         switch_cmd = shell_single_quote(switch_cmd),

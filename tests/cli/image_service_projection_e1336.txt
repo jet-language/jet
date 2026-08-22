@@ -1,3 +1,3 @@
 Error [E1336]: environment image server cannot project services
-Why: the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy
-Fix: run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime
+Why: the environment declares services but the image does not select them; Jet will not silently omit supervised service facts
+Fix: add `services: ["api"]` to the image, or remove the service from the environment

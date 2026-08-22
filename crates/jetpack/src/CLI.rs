@@ -23,6 +23,7 @@ mod studio_transactions;
 mod tool;
 mod profile;
 mod browser;
+mod format;
 #[doc(hidden)]
 pub mod ProfileDispatch;
 mod usage_tests;

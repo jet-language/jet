@@ -521,6 +521,7 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
 pub const JETPACK_VERBS: &[&str] = &[
     // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.
     "doctor",
+    "fmt",
     "run",
     "enter",
     "build",
@@ -588,7 +589,7 @@ pub const BUILD_FLAG_SHELL_ON_FAIL: &str = "--shell-on-fail";
 pub const BRIDGE_SUBCOMMAND: &str = "bridge";
 pub const BRIDGE_VERB_FLAKE: &str = "flake";
 
-/// U16: foreign dev-shell descriptor filenames `jet env`/`jet bridge flake`
+/// U16: foreign dev-shell descriptor filenames `jet env`/`jet os bridge flake`
 /// look for. `jet env` only auto-detects one of these when the project's own
 /// manifest declares no `env.*` module; `--flake` forces it either way.
 pub const FOREIGN_FLAKE_FILE: &str = "flake.nix";

@@ -598,7 +598,7 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
                     )));
                 }
                 let environment = format!(
-                    "{{ {}: Environment.{{\n{}\n}} }}",
+                    "{{ {}: Environment{{\n{}\n}} }}",
                     module_name,
                     body.trim()
                 );
@@ -1699,9 +1699,9 @@ fn add_member_reference(
 
 fn render_config(name: &str, field: &str, value: &str) -> String {
     if field == "raw" {
-        format!("pub {name} :: Config.{{\n{}\n}}\n", value.trim())
+        format!("pub {name} :: Config{{\n{}\n}}\n", value.trim())
     } else {
-        format!("pub {name} :: Config.{{\n    {field}: {}\n}}\n", value.trim())
+        format!("pub {name} :: Config{{\n    {field}: {}\n}}\n", value.trim())
     }
 }
 
@@ -2198,7 +2198,7 @@ mod tests {
     fn environment_split_and_fold_restore_exact_root() {
         let root = temp_root("env");
         let original =
-            b"name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
+            b"name: \"demo\"\nenvironments: .{ development: Environment{ tools: [\"git\"] } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         let result = split(&root, SplitTarget::Environment, false).unwrap();
         assert_eq!(
@@ -2217,7 +2217,7 @@ mod tests {
         let root = temp_root("stale");
         fs::write(
             root.join(PACKAGE_FILE),
-            "name: \"demo\"\nenvironments: .{ dev: .Environment.{ } }\n",
+            "name: \"demo\"\nenvironments: .{ dev: Environment{ } }\n",
         )
         .unwrap();
         let plan = split_plan(&root, SplitTarget::Environment).unwrap();
@@ -2233,7 +2233,7 @@ mod tests {
         let root = temp_root("member");
         fs::write(
             root.join(PACKAGE_FILE),
-            "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n",
+            "name: \"workspace\"\napp :: Config{ version: \"1\" }\n",
         )
         .unwrap();
         split(
@@ -2266,7 +2266,7 @@ mod tests {
         )
         .unwrap();
         let original =
-            "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+            "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config{ version: \"1\" }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         let error = split(
             &root,
@@ -2412,7 +2412,7 @@ mod tests {
         let ambiguous_root = temp_root("hosts-ambiguous");
         fs::write(
             ambiguous_root.join(PACKAGE_FILE),
-            "name: \"demo\"\noutputs: .{ server: .Executable.{ name: \"server\", entry: run } }\n",
+            "name: \"demo\"\noutputs: .{ server: Executable{ name: \"server\", entry: run } }\n",
         )
         .unwrap();
         let ambiguous = split(
@@ -2452,7 +2452,7 @@ mod tests {
                 "module env.dev {\n    tools: [\"git@nixpkgs\"]\n}\n\nmodule env.ci {\n    tools: [\"cargo@nixpkgs\"]\n}\n",
             ),
             ("workspace.jet", "module workspace { members: [] }\n"),
-            ("config.jet", "Config.{ }\n"),
+            ("config.jet", "Config{ }\n"),
         ];
         for (name, source) in originals {
             fs::write(root.join(name), source).unwrap();

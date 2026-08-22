@@ -373,6 +373,94 @@ mod tests {
     }
 
     #[test]
+    fn lock_receipt_root_keeps_connected_closure_reachable() {
+        let (roots, _g) = temp_roots();
+        let base = ingest_fixture(&roots, "receipt-base", &[("out", "base")], Vec::new());
+        let middle = ingest_fixture(
+            &roots,
+            "receipt-middle",
+            &[("out", "middle")],
+            vec![base.entry.envelope.output_hash.clone()],
+        );
+        let consumer = ingest_fixture(
+            &roots,
+            "receipt-consumer",
+            &[("out", "consumer")],
+            vec![middle.entry.envelope.output_hash.clone()],
+        );
+
+        let project = roots.root.join("receipt-closure-project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(
+            managed.join("lock"),
+            format!(
+                "version = 1\n\n[[package]]\nname = \"receipt-consumer\"\nversion = \"1\"\nsource = {{ path = \"{}\" }}\nfingerprint = \"\"\ndependencies = []\nreceipt = \"{}\"\n",
+                consumer.entry.reference, consumer.entry.receipt
+            ),
+        )
+        .unwrap();
+
+        let live = live_roots_from(&roots, &project).unwrap();
+        for entry in [&base.entry, &middle.entry, &consumer.entry] {
+            let meta = parse_meta(&entry.meta_json()).unwrap();
+            assert!(
+                is_live(&entry.id, &meta, &live),
+                "receipt root did not retain connected entry {}",
+                entry.id
+            );
+        }
+        assert!(live.receipts.contains(&consumer.entry.receipt));
+    }
+
+    #[test]
+    fn lock_receipt_identity_mismatch_fails_closed_before_cleanup() {
+        let (roots, _g) = temp_roots();
+        let entry = ingest_fixture(&roots, "receipt-mismatch", &[("out", "bytes")], Vec::new());
+        let project = roots.root.join("receipt-mismatch-project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(
+            managed.join("lock"),
+            format!(
+                "version = 1\n\n[[package]]\nname = \"wrong-package\"\nversion = \"1\"\nsource = {{ path = \"{}\" }}\nfingerprint = \"\"\ndependencies = []\nreceipt = \"{}\"\n",
+                entry.entry.reference, entry.entry.receipt
+            ),
+        )
+        .unwrap();
+
+        let error = live_roots_from(&roots, &project).unwrap_err();
+        assert!(error.to_string().contains("disagrees with Hangar closure record"));
+        assert!(roots.hangar_dir().join(&entry.entry.id).exists());
+        assert!(roots
+            .hangar_dir()
+            .join(Closure::RECEIPTS_DIR)
+            .join(&entry.entry.receipt)
+            .is_file());
+    }
+
+    #[test]
+    fn clean_sweeps_unreachable_receipt_objects() {
+        let (roots, _g) = temp_roots();
+        let entry = ingest_fixture(&roots, "orphan-receipt", &[("out", "bytes")], Vec::new());
+        let receipt = roots
+            .hangar_dir()
+            .join(Closure::RECEIPTS_DIR)
+            .join(&entry.entry.receipt);
+        let object = roots.hangar_dir().join(&entry.entry.id);
+        assert!(Closure::remove_closure_record(&roots, &entry.entry.id).unwrap());
+        make_tree_writable_for_removal(&object).unwrap();
+        fs::remove_dir_all(&object).unwrap();
+        assert!(receipt.is_file());
+
+        let plan = clean_plan(&roots).unwrap();
+        assert_eq!(plan.removed_receipts, 1);
+        let report = clean(&roots).unwrap();
+        assert_eq!(report.removed_receipts, 1);
+        assert!(!receipt.exists());
+    }
+
+    #[test]
     fn malformed_project_lock_fails_closed_before_hangar_cleanup() {
         let (roots, _g) = temp_roots();
         let project = roots.root.join("project");

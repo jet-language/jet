@@ -183,9 +183,13 @@ pub(crate) fn run_hangar_generations(json: bool) {
             })
             .collect::<Vec<_>>();
         println!(
-            "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"generations\",\"generations\":[{}]}}",
-            jet::Diagnostics::json_str(jet::Diagnostics::REPORT_SCHEMA),
-            rows.join(",")
+            "{}",
+            jet::Diagnostics::render_status_json(
+                "ok",
+                true,
+                "generations",
+                &format!(",\"generations\":[{}]", rows.join(",")),
+            )
         );
         return;
     }
@@ -222,10 +226,17 @@ pub(crate) fn run_hangar_rollback(gen_str: &str, json: bool) {
         Ok(g) => {
             if json {
                 println!(
-                    "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"rollback\",\"generation\":{},\"entry_hash\":{}}}",
-                    jet::Diagnostics::json_str(jet::Diagnostics::REPORT_SCHEMA),
-                    g.number,
-                    jet::Diagnostics::json_str(&g.entry_hash)
+                    "{}",
+                    jet::Diagnostics::render_status_json(
+                        "ok",
+                        true,
+                        "rollback",
+                        &format!(
+                            ",\"generation\":{},\"entry_hash\":{}",
+                            g.number,
+                            jet::Diagnostics::json_str(&g.entry_hash)
+                        ),
+                    )
                 );
             } else {
                 println!(

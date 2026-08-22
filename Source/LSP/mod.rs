@@ -7,6 +7,7 @@
 
 mod Check;
 mod Completion;
+mod EnvironmentResources;
 mod Features;
 mod Position;
 mod Server;

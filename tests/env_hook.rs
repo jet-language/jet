@@ -151,7 +151,7 @@ fn enter_from_nested_directory_projects_allowlisted_dotenv_and_unsets() {
     .unwrap();
     fs::write(
         scratch.path.join("env.jet"),
-        "module env.dev {\n  dotenv: Dotenv.{ file: \".env\", allow: [\"VISIBLE\", \"SECRET\"], secrets: [\"SECRET\"] }\n  unset: [\"REMOVE_ME\"]\n}\n",
+        "module env.dev {\n  dotenv: Dotenv{ file: \".env\", allow: [\"VISIBLE\", \"SECRET\"], secrets: [\"SECRET\"] }\n  unset: [\"REMOVE_ME\"]\n}\n",
     )
     .unwrap();
     let out = export_cmd(&inner)
@@ -289,7 +289,7 @@ fn enter_runs_a_trusted_lifecycle_hook_before_the_child() {
     fs::write(
         scratch.path.join("env.jet"),
         r#"module env.dev {
-    on_enter: [.{
+    on_enter: [{
         name: "marker",
         command: "printf entered > .hook-marker",
         trusted: true,
@@ -335,7 +335,7 @@ fn enter_resolves_a_bare_lifecycle_name_to_a_typed_job() {
     )
     .unwrap();
     fs::write(
-        scratch.path.join("main.jet"),
+        scratch.path.join("run.jet"),
         r#"#Job
 fn seed_config() {
         print("typed lifecycle job")
@@ -379,7 +379,7 @@ fn enter_rejects_an_undeclared_lifecycle_job_before_launch() {
         "module env.dev {\n  on_enter: [missing_task]\n}\n",
     )
     .unwrap();
-    fs::write(scratch.path.join("main.jet"), "fn run() {}\n").unwrap();
+    fs::write(scratch.path.join("run.jet"), "fn run() {}\n").unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args(["enter", "--trust", "--no-color", "--", "true"])
@@ -406,7 +406,7 @@ fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
     )
     .unwrap();
     fs::write(
-        scratch.path.join("main.jet"),
+        scratch.path.join("run.jet"),
         "#Job\nfn seed_config() { print(\"typed lifecycle job\") }\nfn run() {}\n",
     )
     .unwrap();
@@ -453,7 +453,7 @@ fn enter_requires_trust_for_a_trusted_lifecycle_hook() {
     fs::write(
         project.path.join("env.jet"),
         r#"module env.dev {
-    on_enter: [.{
+    on_enter: [{
         name: "marker",
         command: "printf entered > .hook-marker",
         trusted: true,
@@ -481,7 +481,7 @@ fn env_test_rejects_an_untrusted_lifecycle_hook() {
     fs::write(
         scratch.path.join("env.jet"),
         r#"module env.dev {
-    on_enter: [.{
+    on_enter: [{
         name: "needs-review",
         command: "false",
     }]
@@ -507,12 +507,12 @@ fn env_test_runs_hooks_checks_and_command_in_a_clean_child() {
     fs::write(
         scratch.path.join("env.jet"),
         r#"module env.dev {
-    on_enter: [.{
+    on_enter: [{
         name: "clean-enter",
         command: "test -z \"$JET_PARENT_SENTINEL\" && printf entered > .clean-marker",
         trusted: true,
     }]
-    checks: [.{
+    checks: [{
         name: "clean-check",
         command: "test -z \"$JET_PARENT_SENTINEL\" && test -f .clean-marker",
         trusted: true,
@@ -712,7 +712,7 @@ fn enter_rejects_a_trusted_hook_cwd_that_escapes_through_a_symlink() {
     fs::write(
         project.path.join("env.jet"),
         r#"module env.dev {
-    on_enter: [.{
+    on_enter: [{
         name: "escape",
         cwd: "link",
         command: "printf escaped > escaped",

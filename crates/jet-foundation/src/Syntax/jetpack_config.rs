@@ -602,6 +602,8 @@ pub const ENV_FIELD_CHECKS: &str = "checks";
 pub const ENV_FIELD_RELOAD: &str = "reload";
 /// D-ECO6=A: map the typed environment to the project's Git hook directory.
 pub const ENV_FIELD_GIT_HOOKS_PATH: &str = "git_hooks_path";
+/// D-ECO12=A: typed environment formatter package for non-`.jet` files.
+pub const ENV_FIELD_FORMATTER: &str = "formatter";
 /// D-ENV-PROFILE1/D-ENV-LANGPACK1, renamed by D-CONF-WORD1=A: typed
 /// environment composition fields. A preset is one named composition.
 pub const ENV_FIELD_PRESETS: &str = "presets";
@@ -616,6 +618,8 @@ pub const ENV_FLAG_ENV: &str = "--env";
 /// D-ENVFLAG1=A: retired input only; this spelling is never an alias.
 pub const ENV_FLAG_ENV_RETIRED: &str = "--env-profile";
 pub const ENV_FLAG_PRESET: &str = "--preset";
+/// D-ECO12=A: choose the environment formatter language for `jet fmt`.
+pub const FMT_FLAG_LANG: &str = "--lang";
 /// D-CONF-WORD1=A: the retired spelling, kept only to teach `--preset`.
 pub const ENV_FLAG_PROFILE_RETIRED: &str = "--profile";
 /// D-FE-PROMPT-STRIP1: `Prompt{ label: "...", path: .Short, strip: .On }`.

@@ -28,7 +28,9 @@ fn record_omitted_secret_integration_projection(
         projection.omitted.push(format!("{prefix}:task:{task}"));
     }
     for provider in &integration.providers {
-        projection.omitted.push(format!("{prefix}:provider:{provider}"));
+        projection
+            .omitted
+            .push(format!("{prefix}:provider:{provider}"));
     }
     for grant in &integration.grants {
         projection.omitted.push(format!("{prefix}:grant:{grant}"));
@@ -515,9 +517,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     };
 
     let push_destination = match parsed.flags.push.as_deref() {
-        Some(push_ref)
-            if push_ref.starts_with("https://") || push_ref.starts_with("http://") =>
-        {
+        Some(push_ref) if push_ref.starts_with("https://") || push_ref.starts_with("http://") => {
             Some(ImagePushDestination::Registry(push_ref.to_string()))
         }
         Some(push_ref) if push_ref.starts_with("oci://") => {
@@ -538,18 +538,20 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             );
             return 2;
         }
-        Some(push_ref) => Some(ImagePushDestination::Local(if let Some(path) =
-            push_ref.strip_prefix("file://")
-        {
-            std::path::PathBuf::from(path)
-        } else {
-            std::path::PathBuf::from(push_ref)
-        })),
+        Some(push_ref) => Some(ImagePushDestination::Local(
+            if let Some(path) = push_ref.strip_prefix("file://") {
+                std::path::PathBuf::from(path)
+            } else {
+                std::path::PathBuf::from(push_ref)
+            },
+        )),
         None => None,
     };
 
     let base_directory = match image.base.as_deref() {
-        Some(reference) if reference.starts_with("https://") || reference.starts_with("http://") => {
+        Some(reference)
+            if reference.starts_with("https://") || reference.starts_with("http://") =>
+        {
             theme.error_coded(
                 "E1268",
                 &format!("base OCI reference `{reference}` needs a verified local copy"),
@@ -564,9 +566,9 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             } else {
                 let relative = std::path::Path::new(reference);
                 if relative.is_absolute()
-                    || relative.components().any(|component| {
-                        component == std::path::Component::ParentDir
-                    })
+                    || relative
+                        .components()
+                        .any(|component| component == std::path::Component::ParentDir)
                 {
                     theme.error(
                         &format!("base OCI layout `{reference}` escapes the project"),
@@ -596,7 +598,18 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let out_dir = dir.join(".jet").join("images").join(name);
     let mut projection = Image::ProjectionReport::default();
-    if !image.services.is_empty() || (image.from_environment && !plan.dev_services.is_empty()) {
+    if !image.from_environment && !image.services.is_empty() {
+        projection.rejected.push("services".to_string());
+        let _ = write_rejected_projection(&out_dir, &projection);
+        theme.error_coded(
+            "E1336",
+            &format!("package image {name} cannot project services"),
+            "services is an environment projection field, not a package-image input",
+            "use `from: env.<name>` for a supervised environment image, or remove `services:`",
+        );
+        return 2;
+    }
+    if image.from_environment && image.services.is_empty() && !plan.dev_services.is_empty() {
         projection.rejected.push("services".to_string());
         if let Err(error) = write_rejected_projection(&out_dir, &projection) {
             theme.error(
@@ -605,16 +618,80 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
                 "check that the image output directory is writable.",
             );
         }
+        let service_names = plan
+            .dev_services
+            .iter()
+            .map(|service| format!("\"{}\"", service.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let fix = format!(
+            "add `services: [{service_names}]` to the image, or remove the service from the environment"
+        );
         theme.error_coded(
             "E1336",
             &format!("environment image {name} cannot project services"),
-            "the image path has no typed service supervisor; starting shell PIDs would bypass readiness, restart, cancellation, and cleanup policy",
-            "run the declared services with `jetpack services`, or build an image without `services:` until the one supervisor owns the image runtime",
+            "the environment declares services but the image does not select them; Jet will not silently omit supervised service facts",
+            &fix,
         );
         return 2;
     }
+    let image_platform = image.target.as_deref().unwrap_or("linux.x64");
+    if image.from_environment {
+        for integration in &plan.integrations {
+            if let Err(error) = integration.validate_target(image_platform) {
+                projection
+                    .rejected
+                    .push(format!("integration:{}:host", integration.kind.as_str()));
+                let _ = write_rejected_projection(&out_dir, &projection);
+                theme.error_coded(
+                    "E1333",
+                    &format!("environment image {name} cannot project this integration"),
+                    &error,
+                    "choose a matching image target or remove the integration from the environment",
+                );
+                return 2;
+            }
+        }
+        for language in &plan.language_projections {
+            if !language.selection.enable {
+                continue;
+            }
+            let unsupported = if language.license.trim().is_empty() {
+                Some(format!(
+                    "language pack `{}` has no license fact",
+                    language.pack.name
+                ))
+            } else if !language.missing_tools.is_empty() {
+                Some(format!(
+                    "language pack `{}` is missing required tools: {}",
+                    language.pack.name,
+                    language.missing_tools.join(", ")
+                ))
+            } else if !hangar_platform_matches(image_platform, &language.platform) {
+                Some(format!(
+                    "language pack `{}` targets `{}`, but the image targets `{image_platform}`",
+                    language.pack.name, language.platform
+                ))
+            } else {
+                None
+            };
+            if let Some(error) = unsupported {
+                projection
+                    .rejected
+                    .push(format!("language:{}:facts", language.pack.name));
+                let _ = write_rejected_projection(&out_dir, &projection);
+                theme.error_coded(
+                    "E1333",
+                    &format!("environment image {name} cannot project this language pack"),
+                    &error,
+                    "choose a supported language pack and image target with an admitted license and complete tool mapping",
+                );
+                return 2;
+            }
+        }
+    }
     let mut files = if image.from_environment {
-        environment_image_files(theme, &roots, &plan, name, &mut projection)
+        environment_image_files(theme, &roots, &plan, name, image_platform, &mut projection)
     } else {
         let bin_path = dir.join("build").join(&image.from);
         let bin_data = match read_project_image_file(&dir.join("build"), &image.from) {
@@ -639,16 +716,20 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         }]
     };
     if image.from_environment {
-        projection
-            .included
-            .extend(plan.package_refs.iter().map(|value| format!("package:{value}")));
+        projection.included.extend(
+            plan.package_refs
+                .iter()
+                .map(|value| format!("package:{value}")),
+        );
         projection.included.push("environment:shell".to_string());
         projection.changed.push("from:environment".to_string());
         if !plan.secrets.is_empty() {
             projection.omitted.push("environment.secrets".to_string());
         }
         if !plan.source_files.is_empty() {
-            projection.omitted.push("environment.source-files".to_string());
+            projection
+                .omitted
+                .push("environment.source-files".to_string());
         }
         if !plan.environment_reads.is_empty() {
             projection.omitted.push("environment.reads".to_string());
@@ -669,7 +750,9 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             projection.omitted.push("environment.vmtests".to_string());
         }
         if !plan.package_profiles.is_empty() {
-            projection.omitted.push("environment.package-profiles".to_string());
+            projection
+                .omitted
+                .push("environment.package-profiles".to_string());
         }
         let lifecycle = &plan.lifecycle;
         if !lifecycle.dotenv.is_empty()
@@ -682,10 +765,14 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             projection.omitted.push("environment.lifecycle".to_string());
         }
         if !plan.files.is_empty() {
-            projection.omitted.push("environment.managed-files".to_string());
+            projection
+                .omitted
+                .push("environment.managed-files".to_string());
         }
         if !plan.integrations.is_empty() {
-            projection.omitted.push("environment.integrations".to_string());
+            projection
+                .omitted
+                .push("environment.integrations".to_string());
         }
         for integration in &plan.integrations {
             if matches!(
@@ -723,9 +810,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             projection.omitted.push("environment.presets".to_string());
         }
     } else {
-        projection
-            .included
-            .push(format!("package:{}", image.from));
+        projection.included.push(format!("package:{}", image.from));
     }
     for (key, _) in &image.env_vars {
         projection.changed.push(format!("env:{key}"));
@@ -749,7 +834,9 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         projection.changed.push("entrypoint".to_string());
     }
     if files.is_empty() {
-        projection.rejected.push("environment.package-output".to_string());
+        projection
+            .rejected
+            .push("environment.package-output".to_string());
         if let Err(error) = write_rejected_projection(&out_dir, &projection) {
             theme.error(
                 &format!("couldn't write image {name} rejection projection"),
@@ -760,16 +847,38 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
     for rel in &image.files {
+        if image.from_environment {
+            if let Some(error) = environment_image_file_rejection(&plan, rel) {
+                projection.rejected.push(format!("file:{rel}"));
+                let _ = write_rejected_projection(&out_dir, &projection);
+                theme.error_coded(
+                    "E1336",
+                    &format!("environment image {name} cannot project extra file `{rel}`"),
+                    &error,
+                    "choose a regular, project-relative, non-secret file that is not an environment input",
+                );
+                return 2;
+            }
+        }
         let data = match read_project_image_file(&dir, rel) {
             Ok(data) => data,
             Err(error) => {
                 projection.rejected.push(format!("file:{rel}"));
                 let _ = write_rejected_projection(&out_dir, &projection);
-                theme.error(
-                    &format!("image file {rel} cannot be projected"),
-                    &error,
-                    "use a regular project-relative file that stays inside the project root.",
-                );
+                if image.from_environment {
+                    theme.error_coded(
+                        "E1336",
+                        &format!("environment image {name} cannot project extra file `{rel}`"),
+                        &error,
+                        "use a regular project-relative, non-secret file that stays inside the project root",
+                    );
+                } else {
+                    theme.error(
+                        &format!("image file {rel} cannot be projected"),
+                        &error,
+                        "use a regular project-relative file that stays inside the project root.",
+                    );
+                }
                 return 2;
             }
         };
@@ -781,14 +890,70 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         projection.included.push(format!("file:{rel}"));
     }
 
+    let (service_commands, service_names) = if image.from_environment {
+        match image_service_commands(&plan, &image, &files) {
+            Ok(projection) => projection,
+            Err(error) => {
+                projection.rejected.push("services".to_string());
+                let _ = write_rejected_projection(&out_dir, &projection);
+                theme.error_coded(
+                    "E1336",
+                    &format!("environment image {name} cannot supervise its services"),
+                    &error,
+                    "give each selected service a projected executable and a supported foreground run command",
+                );
+                return 2;
+            }
+        }
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    if !service_commands.is_empty() {
+        files.push(Image::LayerFile {
+            path: "jet/supervise".to_string(),
+            data: supervisor_script(&service_commands).into_bytes(),
+            mode: 0o755,
+        });
+        projection
+            .included
+            .push("services:jet/supervise".to_string());
+        projection
+            .changed
+            .push(format!("services:{}", service_names.join(",")));
+        for service in &plan.dev_services {
+            if service_names.iter().any(|name| name == &service.name) {
+                projection
+                    .included
+                    .push(format!("service:{}", service.name));
+                if !service.after.is_empty() {
+                    projection.changed.push(format!(
+                        "service:{}:after={}",
+                        service.name,
+                        crate::Services::dependency_names(service).join(",")
+                    ));
+                }
+                if service.ports.is_empty() {
+                    projection
+                        .omitted
+                        .push(format!("service:{}:ports-default", service.name));
+                } else {
+                    projection
+                        .changed
+                        .push(format!("service:{}:ports", service.name));
+                }
+            } else {
+                projection.omitted.push(format!("service:{}", service.name));
+            }
+        }
+    }
+
     let spec = Image::BuildSpec {
         files,
-        platform: image
-            .target
-            .clone()
-            .unwrap_or_else(|| "linux.x64".to_string()),
+        platform: image_platform.to_string(),
         entrypoint: vec![image.entrypoint.clone().unwrap_or_else(|| {
-            if image.from_environment {
+            if !service_commands.is_empty() {
+                "/jet/supervise".to_string()
+            } else if image.from_environment {
                 "/bin/sh".to_string()
             } else {
                 format!("/usr/local/bin/{}", image.from)
@@ -812,7 +977,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         healthcheck: spec.healthcheck.is_some(),
         env_keys: image.env_vars.iter().map(|(key, _)| key.clone()).collect(),
         layer_paths: spec.files.iter().map(|file| file.path.clone()).collect(),
-        services: image.services.clone(),
+        services: service_names,
         base: image.base.is_some(),
         lock: if Lock::load(&dir).is_some() {
             "present".to_string()
@@ -931,11 +1096,158 @@ fn read_project_image_file(root: &std::path::Path, relative: &str) -> Result<Vec
     Ok(data)
 }
 
+fn image_service_commands(
+    plan: &ModuleEval::EnvPlan,
+    image: &ModuleEval::ImagePlan,
+    files: &[Image::LayerFile],
+) -> Result<(Vec<Vec<String>>, Vec<String>), String> {
+    let mut selected = Vec::new();
+    let mut names = Vec::new();
+    let mut visiting = std::collections::BTreeSet::new();
+    for name in &image.services {
+        collect_image_service(
+            name,
+            &plan.dev_services,
+            &mut selected,
+            &mut names,
+            &mut visiting,
+        )?;
+    }
+    let order = crate::Services::dependency_order(&selected)?;
+    let mut commands = Vec::new();
+    for index in order {
+        let service = &selected[index];
+        if service.ready.is_some()
+            || service.ready_probe.is_some()
+            || service.restart.is_some()
+            || service.shutdown.is_some()
+            || service.data_dir.is_some()
+            || !service.watch.is_empty()
+            || !service.before_start.is_empty()
+            || !service.sockets.is_empty()
+            || crate::Services::unknown_field(service).is_some()
+        {
+            return Err(format!(
+                "service {} declares runtime policy that the OCI supervisor cannot carry",
+                service.name
+            ));
+        }
+        let mut command = crate::Services::image_run_command(service)?;
+        if command
+            .iter()
+            .any(|argument| argument.bytes().any(|byte| byte.is_ascii_control()))
+        {
+            return Err(format!(
+                "service {} has a command argument with a control character",
+                service.name
+            ));
+        }
+        let executable = command
+            .first()
+            .cloned()
+            .ok_or_else(|| format!("service {} has an empty run command", service.name))?;
+        let path = if executable == "sh" || executable == "/bin/sh" {
+            "/bin/sh".to_string()
+        } else if executable.starts_with('/') {
+            let path = std::path::Path::new(&executable);
+            if path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir | std::path::Component::Prefix(_)
+                )
+            }) || !path.starts_with("/usr/local/bin")
+            {
+                return Err(format!(
+                    "service {} has an unsafe executable path",
+                    service.name
+                ));
+            }
+            executable.clone()
+        } else {
+            if executable.is_empty() || executable.contains('/') || executable.contains('\\') {
+                return Err(format!(
+                    "service {} has an unsafe executable name",
+                    service.name
+                ));
+            }
+            format!("/usr/local/bin/{executable}")
+        };
+        let layer_path = path.strip_prefix('/').unwrap_or(&path);
+        if !files.iter().any(|file| file.path == layer_path) {
+            return Err(format!(
+                "service {} executable {executable} is not a projected package",
+                service.name
+            ));
+        }
+        command[0] = path;
+        commands.push(command);
+    }
+    if !commands.is_empty() && !files.iter().any(|file| file.path == "usr/local/bin/sleep") {
+        return Err(
+            "the OCI supervisor requires a projected `sleep` executable to monitor services"
+                .to_string(),
+        );
+    }
+    Ok((commands, names))
+}
+
+fn collect_image_service(
+    name: &str,
+    plans: &[ModuleEval::DevServicePlan],
+    selected: &mut Vec<ModuleEval::DevServicePlan>,
+    names: &mut Vec<String>,
+    visiting: &mut std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    if names.iter().any(|selected| selected == name) {
+        return Ok(());
+    }
+    if !visiting.insert(name.to_string()) {
+        return Err(format!("service dependency cycle includes `{name}`"));
+    }
+    let service = plans
+        .iter()
+        .find(|candidate| candidate.name == name)
+        .ok_or_else(|| format!("service {name} is not declared by the environment"))?;
+    if !service.enable {
+        return Err(format!("service {name} is disabled"));
+    }
+    for dependency in crate::Services::dependency_names(service) {
+        collect_image_service(&dependency, plans, selected, names, visiting)?;
+    }
+    visiting.remove(name);
+    selected.push(service.clone());
+    names.push(name.to_string());
+    Ok(())
+}
+
+fn supervisor_script(commands: &[Vec<String>]) -> String {
+    let mut script = String::from(
+        "#!/bin/sh\nset -eu\npids=\"\"\ncleanup() {\n  code=$?\n  for pid in $pids; do kill \"$pid\" 2>/dev/null || true; done\n  for pid in $pids; do wait \"$pid\" 2>/dev/null || true; done\n  exit \"$code\"\n}\ntrap cleanup EXIT INT TERM\nstart() {\n  \"$@\" &\n  pids=\"$pids $!\"\n}\n",
+    );
+    for command in commands {
+        script.push_str("start");
+        for argument in command {
+            script.push(' ');
+            script.push_str(&shell_quote(argument));
+        }
+        script.push('\n');
+    }
+    script.push_str(
+        "while :; do\n  for pid in $pids; do\n    kill -0 \"$pid\" 2>/dev/null || exit 1\n  done\n  /usr/local/bin/sleep 1\ndone\n",
+    );
+    script
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn environment_image_files(
     theme: &Theme,
     roots: &Store::Roots,
     plan: &ModuleEval::EnvPlan,
     name: &str,
+    target: &str,
     projection: &mut Image::ProjectionReport,
 ) -> Vec<Image::LayerFile> {
     let mut package_refs = plan.package_refs.clone();
@@ -970,6 +1282,25 @@ fn environment_image_files(
             projection
                 .included
                 .push(format!("hangar:platform:{}", entry.envelope.platform));
+        }
+        if !hangar_platform_matches(target, &entry.envelope.platform) {
+            projection
+                .rejected
+                .push(format!("package:{reference}:platform"));
+            let realized_platform = if entry.envelope.platform.is_empty() {
+                "no declared platform"
+            } else {
+                entry.envelope.platform.as_str()
+            };
+            theme.error_coded(
+                "E1336",
+                &format!("environment image `{name}` cannot project package `{reference}`"),
+                &format!(
+                    "the verified Hangar output targets `{realized_platform}`, but the image targets `{target}`"
+                ),
+                "realize the environment package for the image target, or choose a matching `target`",
+            );
+            return Vec::new();
         }
         projection.included.push("hangar:provenance".to_string());
         projection.changed.push("hangar:cache".to_string());
@@ -1036,6 +1367,65 @@ fn environment_image_files(
     files
 }
 
+fn hangar_platform_matches(target: &str, realized: &str) -> bool {
+    match target {
+        "linux.x64" => matches!(realized, "linux.x64" | "x86_64-linux"),
+        "linux.arm64" => matches!(realized, "linux.arm64" | "aarch64-linux"),
+        _ => false,
+    }
+}
+
+fn environment_image_file_rejection(plan: &ModuleEval::EnvPlan, relative: &str) -> Option<String> {
+    let normalized = relative.strip_prefix("./").unwrap_or(relative);
+    let path = Path::new(normalized);
+    if path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        let name = name.to_string_lossy().to_ascii_lowercase();
+        name == ".jet"
+            || name == ".env"
+            || name.starts_with(".env.")
+            || ["secret", "credential", "token", "password"]
+                .iter()
+                .any(|word| name.contains(word))
+    }) {
+        return Some("the selected path is secret-bearing or Jet state".to_string());
+    }
+    if plan
+        .lifecycle
+        .dotenv
+        .iter()
+        .any(|dotenv| normalized == dotenv.file.strip_prefix("./").unwrap_or(&dotenv.file))
+    {
+        return Some(
+            "dotenv files are environment inputs and never image-layer inputs".to_string(),
+        );
+    }
+    if plan.files.iter().any(|file| {
+        file.sensitive
+            && (file.destination == normalized
+                || file
+                    .source
+                    .as_deref()
+                    .map(|source| source.strip_prefix("./").unwrap_or(source) == normalized)
+                    .unwrap_or(false))
+    }) || plan.integrations.iter().any(|integration| {
+        integration.files.iter().any(|file| {
+            file.sensitive
+                && (file.destination == normalized
+                    || file
+                        .source
+                        .as_deref()
+                        .map(|source| source.strip_prefix("./").unwrap_or(source) == normalized)
+                        .unwrap_or(false))
+        })
+    }) {
+        return Some("a sensitive environment file cannot become an image-layer input".to_string());
+    }
+    None
+}
+
 fn write_rejected_projection(
     out_dir: &Path,
     projection: &Image::ProjectionReport,
@@ -1067,7 +1457,9 @@ fn verify_realized_hangar_package(
     let output = fs::canonicalize(&entry.out)
         .map_err(|error| format!("the Hangar output cannot be resolved: {error}"))?;
     if output != expected {
-        return Err("the Hangar entry output is not its verified content-addressed object".to_string());
+        return Err(
+            "the Hangar entry output is not its verified content-addressed object".to_string(),
+        );
     }
     let bin_metadata = fs::symlink_metadata(&entry.bin)
         .map_err(|error| format!("the Hangar bin projection cannot be opened: {error}"))?;
@@ -1082,7 +1474,9 @@ fn verify_realized_hangar_package(
     Ok(())
 }
 
-fn read_realized_package_binaries(entry: &Store::StoreEntry) -> Result<Vec<(String, Vec<u8>)>, String> {
+fn read_realized_package_binaries(
+    entry: &Store::StoreEntry,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
     if entry.bin.is_empty() {
         return Err("the Hangar entry has no executable bin directory".to_string());
     }

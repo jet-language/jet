@@ -83,7 +83,9 @@ pub(crate) fn evaluate_named_fields<'a>(
     let provenance = names
         .into_iter()
         .map(|field| {
-            let (field_span, expr) = fields.get(&field).expect("computed field name came from map");
+            let (field_span, expr) = fields
+                .get(&field)
+                .expect("computed field name came from map");
             ComputedFieldProvenance {
                 field,
                 dependencies: dependencies_for_expression(
@@ -126,7 +128,10 @@ fn resolve_named_field<'a>(
         cycle.push(name.to_string());
         return Err(Diagnostic::error(
             "E0338",
-            format!("computed module fields form a cycle: {}", cycle.join(" -> ")),
+            format!(
+                "computed module fields form a cycle: {}",
+                cycle.join(" -> ")
+            ),
             cycle_why.to_string(),
             cycle_fix.to_string(),
             Some(span),
@@ -134,10 +139,8 @@ fn resolve_named_field<'a>(
     }
     states.insert(name.to_string(), 1);
     stack.push(name.to_string());
-    let dependencies = dependencies_for_expression(
-        expr,
-        &fields.keys().cloned().collect::<HashSet<_>>(),
-    );
+    let dependencies =
+        dependencies_for_expression(expr, &fields.keys().cloned().collect::<HashSet<_>>());
     for dependency in dependencies {
         resolve_named_field(
             &dependency,

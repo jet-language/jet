@@ -412,19 +412,40 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         Err(error) => return report_external_root_error(theme, parsed, error),
     };
     let principal = external_root_principal();
-    theme.status("Plan external root");
-    theme.detail(&format!("+ {label}"));
-    theme.detail(&format!("closure objects: {closure_size}"));
-    if let Some(seconds) = expires_in {
-        theme.detail(&format!("expires in {}", render_duration(seconds)));
+    let expected_etag = flag_value(parsed, "--if-etag");
+    if parsed.flags.json {
+        if !parsed.flags.assume_yes {
+            hangar_plan_json(
+                "register-external-root",
+                &format!(
+                    ",\"applied\":false,\"label\":{},\"reference\":{},\"closure_objects\":{},\"expires_at\":{},\"if_etag\":{}",
+                    crate::JSON::quote(label),
+                    crate::JSON::quote(reference),
+                    closure_size,
+                    expires_at.map_or_else(|| "null".to_string(), |value| value.to_string()),
+                    expected_etag
+                        .as_deref()
+                        .map(crate::JSON::quote)
+                        .unwrap_or_else(|| "null".to_string())
+                ),
+            );
+            return 0;
+        }
     } else {
-        theme.detail("expires: never");
-    }
-    if let Some(expected) = flag_value(parsed, "--if-etag") {
-        theme.detail(&format!("if etag: {expected}"));
-    }
-    if !theme.confirm_apply(parsed.flags.assume_yes) {
-        return 0;
+        theme.status("Plan external root");
+        theme.detail(&format!("+ {label}"));
+        theme.detail(&format!("closure objects: {closure_size}"));
+        if let Some(seconds) = expires_in {
+            theme.detail(&format!("expires in {}", render_duration(seconds)));
+        } else {
+            theme.detail("expires: never");
+        }
+        if let Some(expected) = expected_etag.as_deref() {
+            theme.detail(&format!("if etag: {expected}"));
+        }
+        if !theme.confirm_apply(parsed.flags.assume_yes) {
+            return 0;
+        }
     }
     match Store::register_external_root_at(
         &roots,
@@ -432,7 +453,7 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         label,
         reference,
         expires_at,
-        flag_value(parsed, "--if-etag").as_deref(),
+        expected_etag.as_deref(),
         now,
     ) {
         Ok(view) => {
@@ -528,7 +549,7 @@ fn cmd_hangar_unregister_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
             "read `jetpack hangar list-external-roots`, then pass its etag.",
         );
     };
-    if !theme.confirm_apply(parsed.flags.assume_yes) {
+    if !hangar_confirm_apply(theme, parsed, "unregister-external-root") {
         return 0;
     }
     let roots = Store::resolve();
@@ -689,11 +710,27 @@ fn unix_now() -> u64 {
 
 fn hangar_status_json(action: &str, fields: &str) {
     println!(
-        "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":{}{}}}",
-        crate::JSON::quote(jet_foundation::Report::REPORT_SCHEMA),
-        crate::JSON::quote(action),
-        fields,
+        "{}",
+        jet_foundation::Report::render_status_json("ok", true, action, fields)
     );
+}
+
+fn hangar_plan_json(action: &str, fields: &str) {
+    println!(
+        "{}",
+        jet_foundation::Report::render_status_json("plan", true, action, fields)
+    );
+}
+
+fn hangar_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
+    if !parsed.flags.json {
+        return theme.confirm_apply(parsed.flags.assume_yes);
+    }
+    if parsed.flags.assume_yes {
+        return true;
+    }
+    hangar_plan_json(action, ",\"applied\":false");
+    false
 }
 
 fn hangar_report_error(
@@ -910,7 +947,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
                 return archive_usage(theme, parsed, "`hangar export` needs `--to <archive.hangar>`", "write one signed archive, then import it on the target Hangar");
             };
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
             }
             let result = Store::export_archive(&roots, &target, !parsed.flags.archive_no_deps, key)
@@ -924,20 +961,31 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
             let Some(source) = target else {
                 return archive_usage(theme, parsed, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes");
             };
-            let result = Store::read_archive_file(std::path::Path::new(&source)).and_then(|bytes| {
-                if !theme.confirm_apply(parsed.flags.assume_yes) {
-                    return Ok(Store::ArchiveReport {
-                        objects: 0,
-                        bytes: bytes.len() as u64,
-                        signed: true,
-                        root: source.clone(),
-                    });
-                }
-                Store::import_archive(&roots, &bytes, key, parsed.flags.archive_allow_unsigned)
-            });
-            report_archive_result(theme, parsed, action, result)
+            let bytes = match Store::read_archive_file(std::path::Path::new(&source)) {
+                Ok(bytes) => bytes,
+                Err(error) => return report_archive_error(theme, parsed, action, error),
+            };
+            if !hangar_confirm_apply(theme, parsed, action) {
+                return 0;
+            }
+            report_archive_result(
+                theme,
+                parsed,
+                action,
+                Store::import_archive(&roots, &bytes, key, parsed.flags.archive_allow_unsigned),
+            )
         }
         "dump" => {
+            if parsed.flags.json {
+                return hangar_report_error(
+                    theme,
+                    parsed,
+                    "E1340",
+                    "`hangar dump --json` cannot stream archive bytes",
+                    "JSON mode reserves stdout for one `jet.report/v1` machine result.",
+                    "omit `--json` when redirecting the signed archive, or use `export --json` for a status report.",
+                );
+            }
             let Some(target) = target else {
                 return archive_usage(theme, parsed, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar");
             };
@@ -953,32 +1001,38 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "restore" => {
             let mut bytes = Vec::new();
-            let result = std::io::stdin()
+            if let Err(error) = std::io::stdin()
                 .lock()
                 .take((Store::MAX_ARCHIVE_BYTES as u64).saturating_add(1))
                 .read_to_end(&mut bytes)
-                .map_err(|error| std::io::Error::other(format!("could not read archive from stdin: {error}")))
-                .and_then(|_| {
-                    if bytes.len() > Store::MAX_ARCHIVE_BYTES {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "archive from stdin exceeds the 1 GiB Hangar limit",
-                        ));
-                    }
-                    Ok(())
-                })
-                .and_then(|_| {
-                    if !theme.confirm_apply(parsed.flags.assume_yes) {
-                        return Ok(Store::ArchiveReport {
-                            objects: 0,
-                            bytes: bytes.len() as u64,
-                            signed: true,
-                            root: "stdin".to_string(),
-                        });
-                    }
-                    Store::import_archive(&roots, &bytes, key, parsed.flags.archive_allow_unsigned)
-                });
-            report_archive_result(theme, parsed, action, result)
+            {
+                return report_archive_error(
+                    theme,
+                    parsed,
+                    action,
+                    std::io::Error::other(format!("could not read archive from stdin: {error}")),
+                );
+            }
+            if bytes.len() > Store::MAX_ARCHIVE_BYTES {
+                return report_archive_error(
+                    theme,
+                    parsed,
+                    action,
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "archive from stdin exceeds the 1 GiB Hangar limit",
+                    ),
+                );
+            }
+            if !hangar_confirm_apply(theme, parsed, action) {
+                return 0;
+            }
+            report_archive_result(
+                theme,
+                parsed,
+                action,
+                Store::import_archive(&roots, &bytes, key, parsed.flags.archive_allow_unsigned),
+            )
         }
         "copy" => {
             let Some(target) = target else {
@@ -987,7 +1041,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
                 return archive_usage(theme, parsed, "`hangar copy` needs `--to <hangar-root>`", "copy uses the signed export/import backbone");
             };
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
             }
             report_archive_result(
@@ -1001,7 +1055,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
             let Some(target) = target else {
                 return archive_usage(theme, parsed, "`hangar sign` needs an entry id or archive path", "jetpack hangar sign <entry-or-archive> [--to <path>] --yes");
             };
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
             }
             report_archive_result(
@@ -1020,7 +1074,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
             let Some(target) = target else {
                 return archive_usage(theme, parsed, "`hangar repair` needs an entry id or reference", "jetpack hangar repair <entry> --from <signed.hangar> --yes");
             };
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
             }
             report_archive_result(
@@ -1407,6 +1461,19 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
                 );
                 theme.detail(&format!("would free {}", human_bytes(plan.removed_bytes)));
             }
+            if plan.removed_receipts > 0 {
+                theme.plan_row(
+                    Output::PlanMark::Remove,
+                    "orphan-receipts",
+                    name_w,
+                    &format!("{} receipt(s)", plan.removed_receipts),
+                    "removed",
+                );
+                theme.detail(&format!(
+                    "would free {}",
+                    human_bytes(plan.removed_receipt_bytes)
+                ));
+            }
             if plan.swept_tmp > 0 {
                 theme.plan_row(
                     Output::PlanMark::Remove,
@@ -1446,9 +1513,12 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     match Store::clean(&roots) {
         Ok(report) => {
             theme.ok(&format!(
-                "cleaned hangar: removed {} stale object(s), freed {}, swept {} scratch item(s), optimized {} file(s)",
+                "cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), freed {}, swept {} scratch item(s), optimized {} file(s)",
                 report.removed_objects,
-                human_bytes(report.removed_bytes + report.swept_tmp_bytes),
+                report.removed_receipts,
+                human_bytes(
+                    report.removed_bytes + report.removed_receipt_bytes + report.swept_tmp_bytes,
+                ),
                 report.swept_tmp,
                 report.optimized_files
             ));
@@ -1474,8 +1544,11 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
 pub(super) fn auto_clean_after_success(theme: &Theme, roots: &Roots) {
     match Store::maybe_auto_clean(roots) {
         Ok(Some(report)) if !report.is_empty() => theme.detail(&format!(
-            "auto-cleaned hangar: removed {} stale object(s), swept {} scratch item(s), optimized {} file(s)",
-            report.removed_objects, report.swept_tmp, report.optimized_files
+            "auto-cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), swept {} scratch item(s), optimized {} file(s)",
+            report.removed_objects,
+            report.removed_receipts,
+            report.swept_tmp,
+            report.optimized_files
         )),
         Ok(_) => {}
         Err(e) => theme.detail(&theme.gray(&format!("auto-clean skipped: {e}"))),

@@ -2,8 +2,9 @@
 //!
 //! `image.<name> { kind: .Oci, from: packages.<name> }` builds a deterministic,
 //! native OCI layout from an already-built package binary. The same record with
-//! `from: env.<name>` projects a verified Hangar shell output — no Docker, no
-//! external OCI tooling (I6). `.Iso` disk images (the original U14 shape) ride
+//! `from: env.<name>` projects a verified Hangar shell output — no Docker or
+//! second OCI model (I6). Explicit registry pushes use the host curl adapter;
+//! `.Iso` disk images (the original U14 shape) ride
 //! the jetos installer tier (Phase D, owner-gated, untouched by this card).
 //!
 //! Covers:
@@ -14,12 +15,17 @@
 //!   * a library-kind (or undeclared) `from:` package is rejected (E1267);
 //!   * the `jetpack image <name>` engine verb: builds a real OCI layout,
 //!     reproducibly, from a scratch project; a `.Iso` image gets a friendly
-//!     "not yet" message; `--push` is honestly gated (E1268) rather than
-//!     attempting a real push.
+//!     "not yet" message; `--push` copies a validated local layout or uses the
+//!     explicit OCI Distribution HTTP(S) path, while unqualified registry
+//!     names remain the honest E1268 gate.
 
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 mod common;
 use common::{jetpack_bin, Scratch};
@@ -37,9 +43,7 @@ fn jetpack() -> Command {
 fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
     fs::write(
         dir.join("package.jet"),
-        format!(
-            "name: \"demo\"\nversion: \"0.1.0\"\npackages: {{ app: {pkg_kind} }}\n"
-        ),
+        format!("name: \"demo\"\nversion: \"0.1.0\"\npackages: {{ app: {pkg_kind} }}\n"),
     )
     .unwrap();
     fs::write(
@@ -62,6 +66,22 @@ fn write_project(dir: &Path, pkg_kind: &str, built: bool) {
 }
 
 fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
+    ingest_executable_for_platform(
+        root,
+        name,
+        reference,
+        binary,
+        jetpack::Envelope::host_platform(),
+    );
+}
+
+fn ingest_executable_for_platform(
+    root: &Path,
+    name: &str,
+    reference: &str,
+    binary: &str,
+    platform: &str,
+) {
     let source = root.join(format!("source-{name}"));
     fs::create_dir_all(source.join("bin")).unwrap();
     fs::write(source.join("bin").join(binary), b"#!/bin/sh\necho image\n").unwrap();
@@ -87,7 +107,7 @@ fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
                 source_fingerprint: format!("sha256-source-{name}"),
                 recipe_fingerprint: format!("sha256-recipe-{name}"),
                 policy_fingerprint: "policy=image-test".to_string(),
-                platform: jetpack::Envelope::host_platform(),
+                platform: platform.to_string(),
             },
             references: Vec::new(),
             outputs: std::collections::BTreeMap::from([("out".to_string(), source)]),
@@ -113,6 +133,81 @@ fn image_layer(root: &Path) -> Vec<u8> {
         .map(|entry| fs::read(entry.unwrap().path()).unwrap())
         .find(|bytes| bytes.len() >= 263 && &bytes[257..263] == b"ustar\0")
         .expect("image has no ustar layer blob")
+}
+
+fn registry_test_server(
+    listener: TcpListener,
+    expected_requests: usize,
+) -> Vec<(String, String, Vec<u8>)> {
+    listener.set_nonblocking(true).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut requests = Vec::new();
+    while requests.len() < expected_requests && Instant::now() < deadline {
+        let Ok((mut stream, _)) = listener.accept() else {
+            thread::sleep(Duration::from_millis(5));
+            continue;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        let header_end = loop {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                break None;
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break Some(index + 4);
+            }
+            assert!(
+                request.len() < 128 * 1024,
+                "registry test request headers are unbounded"
+            );
+        };
+        let Some(header_end) = header_end else {
+            continue;
+        };
+        let headers = &request[..header_end];
+        let header_text = String::from_utf8_lossy(headers);
+        let mut lines = header_text.lines();
+        let request_line = lines.next().unwrap_or_default();
+        let mut request_parts = request_line.split_whitespace();
+        let method = request_parts.next().unwrap_or_default().to_string();
+        let path = request_parts.next().unwrap_or_default().to_string();
+        let content_length = lines
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap_or(0);
+        while request.len() < header_end + content_length {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        let body = request[header_end..request.len().min(header_end + content_length)].to_vec();
+        requests.push((method.clone(), path.clone(), body));
+
+        let (status, extra_headers) = match method.as_str() {
+            "HEAD" => (404, String::new()),
+            "POST" => (202, "Location: /test-upload\r\n".to_string()),
+            "PUT" if path.contains("/blobs/uploads/") || path.starts_with("/test-upload") => {
+                (201, String::new())
+            }
+            "PUT" if path.contains("/manifests/") => (201, String::new()),
+            _ => (404, String::new()),
+        };
+        let response = format!(
+            "HTTP/1.1 {status} Test\r\n{extra_headers}Content-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    }
+    requests
 }
 
 // ── field-check / cross-check (modeval) ─────────────────────────────────────
@@ -257,6 +352,143 @@ fn image_build_is_reproducible_end_to_end() {
     assert_eq!(a, b, "same project must build byte-identical index.json");
 }
 
+#[test]
+fn image_push_copies_a_real_layout_and_refuses_conflicts() {
+    let project = Scratch::new("copy-layout-project");
+    let destination_root = Scratch::new("copy-layout-destination");
+    write_project(&project.path, "executable", true);
+    let destination = destination_root.path.join("published");
+    let destination_ref = format!("file://{}", destination.display());
+
+    let out = jetpack()
+        .args(["image", "server", "--push"])
+        .arg(&destination_ref)
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "copy should succeed: {stderr}");
+    let source = project.path.join(".jet/images/server");
+    assert_eq!(
+        fs::read(source.join("index.json")).unwrap(),
+        fs::read(destination.join("index.json")).unwrap()
+    );
+    assert_eq!(
+        fs::read(source.join("oci-layout")).unwrap(),
+        fs::read(destination.join("oci-layout")).unwrap()
+    );
+    let mut source_blobs = fs::read_dir(source.join("blobs/sha256"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    let mut destination_blobs = fs::read_dir(destination.join("blobs/sha256"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    source_blobs.sort();
+    destination_blobs.sort();
+    assert_eq!(source_blobs, destination_blobs);
+
+    fs::write(destination.join("index.json"), b"conflicting layout").unwrap();
+    let out = jetpack()
+        .args(["image", "server", "--push"])
+        .arg(&destination_ref)
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "conflicts must fail: {stderr}");
+    assert!(stderr.contains("byte-identical"), "{stderr}");
+    assert_eq!(
+        fs::read(destination.join("index.json")).unwrap(),
+        b"conflicting layout"
+    );
+}
+
+#[test]
+fn image_push_uses_the_real_oci_distribution_path() {
+    let project = Scratch::new("registry-project");
+    write_project(&project.path, "executable", true);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || registry_test_server(listener, 7));
+    let reference = format!("http://127.0.0.1:{port}/demo/server:1");
+
+    let out = jetpack()
+        .args(["image", "server", "--push"])
+        .arg(&reference)
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let requests = server.join().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "registry push should succeed: {stderr}"
+    );
+    assert_eq!(requests.len(), 7, "requests: {requests:?}");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _, _)| method == "HEAD")
+            .count(),
+        2
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, _, _)| method == "POST")
+            .count(),
+        2
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(method, path, _)| method == "PUT" && path.contains("/uploads/"))
+            .count(),
+        2
+    );
+    let manifest = requests
+        .iter()
+        .find(|(method, path, _)| method == "PUT" && path.contains("/manifests/1"))
+        .expect("manifest PUT");
+    assert!(manifest
+        .2
+        .windows(b"schemaVersion".len())
+        .any(|window| window == b"schemaVersion"));
+    assert!(stderr.contains("published"), "{stderr}");
+}
+
+#[test]
+fn image_registry_missing_tool_fails_before_claiming_publish() {
+    let project = Scratch::new("registry-missing-tool");
+    let empty_path = Scratch::new("registry-empty-path");
+    write_project(&project.path, "executable", true);
+    let out = jetpack()
+        .args([
+            "image",
+            "server",
+            "--push",
+            "http://127.0.0.1:9/demo/server:1",
+        ])
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .env("PATH", &empty_path.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        stderr.contains("OCI registry adapter could not start"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("couldn't publish image"), "{stderr}");
+}
+
 /// Environment images consume the realized Hangar bin projection. A project
 /// `build/` directory is intentionally absent, so the old scratch-file path
 /// would fail this production-store check.
@@ -280,22 +512,30 @@ fn environment_image_uses_realized_package_output() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(0), "image should use Hangar output: {stderr}");
-    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
-        .unwrap();
-    assert!(report.contains("package:bash@nixpkgs"), "projection: {report}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "image should use Hangar output: {stderr}"
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("package:bash@nixpkgs"),
+        "projection: {report}"
+    );
     assert!(!project.path.join("build").exists());
     let image = project.path.join(".jet/images/server");
     let layer = image_layer(&image);
-    assert!(
-        layer
-            .windows(b"bin/sh\0".len())
-            .any(|window| window == b"bin/sh\0")
-    );
+    assert!(layer
+        .windows(b"bin/sh\0".len())
+        .any(|window| window == b"bin/sh\0"));
     assert!(!image_blob_containing(&image, br#""User":"10001""#).is_empty());
     let plan = fs::read_to_string(image.join("plan.json")).unwrap();
     assert!(plan.contains("\"source\":\"env:dev\""), "plan: {plan}");
-    assert!(plan.contains("\"entrypoint\":[\"/bin/sh\"]"), "plan: {plan}");
+    assert!(
+        plan.contains("\"entrypoint\":[\"/bin/sh\"]"),
+        "plan: {plan}"
+    );
     assert!(plan.contains("\"platform\":\"linux.x64\""), "plan: {plan}");
     assert!(plan.contains("\"user\":10001"), "plan: {plan}");
     assert!(plan.contains("\"expose\":[]"), "plan: {plan}");
@@ -305,15 +545,72 @@ fn environment_image_uses_realized_package_output() {
     assert!(plan.contains("\"cache\":\"Hangar\""), "plan: {plan}");
     assert!(plan.contains("\"archive\":\"Hangar\""), "plan: {plan}");
     assert!(plan.contains("\"signing\":\"Hangar\""), "plan: {plan}");
-    assert!(plan.contains("\"provenance\":\"Hangar+.jet/lock\""), "plan: {plan}");
+    assert!(
+        plan.contains("\"provenance\":\"Hangar+.jet/lock\""),
+        "plan: {plan}"
+    );
     assert!(plan.contains("\"inputs\":\".jet/lock\""), "plan: {plan}");
     assert!(plan.contains("\"platforms\":\".jet/lock\""), "plan: {plan}");
     assert!(plan.contains("\"publish\":\"Hangar\""), "plan: {plan}");
-    assert!(plan.contains("\"remote\":\"D-JPK-REMOTE1\""), "plan: {plan}");
+    assert!(
+        plan.contains("\"remote\":\"D-JPK-REMOTE1\""),
+        "plan: {plan}"
+    );
     let dossier = fs::read_to_string(image.join("dossier.json")).unwrap();
     assert!(
         dossier.contains("runtime-mount-or-reference-only"),
         "dossier: {dossier}"
+    );
+}
+
+#[test]
+fn environment_image_projects_explicit_extra_file_reproducibly() {
+    let project = Scratch::new("environment-extra-file");
+    let root = Scratch::new("environment-extra-file-root");
+    fs::create_dir_all(project.path.join("config")).unwrap();
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, files: [\"config/app.toml\"] }\n",
+    )
+    .unwrap();
+    fs::write(project.path.join("config/app.toml"), b"port = 8080\n").unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let build = || {
+        let out = jetpack()
+            .args(["image", "server"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        fs::read_to_string(project.path.join(".jet/images/server/index.json")).unwrap()
+    };
+
+    let first = build();
+    let image = project.path.join(".jet/images/server");
+    let report = fs::read_to_string(image.join("projection.json")).unwrap();
+    assert!(
+        report.contains("file:config/app.toml"),
+        "projection: {report}"
+    );
+    let plan = fs::read_to_string(image.join("plan.json")).unwrap();
+    assert!(plan.contains("config/app.toml"), "plan: {plan}");
+    assert!(image_layer(&image)
+        .windows(b"port = 8080\n".len())
+        .any(|window| window == b"port = 8080\n"));
+
+    fs::remove_dir_all(project.path.join(".jet/images")).unwrap();
+    let second = build();
+    assert_eq!(
+        first, second,
+        "extra-file projection must preserve image identity"
     );
 }
 
@@ -327,7 +624,7 @@ fn environment_image_projects_named_environment_not_default() {
     )
     .unwrap();
     ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
-    ingest_executable(&root.path, "sh", "sh@nixpkgs", "sh");
+    ingest_executable_for_platform(&root.path, "sh", "sh@nixpkgs", "sh", "aarch64-linux");
 
     let out = jetpack()
         .args(["image", "server"])
@@ -336,12 +633,26 @@ fn environment_image_projects_named_environment_not_default() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
-    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
-        .unwrap();
-    assert!(report.contains("package:sh@nixpkgs"), "projection: {report}");
-    assert!(!report.contains("package:bash@nixpkgs"), "projection: {report}");
-    assert!(report.contains("platform:linux.arm64"), "projection: {report}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("package:sh@nixpkgs"),
+        "projection: {report}"
+    );
+    assert!(
+        !report.contains("package:bash@nixpkgs"),
+        "projection: {report}"
+    );
+    assert!(
+        report.contains("platform:linux.arm64"),
+        "projection: {report}"
+    );
     assert!(!image_blob_containing(
         &project.path.join(".jet/images/server"),
         br#""architecture":"arm64""#,
@@ -371,6 +682,63 @@ fn environment_image_requires_a_realized_shell_package() {
     assert_eq!(out.status.code(), Some(2));
     assert!(stderr.contains("E1336"), "stderr: {stderr}");
     assert!(stderr.contains("no shell"), "stderr: {stderr}");
+}
+
+#[test]
+fn environment_image_rejects_hangar_platform_mismatch() {
+    let project = Scratch::new("environment-platform-mismatch");
+    let root = Scratch::new("environment-platform-mismatch-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule image.server { from: env.dev, target: linux.arm64 }\n",
+    )
+    .unwrap();
+    ingest_executable_for_platform(&root.path, "bash", "bash@nixpkgs", "bash", "x86_64-linux");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(stderr.contains("platform"), "stderr: {stderr}");
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(report.contains("\"rejected\""), "projection: {report}");
+}
+
+#[test]
+fn environment_image_rejects_an_unsupported_integration_host() {
+    let project = Scratch::new("environment-unsupported-host");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { imports: [env.platform.apple()] }\nmodule image.server { from: env.dev }\n",
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unsupported hosts must fail: {stderr}"
+    );
+    assert!(stderr.contains("E1333"), "{stderr}");
+    assert!(stderr.contains("not supported on target"), "{stderr}");
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("integration:apple:host"),
+        "projection: {report}"
+    );
 }
 
 #[test]
@@ -407,8 +775,14 @@ module image.server { from: env.dev }
     );
     let report =
         fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(report.contains("integration:cloud-credentials:activation"));
     assert!(report.contains("integration:cloud-credentials:task:credential-store-check"));
+    assert!(report.contains("integration:cloud-credentials:provider:credential-store"));
+    assert!(report.contains("integration:cloud-credentials:grant:credential.read"));
+    assert!(report.contains("integration:vault:activation"));
     assert!(report.contains("integration:vault:task:vault-check"));
+    assert!(report.contains("integration:vault:provider:vault"));
+    assert!(report.contains("integration:vault:grant:vault.read"));
     assert!(report.contains("integration:cloud-credentials:secret-refs=1"));
     assert!(report.contains("integration:vault:secret-refs=1"));
     assert!(
@@ -422,16 +796,60 @@ module image.server { from: env.dev }
     let image = project.path.join(".jet/images/server");
     for blob in fs::read_dir(image.join("blobs/sha256")).unwrap() {
         let bytes = fs::read(blob.unwrap().path()).unwrap();
-        assert!(
-            !bytes
-                .windows("aws_production".len())
-                .any(|window| window == b"aws_production")
-        );
-        assert!(
-            !bytes
-                .windows("database_password".len())
-                .any(|window| window == b"database_password")
-        );
+        assert!(!bytes
+            .windows("aws_production".len())
+            .any(|window| window == b"aws_production"));
+        assert!(!bytes
+            .windows("database_password".len())
+            .any(|window| window == b"database_password"));
+    }
+}
+
+#[test]
+fn environment_image_rejects_secret_extra_file() {
+    let project = Scratch::new("environment-secret-file");
+    let root = Scratch::new("environment-secret-file-root");
+    fs::write(
+        project.path.join("env.jet"),
+        r#"module env.dev {
+    packages: ["bash@nixpkgs"]
+    dotenv: [Dotenv{ file: ".env", allow: ["TOKEN"], secrets: ["TOKEN"] }]
+}
+module image.server { from: env.dev, files: [".env"] }
+"#,
+    )
+    .unwrap();
+    fs::write(project.path.join(".env"), b"TOKEN=super-secret-value\n").unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("super-secret-value"),
+        "secret leaked: {stderr}"
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(report.contains("file:.env"), "projection: {report}");
+    assert!(
+        !report.contains("super-secret-value"),
+        "secret leaked: {report}"
+    );
+    if let Ok(blobs) = fs::read_dir(project.path.join(".jet/images/server/blobs/sha256")) {
+        for blob in blobs {
+            let bytes = fs::read(blob.unwrap().path()).unwrap();
+            assert!(!bytes
+                .windows(b"super-secret-value".len())
+                .any(|window| { window == b"super-secret-value" }));
+        }
     }
 }
 
@@ -454,10 +872,17 @@ fn environment_image_rejects_project_escape_layer_path() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2), "unsafe layer path must fail: {stderr}");
-    assert!(stderr.contains("safe project-relative paths"), "stderr: {stderr}");
-    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
-        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "unsafe layer path must fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("safe project-relative paths"),
+        "stderr: {stderr}"
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
     assert!(report.contains("file:../outside"), "projection: {report}");
     assert!(report.contains("\"rejected\""), "projection: {report}");
 }
@@ -468,7 +893,7 @@ fn environment_image_rejects_unredactable_cloud_secret() {
     fs::write(
         project.path.join("env.jet"),
         r#"module env.dev {
-    imports: [env.cloud.credentials(42)]
+    imports: [env.cloud.credentials("super_secret_value")]
 }
 module image.server { from: env.dev }
 "#,
@@ -484,15 +909,18 @@ module image.server { from: env.dev }
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E1335"), "stderr: {stderr}");
-    assert!(!stderr.contains("42"), "secret input leaked: {stderr}");
+    assert!(
+        !stderr.contains("super_secret_value"),
+        "secret input leaked: {stderr}"
+    );
 }
 
 #[test]
-fn environment_image_service_projection_is_e1336() {
+fn environment_image_requires_explicit_service_selection() {
     let project = Scratch::new("environment-service");
     fs::write(
         project.path.join("env.jet"),
-        "module env.dev { services: { api: { run: [\"true\"] } } }\nmodule image.server { from: env.dev, services: [\"api\"] }\n",
+        "module env.dev { services: { api: { run: [\"true\"] } } }\nmodule image.server { from: env.dev }\n",
     )
     .unwrap();
     let out = jetpack()
@@ -502,7 +930,11 @@ fn environment_image_service_projection_is_e1336() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2), "service projection must fail: {stderr}");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "service projection must fail: {stderr}"
+    );
     let diagnostic = stderr
         .split("\n\n")
         .find(|block| block.contains("Error [E1336]"))
@@ -515,10 +947,112 @@ fn environment_image_service_projection_is_e1336() {
                 .join("\n")
         })
         .expect("E1336 diagnostic block");
-    assert_eq!(diagnostic, include_str!("cli/image_service_projection_e1336.txt").trim());
+    assert_eq!(
+        diagnostic,
+        include_str!("cli/image_service_projection_e1336.txt").trim()
+    );
     let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
         .expect("rejected image projection report");
-    assert!(report.contains("\"rejected\":[\"services\"]"), "projection: {report}");
+    assert!(
+        report.contains("\"rejected\":[\"services\"]"),
+        "projection: {report}"
+    );
+}
+
+#[test]
+fn environment_image_projects_supervised_services() {
+    let project = Scratch::new("environment-service-image");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev {\n    packages: [\"bash@nixpkgs\", \"db@nixpkgs\", \"sleep@nixpkgs\", \"worker@nixpkgs\"]\n    services: { db: { enable: true, run: [\"db\"] }, api: { enable: true, ports: [8080], after: [\"db\"], run: [\"worker\", \"--port\", \"8080\"] } }\n}\nmodule image.server { from: env.dev, services: [\"api\"] }\n",
+    )
+    .unwrap();
+    ingest_executable(&project.path, "bash", "bash@nixpkgs", "bash");
+    ingest_executable(&project.path, "db", "db@nixpkgs", "db");
+    ingest_executable(&project.path, "sleep", "sleep@nixpkgs", "sleep");
+    ingest_executable(&project.path, "worker", "worker@nixpkgs", "worker");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "supervised image must build: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let layer = image_layer(&project.path.join(".jet/images/server"));
+    assert!(
+        layer.windows(b"jet/supervise").any(),
+        "supervisor path is not in the OCI layer"
+    );
+    assert!(
+        layer
+            .windows(b"start '/usr/local/bin/worker' '--port' '8080'")
+            .any(),
+        "service command is not in the generated supervisor"
+    );
+    let db_start = layer
+        .windows(b"start '/usr/local/bin/db'")
+        .position(|window| window == b"start '/usr/local/bin/db'")
+        .expect("dependency command");
+    let worker_start = layer
+        .windows(b"start '/usr/local/bin/worker'")
+        .position(|window| window == b"start '/usr/local/bin/worker'")
+        .expect("dependent command");
+    assert!(db_start < worker_start, "dependency must start first");
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("services:jet/supervise"),
+        "projection: {report}"
+    );
+    assert!(report.contains("service:api"), "projection: {report}");
+    let plan = fs::read_to_string(project.path.join(".jet/images/server/plan.json")).unwrap();
+    assert!(
+        plan.contains("\"entrypoint\":[\"/jet/supervise\"]"),
+        "plan: {plan}"
+    );
+    assert!(
+        plan.contains("\"services\":[\"api\",\"db\"]"),
+        "plan: {plan}"
+    );
+}
+
+#[test]
+fn environment_image_rejects_a_service_without_projected_executable() {
+    let project = Scratch::new("environment-service-missing-tool");
+    let root = Scratch::new("environment-service-missing-tool-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev {\n    packages: [\"bash@nixpkgs\"]\n    services: { api: { enable: true, run: [\"worker\"] } }\n}\nmodule image.server { from: env.dev, services: [\"api\"] }\n",
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "missing service tool: {stderr}");
+    assert!(stderr.contains("E1336"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("not a projected package"),
+        "stderr: {stderr}"
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(
+        report.contains("\"rejected\":[\"services\"]"),
+        "projection: {report}"
+    );
 }
 
 /// `jetpack image <name>` when the package hasn't been built yet (no
@@ -541,9 +1075,9 @@ fn image_of_unbuilt_package_is_honest() {
     assert!(!scratch.path.join(".jet/images").exists());
 }
 
-/// `jetpack image <name> --push <ref>` never attempts a real push — it
-/// reports the honest E1268 TLS gate and exits non-zero, even when the image
-/// would otherwise build cleanly.
+/// An unqualified registry-looking `--push <ref>` remains an E1268 gate. Jet
+/// requires an explicit HTTP(S) transport or a local `file://` OCI layout, even
+/// when the image would otherwise build cleanly.
 #[test]
 fn image_push_is_gated_e1268() {
     let scratch = Scratch::new("push-gated");
@@ -561,7 +1095,7 @@ fn image_push_is_gated_e1268() {
     assert_eq!(out.status.code(), Some(2));
     assert!(stderr.contains("E1268"), "expected E1268: {stderr}");
     assert!(stderr.contains("TLS"), "{stderr}");
-    // Never silently built or pushed anything.
+    // The rejected remote name never silently builds or pushes anything.
     assert!(!scratch.path.join(".jet/images").exists());
 }
 

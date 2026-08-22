@@ -3,6 +3,9 @@
 // mounts or references and never become image-layer bytes.
 module env.dev {
     packages: ["bash@nixpkgs"]
+    // Add `services: { api: { enable: true, run: ["api"] } }` here and
+    // `services: ["api"]` to the image when the environment owns a service.
+    // The image then uses one generated `/jet/supervise` entrypoint.
 }
 
 module image.shell {
@@ -10,4 +13,5 @@ module image.shell {
     entrypoint: "/bin/sh"
     user: 10001
     expose: [8080]
+    files: ["config/app.toml"]
 }

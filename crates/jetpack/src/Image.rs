@@ -377,6 +377,14 @@ pub fn build_with_base(
     let layer_digest = SHA256::sha256_hex(&layer_tar);
 
     let base = base.map(load_base).transpose()?;
+    if let Some(base) = base.as_ref() {
+        if base.platform != spec.platform {
+            return Err(invalid(&format!(
+                "OCI base platform `{}` does not match image platform `{}`",
+                base.platform, spec.platform
+            )));
+        }
+    }
     let base_layers = base
         .as_ref()
         .map(|base| base.layers.clone())
@@ -1060,6 +1068,7 @@ struct LayerDescriptor {
 #[derive(Debug, Clone)]
 struct BaseLayout {
     root: PathBuf,
+    platform: String,
     layers: Vec<LayerDescriptor>,
     diff_ids: Vec<String>,
 }
@@ -1291,6 +1300,13 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     )
     .map_err(io::Error::other)?;
     let config = object(&config, "OCI config")?;
+    let os = string_field(config, "os")?;
+    let architecture = string_field(config, "architecture")?;
+    let platform = match (os, architecture) {
+        ("linux", "amd64") => "linux.x64",
+        ("linux", "arm64") => "linux.arm64",
+        _ => return Err(invalid("OCI base platform is unsupported")),
+    };
     let rootfs = object(
         config
             .get("rootfs")
@@ -1315,6 +1331,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     }
     Ok(BaseLayout {
         root: root.canonicalize()?,
+        platform: platform.to_string(),
         layers,
         diff_ids,
     })
@@ -1800,6 +1817,38 @@ mod tests {
         let digest_hex = built.manifest_digest.trim_start_matches("sha256:");
         assert!(dir.join("blobs").join("sha256").join(digest_hex).is_file());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn base_platform_mismatch_is_rejected() {
+        let base_dir = std::env::temp_dir().join(format!(
+            "jet-oci-test-base-arm64-{}",
+            std::process::id()
+        ));
+        let output_dir = std::env::temp_dir().join(format!(
+            "jet-oci-test-base-mismatch-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&base_dir);
+        let _ = fs::remove_dir_all(&output_dir);
+        let base = BuildSpec {
+            files: vec![bin("bin/sh", "base")],
+            platform: "linux.arm64".to_string(),
+            ..BuildSpec::default()
+        };
+        build(&base, &base_dir, "base").unwrap();
+        let image = BuildSpec {
+            files: vec![bin("bin/app", "image")],
+            platform: "linux.x64".to_string(),
+            ..BuildSpec::default()
+        };
+        let error = build_with_base(&image, &output_dir, "image", Some(&base_dir)).unwrap_err();
+        assert!(
+            error.to_string().contains("does not match image platform"),
+            "{error}"
+        );
+        let _ = fs::remove_dir_all(&base_dir);
+        let _ = fs::remove_dir_all(&output_dir);
     }
 
     #[test]

@@ -7,7 +7,7 @@ const JOURNAL_DIR: &str = "journal";
 const PARTIAL_SUFFIX: &str = ".partial";
 const TXN_SUFFIX: &str = ".txn";
 const COMPACT_AFTER: usize = 64;
-const RECEIPTS_DIR: &str = "receipts";
+pub(super) const RECEIPTS_DIR: &str = "receipts";
 const RECEIPT_PARTIAL_SUFFIX: &str = ".partial";
 const MAX_CLOSURE_OBJECTS: usize = 1_000_000;
 const MAX_CLOSURE_RECORDS: usize = 1_000_000;
@@ -77,6 +77,8 @@ pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
 pub struct CleanReport {
     pub removed_objects: usize,
     pub removed_bytes: u64,
+    pub removed_receipts: usize,
+    pub removed_receipt_bytes: u64,
     pub swept_tmp: usize,
     pub swept_tmp_bytes: u64,
     pub optimized_files: usize,
@@ -87,6 +89,8 @@ impl CleanReport {
     pub fn is_empty(&self) -> bool {
         self.removed_objects == 0
             && self.removed_bytes == 0
+            && self.removed_receipts == 0
+            && self.removed_receipt_bytes == 0
             && self.swept_tmp == 0
             && self.swept_tmp_bytes == 0
             && self.optimized_files == 0
@@ -1508,6 +1512,37 @@ pub(crate) fn closure_graph_read_only(roots: &Roots) -> std::io::Result<ClosureG
         Err(error) => return Err(error),
     }
     load_graph_mode(roots, true)
+}
+
+/// Read the closure structure without taking a lock or replaying a journal.
+/// Store proofs may be unavailable, but an explanation must never repair the
+/// projection merely to describe that loss.
+pub(crate) fn closure_graph_structure_read_only(
+    roots: &Roots,
+) -> std::io::Result<ClosureGraph> {
+    let journal = journal_dir(roots);
+    match fs::read_dir(&journal) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(PARTIAL_SUFFIX)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "closure journal contains an incomplete transaction",
+                    ));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ClosureGraph::default());
+        }
+        Err(error) => return Err(error),
+    }
+    load_graph_structure_mode(roots, true)
 }
 
 pub(super) fn lifecycle_inputs_unlocked(

@@ -4,6 +4,7 @@ use super::cmd_doctor;
 use super::package_hangar_vendor::{cmd_audit, cmd_cache, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
 use super::shared_store::cmd_shared_store;
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
+use super::format::cmd_fmt;
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
 use super::profile::cmd_profile;
@@ -105,6 +106,13 @@ pub(super) struct Flags {
     pub(super) cache_credential: Option<String>,
     /// D-JPK-CACHEAUTH1: separate cache write grant.
     pub(super) cache_write: bool,
+    /// D-ECO12: `jetpack fmt --lang <language>` selects the external formatter
+    /// declared by the active typed environment.
+    pub(super) fmt_language: Option<String>,
+    pub(super) fmt_check: bool,
+    pub(super) fmt_diff: bool,
+    pub(super) fmt_dry_run: bool,
+    pub(super) fmt_changed: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -165,6 +173,11 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         studio_host: None,
         preset: None,
         environment: None,
+        fmt_language: None,
+        fmt_check: false,
+        fmt_diff: false,
+        fmt_dry_run: false,
+        fmt_changed: false,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -200,6 +213,17 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                     flags.environment = Some(name.clone());
                 }
             }
+            a if a == Syntax::FMT_FLAG_LANG => {
+                i += 1;
+                flags.fmt_language = args.get(i).cloned().or_else(|| Some(String::new()));
+            }
+            a if a.starts_with("--lang=") => {
+                flags.fmt_language = Some(a.trim_start_matches("--lang=").to_string());
+            }
+            "--check" if verb == "fmt" => flags.fmt_check = true,
+            "--diff" if verb == "fmt" => flags.fmt_diff = true,
+            "--dry-run" if verb == "fmt" => flags.fmt_dry_run = true,
+            "--changed" if verb == "fmt" => flags.fmt_changed = true,
             "--adapt" => flags.adapt = true,
             "--json" => flags.json = true,
             a if a == Syntax::BUILD_FLAG_SHELL_ON_FAIL => flags.shell_on_fail = true,
@@ -452,6 +476,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "doctor" => cmd_doctor(&theme, &parsed),
         "run" => cmd_run(&theme, &parsed),
         "enter" => cmd_enter(&theme, &parsed),
+        "fmt" => cmd_fmt(&theme, &parsed),
         v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),
         v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),

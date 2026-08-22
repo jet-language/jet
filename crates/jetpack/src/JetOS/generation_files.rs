@@ -32,9 +32,11 @@ use super::user_flatpak_perf::{
 use jet_env_model::AST::{Expr, Item, StrPart};
 use jet_env_model::ModuleEval::{EnvPlan, ServicePlan, SystemPlan};
 use jet_env_model::{Lexer, Parser, Syntax};
+use jet_pkg_model::Authority::{AuthorityResolver, CheckedPackage};
+use jet_pkg_model::Package::MemberRef;
 use crate::Store;
 use crate::JSON;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -406,6 +408,9 @@ fn validate_source_proof(
 }
 
 fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
+    if config.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
+        return package_source_closure(config);
+    }
     let source = fs::read_to_string(config)?;
     let (tokens, diagnostics) = Lexer::lex(&source);
     if !diagnostics.is_empty() {
@@ -450,6 +455,76 @@ fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
         frame(&mut canonical, &bytes);
     }
     Ok(canonical)
+}
+
+/// Package manifests are authority documents, not ordinary module programs.
+/// Seal the same checked Package inputs that produce the OS plan instead of
+/// sending `package.jet` through the module parser and losing the proof before
+/// generation publication.
+fn package_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
+    let root = config.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = AuthorityResolver::open(root)
+        .map_err(|error| invalid_generation(format!("package source authority failed: {error}")))?;
+    let package = resolver
+        .checked_package(Path::new("."))
+        .map_err(|error| invalid_generation(format!("package source authority failed: {error}")))?;
+    let mut files = BTreeMap::new();
+    append_package_source_files(&resolver, &package, &mut files, true)?;
+
+    for member in &package.facts.members {
+        let members = match member {
+            MemberRef::Path(relative) => vec![resolver
+                .checked_package(Path::new(relative))
+                .map_err(|error| {
+                    invalid_generation(format!("package member authority failed: {error}"))
+                })?],
+            MemberRef::Find(relative) => resolver
+                .discover_members(Path::new(relative))
+                .map_err(|error| {
+                    invalid_generation(format!("package member authority failed: {error}"))
+                })?
+                .into_iter()
+                .map(|member| resolver.complete_checked_package(member))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| {
+                    invalid_generation(format!("package member authority failed: {error}"))
+                })?,
+        };
+        for member in members {
+            append_package_source_files(&resolver, &member, &mut files, false)?;
+        }
+    }
+
+    let mut canonical = Vec::new();
+    frame(&mut canonical, b"jetos-source-closure-v1");
+    for (path, bytes) in files {
+        frame(&mut canonical, &path_bytes(&path));
+        frame(&mut canonical, &bytes);
+    }
+    Ok(canonical)
+}
+
+fn append_package_source_files(
+    resolver: &AuthorityResolver,
+    package: &CheckedPackage,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+    root_package: bool,
+) -> std::io::Result<()> {
+    let manifest_path = if root_package {
+        PathBuf::from("<root>")
+    } else {
+        package.member.manifest.file.relative.clone()
+    };
+    files.insert(manifest_path, package.member.manifest.file.bytes.clone());
+    for relative in &package.facts.resolved_config_paths {
+        let file = resolver
+            .checked_file(Path::new(relative))
+            .map_err(|error| {
+                invalid_generation(format!("package config authority failed: {error}"))
+            })?;
+        files.insert(file.relative.clone(), file.bytes.clone());
+    }
+    Ok(())
 }
 
 fn import_find_directory(import: &Expr) -> std::io::Result<String> {

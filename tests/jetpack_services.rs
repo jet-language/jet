@@ -658,13 +658,16 @@ initdb)
     ;;
 redis-server)
     data=
+    bound=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
+            --bind) shift; [ "${1:-}" = "127.0.0.1" ]; bound=1 ;;
             --dir) shift; data=$1 ;;
         esac
         shift
     done
     [ -n "$data" ]
+    [ "$bound" -eq 1 ]
     mkdir -p "$data"
     : > "$data/.service-running"
     exec sleep 30
@@ -706,11 +709,14 @@ mariadb-install-db)
     ;;
 postgres)
     data=
+    bound=0
     while [ "$#" -gt 0 ]; do
         case "$1" in -D) shift; data=$1 ;; esac
+        case "$1" in -h) shift; [ "${1:-}" = "127.0.0.1" ]; bound=1 ;; esac
         shift
     done
     [ -n "$data" ]
+    [ "$bound" -eq 1 ]
     : > "$data/.service-running"
     exec sleep 30
     ;;
@@ -729,19 +735,32 @@ mariadbd)
 minio)
     [ "${1:-}" = "server" ]
     data=${2:-}
+    address=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            server) ;;
+            --address) shift; address=${1:-} ;;
+            *) [ -n "$data" ] || data=$1 ;;
+        esac
+        shift
+    done
+    [ "$address" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
     [ -n "$data" ]
     : > "$data/.service-running"
     exec sleep 30
     ;;
 mailpit)
     database=
+    smtp=
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --database) shift; database=$1 ;;
+            --smtp) shift; smtp=$1 ;;
         esac
         shift
     done
     [ -n "$database" ]
+    [ "$smtp" = "127.0.0.1:1025" ]
     : > "$(dirname "$database")/.service-running"
     exec sleep 30
     ;;
@@ -871,10 +890,14 @@ fn production_catalog_service_worker() {
     let tools = PathBuf::from(std::env::var_os("JETPACK_CATALOG_TOOLS").unwrap());
     let systemd_bin = PathBuf::from(std::env::var_os("JETPACK_CATALOG_SYSTEMD_BIN").unwrap());
     let name = std::env::var("JETPACK_CATALOG_NAME").unwrap();
+    let port = std::env::var("JETPACK_CATALOG_PORT")
+        .ok()
+        .and_then(|port| port.parse::<i64>().ok())
+        .unwrap_or(0);
     let plan = DevServicePlan {
         name,
         enable: true,
-        ports: vec![0],
+        ports: vec![port],
         ..Default::default()
     };
     let env = catalog_tool_env(&tools, Some(&systemd_bin));
@@ -975,6 +998,50 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         );
         wait_for_missing(&service_dir.join("pid"));
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_minio_preset_port_conflict_has_terminal_state() {
+    let proj = Scratch::new("minio-port-conflict");
+    let tools = Scratch::new("minio-port-conflict-tools");
+    install_catalog_tools(&tools.path);
+    let blocker = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = blocker.local_addr().unwrap().port();
+    let fake = fake_systemd();
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = format!(
+        "{}:{}",
+        fake.bin.display(),
+        current_path.to_string_lossy()
+    );
+    let worker = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "production_catalog_service_worker",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("JETPACK_CATALOG_PROJECT", &proj.path)
+        .env("JETPACK_CATALOG_TOOLS", &tools.path)
+        .env("JETPACK_CATALOG_SYSTEMD_BIN", &fake.bin)
+        .env("JETPACK_CATALOG_NAME", "minio")
+        .env("JETPACK_CATALOG_PORT", port.to_string())
+        .env("JETPACK_SERVICE_SUPERVISOR", "1")
+        .env("PATH", &path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let service_dir = proj.path.join(".jet/services/minio");
+    let output = worker.wait_with_output().unwrap();
+    assert!(!output.status.success(), "port conflict must reach the worker");
+    assert!(!service_dir.join("pid").exists());
+    assert!(service_dir.join("supervisor.error").is_file());
+    let lifecycle = fs::read_to_string(service_dir.join("lifecycle")).unwrap();
+    assert!(lifecycle.contains("phase=failed"), "{lifecycle}");
+    assert!(lifecycle.contains("recovery=startup-failed"), "{lifecycle}");
 }
 
 #[cfg(target_os = "linux")]

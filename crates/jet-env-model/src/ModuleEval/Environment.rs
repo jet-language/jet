@@ -7,8 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::AST::CtKey;
 use crate::Comptime::CtValue;
+use crate::AST::CtKey;
 use jet_pkg_model::ProviderFacts::ProviderFacts;
 
 const MAX_RESOLVER_NODES: usize = 100_000;
@@ -186,7 +186,10 @@ impl IntegrationFactProjection {
             ))
         } else if self.task_facts.iter().any(|task| {
             task.name.trim().is_empty()
-                || task.providers.iter().any(|provider| provider.trim().is_empty())
+                || task
+                    .providers
+                    .iter()
+                    .any(|provider| provider.trim().is_empty())
                 || task.secrets.iter().any(|secret| secret.trim().is_empty())
                 || task.host_checks.iter().any(|check| check.trim().is_empty())
                 || task.grants.iter().any(|grant| grant.trim().is_empty())
@@ -255,7 +258,9 @@ impl EnvironmentIntegration {
     pub fn fingerprint(&self) -> String {
         let mut text = format!(
             "jet-environment-integration-v1\nkind={}\nname={}\npreset={}\n",
-            self.kind.as_str(), self.name, self.preset
+            self.kind.as_str(),
+            self.name,
+            self.preset
         );
         for (key, value) in &self.options {
             text.push_str("option=");
@@ -328,7 +333,8 @@ impl EnvironmentIntegration {
         supported.then_some(()).ok_or_else(|| {
             format!(
                 "{} integration `{}` is not supported on target `{target}`",
-                self.kind.as_str(), self.name
+                self.kind.as_str(),
+                self.name
             )
         })
     }
@@ -396,15 +402,19 @@ impl ManagedFile {
             self.source.as_deref().unwrap_or("<inline>"),
             self.source_digest,
             self.mode.as_str(),
-            self.permissions.map_or_else(String::new, |value| value.to_string()),
-            if self.sensitive { "sensitive" } else { "public" },
+            self.permissions
+                .map_or_else(String::new, |value| value.to_string()),
+            if self.sensitive {
+                "sensitive"
+            } else {
+                "public"
+            },
             self.generation.as_deref().unwrap_or(""),
             match self.conflict {
                 FileConflict::Refuse => "refuse",
             },
         )
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,11 +429,15 @@ pub enum ManagedFileError {
 impl std::fmt::Display for ManagedFileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidDestination(value) => write!(f, "managed file destination `{value}` is unsafe"),
+            Self::InvalidDestination(value) => {
+                write!(f, "managed file destination `{value}` is unsafe")
+            }
             Self::InvalidSource(value) => write!(f, "managed file source `{value}` is unsafe"),
             Self::InvalidEntry(value) => f.write_str(value),
             Self::InvalidMode(value) => write!(f, "unknown managed file mode `{value}`"),
-            Self::InvalidPermissions(value) => write!(f, "managed file permissions `{value}` are invalid"),
+            Self::InvalidPermissions(value) => {
+                write!(f, "managed file permissions `{value}` are invalid")
+            }
         }
     }
 }
@@ -455,9 +469,11 @@ pub fn files_from_value(value: &CtValue) -> Result<Vec<ManagedFile>, ManagedFile
                 let destination = fields
                     .get("destination")
                     .and_then(string_value)
-                    .ok_or_else(|| ManagedFileError::InvalidEntry(
-                        "a managed file list entry needs a string `destination`".to_string(),
-                    ))?;
+                    .ok_or_else(|| {
+                        ManagedFileError::InvalidEntry(
+                            "a managed file list entry needs a string `destination`".to_string(),
+                        )
+                    })?;
                 Ok((destination, value.clone()))
             })
             .collect::<Result<Vec<_>, ManagedFileError>>()?,
@@ -474,7 +490,9 @@ pub fn files_from_value(value: &CtValue) -> Result<Vec<ManagedFile>, ManagedFile
     files.sort_by(|left, right| left.destination.cmp(&right.destination));
     for pair in files.windows(2) {
         if pair[0].destination == pair[1].destination {
-            return Err(ManagedFileError::InvalidDestination(pair[0].destination.clone()));
+            return Err(ManagedFileError::InvalidDestination(
+                pair[0].destination.clone(),
+            ));
         }
     }
     Ok(files)
@@ -504,10 +522,12 @@ fn managed_file_from_value(
             let source_or_content = fields
                 .get("content")
                 .or_else(|| fields.get("source"))
-                .ok_or_else(|| ManagedFileError::InvalidEntry(format!(
-                    "managed file `{}` needs `source` or `content`",
-                    file.destination
-                )))?;
+                .ok_or_else(|| {
+                    ManagedFileError::InvalidEntry(format!(
+                        "managed file `{}` needs `source` or `content`",
+                        file.destination
+                    ))
+                })?;
             match source_or_content {
                 CtValue::Str(value) if fields.contains_key("content") => {
                     file.content = Some(value.as_bytes().to_vec());
@@ -756,7 +776,9 @@ impl std::fmt::Display for PresetError {
         match self {
             Self::Missing(name) => write!(f, "preset '{name}' does not exist"),
             Self::Cycle(names) => write!(f, "preset inheritance cycle: {}", names.join(" -> ")),
-            Self::Conflict { name } => write!(f, "preset '{name}' is declared with conflicting facts"),
+            Self::Conflict { name } => {
+                write!(f, "preset '{name}' is declared with conflicting facts")
+            }
         }
     }
 }
@@ -774,7 +796,11 @@ impl std::fmt::Display for PackageProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Missing(name) => write!(f, "package generation '{name}' does not exist"),
-            Self::Cycle(names) => write!(f, "package generation inheritance cycle: {}", names.join(" -> ")),
+            Self::Cycle(names) => write!(
+                f,
+                "package generation inheritance cycle: {}",
+                names.join(" -> ")
+            ),
             Self::Conflict { name } if name.starts_with(RESOLVER_BUDGET_NAME) => write!(
                 f,
                 "package generation resolver exceeds {} entries",
@@ -800,9 +826,7 @@ impl PresetSet {
     pub fn insert_checked(&mut self, preset: PresetSpec) -> Result<(), PresetError> {
         if let Some(existing) = self.presets.get(&preset.name) {
             if existing != &preset {
-                return Err(PresetError::Conflict {
-                    name: preset.name,
-                });
+                return Err(PresetError::Conflict { name: preset.name });
             }
             return Ok(());
         }
@@ -928,7 +952,10 @@ pub struct PackageProfileSet {
 }
 
 impl PackageProfileSet {
-    pub fn insert_checked(&mut self, profile: PackageProfileSpec) -> Result<(), PackageProfileError> {
+    pub fn insert_checked(
+        &mut self,
+        profile: PackageProfileSpec,
+    ) -> Result<(), PackageProfileError> {
         if let Some(existing) = self.profiles.get_mut(&profile.name) {
             if existing.extends != profile.extends
                 || existing.packages != profile.packages
@@ -957,7 +984,10 @@ impl PackageProfileSet {
         self.resolve_many(&[name.to_string()])
     }
 
-    pub fn resolve_many(&self, names: &[String]) -> Result<ResolvedPackageProfile, PackageProfileError> {
+    pub fn resolve_many(
+        &self,
+        names: &[String],
+    ) -> Result<ResolvedPackageProfile, PackageProfileError> {
         let mut selected_profiles = Vec::new();
         let mut selected_seen = BTreeSet::new();
         for name in names {
@@ -1265,28 +1295,13 @@ impl LanguagePackCatalog {
                     "clippy@nixpkgs",
                 ],
             ),
-            pack(
-                "Python",
-                &[
-                    "python@nixpkgs",
-                    "pip@nixpkgs",
-                ],
-            ),
-            pack(
-                "Go",
-                &[
-                    "go@nixpkgs",
-                    "gopls@nixpkgs",
-                ],
-            ),
-            pack(
-                "JavaScript",
-                &[
-                    "nodejs@nixpkgs",
-                ],
-            ),
+            pack("Python", &["python@nixpkgs", "pip@nixpkgs"]),
+            pack("Go", &["go@nixpkgs", "gopls@nixpkgs"]),
+            pack("JavaScript", &["nodejs@nixpkgs"]),
         ] {
-            catalog.register(pack).expect("built-in language pack names are unique");
+            catalog
+                .register(pack)
+                .expect("built-in language pack names are unique");
         }
         for name in extended_language_names() {
             catalog
@@ -1305,7 +1320,10 @@ impl LanguagePackCatalog {
             .keys()
             .any(|name| language_key(name) == language_key(&pack.name))
         {
-            return Err(format!("language pack '{}' is already registered", pack.name));
+            return Err(format!(
+                "language pack '{}' is already registered",
+                pack.name
+            ));
         }
         validate_language_pack(&pack)?;
         self.packs.insert(pack.name.clone(), pack);
@@ -1315,7 +1333,9 @@ impl LanguagePackCatalog {
     pub fn get(&self, name: &str) -> Option<&LanguagePack> {
         self.packs.get(name).or_else(|| {
             let key = language_key(name);
-            self.packs.values().find(|pack| language_key(&pack.name) == key)
+            self.packs
+                .values()
+                .find(|pack| language_key(&pack.name) == key)
         })
     }
 
@@ -1377,10 +1397,7 @@ impl LanguagePackCatalog {
                 ..Default::default()
             };
             if selection.enable && pack.license.trim().is_empty() {
-                return Err(format!(
-                    "language pack `{}` has no license fact",
-                    pack.name
-                ));
+                return Err(format!("language pack `{}` has no license fact", pack.name));
             }
             if selection.enable
                 && !pack.platforms.is_empty()
@@ -1460,7 +1477,9 @@ impl LanguagePackCatalog {
                     projection.included.push(package);
                 }
             } else {
-                projection.omitted.extend(pack.venv_packages.iter().cloned());
+                projection
+                    .omitted
+                    .extend(pack.venv_packages.iter().cloned());
             }
             for (key, value) in &pack.variables {
                 merge_language_fact(&mut expansion.variables, &pack.name, "variable", key, value)?;
@@ -1547,13 +1566,22 @@ fn language_key(name: &str) -> String {
 }
 
 fn validate_language_pack(pack: &LanguagePack) -> Result<(), String> {
-    if pack.packages.is_empty() || pack.packages.iter().any(|package| package.trim().is_empty()) {
+    if pack.packages.is_empty()
+        || pack
+            .packages
+            .iter()
+            .any(|package| package.trim().is_empty())
+    {
         return Err(format!(
             "language pack '{}' must declare at least one non-empty package",
             pack.name
         ));
     }
-    if pack.venv_packages.iter().any(|package| package.trim().is_empty()) {
+    if pack
+        .venv_packages
+        .iter()
+        .any(|package| package.trim().is_empty())
+    {
         return Err(format!(
             "language pack '{}' has an empty venv package",
             pack.name
@@ -1568,14 +1596,22 @@ fn validate_language_pack(pack: &LanguagePack) -> Result<(), String> {
     if pack.host.trim().is_empty() {
         return Err(format!("language pack '{}' must declare a host", pack.name));
     }
-    if pack.platforms.is_empty() || pack.platforms.iter().any(|platform| platform.trim().is_empty()) {
+    if pack.platforms.is_empty()
+        || pack
+            .platforms
+            .iter()
+            .any(|platform| platform.trim().is_empty())
+    {
         return Err(format!(
             "language pack '{}' must declare at least one non-empty platform",
             pack.name
         ));
     }
     if pack.license.trim().is_empty() {
-        return Err(format!("language pack '{}' must declare a license", pack.name));
+        return Err(format!(
+            "language pack '{}' must declare a license",
+            pack.name
+        ));
     }
     if pack.commands.is_empty() {
         return Err(format!(
@@ -1583,15 +1619,22 @@ fn validate_language_pack(pack: &LanguagePack) -> Result<(), String> {
             pack.name
         ));
     }
-    if pack.commands.iter().any(|(name, command)| {
-        name.trim().is_empty() || command.trim().is_empty()
-    }) {
+    if pack
+        .commands
+        .iter()
+        .any(|(name, command)| name.trim().is_empty() || command.trim().is_empty())
+    {
         return Err(format!(
             "language pack '{}' has an empty command name or mapping",
             pack.name
         ));
     }
-    if pack.required_tools.is_empty() || pack.required_tools.iter().any(|tool| tool.trim().is_empty()) {
+    if pack.required_tools.is_empty()
+        || pack
+            .required_tools
+            .iter()
+            .any(|tool| tool.trim().is_empty())
+    {
         return Err(format!(
             "language pack '{}' must declare non-empty required tools",
             pack.name
@@ -1770,10 +1813,22 @@ fn extended_language_names() -> &'static [&'static str] {
 
 fn extended_language_pack(name: &str) -> LanguagePack {
     let (packages, tools, license) = match name {
-        "Ansible" => (vec!["ansible@nixpkgs"], vec!["ansible", "ansible-playbook"], "GPL-3.0-or-later"),
-        "C" => (vec!["gcc@nixpkgs", "gnumake@nixpkgs"], vec!["gcc", "make"], "GPL-3.0-or-later"),
+        "Ansible" => (
+            vec!["ansible@nixpkgs"],
+            vec!["ansible", "ansible-playbook"],
+            "GPL-3.0-or-later",
+        ),
+        "C" => (
+            vec!["gcc@nixpkgs", "gnumake@nixpkgs"],
+            vec!["gcc", "make"],
+            "GPL-3.0-or-later",
+        ),
         "Clojure" => (vec!["clojure@nixpkgs"], vec!["clojure"], "EPL-1.0"),
-        "Cplusplus" => (vec!["gcc@nixpkgs", "cmake@nixpkgs"], vec!["g++", "cmake"], "GPL-3.0-or-later"),
+        "Cplusplus" => (
+            vec!["gcc@nixpkgs", "cmake@nixpkgs"],
+            vec!["g++", "cmake"],
+            "GPL-3.0-or-later",
+        ),
         "Crystal" => (vec!["crystal@nixpkgs"], vec!["crystal"], "Apache-2.0"),
         "Cue" => (vec!["cue@nixpkgs"], vec!["cue"], "Apache-2.0"),
         "Dart" => (vec!["dart@nixpkgs"], vec!["dart"], "BSD-3-Clause"),
@@ -1781,44 +1836,100 @@ fn extended_language_pack(name: &str) -> LanguagePack {
         "Dotnet" => (vec!["dotnet-sdk@nixpkgs"], vec!["dotnet"], "MIT"),
         "Elixir" => (vec!["elixir@nixpkgs"], vec!["elixir", "mix"], "Apache-2.0"),
         "Elm" => (vec!["elm@nixpkgs"], vec!["elm"], "BSD-3-Clause"),
-        "Erlang" => (vec!["erlang@nixpkgs", "rebar3@nixpkgs"], vec!["erl", "rebar3"], "Apache-2.0"),
-        "Fortran" => (vec!["gfortran@nixpkgs"], vec!["gfortran"], "GPL-3.0-or-later"),
+        "Erlang" => (
+            vec!["erlang@nixpkgs", "rebar3@nixpkgs"],
+            vec!["erl", "rebar3"],
+            "Apache-2.0",
+        ),
+        "Fortran" => (
+            vec!["gfortran@nixpkgs"],
+            vec!["gfortran"],
+            "GPL-3.0-or-later",
+        ),
         "Gawk" => (vec!["gawk@nixpkgs"], vec!["gawk"], "GPL-3.0-or-later"),
         "Gleam" => (vec!["gleam@nixpkgs"], vec!["gleam"], "Apache-2.0"),
         "Hare" => (vec!["hare@nixpkgs"], vec!["hare"], "GPL-3.0-or-later"),
-        "Haskell" => (vec!["ghc@nixpkgs", "cabal-install@nixpkgs"], vec!["ghc", "cabal"], "BSD-3-Clause"),
+        "Haskell" => (
+            vec!["ghc@nixpkgs", "cabal-install@nixpkgs"],
+            vec!["ghc", "cabal"],
+            "BSD-3-Clause",
+        ),
         "Helm" => (vec!["kubernetes-helm@nixpkgs"], vec!["helm"], "Apache-2.0"),
         "Idris" => (vec!["idris2@nixpkgs"], vec!["idris2"], "BSD-3-Clause"),
-        "Java" => (vec!["jdk@nixpkgs", "maven@nixpkgs"], vec!["java", "javac", "mvn"], "GPL-2.0-with-classpath-exception"),
+        "Java" => (
+            vec!["jdk@nixpkgs", "maven@nixpkgs"],
+            vec!["java", "javac", "mvn"],
+            "GPL-2.0-with-classpath-exception",
+        ),
         "Jsonnet" => (vec!["jsonnet@nixpkgs"], vec!["jsonnet"], "Apache-2.0"),
         "Julia" => (vec!["julia@nixpkgs"], vec!["julia"], "MIT"),
         "Kotlin" => (vec!["kotlin@nixpkgs"], vec!["kotlinc"], "Apache-2.0"),
         "Lean4" => (vec!["lean4@nixpkgs"], vec!["lean", "lake"], "Apache-2.0"),
         "Lobster" => (vec!["lobster@nixpkgs"], vec!["lobster"], "MIT"),
-        "Lua" => (vec!["lua@nixpkgs", "luarocks@nixpkgs"], vec!["lua", "luarocks"], "MIT"),
+        "Lua" => (
+            vec!["lua@nixpkgs", "luarocks@nixpkgs"],
+            vec!["lua", "luarocks"],
+            "MIT",
+        ),
         "Nim" => (vec!["nim@nixpkgs"], vec!["nim", "nimble"], "MIT"),
         "Nix" => (vec!["nix@nixpkgs"], vec!["nix"], "LGPL-2.1-or-later"),
-        "Ocaml" => (vec!["ocaml@nixpkgs", "opam@nixpkgs"], vec!["ocaml", "opam"], "LGPL-2.1-with-linking-exception"),
+        "Ocaml" => (
+            vec!["ocaml@nixpkgs", "opam@nixpkgs"],
+            vec!["ocaml", "opam"],
+            "LGPL-2.1-with-linking-exception",
+        ),
         "Odin" => (vec!["odin@nixpkgs"], vec!["odin"], "BSD-3-Clause"),
         "Opentofu" => (vec!["opentofu@nixpkgs"], vec!["tofu"], "MPL-2.0"),
         "Pascal" => (vec!["fpc@nixpkgs"], vec!["fpc"], "GPL-2.0-or-later"),
-        "Perl" => (vec!["perl@nixpkgs"], vec!["perl"], "Artistic-1.0 OR GPL-1.0-or-later"),
-        "Php" => (vec!["php@nixpkgs", "composer@nixpkgs"], vec!["php", "composer"], "PHP-3.01"),
+        "Perl" => (
+            vec!["perl@nixpkgs"],
+            vec!["perl"],
+            "Artistic-1.0 OR GPL-1.0-or-later",
+        ),
+        "Php" => (
+            vec!["php@nixpkgs", "composer@nixpkgs"],
+            vec!["php", "composer"],
+            "PHP-3.01",
+        ),
         "Pkl" => (vec!["pkl@nixpkgs"], vec!["pkl"], "Apache-2.0"),
-        "Purescript" => (vec!["purescript@nixpkgs", "spago@nixpkgs"], vec!["purs", "spago"], "BSD-3-Clause"),
+        "Purescript" => (
+            vec!["purescript@nixpkgs", "spago@nixpkgs"],
+            vec!["purs", "spago"],
+            "BSD-3-Clause",
+        ),
         "R" => (vec!["R@nixpkgs"], vec!["R"], "GPL-2.0-or-later"),
         "Racket" => (vec!["racket@nixpkgs"], vec!["racket"], "LGPL-3.0-or-later"),
         "Raku" => (vec!["rakudo@nixpkgs"], vec!["raku"], "Artistic-2.0"),
         "Robotframework" => (vec!["robotframework@nixpkgs"], vec!["robot"], "Apache-2.0"),
-        "Ruby" => (vec!["ruby@nixpkgs", "bundler@nixpkgs"], vec!["ruby", "bundle"], "BSD-2-Clause"),
-        "Scala" => (vec!["scala@nixpkgs", "sbt@nixpkgs"], vec!["scala", "sbt"], "Apache-2.0"),
-        "Shell" => (vec!["bash@nixpkgs", "shellcheck@nixpkgs"], vec!["bash", "shellcheck"], "GPL-3.0-or-later"),
+        "Ruby" => (
+            vec!["ruby@nixpkgs", "bundler@nixpkgs"],
+            vec!["ruby", "bundle"],
+            "BSD-2-Clause",
+        ),
+        "Scala" => (
+            vec!["scala@nixpkgs", "sbt@nixpkgs"],
+            vec!["scala", "sbt"],
+            "Apache-2.0",
+        ),
+        "Shell" => (
+            vec!["bash@nixpkgs", "shellcheck@nixpkgs"],
+            vec!["bash", "shellcheck"],
+            "GPL-3.0-or-later",
+        ),
         "Solidity" => (vec!["solc@nixpkgs"], vec!["solc"], "GPL-3.0-or-later"),
         "Standardml" => (vec!["smlnj@nixpkgs"], vec!["sml"], "BSD-3-Clause"),
         "Swift" => (vec!["swift@nixpkgs"], vec!["swiftc"], "Apache-2.0"),
         "Terraform" => (vec!["terraform@nixpkgs"], vec!["terraform"], "MPL-2.0"),
-        "Texlive" => (vec!["texlive@nixpkgs"], vec!["pdflatex"], "GPL-3.0-or-later"),
-        "Typescript" => (vec!["nodejs@nixpkgs", "nodePackages.typescript@nixpkgs"], vec!["node", "npm", "tsc"], "Apache-2.0"),
+        "Texlive" => (
+            vec!["texlive@nixpkgs"],
+            vec!["pdflatex"],
+            "GPL-3.0-or-later",
+        ),
+        "Typescript" => (
+            vec!["nodejs@nixpkgs", "nodePackages.typescript@nixpkgs"],
+            vec!["node", "npm", "tsc"],
+            "Apache-2.0",
+        ),
         "Typst" => (vec!["typst@nixpkgs"], vec!["typst"], "Apache-2.0"),
         "Unison" => (vec!["unison-language@nixpkgs"], vec!["unison"], "MIT"),
         "V" => (vec!["vlang@nixpkgs"], vec!["v"], "MIT"),
@@ -1829,15 +1940,13 @@ fn extended_language_pack(name: &str) -> LanguagePack {
     catalog_pack(name, &packages, &tools, license)
 }
 
-fn catalog_pack(
-    name: &str,
-    packages: &[&str],
-    tools: &[&str],
-    license: &str,
-) -> LanguagePack {
+fn catalog_pack(name: &str, packages: &[&str], tools: &[&str], license: &str) -> LanguagePack {
     LanguagePack {
         name: name.to_string(),
-        packages: packages.iter().map(|package| (*package).to_string()).collect(),
+        packages: packages
+            .iter()
+            .map(|package| (*package).to_string())
+            .collect(),
         commands: tools
             .iter()
             .map(|tool| ((*tool).to_string(), (*tool).to_string()))
@@ -1882,6 +1991,13 @@ pub struct DotenvSpec {
     pub secrets: Vec<String>,
 }
 
+/// D-ECO12=A: one typed package ref used by `jet fmt --lang`. The formatter
+/// is a package fact, not a shell command or a second process supervisor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatterSpec {
+    pub package: String,
+}
+
 impl DotenvSpec {
     pub fn fingerprint(&self) -> String {
         format!(
@@ -1897,7 +2013,10 @@ impl DotenvSpec {
 pub enum ReloadPolicy {
     Never,
     Prompt,
-    Watch { paths: Vec<String>, debounce_ms: u64 },
+    Watch {
+        paths: Vec<String>,
+        debounce_ms: u64,
+    },
 }
 
 impl Default for ReloadPolicy {
@@ -1912,6 +2031,8 @@ pub struct EnvironmentLifecycle {
     pub unset: Vec<String>,
     pub on_enter: Vec<HookSpec>,
     pub checks: Vec<HookSpec>,
+    /// D-ECO12=A: external formatter package for non-`.jet` files.
+    pub formatter: Option<FormatterSpec>,
     /// D-ECO6=A: project-relative Git hook directory used by native Git.
     pub git_hooks_path: Option<String>,
     pub reload: ReloadPolicy,
@@ -1923,6 +2044,11 @@ pub struct EnvironmentLifecycle {
 impl EnvironmentLifecycle {
     pub fn fingerprint(&self) -> String {
         let mut text = String::new();
+        if let Some(formatter) = &self.formatter {
+            text.push_str("formatter\t");
+            text.push_str(&formatter.package);
+            text.push('\n');
+        }
         for dotenv in &self.dotenv {
             text.push_str("dotenv\t");
             text.push_str(&dotenv.fingerprint());
@@ -1970,7 +2096,11 @@ impl EnvironmentLifecycle {
             }
         }
         text.push_str("reload-explicit=");
-        text.push_str(if self.reload_explicit { "true\n" } else { "false\n" });
+        text.push_str(if self.reload_explicit {
+            "true\n"
+        } else {
+            "false\n"
+        });
         text
     }
 }
@@ -2001,13 +2131,12 @@ pub fn languages_from_value(value: &CtValue) -> Result<Vec<LanguageSpec>, String
                     language_name(variant.rsplit('.').next().unwrap_or(variant))
                 }
                 CtValue::Struct { .. } => language_record(None, value),
-                _ => Err(
-                    "language lists need names or typed Lang records".to_string(),
-                ),
+                _ => Err("language lists need names or typed Lang records".to_string()),
             })
             .collect::<Result<Vec<_>, _>>()?,
         CtValue::Struct { type_name, .. }
-            if type_name.rsplit('.').next().unwrap_or(type_name) == "Lang" => {
+            if type_name.rsplit('.').next().unwrap_or(type_name) == "Lang" =>
+        {
             vec![language_record(None, value)?]
         }
         _ => {
@@ -2020,7 +2149,10 @@ pub fn languages_from_value(value: &CtValue) -> Result<Vec<LanguageSpec>, String
 
     let mut unique = Vec::with_capacity(selections.len());
     for selection in selections.drain(..) {
-        if let Some(existing) = unique.iter().find(|item: &&LanguageSpec| item.key() == selection.key()) {
+        if let Some(existing) = unique
+            .iter()
+            .find(|item: &&LanguageSpec| item.key() == selection.key())
+        {
             if *existing != selection {
                 return Err(format!(
                     "language pack `{}` is declared with conflicting selection facts",
@@ -2051,12 +2183,16 @@ fn language_record(name_hint: Option<&str>, value: &CtValue) -> Result<LanguageS
     };
     let kind = type_name.rsplit('.').next().unwrap_or(type_name);
     if kind != "Lang" {
-        return Err(format!("language selection must be a Lang record, not `{type_name}`"));
+        return Err(format!(
+            "language selection must be a Lang record, not `{type_name}`"
+        ));
     }
     let fields = checked_unique_fields_named(
         value,
         "language selection",
-        &["name", "enable", "version", "channel", "venv", "extra", "extras", "packages"],
+        &[
+            "name", "enable", "version", "channel", "venv", "extra", "extras", "packages",
+        ],
     )?;
     let field_name = fields
         .get("name")
@@ -2073,9 +2209,7 @@ fn language_record(name_hint: Option<&str>, value: &CtValue) -> Result<LanguageS
         }
         (Some(key), _) => key.to_string(),
         (None, Some(field)) => field.to_string(),
-        (None, None) => {
-            return Err("a Lang record needs a language name or a map key".to_string())
-        }
+        (None, None) => return Err("a Lang record needs a language name or a map key".to_string()),
     };
     let name = language_name(&name)?.name;
     let enable = fields
@@ -2106,7 +2240,8 @@ fn language_record(name_hint: Option<&str>, value: &CtValue) -> Result<LanguageS
         if let Some(value) = fields.get(alias) {
             let packages = list_strings_named(value, &format!("Lang.{alias}"))?;
             if packages.iter().any(|package| {
-                package.trim().is_empty() || package.chars().any(|character| character.is_whitespace())
+                package.trim().is_empty()
+                    || package.chars().any(|character| character.is_whitespace())
             }) {
                 return Err(format!("Lang.{alias} must contain non-empty package refs"));
             }
@@ -2149,6 +2284,10 @@ pub fn lifecycle_from_field(
     value: &CtValue,
 ) -> Result<bool, String> {
     match name {
+        crate::Syntax::ENV_FIELD_FORMATTER => {
+            lifecycle.formatter = Some(formatter_from_value(value)?);
+            Ok(true)
+        }
         "dotenv" => {
             lifecycle.dotenv = dotenv_from_value(value)?;
             Ok(true)
@@ -2178,9 +2317,29 @@ pub fn lifecycle_from_field(
     }
 }
 
+/// Parse the one-package D-ECO12 formatter fact. `pkgs.nixfmt` is the ratified
+/// spelling; `nixpkgs.nixfmt` and an explicit `name@source` remain the same
+/// typed package references used by `packages:`.
+pub fn formatter_from_value(value: &CtValue) -> Result<FormatterSpec, String> {
+    let raw = string_value(value)
+        .ok_or_else(|| "formatter must be one typed package reference".to_string())?;
+    let normalized = raw
+        .strip_prefix("pkgs.")
+        .map(|name| format!("nixpkgs.{name}"))
+        .unwrap_or(raw);
+    let packages = crate::Merge::parse_package_list(&normalized);
+    if packages.len() != 1 {
+        return Err("formatter must contain exactly one package reference".to_string());
+    }
+    let package = super::Eval::pkg_ref(&packages[0]);
+    if package.is_empty() || package.starts_with('@') || package.contains(char::is_whitespace) {
+        return Err("formatter must be one non-empty package reference".to_string());
+    }
+    Ok(FormatterSpec { package })
+}
+
 fn git_hooks_path_from_value(value: &CtValue) -> Result<String, String> {
-    let path = string_value(value)
-        .ok_or_else(|| "git_hooks_path must be a string".to_string())?;
+    let path = string_value(value).ok_or_else(|| "git_hooks_path must be a string".to_string())?;
     if validate_relative_path(&path, true).is_err() {
         return Err(
             "git_hooks_path must be a non-empty project-relative path without `..`".to_string(),
@@ -2190,7 +2349,7 @@ fn git_hooks_path_from_value(value: &CtValue) -> Result<String, String> {
 }
 
 /// Parse both `dotenv: [".env"]` and the expert record form
-/// `dotenv: Dotenv.{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }`.
+/// `dotenv: Dotenv{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }`.
 /// The shape is closed and validated before the lifecycle plan is returned.
 pub fn dotenv_from_value(value: &CtValue) -> Result<Vec<DotenvSpec>, String> {
     let values = match value {
@@ -2221,7 +2380,11 @@ pub fn dotenv_from_value(value: &CtValue) -> Result<Vec<DotenvSpec>, String> {
                     .map(list_strings_checked)
                     .transpose()?
                     .unwrap_or_default();
-                DotenvSpec { file, allow, secrets }
+                DotenvSpec {
+                    file,
+                    allow,
+                    secrets,
+                }
             }
         };
         validate_dotenv_spec(&spec)?;
@@ -2257,7 +2420,9 @@ fn validate_dotenv_spec(spec: &DotenvSpec) -> Result<(), String> {
     }
     for name in spec.allow.iter().chain(spec.secrets.iter()) {
         if !valid_env_name(name) {
-            return Err(format!("dotenv variable `{name}` is not a valid environment name"));
+            return Err(format!(
+                "dotenv variable `{name}` is not a valid environment name"
+            ));
         }
     }
     if !spec.allow.is_empty() && spec.secrets.iter().any(|name| !spec.allow.contains(name)) {
@@ -2283,7 +2448,9 @@ fn checked_struct_fields(value: &CtValue) -> Result<BTreeMap<String, CtValue>, S
     for (name, value) in fields {
         if let Some(existing) = result.get(name) {
             if existing != value {
-                return Err(format!("Dotenv field `{name}` is declared with conflicting values"));
+                return Err(format!(
+                    "Dotenv field `{name}` is declared with conflicting values"
+                ));
             }
             continue;
         }
@@ -2392,14 +2559,19 @@ fn checked_struct_fields_named(
     for (name, value) in fields {
         if let Some(existing) = result.get(name) {
             if existing != value {
-                return Err(format!("{scope}.{name} is declared with conflicting values"));
+                return Err(format!(
+                    "{scope}.{name} is declared with conflicting values"
+                ));
             }
             continue;
         }
         result.insert(name.clone(), value.clone());
     }
     for name in result.keys() {
-        if !matches!(name.as_str(), "name" | "extends" | "packages" | "variables" | "hostname" | "user") {
+        if !matches!(
+            name.as_str(),
+            "name" | "extends" | "packages" | "variables" | "hostname" | "user"
+        ) {
             return Err(format!("unknown {scope} field `{name}`"));
         }
     }
@@ -2412,7 +2584,9 @@ fn list_strings_named(value: &CtValue, scope: &str) -> Result<Vec<String>, Strin
     };
     values
         .iter()
-        .map(|value| string_value(value).ok_or_else(|| format!("{scope} must contain only strings")))
+        .map(|value| {
+            string_value(value).ok_or_else(|| format!("{scope} must contain only strings"))
+        })
         .collect()
 }
 
@@ -2420,7 +2594,9 @@ fn env_names_named(value: &CtValue, scope: &str) -> Result<Vec<String>, String> 
     let names = list_strings_named(value, scope)?;
     for name in &names {
         if !valid_env_name(name) {
-            return Err(format!("{scope} variable '{name}' is not a valid environment name"));
+            return Err(format!(
+                "{scope} variable '{name}' is not a valid environment name"
+            ));
         }
     }
     Ok(names)
@@ -2435,10 +2611,12 @@ fn string_map_named(value: &CtValue, scope: &str) -> Result<BTreeMap<String, Str
                     return Err(format!("{scope} keys must be strings"));
                 };
                 if !valid_env_name(key) {
-                    return Err(format!("{scope} variable '{key}' is not a valid environment name"));
+                    return Err(format!(
+                        "{scope} variable '{key}' is not a valid environment name"
+                    ));
                 }
-                let value = string_value(value)
-                    .ok_or_else(|| format!("{scope} values must be strings"))?;
+                let value =
+                    string_value(value).ok_or_else(|| format!("{scope} values must be strings"))?;
                 Ok((key.clone(), value))
             })
             .collect(),
@@ -2446,10 +2624,12 @@ fn string_map_named(value: &CtValue, scope: &str) -> Result<BTreeMap<String, Str
             .iter()
             .map(|(key, value)| {
                 if !valid_env_name(key) {
-                    return Err(format!("{scope} variable '{key}' is not a valid environment name"));
+                    return Err(format!(
+                        "{scope} variable '{key}' is not a valid environment name"
+                    ));
                 }
-                let value = string_value(value)
-                    .ok_or_else(|| format!("{scope} values must be strings"))?;
+                let value =
+                    string_value(value).ok_or_else(|| format!("{scope} values must be strings"))?;
                 Ok((key.clone(), value))
             })
             .collect(),
@@ -2470,7 +2650,9 @@ fn optional_string_named(
 
 fn hooks_from_value(prefix: &str, value: &CtValue) -> Result<Vec<HookSpec>, String> {
     let CtValue::List(values) = value else {
-        return Err(format!("{prefix} must be a list of commands or hook records"));
+        return Err(format!(
+            "{prefix} must be a list of commands or hook records"
+        ));
     };
     values
         .iter()
@@ -2596,9 +2778,13 @@ fn reload_paths(value: &CtValue) -> Result<Vec<String>, String> {
         let path_ref = Path::new(path);
         if path.is_empty()
             || path_ref.is_absolute()
-            || path_ref.components().any(|component| component == std::path::Component::ParentDir)
+            || path_ref
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
         {
-            return Err(format!("reload.watch path `{path}` must stay inside the project"));
+            return Err(format!(
+                "reload.watch path `{path}` must stay inside the project"
+            ));
         }
     }
     Ok(paths)
@@ -2629,12 +2815,14 @@ fn duration_ms(value: &CtValue) -> Result<u64, String> {
                 CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
                 _ => None,
             });
-            amount.map(|amount| match variant.rsplit('.').next().unwrap_or(variant) {
-                "Seconds" | "Second" => amount.saturating_mul(1_000),
-                "Minutes" | "Minute" => amount.saturating_mul(60_000),
-                "Hours" | "Hour" => amount.saturating_mul(3_600_000),
-                _ => amount,
-            })
+            amount.map(
+                |amount| match variant.rsplit('.').next().unwrap_or(variant) {
+                    "Seconds" | "Second" => amount.saturating_mul(1_000),
+                    "Minutes" | "Minute" => amount.saturating_mul(60_000),
+                    "Hours" | "Hour" => amount.saturating_mul(3_600_000),
+                    _ => amount,
+                },
+            )
         }
         _ => None,
     };
@@ -2667,7 +2855,9 @@ fn checked_unique_fields(
     for (name, value) in fields {
         if let Some(existing) = result.get(name) {
             if existing != value {
-                return Err(format!("{scope}.{name} is declared with conflicting values"));
+                return Err(format!(
+                    "{scope}.{name} is declared with conflicting values"
+                ));
             }
             continue;
         }
@@ -2688,7 +2878,16 @@ fn checked_managed_fields(
     let fields = checked_unique_fields(fields, &format!("managed file {scope}"))
         .map_err(ManagedFileError::InvalidEntry)?;
     for name in fields.keys() {
-        if !matches!(name.as_str(), "destination" | "source" | "content" | "mode" | "permissions" | "sensitive" | "generation") {
+        if !matches!(
+            name.as_str(),
+            "destination"
+                | "source"
+                | "content"
+                | "mode"
+                | "permissions"
+                | "sensitive"
+                | "generation"
+        ) {
             return Err(ManagedFileError::InvalidEntry(format!(
                 "unknown managed file field `{name}`"
             )));
@@ -2715,13 +2914,15 @@ mod tests {
             name: "base".to_string(),
             packages: vec!["git@nixpkgs".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         set.insert(PresetSpec {
             name: "dev".to_string(),
             extends: vec!["base".to_string()],
             packages: vec!["git@nixpkgs".to_string(), "rustc@nixpkgs".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         let resolved = set.resolve("dev").unwrap();
         assert_eq!(resolved.applied, vec!["base", "dev"]);
         assert_eq!(resolved.packages, vec!["git@nixpkgs", "rustc@nixpkgs"]);
@@ -2753,8 +2954,14 @@ mod tests {
         assert_eq!(resolved.name, "host+sam");
         assert_eq!(resolved.selected_presets, selected);
         assert_eq!(resolved.packages, vec!["git@nixpkgs", "ripgrep@nixpkgs"]);
-        assert_eq!(resolved.variables.get("HOST_MODE"), Some(&"host".to_string()));
-        assert_eq!(resolved.variables.get("USER_MODE"), Some(&"user".to_string()));
+        assert_eq!(
+            resolved.variables.get("HOST_MODE"),
+            Some(&"host".to_string())
+        );
+        assert_eq!(
+            resolved.variables.get("USER_MODE"),
+            Some(&"user".to_string())
+        );
     }
 
     #[test]
@@ -2810,12 +3017,14 @@ mod tests {
             name: "a".to_string(),
             extends: vec!["b".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         set.insert(PresetSpec {
             name: "b".to_string(),
             extends: vec!["a".to_string()],
             ..Default::default()
-        }).unwrap();
+        })
+        .unwrap();
         assert!(matches!(set.resolve("a"), Err(PresetError::Cycle(_))));
     }
 
@@ -2874,11 +3083,17 @@ mod tests {
         let catalog = LanguagePackCatalog::builtin();
         assert_eq!(extended_language_names().len(), 54);
         for name in extended_language_names() {
-            let pack = catalog.get(name).unwrap_or_else(|| panic!("missing pack {name}"));
+            let pack = catalog
+                .get(name)
+                .unwrap_or_else(|| panic!("missing pack {name}"));
             assert!(!pack.packages.is_empty(), "{name} has no package facts");
             assert!(!pack.commands.is_empty(), "{name} has no command facts");
             assert!(!pack.license.is_empty(), "{name} has no license fact");
-            assert_eq!(pack.required_tools.len(), pack.commands.len(), "{name} tool facts drift");
+            assert_eq!(
+                pack.required_tools.len(),
+                pack.commands.len(),
+                "{name} tool facts drift"
+            );
         }
         let selections = catalog
             .names()
@@ -2919,8 +3134,14 @@ mod tests {
         assert!(expanded.packages.contains(&"go@nixpkgs".to_string()));
         assert!(expanded.packages.contains(&"gopls@nixpkgs".to_string()));
         assert!(expanded.packages.contains(&"nodejs@nixpkgs".to_string()));
-        assert_eq!(expanded.commands.get("gofmt").map(String::as_str), Some("gofmt"));
-        assert_eq!(expanded.commands.get("npx").map(String::as_str), Some("npx"));
+        assert_eq!(
+            expanded.commands.get("gofmt").map(String::as_str),
+            Some("gofmt")
+        );
+        assert_eq!(
+            expanded.commands.get("npx").map(String::as_str),
+            Some("npx")
+        );
         assert!(expanded
             .projections
             .iter()
@@ -3019,7 +3240,9 @@ mod tests {
         assert!(expansion.fingerprint().contains(&original_fingerprint));
 
         let mut changed = catalog.get("Contributed").unwrap().clone();
-        changed.variables.insert("COMPILER_MODE".to_string(), "fast".to_string());
+        changed
+            .variables
+            .insert("COMPILER_MODE".to_string(), "fast".to_string());
         assert_ne!(changed.fingerprint(), original_fingerprint);
     }
 
@@ -3038,10 +3261,7 @@ mod tests {
                         "COMPILER_MODE".to_string(),
                         variable.to_string(),
                     )]),
-                    commands: BTreeMap::from([(
-                        "compiler".to_string(),
-                        command.to_string(),
-                    )]),
+                    commands: BTreeMap::from([("compiler".to_string(), command.to_string())]),
                     host: "native".to_string(),
                     platforms: vec![jet_pkg_model::Platform::host_key()],
                     license: "MIT".to_string(),
@@ -3053,7 +3273,10 @@ mod tests {
         let error = catalog
             .expand_names(&["First".to_string(), "Second".to_string()])
             .unwrap_err();
-        assert!(error.contains("conflicts with existing variable"), "{error}");
+        assert!(
+            error.contains("conflicts with existing variable"),
+            "{error}"
+        );
 
         let mut commands = LanguagePackCatalog::default();
         for (name, command) in [("One", "compiler"), ("Two", "other-compiler")] {
@@ -3061,10 +3284,7 @@ mod tests {
                 .register(LanguagePack {
                     name: name.to_string(),
                     packages: vec![format!("{name}@nixpkgs")],
-                    commands: BTreeMap::from([(
-                        "compiler".to_string(),
-                        command.to_string(),
-                    )]),
+                    commands: BTreeMap::from([("compiler".to_string(), command.to_string())]),
                     host: "native".to_string(),
                     platforms: vec![jet_pkg_model::Platform::host_key()],
                     license: "MIT".to_string(),
@@ -3104,10 +3324,15 @@ mod tests {
                 "aarch64-darwin",
             )
             .unwrap_err();
-        assert!(unsupported.contains("does not support host platform"), "{unsupported}");
+        assert!(
+            unsupported.contains("does not support host platform"),
+            "{unsupported}"
+        );
 
         let mut missing = LanguagePackCatalog::default();
-        missing.packs.insert("Missing".to_string(), LanguagePack {
+        missing.packs.insert(
+            "Missing".to_string(),
+            LanguagePack {
                 name: "Missing".to_string(),
                 packages: vec!["missing@nixpkgs".to_string()],
                 host: "native".to_string(),
@@ -3116,7 +3341,8 @@ mod tests {
                 required_tools: vec!["missing".to_string()],
                 commands: BTreeMap::new(),
                 ..Default::default()
-            });
+            },
+        );
         let error = missing
             .expand_for_platform(
                 &[LanguageSpec {
@@ -3156,7 +3382,10 @@ mod tests {
                 ..Default::default()
             })
             .unwrap_err();
-        assert!(unlicensed_error.contains("must declare a license"), "{unlicensed_error}");
+        assert!(
+            unlicensed_error.contains("must declare a license"),
+            "{unlicensed_error}"
+        );
 
         let mut malformed = LanguagePackCatalog::default();
         let invalid_venv = malformed
@@ -3172,7 +3401,10 @@ mod tests {
                 ..Default::default()
             })
             .unwrap_err();
-        assert!(invalid_venv.contains("empty venv package"), "{invalid_venv}");
+        assert!(
+            invalid_venv.contains("empty venv package"),
+            "{invalid_venv}"
+        );
         let invalid_variable = malformed
             .register(LanguagePack {
                 name: "InvalidVariable".to_string(),
@@ -3201,15 +3433,19 @@ mod tests {
                     type_name: "Lang".to_string(),
                     fields: vec![
                         ("enable".to_string(), CtValue::Bool(true)),
-                        ("channel".to_string(), CtValue::Enum {
-                            type_name: "Channel".to_string(),
-                            variant: "Stable".to_string(),
-                            args: Vec::new(),
-                        }),
+                        (
+                            "channel".to_string(),
+                            CtValue::Enum {
+                                type_name: "Channel".to_string(),
+                                variant: "Stable".to_string(),
+                                args: Vec::new(),
+                            },
+                        ),
                         ("version".to_string(), CtValue::Str("1.78".to_string())),
-                        ("extra".to_string(), CtValue::List(vec![CtValue::Str(
-                            "rust-analyzer@nixpkgs".to_string(),
-                        )])),
+                        (
+                            "extra".to_string(),
+                            CtValue::List(vec![CtValue::Str("rust-analyzer@nixpkgs".to_string())]),
+                        ),
                     ],
                 },
             ),
@@ -3226,8 +3462,14 @@ mod tests {
         ]));
         let selections = languages_from_value(&value).unwrap();
         assert_eq!(selections.len(), 2);
-        let rust = selections.iter().find(|selection| selection.name == "rust").unwrap();
-        let python = selections.iter().find(|selection| selection.name == "python").unwrap();
+        let rust = selections
+            .iter()
+            .find(|selection| selection.name == "rust")
+            .unwrap();
+        let python = selections
+            .iter()
+            .find(|selection| selection.name == "python")
+            .unwrap();
         assert_eq!(rust.channel.as_deref(), Some("Stable"));
         assert!(python.venv);
 
@@ -3248,9 +3490,14 @@ mod tests {
         assert!(rust_projection
             .included
             .contains(&"rustc#version=1.78@nixpkgs".to_string()));
-        assert!(rust_projection.changed.contains(&"channel=Stable".to_string()));
+        assert!(rust_projection
+            .changed
+            .contains(&"channel=Stable".to_string()));
         assert_eq!(rust_projection.host, "native");
-        assert_eq!(rust_projection.platform, jet_pkg_model::Platform::host_key());
+        assert_eq!(
+            rust_projection.platform,
+            jet_pkg_model::Platform::host_key()
+        );
         assert_eq!(rust_projection.license, "Apache-2.0 OR MIT");
         assert!(rust_projection.missing_tools.is_empty());
         let python_projection = expansion
@@ -3261,7 +3508,9 @@ mod tests {
         assert!(python_projection
             .omitted
             .contains(&"python@nixpkgs".to_string()));
-        assert!(python_projection.changed.contains(&"enable=false".to_string()));
+        assert!(python_projection
+            .changed
+            .contains(&"enable=false".to_string()));
     }
 
     #[test]
@@ -3323,8 +3572,13 @@ mod tests {
             &CtValue::Str("scripts/githooks".to_string()),
         )
         .unwrap());
-        assert_eq!(lifecycle.git_hooks_path.as_deref(), Some("scripts/githooks"));
-        assert!(lifecycle.fingerprint().contains("git-hooks-path\tscripts/githooks\n"));
+        assert_eq!(
+            lifecycle.git_hooks_path.as_deref(),
+            Some("scripts/githooks")
+        );
+        assert!(lifecycle
+            .fingerprint()
+            .contains("git-hooks-path\tscripts/githooks\n"));
         assert!(lifecycle_from_field(
             &mut EnvironmentLifecycle::default(),
             crate::Syntax::ENV_FIELD_GIT_HOOKS_PATH,

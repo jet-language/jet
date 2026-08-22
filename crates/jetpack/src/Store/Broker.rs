@@ -1722,6 +1722,9 @@ fn writer_credential(config: &SharedStoreConfig) -> io::Result<Option<String>> {
     if !grant.write {
         return Ok(None);
     }
+    if grant.credential.as_deref() == Some("private-owner") {
+        return Ok(Some("private-owner".to_string()));
+    }
     if [
         grant.sources.is_empty(),
         grant.builders.is_empty(),
@@ -2176,10 +2179,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn authenticated_socket_handler_promotes_reads_and_rejects_failures() {
-        use std::os::unix::net::UnixStream;
+        use std::os::unix::net::{UnixListener, UnixStream};
 
         let root = std::env::temp_dir().join(format!(
-            "jet-shared-store-protocol-{}-{}",
+            "jss-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -2188,10 +2191,10 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         let local = Roots {
-            root: root.join("local"),
+            root: root.join("l"),
             dev_mode: false,
         };
-        let source = root.join("source");
+        let source = root.join("s");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("payload"), "socket protocol payload\n").unwrap();
         let entry = crate::Store::ingest_tree(
@@ -2216,16 +2219,47 @@ mod tests {
         .unwrap()
         .entry;
         let archive = Archive::export_unsigned_archive(&local, &entry.id, true).unwrap();
-        let shared_root = root.join("shared");
-        fs::create_dir_all(&shared_root).unwrap();
-        let config = SharedStoreConfig {
-            socket: root.join("broker.sock"),
-            shared_root: shared_root.clone(),
-            trust_key: root.join("trust/hangar.key"),
-            grants: root.join("users"),
+        let configure_user_broker = |roots: &Roots| {
+            let base = roots.root.join(SHARED_DIR);
+            let shared_root = base.join("root");
+            let trust_key = base.join("trust/hangar.key");
+            let grants = base.join("users");
+            for directory in [
+                base.clone(),
+                shared_root.clone(),
+                trust_key.parent().unwrap().to_path_buf(),
+                grants.clone(),
+            ] {
+                fs::create_dir_all(&directory).unwrap();
+                set_mode(&directory, 0o700).unwrap();
+            }
+            fs::write(&trust_key, [b'k'; 32]).unwrap();
+            set_private_mode(&trust_key).unwrap();
+            let config = SharedStoreConfig {
+                socket: base.join("broker.sock"),
+                shared_root,
+                trust_key,
+                grants,
+            };
+            let mut text = format!("{CONFIG_MAGIC}\n");
+            for (key, value) in [
+                ("socket", &config.socket),
+                ("shared_root", &config.shared_root),
+                ("trust_key", &config.trust_key),
+                ("grants", &config.grants),
+            ] {
+                text.push_str(key);
+                text.push('=');
+                text.push_str(&encode_hex(value.to_string_lossy().as_bytes()));
+                text.push('\n');
+            }
+            let config_path = base.join("config");
+            fs::write(config_path, text).unwrap();
+            set_private_mode(&base.join("config")).unwrap();
+            config
         };
-        fs::create_dir_all(config.trust_key.parent().unwrap()).unwrap();
-        fs::write(&config.trust_key, [b'k'; 32]).unwrap();
+        let config = configure_user_broker(&local);
+        let shared_root = config.shared_root.clone();
         let binding = provenance_binding_for_entry(&entry).unwrap();
 
         let (mut client, server) = UnixStream::pair().unwrap();
@@ -2246,13 +2280,15 @@ mod tests {
         };
         assert!(super::super::find_by_reference(&shared, &entry.reference).is_none());
 
-        let (mut client, server) = UnixStream::pair().unwrap();
+        let listener = UnixListener::bind(&config.socket).unwrap();
         let thread = std::thread::spawn({
             let config = config.clone();
-            move || serve_shared_store_connection(server, config)
+            move || {
+                let (server, _) = listener.accept().unwrap();
+                serve_shared_store_connection(server, config)
+            }
         });
-        write_request(&mut client, &binding, "private-owner", &archive).unwrap();
-        assert!(read_response(&mut client).unwrap());
+        assert!(promote_shared_entry(&local, &entry).unwrap());
         assert!(thread.join().unwrap().is_ok());
         let published = super::super::find_by_reference(&shared, &entry.reference).unwrap();
         super::super::verify_hangar_object(&shared, &published).unwrap();
@@ -2261,21 +2297,33 @@ mod tests {
             .next()
             .is_none());
 
-        let (mut client, server) = UnixStream::pair().unwrap();
-        let thread = std::thread::spawn({
-            let config = config.clone();
-            move || serve_shared_store_connection(server, config)
-        });
-        write_read_request(&mut client, &entry.reference).unwrap();
-        let returned = read_archive_response(&mut client).unwrap().unwrap();
-        assert!(thread.join().unwrap().is_ok());
         let reader = Roots {
-            root: root.join("reader"),
+            root: root.join("r"),
             dev_mode: false,
         };
-        Archive::import_broker_archive(&reader, &returned).unwrap();
-        let received = super::super::find_by_reference(&reader, &entry.reference).unwrap();
-        super::super::verify_hangar_object(&reader, &received).unwrap();
+        let reader_config = configure_user_broker(&reader);
+        let listener = UnixListener::bind(&reader_config.socket).unwrap();
+        let thread = std::thread::spawn({
+            let config = config.clone();
+            move || {
+                let (server, _) = listener.accept().unwrap();
+                serve_shared_store_connection(server, config)
+            }
+        });
+        let reused = reuse_shared_entry(
+            &reader,
+            &entry.reference,
+            &CacheExpectation {
+                identity: entry.cache_identity.clone(),
+                owned_output: None,
+                allow_unsigned_local: true,
+            },
+        )
+        .unwrap()
+        .expect("authenticated broker read should return the published entry");
+        assert!(thread.join().unwrap().is_ok());
+        assert_eq!(reused.envelope.output_hash, entry.envelope.output_hash);
+        super::super::verify_hangar_object(&reader, &reused).unwrap();
 
         let mut corrupted = archive;
         corrupted[0] ^= 1;

@@ -6,6 +6,7 @@
 
 use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, StoreEntry};
 use crate::{BuildDebug, ProviderFacts, SemanticLock, JSON};
+use jet_foundation::Report::ReportEnvelope;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -179,7 +180,10 @@ pub fn explain_package(
     query: &str,
     lens: ExplainLens,
 ) -> std::io::Result<Option<PackageExplain>> {
-    let entries = super::list_checked(roots)?;
+    // Explain is an observation surface. It must preserve the damaged state
+    // long enough to report the missing proof instead of replaying recovery or
+    // rewriting a receipt while answering a question.
+    let entries = super::list_read_only(roots);
     let entry = find_entry(&entries, query)?;
     if entry.is_none() {
         let package = package_name(query);
@@ -325,14 +329,14 @@ fn entry_projection(entry: &StoreEntry) -> ExplainEntry {
 }
 
 fn load_graph(roots: &Roots, reports: &mut Vec<ExplainReport>) -> Option<ClosureGraph> {
-    match super::closure_graph(roots) {
+    match super::Closure::closure_graph_read_only(roots) {
         Ok(graph) => Some(graph),
         Err(error) => {
             reports.push(ExplainReport {
                 kind: "loss".to_string(),
                 message: format!("closure proof is unavailable: {error}"),
             });
-            match super::closure_graph_structure(roots) {
+            match super::Closure::closure_graph_structure_read_only(roots) {
                 Ok(graph) => Some(graph),
                 Err(error) => {
                     reports.push(ExplainReport {
@@ -1511,19 +1515,21 @@ fn attempt_projection(attempt: &BuildDebug::Attempt) -> ExplainAttempt {
 impl PackageExplain {
     pub fn to_json(&self) -> String {
         let conflicted = self.reports.iter().any(|report| report.kind == "conflict");
-        format!(
-            "{{\"schema\":{},\"moment\":\"tool\",\"status\":{},\"ok\":{},\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}}}",
-            JSON::quote(&self.schema),
-            JSON::quote(if conflicted { "conflict" } else { "ok" }),
+        jet_foundation::Report::render_status_json(
+            if conflicted { "conflict" } else { "ok" },
             !conflicted,
-            JSON::quote(&self.query),
-            JSON::quote(&self.lens),
-            option_json(self.entry.as_ref(), ExplainEntry::to_json),
-            option_json(self.provider.as_ref(), ExplainProvider::to_json),
-            self.graph.to_json(),
-            self.liveness.to_json(),
-            self.rebuild.to_json(),
-            json_array(self.reports.iter().map(ExplainReport::to_json)),
+            "explain",
+            &format!(
+                ",\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}",
+                JSON::quote(&self.query),
+                JSON::quote(&self.lens),
+                option_json(self.entry.as_ref(), ExplainEntry::to_json),
+                option_json(self.provider.as_ref(), ExplainProvider::to_json),
+                self.graph.to_json(),
+                self.liveness.to_json(),
+                self.rebuild.to_json(),
+                json_array(self.reports.iter().map(ExplainReport::to_json)),
+            ),
         )
     }
 
@@ -1753,11 +1759,29 @@ impl ExplainRebuild {
 
 impl ExplainReport {
     fn to_json(&self) -> String {
-        format!(
-            "{{\"kind\":{},\"message\":{}}}",
-            JSON::quote(&self.kind),
-            JSON::quote(&self.message)
+        let conflict = self.kind == "conflict";
+        let mut report = ReportEnvelope::new(
+            "tool",
+            if conflict { "error" } else { "warning" },
+            "E1340",
+            self.message.as_str(),
+            if conflict {
+                "two persisted Hangar facts disagree, so the explanation cannot claim one identity"
+            } else {
+                "a persisted Hangar fact needed by this explanation is unavailable or lossy"
+            },
+            if conflict {
+                "repair the conflicting Hangar or provider record, then run `jet explain` again"
+            } else {
+                "run `jet hangar verify` and repair or rebuild the affected package before relying on this fact"
+            },
         )
+        .json();
+        report.pop();
+        report.push_str(",\"kind\":");
+        report.push_str(&JSON::quote(&self.kind));
+        report.push('}');
+        report
     }
 }
 

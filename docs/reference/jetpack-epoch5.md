@@ -19,11 +19,11 @@ module. This keeps one grammar responsible for every dependency reference.
 ```text
 name: "demo"
 version: "0.1.0"
-outputs: .{
-    app: .Executable.{ entry: run }
-    check: .Check.{ entry: check }
+outputs: {
+    app: .Executable{ entry: run }
+    check: .Check{ entry: check }
 }
-defaults: .{ run: app, test: check }
+defaults: { run: app, test: check }
 configs: ["config/dev.jet"]
 members: find("./packages")
 ```
@@ -216,12 +216,12 @@ a second resolver or an untracked PATH shortcut.
 ```text
 module env.dev {
     presets: {
-        base: .{ packages: ["git@nixpkgs"] }
-        work: .{ extends: ["base"], hostname: "build-01" }
+        base: { packages: ["git@nixpkgs"] }
+        work: { extends: ["base"], hostname: "build-01" }
     }
     languages: {
-        rust: Lang.{ enable: true, channel: .Stable }
-        python: Lang.{ enable: true, version: "3.12", venv: true }
+        rust: Lang{ enable: true, channel: .Stable }
+        python: Lang{ enable: true, version: "3.12", venv: true }
     }
 }
 ```
@@ -229,8 +229,8 @@ module env.dev {
 ## Lifecycle and managed files
 
 Lifecycle facts include dotenv allowlists, unset names, enter and check jobs,
-the project-relative `git_hooks_path`, and reload policy. Secret values never
-enter the plan or information output.
+the project-relative `git_hooks_path`, reload policy, and one typed external
+`formatter` package. Secret values never enter the plan or information output.
 
 Managed files use project-relative destinations. `Symlink` points to an
 immutable content object. `Seed` keeps an existing file. `Copy` owns the file
@@ -238,17 +238,24 @@ after the first write. Jet refuses to replace an unmanaged destination.
 
 ```text
 module env.dev {
-    dotenv: [Dotenv.{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }]
+    dotenv: [Dotenv{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }]
     unset: ["RUST_LOG"]
     on_enter: [prepare]
     checks: [smoke]
     git_hooks_path: "scripts/githooks"
-    reload: .Watch.{ paths: ["env.jet"], debounce_ms: 250 }
+    reload: .Watch{ paths: ["env.jet"], debounce_ms: 250 }
+    formatter: pkgs.nixfmt
     files: [
         "config/generated.txt": File{ content: "generated\n", mode: .Copy }
     ]
 }
 ```
+
+`formatter` names one package, not a shell command. Native `.jet` files use
+the compiler formatter; `jet fmt --lang nix` realizes the selected environment,
+uses its trusted composed PATH, and delegates the discovered `.nix` files to
+that package. The command stages the complete batch first, so a formatter
+failure leaves project files unchanged and removes its staging directory.
 
 Lifecycle jobs run only after the environment is composed. Bare names resolve
 to declared `#Job fn`s and use the normal job metadata, trust, and clean-shell
@@ -287,11 +294,17 @@ the generated help, shell completions, and manual.
 ## Environment discovery
 
 `jet env info` reads one selected typed environment plan. It shows the selected
-environment, packages, services, `jobs`, `checks`, variables, managed file
+environment, packages, formatter, services, `jobs`, `checks`, variables, managed file
 destinations, `git_hooks_path`, and integration facts. `jet env info --json` emits the same
 facts for tools. The `--env <name>` selector applies to every fact in the
 report; sibling environment contributions are not merged.
 It is exposed as the matching `jet env info` action in the same CLI surfaces.
+
+The existing `jet self lsp` transport also exposes the selected report as the
+read-only MCP resource `jet://environment` through `resources/list` and
+`resources/read`. The resource uses the same `jet env info --json` production
+path; it never realizes packages, starts services, runs jobs, or prints
+variable values.
 
 The report does not realize packages, start services, run jobs, or apply
 managed files. A variable read from the environment appears by name with the
@@ -494,6 +507,15 @@ readiness. `redis` realizes `redis@nixpkgs`, uses
 overrides only that fact; the service still uses the same supervisor and cleanup
 path.
 
+The catalog also includes MinIO (`minio`, port `9000`), Mailpit (`mailpit`, with
+`mail` as its alias, UI port `8025`, and loopback SMTP port `1025`), MailHog, and
+Blackfire. Their package, executable, port, argument vector, and readiness facts
+come from the same registry used by host supervision, image projection, and
+discovery; no second service runner or shell-string preset field is involved.
+Adminer is catalog-listed with the same typed facts, but its current nixpkgs
+output is a PHP source artifact rather than a runnable executable. It remains
+owner-gated until Jet has a ratified PHP runtime/source projection for that row.
+
 `after` names a declared service dependency. It is the only dependency spelling;
 the retired `depends_on` spelling is rejected. Jetpack validates names, disabled
 dependencies, and cycles before spawning a process, starts dependencies before
@@ -537,7 +559,7 @@ invalidates the graph before bridge output is reused.
 }
 ```
 
-Use `jet bridge flake` to review an `env.*` shim. Every field without a
+Use `jet os bridge flake` to review an `env.*` shim. Every field without a
 lossless Jet meaning produces L0204. Unsupported or over-budget foreign-flake
 input produces E1256. Arbitrary evaluator functions never become Jet values.
 
@@ -599,8 +621,13 @@ embedded credentials, and hook processes receive no caller environment or
 credentials, only the declared deterministic build values and private output
 channel. Failed stages publish no output.
 
-Environment images project the same package and service facts into OCI
-metadata. Secret values and dotenv contents do not enter the image projection.
+Environment images project verified Hangar package and selected service facts
+into OCI layers and metadata. A selected service set adds one generated
+`/jet/supervise` entrypoint; it starts projected argument vectors in dependency
+order, monitors child liveness, and cleans up all children on exit. The image
+`files` list is an explicit extra-file projection: only regular project-relative
+non-secret paths enter the layer. Managed environment files, dotenv inputs,
+service process state, and secret values stay out of the image projection.
 
 ## First-party integrations
 
@@ -625,6 +652,9 @@ the `nixpkgs` provider. Cloud credential names lower to the
 `credential-store-check` task, `credential-store` provider, and separate
 `credential.read` grant. Vault names lower to the `vault-check` task, `vault`
 provider, and separate `vault.read` grant.
+Cloud and vault arguments accept only named references or lists of named
+references. Literal or computed secret values fail with E1335 before comptime
+evaluation, and the rejected value is not echoed.
 Secret values are never stored in the plan or its fingerprint. Secret names
 enter the ordinary environment secret check. Provider facts are checked against
 the closed preset mapping, and sensitive integration grants are separate

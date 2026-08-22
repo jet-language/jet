@@ -77,12 +77,37 @@ pub fn project_package_outputs(
     }
 
     let mut fleets = Vec::new();
+    let mut fleet_names = BTreeMap::new();
+    let mut host_paths = BTreeMap::new();
     for (key, output) in &facts.outputs {
         if output.kind != PackageOutputKind::Fleet {
             continue;
         }
         let path = format!("outputs.{key}");
-        fleets.push(project_fleet(&path, output, &system_names)?);
+        let fleet = project_fleet(&path, output, &system_names)?;
+        if fleet_names
+            .insert(fleet.name.clone(), key.clone())
+            .is_some()
+        {
+            return Err(PackageOutputError::new(
+                path,
+                format!("fleet {} is declared more than once", fleet.name),
+            ));
+        }
+        for host in &fleet.hosts {
+            let host_path = format!("{path}.hosts.{}", host.name);
+            let collision = (host.system.clone(), host.name.clone());
+            if let Some(previous) = host_paths.insert(collision, host_path.clone()) {
+                return Err(PackageOutputError::new(
+                    host_path,
+                    format!(
+                        "host `{}` for system `{}` collides with Fleet host at {previous}",
+                        host.name, host.system
+                    ),
+                ));
+            }
+        }
+        fleets.push(fleet);
     }
 
     Ok(PackageOutputPlan {
@@ -589,5 +614,38 @@ outputs: .{
         let rendered = error.to_string();
         assert!(rendered.contains("../escape"), "{rendered}");
         assert!(rendered.contains("safe path component"), "{rendered}");
+    }
+
+    #[test]
+    fn rejects_duplicate_fleet_names_and_host_paths() {
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{
+    workstation: System{ target: linux.x64 }
+    blue: Fleet{ name: "prod", hosts: .{ edge: system.workstation } }
+    green: Fleet{ name: "prod", hosts: .{ other: system.workstation } }
+}"#,
+            "package.jet",
+        )
+        .unwrap();
+        let error = project_package_outputs(&facts).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("fleet prod is declared more than once"));
+
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{
+    workstation: System{ target: linux.x64 }
+    blue: Fleet{ hosts: .{ edge: system.workstation } }
+    green: Fleet{ hosts: .{ edge: system.workstation } }
+}"#,
+            "package.jet",
+        )
+        .unwrap();
+        let error = project_package_outputs(&facts).unwrap_err();
+        let rendered = error.to_string();
+        assert!(rendered.contains("outputs.green.hosts.edge"), "{rendered}");
+        assert!(rendered.contains("collides with Fleet host"), "{rendered}");
     }
 }

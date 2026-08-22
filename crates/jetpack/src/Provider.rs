@@ -596,7 +596,28 @@ pub(crate) fn project_lock_digest(project: Option<&Path>) -> Result<String, Prov
     };
     let path = super::Store::lock_path(project);
     match std::fs::read(&path) {
-        Ok(raw) => Ok(SHA256::sha256_hex(&raw)),
+        Ok(raw) => {
+            // Hangar receipts are a post-realization projection of this lock,
+            // not a Nix input. Exclude them from the producer digest so adding
+            // the receipt cannot invalidate the same cached realization on its
+            // next use.
+            let raw = String::from_utf8(raw).map_err(|error| {
+                ProviderError::BadOutput(format!(
+                    "project lock `{}` is not valid UTF-8: {error}",
+                    path.display()
+                ))
+            })?;
+            let mut lock = super::Lock::parse(&raw).map_err(|error| {
+                ProviderError::BadOutput(format!(
+                    "could not parse project lock `{}`: {error}",
+                    path.display()
+                ))
+            })?;
+            for package in &mut lock.packages {
+                package.receipt = None;
+            }
+            Ok(SHA256::sha256_hex(super::Lock::write(&lock).as_bytes()))
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(ProviderError::BadOutput(format!(
             "could not read project lock `{}`: {error}",
@@ -2351,6 +2372,29 @@ mod tests {
         assert!(production_root.contains("\nmod remote;\n"));
         assert!(!production_root.contains("include!("));
         assert!(!remote.contains("include!("));
+    }
+
+    #[test]
+    fn nix_lock_digest_ignores_hangar_receipt_projection() {
+        let root = unique_dir("nix-lock-receipt-digest");
+        let managed = root.join(crate::Syntax::SOURCE_ROOT_DIR);
+        std::fs::create_dir_all(&managed).unwrap();
+        let lock_path = managed.join("lock");
+        let base = "version = 1\n\n[[package]]\nname = \"greet\"\nversion = \"1\"\nsource = { path = \"greet\" }\nfingerprint = \"\"\ndependencies = []\n";
+        std::fs::write(&lock_path, base).unwrap();
+        let without_receipt = project_lock_digest(Some(&root)).unwrap();
+
+        std::fs::write(
+            &lock_path,
+            format!(
+                "{base}receipt = \"sha256-{}\"\n",
+                "a".repeat(64)
+            ),
+        )
+        .unwrap();
+        let with_receipt = project_lock_digest(Some(&root)).unwrap();
+        assert_eq!(without_receipt, with_receipt);
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

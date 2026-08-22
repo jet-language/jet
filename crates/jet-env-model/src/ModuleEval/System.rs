@@ -14,14 +14,12 @@ use crate::AST::{
     Item, ServiceEntry, SystemFieldValue, SystemLit, VmTestFieldValue, VmTestLit,
 };
 
+use super::Computed::{dependencies_for_expression, evaluate_expression, evaluate_named_fields};
 use super::Diagnostics::{
     fleet_missing_hosts, fleet_unknown_field, image_bad_format, image_field_shape,
     image_kind_from_mismatch, image_missing_from, image_restated_field, image_unknown_kind,
     missing_system_target, service_enable_not_bool, service_missing_enable, unknown_platform,
     unknown_record_field,
-};
-use super::Computed::{
-    dependencies_for_expression, evaluate_expression, evaluate_named_fields,
 };
 use super::Eval::extract_packages;
 use super::Types::{
@@ -184,13 +182,34 @@ pub(super) fn evaluate_image(
                 base = Some(eval_base(expr, base_dir, funcs, globals, field.name_span)?);
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_SERVICES => {
-                services = eval_names(expr, Syntax::IMAGE_FIELD_SERVICES, base_dir, funcs, globals, field.name_span)?;
+                services = eval_names(
+                    expr,
+                    Syntax::IMAGE_FIELD_SERVICES,
+                    base_dir,
+                    funcs,
+                    globals,
+                    field.name_span,
+                )?;
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_HEALTH => {
-                health = Some(eval_string(expr, Syntax::IMAGE_FIELD_HEALTH, base_dir, funcs, globals, field.name_span)?);
+                health = Some(eval_string(
+                    expr,
+                    Syntax::IMAGE_FIELD_HEALTH,
+                    base_dir,
+                    funcs,
+                    globals,
+                    field.name_span,
+                )?);
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_ENTRYPOINT => {
-                entrypoint = Some(eval_string(expr, Syntax::IMAGE_FIELD_ENTRYPOINT, base_dir, funcs, globals, field.name_span)?);
+                entrypoint = Some(eval_string(
+                    expr,
+                    Syntax::IMAGE_FIELD_ENTRYPOINT,
+                    base_dir,
+                    funcs,
+                    globals,
+                    field.name_span,
+                )?);
             }
             ImageFieldValue::Other(expr) if field.name == Syntax::IMAGE_FIELD_USER => {
                 user = Some(eval_user(expr, field.name_span, base_dir, funcs, globals)?);
@@ -309,9 +328,14 @@ fn eval_user(
 ) -> Result<u32, Diagnostic> {
     let value = evaluate_expression(expr, globals, funcs, &HashSet::new(), base_dir)?;
     let CtValue::Int(value) = value else {
-        return Err(image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span));
+        return Err(image_field_shape(
+            Syntax::IMAGE_FIELD_USER,
+            "a non-negative integer",
+            span,
+        ));
     };
-    u32::try_from(value).map_err(|_| image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span))
+    u32::try_from(value)
+        .map_err(|_| image_field_shape(Syntax::IMAGE_FIELD_USER, "a non-negative integer", span))
 }
 
 /// D-JPK-IMAGE1: `kind: .Oci` / `kind: .Iso` — a bare leading-dot enum literal
@@ -499,7 +523,12 @@ pub(super) fn evaluate_fleet(
                     let (overrides, override_source) = match e.overrides {
                         Some(span) => {
                             let source = src[span.start..span.end].trim().to_string();
-                            (Some(evaluate_host_override(&source, span, base_dir, funcs, globals)?), Some(source))
+                            (
+                                Some(evaluate_host_override(
+                                    &source, span, base_dir, funcs, globals,
+                                )?),
+                                Some(source),
+                            )
                         }
                         None => (None, None),
                     };
@@ -542,7 +571,12 @@ pub(super) fn evaluate_vmtest(
                     let (overrides, override_source) = match e.overrides {
                         Some(span) => {
                             let source = src[span.start..span.end].trim().to_string();
-                            (Some(evaluate_host_override(&source, span, base_dir, funcs, globals)?), Some(source))
+                            (
+                                Some(evaluate_host_override(
+                                    &source, span, base_dir, funcs, globals,
+                                )?),
+                                Some(source),
+                            )
                         }
                         None => (None, None),
                     };
@@ -590,18 +624,22 @@ fn evaluate_host_override(
         diagnostic.span = Some(original_span);
         diagnostic
     })?;
-    let module = program.items.iter().find_map(|item| match item {
-        Item::Module(module) => Some(module),
-        _ => None,
-    }).ok_or_else(|| {
-        Diagnostic::error(
-            "E0003",
-            "host override is not a record".to_string(),
-            "fleet overrides use the same record evaluator as system fields".to_string(),
-            "write `.{ field: value }` after the system reference".to_string(),
-            Some(original_span),
-        )
-    })?;
+    let module = program
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Module(module) => Some(module),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "E0003",
+                "host override is not a record".to_string(),
+                "fleet overrides use the same record evaluator as system fields".to_string(),
+                "write `.{ field: value }` after the system reference".to_string(),
+                Some(original_span),
+            )
+        })?;
     let contribution = module.contributions.first().ok_or_else(|| {
         Diagnostic::error(
             "E0003",
@@ -679,15 +717,13 @@ fn evaluate_host_override(
                 }
                 HostOverrideValue::Options(options)
             }
-            SystemFieldValue::Other(expr) => {
-                HostOverrideValue::Value(evaluate_expression(
-                    expr,
-                    &resolved,
-                    funcs,
-                    &HashSet::new(),
-                    base_dir,
-                )?)
-            }
+            SystemFieldValue::Other(expr) => HostOverrideValue::Value(evaluate_expression(
+                expr,
+                &resolved,
+                funcs,
+                &HashSet::new(),
+                base_dir,
+            )?),
         };
         fields.push((field.name.clone(), value));
         let common = computed
@@ -704,7 +740,9 @@ fn evaluate_host_override(
             source: common
                 .map(|candidate| candidate.source.clone())
                 .filter(|candidate| !candidate.is_empty())
-                .unwrap_or_else(|| host_field_source(source, field.span, wrapped.len() - source.len())),
+                .unwrap_or_else(|| {
+                    host_field_source(source, field.span, wrapped.len() - source.len())
+                }),
         });
     }
     Ok(HostOverride {
@@ -729,18 +767,12 @@ fn evaluate_host_option(
     resolved: &HashMap<String, CtValue>,
 ) -> Result<String, Diagnostic> {
     let value = match expr {
-        Expr::Ident(name, _) if !resolved.contains_key(name) => CtValue::Str(
-            host_field_source(source, value_span, prefix_len),
-        ),
+        Expr::Ident(name, _) if !resolved.contains_key(name) => {
+            CtValue::Str(host_field_source(source, value_span, prefix_len))
+        }
         Expr::Field(..) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
         Expr::Str(_, _) => CtValue::Str(host_field_source(source, value_span, prefix_len)),
-        _ => evaluate_expression(
-            expr,
-            resolved,
-            funcs,
-            &HashSet::new(),
-            base_dir,
-        )?,
+        _ => evaluate_expression(expr, resolved, funcs, &HashSet::new(), base_dir)?,
     };
     Ok(value.jet_show())
 }
@@ -748,11 +780,7 @@ fn evaluate_host_option(
 fn host_field_source(source: &str, span: Span, prefix_len: usize) -> String {
     let start = span.start.saturating_sub(prefix_len);
     let end = span.end.saturating_sub(prefix_len);
-    source
-        .get(start..end)
-        .unwrap_or(source)
-        .trim()
-        .to_string()
+    source.get(start..end).unwrap_or(source).trim().to_string()
 }
 
 fn typed_field_dependencies(

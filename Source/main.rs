@@ -1746,6 +1746,18 @@ fn main() {
             return;
         }
         "fmt" => {
+            // D-ECO12=A: external language formatting belongs to the same
+            // environment realization/trust path as `jet env`; native `.jet`
+            // formatting stays in the compiler driver below.
+            if jet_argv.iter().any(|a| {
+                a == jet::Syntax::FMT_FLAG_LANG || a.starts_with("--lang=")
+            }) {
+                exit(EngineDispatch::dispatch(
+                    jet::Syntax::JETPACK_BINARY_NAME,
+                    "fmt",
+                    &raw,
+                ));
+            }
             // D-FMTPROJECT1=D: project-level formatter. No positional target
             // required — defaults to discovering the workspace/project root.
             let path_args: Vec<String> =
@@ -2043,7 +2055,7 @@ fn main() {
             ));
         }
         "bridge" => {
-            // U16 (card c9jetpackgates): `jet bridge flake` translates a
+            // U16 (card c9jetpackgates): `jet os bridge flake` translates a
             // foreign flake.nix's devShell into jetpack's `env.*` form.
             // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
             // like `push`/`config`, never linked in-process.

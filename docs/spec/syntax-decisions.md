@@ -4861,8 +4861,11 @@ declares `executable`) or `from: env.<name>` (one declared environment) + option
 quoted strings — no bare-ident sugar), `files: [String]`, and `base:
 oci("<ref>")`. Environment images use the same record and default to a
 non-root `/bin/sh` entrypoint from a verified Hangar shell package. Their
-expert controls are the existing `target`, `user`, `entrypoint`, `health`,
-`services`, `files` (layer inputs), `expose`, and `base` fields. Services stay
+explicit `files` list adds only regular, project-relative, non-secret paths to
+the image layer; managed environment files, dotenv inputs, and secret-like
+paths stay out of layers. Their expert controls are the existing `target`,
+`user`, `entrypoint`, `health`, `services`, `files` (layer inputs), `expose`,
+and `base` fields. Services stay
 selected on the image record but fail clearly until the typed service
 supervisor prerequisite owns their runtime; Jet never starts raw service PIDs
 from an image build.
@@ -5234,8 +5237,8 @@ rename objects (`<plan.json> --dry-run`, `apply <plan.json>`, `undo <log.json>`)
 helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
 compiler-extension WASM components (typed post-sema snapshot; see above) —
 not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
-cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
-a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
+cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completion and hover
+for package names and typed option fields from a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>` reports Store identity, provider
 facts, dependency/closure edges, liveness roots, and rebuild checks; `jet logs
 <pkg>` persists per-step records.
@@ -5783,6 +5786,14 @@ workspace/package/cwd scope, accepts explicit paths, `--dry-run`, `--check --dif
 and 2 means usage/parse/I/O failure. Preflight finds all failures before a
 zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin
 diagnostics. CLI, LSP, Canvas, and CI output is one byte-identical fixpoint.
+
+**D-ECO12=A — environment formatter passthrough**: an environment may declare
+one typed formatter package, for example `formatter: pkgs.nixfmt`. Native
+`.jet` files remain under the Jet formatter; `jet fmt --lang nix` realizes the
+selected environment and delegates discovered non-`.jet` files to that
+package. The formatter is an ordinary environment package fact subject to
+the existing trust, PATH, process, and cleanup seams. It is not a string shell
+field, a second supervisor, or a second formatter configuration language.
 
 **D-PERFSESSION1=D / D-ARTIFACT-EXT1=A — one `.jettrace` truth**: `jet perf run/test` preserves
 the exact base-command argument surface and driver path; `attach/view/compare/

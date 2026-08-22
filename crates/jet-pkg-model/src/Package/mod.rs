@@ -3528,7 +3528,7 @@ outputs: .{
 name: "demo"
 configs: [dev, "release.jet"]
 defaults: .{ run: app }
-dev :: Config.{
+dev :: Config{
     version: "1"
 }
 "#,
@@ -3536,7 +3536,7 @@ dev :: Config.{
         .unwrap();
         std::fs::write(
             dir.join("release.jet"),
-            r#"pub release :: Config.{ outputs: .{ app: .Executable.{ entry: run } } }"#,
+            r#"pub release :: Config{ outputs: .{ app: Executable{ entry: run } } }"#,
         )
         .unwrap();
         let facts = PackageFacts::load(&dir).unwrap().unwrap();

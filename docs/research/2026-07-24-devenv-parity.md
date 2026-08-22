@@ -37,7 +37,7 @@ Captions on the video were auto-only (medium confidence). Product claims below r
 | Cut | Meaning |
 |---|---|
 | **Newbie** | `docs/first-hour.md` can teach `jet env` / hook, not only `nix build` |
-| **Refugee / dogfood** | Jet repo core shell works via Jet env; `.envrc` drops `use flake` / `JET_ENV_DISABLE=1` (or becomes a thin Jet-hook wrapper). `jet bridge flake` remains for Nix consumers |
+| **Refugee / dogfood** | Jet repo core shell works via Jet env; `.envrc` drops `use flake` / `JET_ENV_DISABLE=1` (or becomes a thin Jet-hook wrapper). `jet os bridge flake` remains for Nix consumers |
 
 ### Dogfood acceptance (stress test)
 
@@ -72,7 +72,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Structured outputs (packages, apps, checks, shells) | `Output` kinds + hangar; `D-ECO-OUTPUT*` | **partial** | Same |
 | Multiple named shells | `env.<name>` overlays (U19) | **partial** | Same |
 | Consume foreign `flake.nix` / `devenv.nix` | U16 bridge; L0204 unmapped fields | **partial** | Same |
-| Emit flake shim for Nix consumers | `jet bridge flake` | **partial** | Same |
+| Emit flake shim for Nix consumers | `jet os bridge flake` | **partial** | Same |
 | Flake-parts composition | — | **ratified A** | #793 tracker + slices |
 
 ### B. Shell activation & lifecycle (video-heavy)
@@ -109,7 +109,8 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 |---|---|---|---|
 | `packages = [ … ]` | `packages:` on env | **shipped** | — |
 | Overlays / overrides | D-JPK-OVERLAY1; #330 | **partial** | Existing #330 |
-| `devenv search` | U26 `jet search` | **partial** | #789 |
+| `devenv search` | U26 `jet search` + typed option fields | **partial** | #789 sibling cockpit/doctor slices |
+| Typed option search/browse | `jet search <option>` + `jet info <source>.<package>` | **shipped** | — |
 | Cachix pull/push | U24 / D-JPK-CACHE* | **partial** | Existing cache cards |
 | Binary cache UX polish | — | **partial** | Existing program |
 
@@ -124,7 +125,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Job I/O JSON / exports | — | **gap** | #787 |
 | Generated `files.` (json/toml/sh) | typed `files:` facts + `jet env sync` | **shipped** | #1084 — symlink/seed/copy + `jet env sync` |
 | `git-hooks` / pre-commit catalog | typed `git_hooks_path` + native Git `core.hooksPath` | **shipped** | #1085 |
-| `treefmt` / formatter integrations | D-ECO12 formatter passthrough | **partial** | #787 |
+| `treefmt` / formatter integrations | D-ECO12 formatter passthrough | **shipped** | #1086 |
 
 ### F. Processes & services (video-heavy)
 
@@ -138,7 +139,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Automatic port allocation | — | **gap** | #785 |
 | Process↔task dependency graph | — | **gap** | #785 |
 | Alternate managers (process-compose…) | — | **reject** | I8 one supervisor |
-| Service presets (postgres, redis, MySQL/MariaDB, Nginx, …) | typed Service; one shared typed constructor registry with package realization, state initialization, loopback binding, and readiness | **shipped** | — |
+| Service presets (postgres, redis, MySQL/MariaDB, Nginx, MinIO, mail, and administration tools) | typed Service; one shared typed constructor registry with package realization, state initialization, loopback binding, and readiness | **partial** | Adminer needs an owner-ratified PHP runtime/source projection |
 | Service state dirs / init scripts | partial | **partial** | #786 |
 
 #### Service preset catalog and contribution path
@@ -171,9 +172,9 @@ and this catalog entry are updated together.
 
 | Feature | Jet today | Status | Follow-up |
 |---|---|---|---|
-| Build OCI from env (`shell` / `processes`) | D-JPK-IMAGE1 from packages | **partial** | #788 |
-| `container run/copy` + registry | push TLS-gated E1268 | **partial** | #788 |
-| Custom containers + copyToRoot | Image fields partial | **gap** | #788 |
+| Build OCI from env (`shell` / `processes`) | D-JPK-IMAGE1 from verified Hangar outputs; selected services use one generated dependency-first `/jet/supervise` entrypoint; remote realization stays on the host-bound build path | **partial** | #1089: image projection/copy is shipped; remote realization remains `jet build --builder` |
+| `container run/copy` + registry | validated local OCI copy plus explicit HTTP(S) OCI Distribution push; bare registry names remain E1268 | **partial** | #1089: runtime/container-run work remains separate |
+| Custom containers + copyToRoot | image `files` explicit regular project-relative non-secret extra-file projection | **shipped** | #1088 |
 | `devcontainer` export | — | **gap** | #788 P2 |
 | macOS remote Linux builder | D-JPK-REMOTE1 | **partial** | Existing remote cards |
 
@@ -204,11 +205,12 @@ and this catalog entry are updated together.
 
 | Feature | Jet today | Status | Follow-up |
 |---|---|---|---|
-| `devenv lsp` for options | U26 LSP for env fields | **partial** | #789 |
-| `devenv mcp` | #768 MCP campaign | **partial** | Link #768; env tools as MCP resources |
+| `devenv lsp` for options | U26 LSP completion + hover from the local index | **shipped** | — |
+| `devenv mcp` | #768 MCP campaign | **partial** | Read-only environment facts now bridge as `jet self lsp` MCP resources; full MCP remains #768 |
 | editor / agent tool modules | typed `env.editor.vscode` / `env.agent.codex` projections | **shipped** | #792 / #1101 |
 | android / apple SDK modules | typed `env.platform.android()` / `env.platform.apple()` presets | **shipped** | #792 / #1099 |
 | certificates / hosts | typed `env.security.certificates` / `env.network.hosts` projections | **shipped** | #792 / #1100 |
+| cloud credentials / vault tools | typed `env.cloud.credentials` / `env.security.vault` projections | **shipped** | #1102 |
 | `outputs` language.import packaging | package recipes / adapters | **partial** | Flake-class + package program |
 
 ### Better-than-devenv (ergonomics / UX / DX)
@@ -228,7 +230,7 @@ Keep as product advantages; do not dilute:
 2. YAML/inputs + rolling nixpkgs — **sources + channels**
 3. Shell hook auto-activate + allow — **D-ENVHOOK1 + trust**
 4. Hot reload on edit — **devenv 2.1 semantics**
-5. LSP completions for options — **U26 partial**
+5. LSP completions and hover for options — **shipped**
 6. `languages.rust.enable` (+ channel/version) — **#791**
 7. Python venv + requirements — **pack slice**
 8. Scripts + per-script packages — **#Job + #787**
@@ -251,7 +253,7 @@ Small-scope slices measure progress; **TRACKER** cards close only when their sli
 | **#784** | Env lifecycle | **#800** trust prompt+allowlist · **#801** hot-reload (devenv 2.1) · **#802** enterShell Tasks · **#803** dotenv · **#804** unsetEnvVars · **#805** `jet env test` · **#806** prompt polish |
 | **#785** | Process supervisor depth | **#807** ready probes · **#808** restart · **#809** watch→restart · **#810** port alloc · **#811** socket activation · **#812** process↔task DAG |
 | **#786** | Service catalog (no 7-cap) | **#813** preset framework · **#814** postgres · **#815** redis · **#1081** MySQL/MariaDB + Nginx · **#818** minio · **#819** expansion toward full set |
-| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#1084** files. symlink/seed/copy + `jet env sync` · **#1085** git-hooks · **#824** treefmt |
+| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#1084** files. symlink/seed/copy + `jet env sync` · **#1085** git-hooks · **#1086** treefmt-compatible formatter task integration |
 | **#788** | Env containers | **#825** shell OCI · **#826** processes OCI · **#827** copyToRoot · **#828** run/copy/registry · **#829** devcontainer P2 |
 | **#789** | Discoverability | **#830** info cockpit · **#831** search · **#832** env LSP · **#833** doctor |
 | **#790** | **D-ENV-PROFILE1=C** | **#834** named+extends · **#835** hostname/user auto + info disclosure |

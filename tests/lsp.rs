@@ -12,6 +12,7 @@
 mod common;
 
 use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
+use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -270,6 +271,10 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
     (
         "executeCommandProvider",
         "lsp_execute_command_impact_returns_report",
+    ),
+    (
+        "resources",
+        "lsp_mcp_environment_resources_are_read_only",
     ),
 ];
 
@@ -776,6 +781,121 @@ fn lsp_initialize_capabilities_have_named_test_coverage() {
     );
     drop(stdin);
     let _ = child.wait();
+}
+
+#[test]
+fn lsp_mcp_environment_resources_are_read_only() {
+    let _guard = lock_lsp_process();
+    let project = common::Scratch::new("lsp-mcp-environment");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    prompt: $HOME
+    services: {
+        fixture: {
+            enable: false,
+            ports: [8080],
+            run: ["fixture", "--port", "8080"],
+            ready: "fixture --ready",
+            watch: ["src"],
+            after: ["database"],
+            sockets: ["run/fixture.sock"]
+        }
+    }
+    files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+}
+"#,
+    )
+    .unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
+
+    let root_uri = format!("file://{}", project.path.display());
+    let mut child = Command::new(jet_bin())
+        .args(["self", "lsp"])
+        .current_dir(&project.path)
+        .env("HOME", "/test/home")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet self lsp");
+    let mut stdin = child.stdin.take().expect("LSP stdin");
+    let mut stdout = child.stdout.take().expect("LSP stdout");
+
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":{},"capabilities":{{}}}}}}"#,
+            json_string(&root_uri)
+        ),
+    );
+    let init = read_msg(&mut stdout);
+    assert!(
+        init.contains(r#""protocolVersion": "2025-11-25""#),
+        "init: {init}"
+    );
+    assert!(init.contains(r#""resources": {"#), "init: {init}");
+    assert!(init.contains(r#""subscribe": false"#), "init: {init}");
+    assert!(init.contains(r#""listChanged": false"#), "init: {init}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}"#,
+    );
+    let list = read_msg(&mut stdout);
+    assert!(list.contains("jet://environment"), "list: {list}");
+    assert!(list.contains("application/json"), "list: {list}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"jet://environment"}}"#,
+    );
+    let read = read_msg(&mut stdout);
+    assert!(read.contains("\"contents\""), "read: {read}");
+    assert!(read.contains("active_environment"), "read: {read}");
+    assert!(read.contains("fixture"), "read: {read}");
+    assert!(read.contains("generated.txt"), "read: {read}");
+    assert!(read.contains("HOME"), "read: {read}");
+    assert!(read.contains("lint"), "read: {read}");
+    assert!(!read.contains("/test/home"), "resource leaked a variable value: {read}");
+    assert!(
+        !project.join(".jet/services").exists(),
+        "resource discovery must not start services"
+    );
+
+    fs::write(project.join("env.jet"), "module env.dev {\n    packages: [\n").unwrap();
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://environment"}}"#,
+    );
+    let unavailable = read_msg(&mut stdout);
+    assert!(unavailable.contains("\"error\""), "unavailable: {unavailable}");
+    assert!(unavailable.contains("-32002"), "unavailable: {unavailable}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"jet://missing"}}"#,
+    );
+    let missing = read_msg(&mut stdout);
+    assert!(missing.contains("\"error\""), "missing: {missing}");
+    assert!(missing.contains("-32002"), "missing: {missing}");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":6,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let status = child.wait().expect("wait for LSP");
+    assert!(status.success(), "LSP exited unsuccessfully: {status}");
 }
 
 // ── M6 v0 regression tests (must keep working) ───────────────────────────────
@@ -1825,7 +1945,7 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
 
     let path = root.join("main.jet");
     let uri = format!("file://{}", path.display());
-    let source = "module env.dev {\n    env.dev: Env{\n        packages: [default.post]\n        services: { db: Service{ re } }\n    }\n}\n";
+    let source = "module env.dev {\n    env.dev: Env{\n        packages: [default.postgres_16]\n        services: { db: Service{ re }, configured: Service{ ready: false } }\n    }\n}\n";
     std::fs::write(&path, source).expect("write LSP source");
 
     let mut child = Command::new(&jet)
@@ -1882,6 +2002,33 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     assert!(
         option_resp.contains("\"ready\"") && option_resp.contains("Command polled until ready."),
         "option discovery completion missing: {option_resp}"
+    );
+
+    let package_hover_offset = source.find("default.postgres_16").unwrap() + "default.po".len();
+    let package_hover_pos = jet::LSP::byte_offset_to_lsp(source, package_hover_offset);
+    let package_hover_req = format!(
+        r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        uri, package_hover_pos.line, package_hover_pos.character
+    );
+    send_msg(&mut stdin, &package_hover_req);
+    let package_hover_resp = read_msg(&mut stdout);
+    assert!(
+        package_hover_resp.contains("postgres_16") && package_hover_resp.contains("16.4"),
+        "package discovery hover missing: {package_hover_resp}"
+    );
+
+    let option_hover_offset = source.find("ready: false").unwrap() + "rea".len();
+    let option_hover_pos = jet::LSP::byte_offset_to_lsp(source, option_hover_offset);
+    let option_hover_req = format!(
+        r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        uri, option_hover_pos.line, option_hover_pos.character
+    );
+    send_msg(&mut stdin, &option_hover_req);
+    let option_hover_resp = read_msg(&mut stdout);
+    assert!(
+        option_hover_resp.contains("Environment option `ready`")
+            && option_hover_resp.contains("Command polled until ready."),
+        "option discovery hover missing: {option_hover_resp}"
     );
 
     send_msg(

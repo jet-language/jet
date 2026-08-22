@@ -6,6 +6,38 @@
 
 pub const REPORT_SCHEMA: &str = "jet.report/v1";
 
+/// Render one command result through the shared machine-report surface.
+///
+/// `fields` is the already-encoded, comma-prefixed command data. Keeping the
+/// status prefix here prevents each tool from inventing its own schema or
+/// escaping rules while preserving command-specific facts for consumers.
+pub fn render_status_json(status: &str, ok: bool, action: &str, fields: &str) -> String {
+    let mut out = String::from("{\"schema\":");
+    out.push_str(&report_json_string(REPORT_SCHEMA));
+    out.push_str(",\"moment\":\"tool\",\"status\":");
+    out.push_str(&report_json_string(status));
+    out.push_str(",\"ok\":");
+    out.push_str(if ok { "true" } else { "false" });
+    out.push_str(",\"action\":");
+    out.push_str(&report_json_string(action));
+    out.push_str(fields);
+    out.push('}');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_status_json;
+
+    #[test]
+    fn status_renderer_emits_one_escaped_machine_report() {
+        assert_eq!(
+            render_status_json("plan", true, "a\"ction", ",\"applied\":false"),
+            "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"plan\",\"ok\":true,\"action\":\"a\\\"ction\",\"applied\":false}"
+        );
+    }
+}
+
 /// D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FixSafety {

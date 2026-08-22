@@ -97,7 +97,7 @@ pub(crate) const JET_KEYWORDS: &[&str] = Syntax::JET_KEYWORD_LIST;
 pub(crate) const JET_TYPES: &[&str] = Syntax::JET_TYPE_LIST;
 
 /// Is the character sequence before `offset` indicative of member access (`.`)?
-fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
+pub(crate) fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
     let before = &src[..offset.min(src.len())];
     // Walk backward over the current identifier, then check for `.`
     let bytes = before.as_bytes();
@@ -274,20 +274,22 @@ pub(crate) fn compute_completions(
 
     if let Some(index) = discovery {
         if let Some((source, prefix)) = context_is_package_ref(src, offset) {
-            for name in index.package_completions(&source, &prefix) {
-                if seen.insert(format!("pkg:{source}.{name}")) {
-                    items.push(CompletionItem {
-                        label: name,
-                        kind: ck::MODULE,
-                        detail: Some(format!("package from {source}")),
-                        documentation: None,
-                        insert_text: None,
-                        insert_text_format: 1,
-                        auto_import: None,
-                    });
+            if index.packages.iter().any(|record| record.source == source) {
+                for name in index.package_completions(&source, &prefix) {
+                    if seen.insert(format!("pkg:{source}.{name}")) {
+                        items.push(CompletionItem {
+                            label: name,
+                            kind: ck::MODULE,
+                            detail: Some(format!("package from {source}")),
+                            documentation: None,
+                            insert_text: None,
+                            insert_text_format: 1,
+                            auto_import: None,
+                        });
+                    }
                 }
+                return items;
             }
-            return items;
         }
 
         if let Some(prefix) = context_is_option_field(src, offset) {
@@ -298,20 +300,22 @@ pub(crate) fn compute_completions(
                 .filter(|field| field.name.starts_with(&prefix))
                 .collect::<Vec<_>>();
             fields.sort_by(|a, b| a.name.cmp(&b.name));
-            for field in fields {
-                if seen.insert(format!("opt:{}", field.name)) {
-                    items.push(CompletionItem {
-                        label: field.name.clone(),
-                        kind: ck::PROPERTY,
-                        detail: Some(format!("default: {} - {}", field.default, field.docs)),
-                        documentation: None,
-                        insert_text: Some(format!("{}: ", field.name)),
-                        insert_text_format: 1,
-                        auto_import: None,
-                    });
+            if !fields.is_empty() {
+                for field in fields {
+                    if seen.insert(format!("opt:{}", field.name)) {
+                        items.push(CompletionItem {
+                            label: field.name.clone(),
+                            kind: ck::PROPERTY,
+                            detail: Some(format!("default: {}", field.default)),
+                            documentation: Some(field.docs.clone()),
+                            insert_text: Some(format!("{}: ", field.name)),
+                            insert_text_format: 1,
+                            auto_import: None,
+                        });
+                    }
                 }
+                return items;
             }
-            return items;
         }
     }
 
@@ -544,7 +548,7 @@ fn context_is_package_ref(src: &str, offset: usize) -> Option<(String, String)> 
     Some((source, prefix))
 }
 
-fn context_is_option_field(src: &str, offset: usize) -> Option<String> {
+pub(crate) fn context_is_option_field(src: &str, offset: usize) -> Option<String> {
     let before = &src[..offset.min(src.len())];
     let service = before.rfind("Service{");
     let env = before.rfind("Env{");

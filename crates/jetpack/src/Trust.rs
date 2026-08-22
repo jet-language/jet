@@ -1117,7 +1117,7 @@ pub fn flake_definition_hash(content: &str) -> String {
 }
 
 /// The trust gate for a foreign flake/devenv file (U16) — `jet env`'s
-/// foreign-flake projection and `jet bridge flake` both reach this before
+/// foreign-flake projection and `jet os bridge flake` both reach this before
 /// native evaluation. Same store, same hash-grant/pattern machinery, same
 /// non-interactive-stdin refusal as [`gate`]; keyed on the file's content
 /// instead of a ref list, since there is no `RefSpec` for "arbitrary flake.nix

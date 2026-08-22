@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 
 use super::Check::{collect_fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
+use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
-    compute_definition, compute_generated_definition, compute_hover, compute_references,
-    compute_refactor_actions, compute_rename, encode_semantic_tokens,
+    compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
+    compute_references, compute_refactor_actions, compute_rename, encode_semantic_tokens,
     encode_semantic_tokens_in_span, format_inlay_hints, RefactorAction,
 };
 use super::Position::{
@@ -138,7 +139,10 @@ pub fn run_stdio() -> io::Result<()> {
                 }
             };
             if let Ok(message) = parse_rpc_message(&body) {
-                if json_get(&message, "method").and_then(json_str) == Some("$/cancelRequest") {
+                if matches!(
+                    json_get(&message, "method").and_then(json_str),
+                    Some("$/cancelRequest") | Some("notifications/cancelled")
+                ) {
                     if let Some(key) = cancellation_key(json_get(&message, "params")) {
                         lock_cancelled(&reader_cancelled).insert(key);
                     }
@@ -183,7 +187,8 @@ pub fn run_stdio() -> io::Result<()> {
                     write_message(&mut stdout, &resp)?;
                 }
             } else {
-                let cancel_key = (method == "$/cancelRequest")
+                let cancel_key = (method == "$/cancelRequest"
+                    || method == "notifications/cancelled")
                     .then(|| cancellation_key(params))
                     .flatten();
                 let result = catch_notification(|| {
@@ -215,7 +220,8 @@ fn lock_cancelled(
 }
 
 fn cancellation_key(params: Option<&JSONValue>) -> Option<String> {
-    let id = params.and_then(|params| json_get(params, "id"))?;
+    let id = params
+        .and_then(|params| json_get(params, "id").or_else(|| json_get(params, "requestId")))?;
     matches!(id, JSONValue::Number(_) | JSONValue::String(_)).then(|| serialize_id(id))
 }
 
@@ -343,6 +349,12 @@ fn handle_request(
             configure_workspace_roots(server, params);
             Some(initialize_response(id))
         }
+        "resources/list" => Some(response(
+            id,
+            &EnvironmentResources::list_json(&server.workspace_roots),
+        )),
+        "resources/read" => environment_resource_read_response(server, params, id),
+        "ping" => Some(response(id, "{}")),
         "shutdown" => {
             server.shutdown = true;
             Some(response(id, "null"))
@@ -478,8 +490,8 @@ fn handle_notification(
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     match method {
-        "initialized" => Ok(()),
-        "$/cancelRequest" => {
+        "initialized" | "notifications/initialized" => Ok(()),
+        "$/cancelRequest" | "notifications/cancelled" => {
             // The reader thread records this before the queued notification
             // reaches the state-owning loop.
             Ok(())
@@ -512,6 +524,7 @@ fn handle_notification(
 
 fn initialize_response(id: &JSONValue) -> String {
     let result = r#"{
+  "protocolVersion": "2025-11-25",
   "capabilities": {
     "textDocumentSync": 2,
     "documentFormattingProvider": true,
@@ -563,11 +576,48 @@ fn initialize_response(id: &JSONValue) -> String {
     },
     "executeCommandProvider": {
       "commands": ["jet.impact", "jet.budgetReports"]
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
     }
   },
   "serverInfo": { "name": "jet", "version": "0.2.0" }
 }"#;
     response(id, result)
+}
+
+fn environment_resource_read_response(
+    server: &Server,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
+) -> Option<String> {
+    let Some(uri) = params
+        .and_then(|params| json_get(params, "uri"))
+        .and_then(json_str)
+    else {
+        return Some(error_response(id, -32602, "resources/read requires a URI"));
+    };
+    match EnvironmentResources::read_json(&server.workspace_roots, uri) {
+        Ok(text) => Some(response(
+            id,
+            &format!(
+                "{{\"contents\":[{{\"uri\":\"{}\",\"mimeType\":\"application/json\",\"text\":\"{}\"}}]}}",
+                json_escape(uri),
+                json_escape(&text)
+            ),
+        )),
+        Err(ReadError::NotFound) => Some(error_response(
+            id,
+            -32002,
+            "environment resource not found",
+        )),
+        Err(ReadError::Unavailable) => Some(error_response(
+            id,
+            -32002,
+            "environment resource unavailable",
+        )),
+    }
 }
 
 fn response(id: &JSONValue, result_json: &str) -> String {
@@ -1691,7 +1741,12 @@ fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -
         None => SymbolDB::new(),
     };
 
-    match compute_hover(&db, &tokens, &doc.text, &doc.path, offset) {
+    let discovery = load_discovery_index(&doc.path);
+    let hover = discovery
+        .as_ref()
+        .and_then(|index| compute_discovery_hover(&doc.text, offset, index))
+        .or_else(|| compute_hover(&db, &tokens, &doc.text, &doc.path, offset));
+    match hover {
         Some(text) => {
             let result = format!(
                 r#"{{"contents":{{"kind":"markdown","value":"{}"}}}}"#,

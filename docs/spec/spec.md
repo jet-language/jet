@@ -2791,8 +2791,10 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   the selected typed environment through this same image record; the safe
   default is a non-root runnable `/bin/sh` assembled from verified Hangar
   executable output. The record also accepts `services`, `target`, `user`,
-  `entrypoint`, `health`, `expose`, `env_vars`, `files`, and `base`; service
-  projection remains rejected until the typed supervisor prerequisite lands.
+  `entrypoint`, `health`, `expose`, `env_vars`, `files`, and `base`; `files`
+  explicitly layers regular project-relative non-secret paths, while managed
+  environment files and dotenv inputs stay omitted. Service projection remains
+  rejected until the typed supervisor prerequisite lands.
   `base:` is captured but not yet realized for remote references. `.Iso`,
   `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer inputs handled
   by `jet os image`, not by `jet image`.
@@ -2825,7 +2827,8 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   provider fixtures, and hangar metadata. They never fetch. `--json` emits the
   same package records the editor discovery hooks consume: source, name,
   resolved ref, version, platforms, docs, provenance, and typed service option
-  fields.
+  fields. Search matches option names, defaults, and documentation. LSP
+  completion and hover expose the same package and typed option records.
 - **Environment discovery cockpit (U26/#789):** `jet env info [--env <name>]
   [--preset <name>] [--json]` reads one selected typed environment plan. It
   reports package refs, typed service readiness/dependency/restart/watch facts,
@@ -2833,6 +2836,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   files, and integration facts. It does not realize packages, start services,
   run lifecycle actions, or apply files; sibling `env.<name>` contributions are
   not merged into the selected report.
+  The existing `jet self lsp` transport serves the same selected JSON facts as
+  the read-only MCP resource `jet://environment` through `resources/list` and
+  `resources/read`; the bridge does not enter the lifecycle.
 - **Failed-build debugging (U27):** recipe-backed builds persist per-step logs
   under the hangar. On failure, scratch is preserved in hangar-managed storage
   and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form

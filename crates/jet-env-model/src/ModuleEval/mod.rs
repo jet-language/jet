@@ -44,7 +44,7 @@ pub use Types::{
     ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 pub use Environment::{
-    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookAction, HookSpec, LanguageExpansion, LanguagePack,
+    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, FormatterSpec, HookAction, HookSpec, LanguageExpansion, LanguagePack,
     LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
     EnvironmentIntegration, IntegrationKind, PackageProfileError, PackageProfileFact,
     PackageProfilePackage, PackageProfilePlan, PackageProfileSet, PackageProfileSpec, PresetError,
@@ -856,7 +856,7 @@ module b {
     #[test]
     fn typed_integrations_lower_to_one_environment_fact_graph() {
         let src = r#"
-module mobile {
+module env.dev {
     imports: [
         env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
         env.platform.apple(targets: [.IOS]),
@@ -965,7 +965,7 @@ module mobile {
     #[test]
     fn typed_integration_loss_is_reported_before_plan_persistence() {
         let src = r#"
-module mobile {
+module env.dev {
             imports: [env.security.certificates(42)]
 }
 "#;
@@ -974,12 +974,14 @@ module mobile {
         assert!(error.what.contains("integration lowering was lossy"));
         assert!(error.why.contains("secret input must be a named reference"));
         assert!(!error.why.contains("42"));
+        let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&error));
+        check_diagnostic_snapshot("E1335", &rendered);
     }
 
     #[test]
     fn cloud_and_vault_fact_contracts_reject_dropped_authority() {
         let src = r#"
-module secrets {
+module env.dev {
     imports: [
         env.cloud.credentials([aws_production]),
         env.security.vault([database_password])
@@ -1005,19 +1007,25 @@ module secrets {
 
     #[test]
     fn cloud_and_vault_secret_values_fail_without_echoing_input() {
-        for import in ["env.cloud.credentials(42)", "env.security.vault(42)"] {
-            let src = format!("module secrets {{ imports: [{import}] }}");
+        for import in [
+            "env.cloud.credentials(42)",
+            "env.cloud.credentials(\"super_secret_value\")",
+            "env.security.vault(42)",
+            "env.security.vault(\"super_secret_value\")",
+        ] {
+            let src = format!("module env.dev {{ imports: [{import}] }}");
             let error = evaluate_env(&src, &base_dir()).unwrap_err();
             assert_eq!(error.code, "E1335");
             assert!(error.why.contains("secret input must be a named reference"));
             assert!(!error.why.contains("42"));
+            assert!(!error.why.contains("super_secret_value"));
         }
     }
 
     #[test]
     fn conflicting_typed_integration_is_e1335() {
         let src = r#"
-module mobile {
+module env.dev {
     imports: [env.platform.android(api: 34), env.platform.android(api: 35)]
 }
 "#;

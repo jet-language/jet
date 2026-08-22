@@ -105,14 +105,21 @@ impl Index {
                 let name = record.name.to_ascii_lowercase();
                 let display = record.display_ref().to_ascii_lowercase();
                 let docs = record.docs.to_ascii_lowercase();
+                let option = record.options.iter().any(|field| {
+                    field.name.to_ascii_lowercase().contains(&q)
+                        || field.default.to_ascii_lowercase().contains(&q)
+                        || field.docs.to_ascii_lowercase().contains(&q)
+                });
                 let score = if name == q || display == q {
                     0
                 } else if name.starts_with(&q) || display.starts_with(&q) {
                     1
                 } else if name.contains(&q) || display.contains(&q) {
                     2
-                } else if docs.contains(&q) {
+                } else if option {
                     3
+                } else if docs.contains(&q) {
+                    4
                 } else {
                     return None;
                 };

@@ -5,10 +5,14 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
 
-use super::Completion::{use_statement_for_module, JET_KEYWORDS, JET_TYPES};
+use super::Completion::{
+    context_is_member_access, context_is_option_field, use_statement_for_module, JET_KEYWORDS,
+    JET_TYPES,
+};
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
+use jetpack::Discovery::{Index as DiscoveryIndex, OptionField, PackageRecord};
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 
@@ -87,6 +91,80 @@ pub(crate) fn compute_hover(
         return Some(semantic_hover(symbol, path));
     }
     db.hover_at(path, offset).map(str::to_string)
+}
+
+/// Hover over package metadata and typed environment option fields from the
+/// same local, offline discovery index used by completion.
+pub(crate) fn compute_discovery_hover(
+    src: &str,
+    offset: usize,
+    discovery: &DiscoveryIndex,
+) -> Option<String> {
+    let name = identifier_at(src, offset)?;
+    if let Some(source) = context_is_member_access(src, offset) {
+        if let Some(record) = discovery.info(&format!("{source}.{name}")) {
+            return Some(package_hover(record));
+        }
+    }
+    // `context_is_option_field` returns the identifier prefix so completion can
+    // filter on it. Hover only needs to know it is inside an option block.
+    if context_is_option_field(src, offset).is_some() {
+        if let Some(field) = discovery
+            .packages
+            .iter()
+            .flat_map(|record| record.options.iter())
+            .find(|field| field.name == name)
+        {
+            return Some(option_hover(field));
+        }
+    }
+    None
+}
+
+fn identifier_at(src: &str, offset: usize) -> Option<&str> {
+    let bytes = src.as_bytes();
+    let mut cursor = offset.min(bytes.len());
+    if cursor == bytes.len() || !is_identifier_byte(bytes[cursor]) {
+        if cursor == 0 || !is_identifier_byte(bytes[cursor - 1]) {
+            return None;
+        }
+        cursor -= 1;
+    }
+    while cursor > 0 && is_identifier_byte(bytes[cursor - 1]) {
+        cursor -= 1;
+    }
+    let mut end = offset.min(bytes.len());
+    while end < bytes.len() && is_identifier_byte(bytes[end]) {
+        end += 1;
+    }
+    (cursor < end).then(|| &src[cursor..end])
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn package_hover(record: &PackageRecord) -> String {
+    let mut out = format!("`{}`\n\n", record.display_ref());
+    out.push_str(&format!("ref: `{}`\n", record.reference));
+    out.push_str(&format!(
+        "version: `{}`\n",
+        if record.version.is_empty() {
+            "-"
+        } else {
+            &record.version
+        }
+    ));
+    out.push_str(&format!("platforms: {}\n", record.platforms.join(", ")));
+    out.push_str(&format!("source: local discovery index\n\n{}", record.docs));
+    out
+}
+
+fn option_hover(field: &OptionField) -> String {
+    format!(
+        "Environment option `{}`\n\nDefault: `{}`\n\n{}\n\nSource: local discovery index",
+        field.name, field.default, field.docs
+    )
 }
 
 fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {

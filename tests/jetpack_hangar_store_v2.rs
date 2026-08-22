@@ -276,6 +276,27 @@ fn hangar_sign_and_verify_production_path_rejects_tamper() {
     assert!(sign_stdout.contains("\"schema\":\"jet.report/v1\""), "{sign_stdout}");
     assert!(sign_stdout.contains("\"action\":\"sign\""), "{sign_stdout}");
     assert!(sign_stdout.contains("\"signed\":true"), "{sign_stdout}");
+    let sign_report = jetpack::JSON::parse(sign_stdout.trim()).expect("sign JSON report");
+    assert_eq!(json_string(&sign_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&sign_report, "moment"), "tool");
+    assert_eq!(json_string(&sign_report, "status"), "ok");
+    assert_eq!(json_string(&sign_report, "action"), "sign");
+    assert!(sign.stderr.is_empty(), "JSON sign leaked stderr: {:?}", sign.stderr);
+
+    let dump_json = jet()
+        .args(["hangar", "dump", "signed@fixture", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(dump_json.status.code(), Some(2));
+    assert!(dump_json.stderr.is_empty(), "JSON dump leaked stderr: {:?}", dump_json.stderr);
+    let dump_report =
+        jetpack::JSON::parse(String::from_utf8_lossy(&dump_json.stdout).trim()).expect("dump JSON report");
+    assert_eq!(json_string(&dump_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&dump_report, "moment"), "compile");
+    assert_eq!(json_string(&dump_report, "severity"), "error");
+    assert_eq!(json_string(&dump_report, "code"), "E1340");
 
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
@@ -306,6 +327,78 @@ fn hangar_sign_and_verify_production_path_rejects_tamper() {
     assert!(verify_stdout.contains("\"schema\":\"jet.report/v1\""), "{verify_stdout}");
     assert!(verify_stdout.contains("\"action\":\"verify\""), "{verify_stdout}");
     assert!(verify_stdout.contains("\"signed\":true"), "{verify_stdout}");
+
+    let unsigned_archive = root.path.join("unsigned.hangar");
+    let signed_archive_path = root.path.join("signed.hangar");
+    fs::write(
+        &unsigned_archive,
+        jetpack::Store::export_unsigned_archive(&roots, &entry.id, false).unwrap(),
+    )
+    .unwrap();
+    let sign_archive = jet()
+        .args([
+            "hangar",
+            "sign",
+            unsigned_archive.to_str().unwrap(),
+            "--to",
+            signed_archive_path.to_str().unwrap(),
+            "--yes",
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        sign_archive.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&sign_archive.stderr)
+    );
+    assert!(signed_archive_path.is_file());
+    let verify_archive = jet()
+        .args([
+            "hangar",
+            "verify",
+            signed_archive_path.to_str().unwrap(),
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        verify_archive.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&verify_archive.stderr)
+    );
+
+    let mut corrupt_unsigned = fs::read(&unsigned_archive).unwrap();
+    let payload = b"signed bytes\n";
+    let offset = corrupt_unsigned
+        .windows(payload.len())
+        .position(|window| window == payload)
+        .expect("archive carries the fixture payload");
+    corrupt_unsigned[offset] ^= 1;
+    fs::write(&unsigned_archive, corrupt_unsigned).unwrap();
+    let corrupt_signed_path = root.path.join("corrupt-signed.hangar");
+    let reject_corrupt_sign = jet()
+        .args([
+            "hangar",
+            "sign",
+            unsigned_archive.to_str().unwrap(),
+            "--to",
+            corrupt_signed_path.to_str().unwrap(),
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(reject_corrupt_sign.status.code(), Some(2));
+    assert!(!corrupt_signed_path.exists());
 
     let all_verify = jet()
         .args(["hangar", "verify", "--json", "--no-color"])
@@ -364,6 +457,11 @@ fn hangar_sign_and_verify_production_path_rejects_tamper() {
         "{rejected_signature_json_stdout}"
     );
     assert!(rejected_signature_json.stderr.is_empty());
+    let rejected_report =
+        jetpack::JSON::parse(rejected_signature_json_stdout.trim()).expect("verify JSON report");
+    assert_eq!(json_string(&rejected_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&rejected_report, "moment"), "compile");
+    assert_eq!(json_string(&rejected_report, "severity"), "error");
     fs::write(&sidecar, signed_archive).unwrap();
 
     make_tree_writable(Path::new(&entry.out));
@@ -420,6 +518,7 @@ fn hangar_export_plan_does_not_create_archive_or_signer() {
             "planned@fixture",
             "--to",
             archive.to_str().unwrap(),
+            "--json",
             "--no-color",
         ])
         .current_dir(&project.path)
@@ -431,11 +530,17 @@ fn hangar_export_plan_does_not_create_archive_or_signer() {
         "stderr: {}",
         String::from_utf8_lossy(&planned.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&planned.stderr).contains("plan only"),
-        "stderr: {}",
-        String::from_utf8_lossy(&planned.stderr)
-    );
+    assert!(planned.stderr.is_empty(), "JSON plan leaked stderr: {:?}", planned.stderr);
+    let planned_stdout = String::from_utf8_lossy(&planned.stdout);
+    let planned_report = jetpack::JSON::parse(planned_stdout.trim()).expect("export plan JSON");
+    assert_eq!(json_string(&planned_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&planned_report, "moment"), "tool");
+    assert_eq!(json_string(&planned_report, "status"), "plan");
+    assert_eq!(json_string(&planned_report, "action"), "export");
+    assert!(matches!(
+        planned_report.get("applied").unwrap(),
+        jetpack::JSON::JSONValue::Bool(false)
+    ));
     assert!(!archive.exists());
     assert!(!root.path.join("trust/hangar.key").exists());
 }
@@ -815,7 +920,11 @@ fn hangar_copy_roundtrip_is_idempotent_and_conflict_safe() {
     let rejected = copy();
     assert_eq!(rejected.status.code(), Some(2));
     let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert!(rejected_stderr.contains("conflicting digest"), "{rejected_stderr}");
+    let rejected_stdout = String::from_utf8_lossy(&rejected.stdout);
+    assert!(
+        rejected_stdout.contains("conflicting digest"),
+        "stderr: {rejected_stderr}\nstdout: {rejected_stdout}"
+    );
     assert_eq!(fs::read_to_string(destination_payload).unwrap(), "keep corrupt bytes\n");
     assert_eq!(fs::read_to_string(source_payload).unwrap(), "copy me\n");
 }

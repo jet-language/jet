@@ -48,7 +48,7 @@ This proposal completes, and does not reopen, these decisions:
 | Ratified law | Consequence here |
 |---|---|
 | D-ECO-DECL1=A | Packages, environments, checks, services, images, systems, and fleets are ordinary named typed values under one root. |
-| D-SHAPE5a/5b=A | Roles use ordinary `T.{}` or `.{}` construction; Output is a closed sum with checked payloads. |
+| D-SHAPE5a/5b=A | Roles use ordinary `T{}` or `.{}` construction; Output is a closed sum with checked payloads. |
 | D-ECO-EXTENSION1 / D-ECO-COMPOSE2=A | Extensions are typed functions returning closed graph values. Safe additions merge by field law; scalar disagreements stop with full provenance. |
 | D-ECO-ENV1=A | Environment is an Output, not a parallel setup language. |
 | D-ECO-RECEIPT2=A | One record connects input, action, output digest, activation proof, and parent generation. |
@@ -92,7 +92,7 @@ Composition is deterministic:
 - named collections combine by key;
 - sets union;
 - ordered values use the order law declared by their type;
-- ecosystem scalar disagreements stop with provenance; experts use ordinary functions to construct one final value (D-ECO-COMPOSE2); `OptionValue.{ value, priority }` exists only inside option contributions (D-JOS-PRIORITY-SURFACE2);
+- ecosystem scalar disagreements stop with provenance; experts use ordinary functions to construct one final value (D-ECO-COMPOSE2); `OptionValue{ value, priority }` exists only inside option contributions (D-JOS-PRIORITY-SURFACE2);
 - every successful contributor remains in `.jet/lock`.
 
 ```text
@@ -145,8 +145,10 @@ package.jet. A System needs target and may include packages, services, and
 options; service open-record fields remain in the plan as deterministic
 `key`/`value` facts. A Fleet maps host names to System names. The projection keeps the
 Package semantic digest as graph_identity in the shared EnvPlan and in
-JetOS plan.json. jet os plan previews this value; JetOS build and proof use
-the existing Hangar and generation receipt path.
+JetOS plan.json. Fleet deploy facts carry the same identity in their deploy
+plan and host proof scripts. jet os plan previews this value; JetOS build and
+proof use the existing Hangar and generation receipt path. Duplicate Fleet
+names and host paths are rejected before generation publication.
 
 The payload holds only name and kind-specific facts. Sources, dependencies, actions, effects, policy, target facts, and provenance live once. `jet inspect output` (`NEW: D-ECO-OUTPUT-PAYLOAD1`) reconstructs the complete path:
 
@@ -187,6 +189,15 @@ Plural intents run every matching Output: `jet test` runs every Check. Singular 
 ### Lock, receipts, Hangar, and roots
 
 `.jet/lock` is a small, reviewable index, not a dump of artifact logs. It owns exact package graph identity, solver rationale, provider facts, targets, toolchains, policy, and complete merge edges. Each realization or activation appends an immutable receipt object to the Hangar and records its digest in the lock or generation. The receipt points back to locked inputs; it does not copy merge history.
+
+A lock receipt is a root only when its digest, package identity, source, and
+output projection agree with one immutable Hangar closure record. Reachability
+then follows that record's complete connected closure. Cleanup removes only
+receipt objects outside all lock, lifecycle, lease, and retained-object roots;
+corrupt, missing, mismatched, or unsafe receipt paths fail closed so the live
+closure remains available for recovery. The receipt field is a Hangar
+projection, not a Nix input: adding it does not change the Nix lock digest or
+the realization action identity.
 
 ```text
 .jet/lock
@@ -458,11 +469,11 @@ name: "pulse"
 source: "Source"
 deps: .{ http: "2.3", postgres: "1.9" }
 outputs: .{
-    app: .Executable.{ name: "pulse", entry: run }
-    unit: .Check.{ name: "unit", entry: test_unit }
+    app: Executable{ name: "pulse", entry: run }
+    unit: Check{ name: "unit", entry: test_unit }
 }
 environments: .{
-    dev: .Environment.{
+    dev: Environment{
         name: "dev"
         tools: [ripgrep, jet_language_server]
         services: .{
@@ -556,12 +567,12 @@ configs: [application, development]            // NEW: D-ECO-SLICENAME1
 name: "pulse"
 defaults: .{ run: app, check: unit, enter: dev }
 
-application :: Config.{                // NEW: D-ECO-SLICENAME1
+application :: Config{                 // NEW: D-ECO-SLICENAME1
     source: "Source"
     deps: .{ http: "2.3", postgres: "1.9" }
     outputs: .{
-        app: .Executable.{ name: "pulse", entry: run }
-        unit: .Check.{ name: "unit", entry: test_unit }
+        app: Executable{ name: "pulse", entry: run }
+        unit: Check{ name: "unit", entry: test_unit }
     }
 }
 ```
@@ -569,9 +580,9 @@ application :: Config.{                // NEW: D-ECO-SLICENAME1
 Resulting `package/env.jet`:
 
 ```jet
-pub development :: Config.{            // NEW: D-ECO-SLICENAME1
+pub development :: Config{             // NEW: D-ECO-SLICENAME1
     environments: .{
-        dev: .Environment.{             // NEW: D-ECO-OUTPUT-KINDS1
+        dev: Environment{              // NEW: D-ECO-OUTPUT-KINDS1
             name: "dev"
             tools: [ripgrep, jet_language_server]
             services: .{ postgres: .{ enable: true, ports: [5432], ready: postgres_ready } }
@@ -599,7 +610,7 @@ deps: .{
         recipe: Recipe.cmake
     )
 }
-outputs: .{ agent: .Executable.{ name: "edge-agent", entry: run } }
+outputs: .{ agent: Executable{ name: "edge-agent", entry: run } }
 targets: .{
     appliance: .{ build: linux.x64, host: linux.x64, target: linux.arm64, libc: .Musl }
 }
@@ -705,8 +716,8 @@ name: "api"
 source: "Source"
 deps: .{ http: catalog.http, postgres: catalog.postgres, tracing: catalog.tracing }
 outputs: .{
-    server: .Executable.{ name: "acme-api", entry: run }
-    unit: .Check.{ name: "api-unit", entry: unit }
+    server: Executable{ name: "acme-api", entry: run }
+    unit: Check{ name: "api-unit", entry: unit }
 }
 ```
 
@@ -730,8 +741,8 @@ name: "billing"
 source: "Source"
 deps: .{ http: catalog.http, api_contract: api }
 outputs: .{
-    library: .Library.{ name: "billing", modules: [Billing] }
-    unit: .Check.{ name: "billing-unit", entry: unit }
+    library: Library{ name: "billing", modules: [Billing] }
+    unit: Check{ name: "billing-unit", entry: unit }
 }
 ```
 
@@ -750,7 +761,7 @@ fn unit() ? {
 name: "web"
 source: "Source"
 deps: .{ http: catalog.http, api_contract: api }
-outputs: .{ app: .Executable.{ name: "acme-web", entry: run } }
+outputs: .{ app: Executable{ name: "acme-web", entry: run } }
 ```
 
 `packages/web/Source/main.jet`:
@@ -848,7 +859,7 @@ A Package may define only an Environment Output; no dummy value or shell hook st
 name: "research"
 sources: .{ upstream: nixos-unstable@nixpkgs }
 environments: .{
-    data: .Environment.{
+    data: Environment{
         name: "data"
         tools: [upstream.[python3, duckdb, ripgrep]]
         variables: .{ DATA_ROOT: path("./data") }
@@ -932,7 +943,7 @@ options: laptop_options
 themes: .{ halcyon: halcyon_theme }
 profiles: .{ nate: .{ packages: [fish, helix, git] } }
 systems: .{
-    halcyon: .System.{
+    halcyon: System{
         name: "halcyon"
         target: linux.x64
         packages: [firefox, ghostty, helix, git, ripgrep, btop]
@@ -962,7 +973,7 @@ systems: .{
     }
 }
 images: .{
-    installer: .Image.{
+    installer: Image{
         name: "halcyon-installer"
         from: systems.halcyon
         kind: .Iso
@@ -970,14 +981,14 @@ images: .{
     }
 }
 checks: .{
-    vm: .Check.{ name: "halcyon-vm", entry: verify_halcyon_vm }
+    vm: Check{ name: "halcyon-vm", entry: verify_halcyon_vm }
 }
 ```
 
 `system/options.jet`:
 
 ```jet
-pub laptop_options :: OptionSet.{   // NEW: D-ECO-JETOS2
+pub laptop_options :: OptionSet{    // NEW: D-ECO-JETOS2
     declarations: .{
         desktop: .{
             path: "services.desktop.environment"
@@ -997,7 +1008,7 @@ pub laptop_options :: OptionSet.{   // NEW: D-ECO-JETOS2
 `system/theme.jet`:
 
 ```jet
-pub halcyon_theme :: Theme.{            // D-JOS-THEME1; unified placement: D-ECO-JETOS2
+pub halcyon_theme :: Theme{             // D-JOS-THEME1; unified placement: D-ECO-JETOS2
     polarity: .Dark
     wallpaper: "wallpapers/forest.png"
     fonts: .{ ui: "Inter", monospace: "JetBrains Mono" }
@@ -1008,7 +1019,7 @@ pub halcyon_theme :: Theme.{            // D-JOS-THEME1; unified placement: D-EC
 `system/hardware.jet`:
 
 ```jet
-pub halcyon_hardware :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub halcyon_hardware :: Config{         // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     hardware: .{
         halcyon: .{
             cpu: .Amd64
@@ -1023,7 +1034,7 @@ pub halcyon_hardware :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-
 `system/packages.jet`:
 
 ```jet
-fn workstation() => Config {                   // NEW: D-ECO-SLICENAME1
+fn workstation() -> Config {                    // NEW: D-ECO-SLICENAME1
     return .{
         overlays: .{
             browsers: .{ firefox: .{ channel: "stable" } }
@@ -1037,14 +1048,14 @@ pub workstation_packages: Config :: workstation() // NEW: D-ECO-SLICENAME1
 `system/files.jet`:
 
 ```jet
-pub generated_sysctl :: File.{          // NEW: D-ECO-JETOS2
+pub generated_sysctl :: File{           // NEW: D-ECO-JETOS2
     path: "/etc/sysctl.d/90-jetos.conf"
     text: "vm.swappiness=10\n"
     mode: 0o644
     replace: .Force
 }
 
-pub ghostty_config :: File.{            // NEW: D-ECO-JETOS2
+pub ghostty_config :: File{             // NEW: D-ECO-JETOS2
     path: "/home/nate/.config/ghostty/config"
     source: path("home/ghostty/config")
     mode: 0o644
@@ -1055,7 +1066,7 @@ pub ghostty_config :: File.{            // NEW: D-ECO-JETOS2
 `system/laptop.jet` contributes one closed feature across system and user scope:
 
 ```jet
-pub laptop :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
+pub laptop :: Config{                   // NEW: D-ECO-SLICENAME1; schema: D-ECO-JETOS2
     systems: .{
         halcyon: .{ services: .{ power: .{ profile: .Balanced } } }
     }
@@ -1084,7 +1095,7 @@ fn verify_halcyon_vm() ? {
 `system/_nvidia.jet` is discovered but disabled by its one-character `_` prefix (`NEW: D-ECO-FILEROOT1`):
 
 ```jet
-pub nvidia :: Config.{                  // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
+pub nvidia :: Config{                   // NEW: D-ECO-SLICENAME1; NEW: D-ECO-FILEROOT1
     systems: .{ halcyon: .{ kernel: .{ drivers: [nvidia] } } }
 }
 ```
@@ -1158,7 +1169,7 @@ receipt: sha256:91b8…
 rollback: gen-41 ready
 ```
 
-The type/default/docs declarations feed source checks, completion, `jet inspect search`, `jet inspect info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. Experts use ordinary functions to construct one final ecosystem value (D-ECO-COMPOSE2). Only option contributions may use `OptionValue.{ value, priority: .Force }` (D-JOS-PRIORITY-SURFACE2), never a parallel `force` grammar.
+The type/default/docs declarations feed source checks, completion, `jet inspect search`, `jet inspect info`, Studio, and generated reference pages. Final-value reads use the checked resolved graph; a dependency cycle reports the shortest option cycle and every source span. Lists and maps merge by their declared type law; unequal ordinary scalars conflict. Experts use ordinary functions to construct one final ecosystem value (D-ECO-COMPOSE2). Only option contributions may use `OptionValue{ value, priority: .Force }` (D-JOS-PRIORITY-SURFACE2), never a parallel `force` grammar.
 
 Representative NixOS comparison:
 
@@ -1225,9 +1236,9 @@ fn api_can_serve() ? {
     assert(response.status() == 200, "api could not serve a request")
 }
 
-pub web_base :: Config.{
+pub web_base :: Config{
     source: "Source/api"
-    outputs: .{ api: .Service.{ name: "api", entry: run_api } }
+    outputs: .{ api: Service{ name: "api", entry: run_api } }
     systems: .{
         web: .{
             target: linux.x64
@@ -1238,13 +1249,13 @@ pub web_base :: Config.{
     }
 }
 
-pub production :: Config.{
+pub production :: Config{
     systems: .{
         web1: web_base.systems.web.with(.{ network: .{ hostName: "web1" }, region: "us-east" })
         web2: web_base.systems.web.with(.{ network: .{ hostName: "web2" }, region: "eu-west" })
     }
     fleets: .{
-        prod: .Fleet.{
+        prod: Fleet{
             name: "prod"
             hosts: .{
                 web1: .{ system: systems.web1, target: .{ binding: "web1" }, authority: .{ identity: "deploy", privilege: .Root } }
@@ -1412,7 +1423,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Flake schema and `${system}` precede first build | `jet build` derives host target; `--target` reveals explicit control only when asked. |
 | Untracked source disappears from a flake snapshot | Plan names every included and excluded source with the owning source-set rule before build. |
 | Lazy evaluation fails through library frames | Eager graph checks report the user declaration, failed contract, shortest dependency or option cycle, and fix. |
-| Overrides require choosing among several layers | Ordinary contributions merge; disagreement stops; the sole expert precedence spelling is `OptionValue.{ value, priority }`. |
+| Overrides require choosing among several layers | Ordinary contributions merge; disagreement stops; the sole expert precedence spelling is `OptionValue{ value, priority }`. |
 | Cache miss triggers an unexplained rebuild | `jet explain cache:<output>` names first mismatching identity or trust fact and the exact fallback. |
 | Update fanout is unclear | `jet update <pkg> --check` previews selected/rejected versions, rebuild set, policy, and untouched lock subtrees. |
 | Deployment needs NixOS plus another fleet tool | System and Fleet are Outputs in one graph with plan, proof, staged push, health gates, and per-host rollback. |

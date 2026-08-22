@@ -43,14 +43,14 @@ deps: {
 module env.dev {
     packages: [default.[postgres_16, ripgrep], unstable.zig]
     services: {
-        postgres: Service.{ version: 16, port: 5432, init: "schema.sql" }
+        postgres: Service{ version: 16, port: 5432, init: "schema.sql" }
     }
     secrets: { STRIPE_KEY: secret("stripe-dev") }
 }
 
 module system.laptop {
     packages: [default.[firefox, ghostty]]
-    services: { tailscale: Service.{}, pipewire: Service.{} }
+    services: { tailscale: Service{}, pipewire: Service{} }
 }
 
 module image.server {
@@ -120,8 +120,8 @@ Services are typed values in env modules, supervised by jetpack:
 ```jet
 module env.dev {
     services: {
-        postgres: Service.{ version: 16, port: 5432, init: "schema.sql" }
-        redis: Service.{}
+        postgres: Service{ version: 16, port: 5432, init: "schema.sql" }
+        redis: Service{}
     }
 }
 ```
@@ -177,7 +177,7 @@ The bridge matches the three daily Nix flows:
 | `nix develop` in a flake repo | `jet env` detects `flake.nix` / `devenv.nix` when no `env.*` exists |
 | `nix run nixpkgs#fastfetch` | `jet run fastfetch@nixpkgs` |
 
-`jet bridge flake` emits a generated `flake.nix` shim so Nix users can consume
+`jet os bridge flake` emits a generated `flake.nix` shim so Nix users can consume
 Jet packages and envs. Adoption is consume, coexist, replace; no flag day.
 
 ## jetos
@@ -191,11 +191,11 @@ module system.laptop {
     imports: find("./modules")
     packages: [default.[firefox, ghostty, ffmpeg]]
     services: {
-        tailscale: Service.{}
-        pipewire: Service.{}
+        tailscale: Service{}
+        pipewire: Service{}
     }
     users: {
-        nate: User.{ shell: fish, groups: [wheel] }
+        nate: User{ shell: fish, groups: [wheel] }
     }
 }
 ```

@@ -502,7 +502,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             "E1256",
             "couldn't project the foreign environment",
             reason,
-            "use the supported literal devShell fields, run `jet bridge flake` for the loss report, or declare the environment in `env.*`.",
+            "use the supported literal devShell fields, run `jet os bridge flake` for the loss report, or declare the environment in `env.*`.",
         ),
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",
@@ -688,6 +688,11 @@ fn typed_plan(
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
     let selected_preset = plan.selected_preset;
+    if let Some(formatter) = &plan.lifecycle.formatter {
+        if !package_refs.iter().any(|existing| existing == &formatter.package) {
+            package_refs.push(formatter.package.clone());
+        }
+    }
     // `evaluate_env_with_selections` already expanded the typed selections. Keep
     // that exact graph fact through realization; re-expanding here could make
     // planning, trust, and activation disagree if the catalog changes.

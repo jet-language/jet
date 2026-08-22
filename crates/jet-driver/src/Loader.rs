@@ -374,7 +374,7 @@ fn record_import_edge_fact(
 /// "run `jetpack build`" (E0983), never a silent network fetch.
 fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
     let mut declared_deps = HashSet::new();
-    let facts = crate::Package::PackageFacts::parse(raw, "package.jet").map_err(|error| {
+    let facts = crate::Package::PackageFacts::parse_uncomposed(raw, "package.jet").map_err(|error| {
         match &error {
             crate::Package::PackageParseError::Composition(detail)
                 if detail.contains("is a diagnostic code") => {
@@ -708,7 +708,10 @@ fn load_entry_with_overlays_mode_on_stack(
                 ));
             }
         };
-        let package_manifest = match crate::Package::PackageFacts::parse(&raw, pack_path.display().to_string()) {
+        let package_manifest = match crate::Package::PackageFacts::parse_uncomposed(
+            &raw,
+            pack_path.display().to_string(),
+        ) {
             Ok(facts) => facts,
             Err(crate::Package::PackageParseError::BadMemoryPolicy { detail }) => {
                 return Err(record_loader_error(

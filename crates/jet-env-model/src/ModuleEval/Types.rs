@@ -8,8 +8,8 @@ use super::super::Merge::{self, EntryContribution};
 use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 use super::Environment::{
-    EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion, LanguagePack,
-    LanguageProjection, LanguageSpec, PackageProfileSpec, PresetSpec, ResolvedPreset,
+    EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion,
+    LanguagePack, LanguageProjection, LanguageSpec, PackageProfileSpec, PresetSpec, ResolvedPreset,
 };
 
 /// One `$NAME` read captured from a config surface. Environment variables are

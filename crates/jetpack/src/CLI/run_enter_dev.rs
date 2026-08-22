@@ -2228,8 +2228,15 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let formatter = plan
+            .environment
+            .lifecycle
+            .formatter
+            .as_ref()
+            .map(|formatter| crate::JSON::quote(&formatter.package))
+            .unwrap_or_else(|| "null".to_string());
         println!(
-            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"git_hooks_path\":{},\"integrations\":[{}]}}",
+            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"formatter\":{},\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"git_hooks_path\":{},\"integrations\":[{}]}}",
             crate::JSON::quote(preset),
             quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2256,6 +2263,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             language_packs,
             language_projections,
             quote_list(&packages),
+            formatter,
             services,
             // D-JOB-NAME2=B: both keys always appear, so a consumer reads the
             // one it means instead of guessing from a merged list. The key text
@@ -2354,6 +2362,15 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .collect::<Vec<_>>();
     theme.detail(&format!("language projections: {}", if expanded.is_empty() { "<none>".to_string() } else { expanded.join("; ") }));
     theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
+    theme.detail(&format!(
+        "formatter: {}",
+        plan.environment
+            .lifecycle
+            .formatter
+            .as_ref()
+            .map(|formatter| formatter.package.as_str())
+            .unwrap_or("<none>")
+    ));
     let services = plan
         .dev_services
         .iter()
@@ -2705,6 +2722,7 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
                     || !p.lifecycle.on_enter.is_empty()
                     || !p.lifecycle.checks.is_empty()
                     || p.lifecycle.git_hooks_path.is_some()
+                    || p.lifecycle.formatter.is_some()
                     || p.lifecycle.reload_explicit
                     || !p.presets.is_empty()
                     || !p.languages.is_empty()
@@ -2721,7 +2739,7 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
 }
 
 /// U16: enter a foreign flake's default devShell through the same bounded
-/// native evaluator as `jet bridge flake`. The projection is deliberately
+/// native evaluator as `jet os bridge flake`. The projection is deliberately
 /// loss-recording: package lists become ordinary nixpkgs refs and fields with
 /// no `env.*` meaning are reported as L0204. Jetpack never delegates this
 /// product path to an installed `nix` binary.

@@ -2541,6 +2541,11 @@ fn build_resolves_fixture_ref() {
     let stdout = String::from_utf8_lossy(&explained.stdout);
     assert!(stdout.contains("\"schema\":\"jet.report/v1\""));
     assert!(stdout.contains("\"moment\":\"tool\""));
+    let explain_report = jetpack::JSON::parse(stdout.trim()).expect("package explain JSON");
+    assert_eq!(json_string(&explain_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&explain_report, "moment"), "tool");
+    assert_eq!(json_string(&explain_report, "action"), "explain");
+    assert_eq!(json_string(&explain_report, "status"), "ok");
     assert!(stdout.contains("\"provider_facts\":"));
     assert!(stdout.contains("\"direct_dependencies\":"));
     assert!(stdout.contains("\"roots\":"));
@@ -2590,6 +2595,11 @@ fn build_resolves_fixture_ref() {
         String::from_utf8_lossy(&rebuild.stderr)
     );
     let rebuild_stdout = String::from_utf8_lossy(&rebuild.stdout);
+    let rebuild_report = jetpack::JSON::parse(rebuild_stdout.trim()).expect("rebuild JSON");
+    assert_eq!(json_string(&rebuild_report, "schema"), "jet.report/v1");
+    assert_eq!(json_string(&rebuild_report, "action"), "explain");
+    assert!(rebuild_stdout.contains("\"severity\":\"warning\""));
+    assert!(rebuild_stdout.contains("\"what\":"));
     assert!(rebuild_stdout.contains("\"decision\":\"rebuild-required\""));
     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
@@ -2846,6 +2856,27 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
         String::from_utf8_lossy(&rebuilt.stdout),
         String::from_utf8_lossy(&rebuilt.stderr)
     );
+
+    let orphan_bytes = b"orphan receipt";
+    let orphan_digest = format!(
+        "sha256-{}",
+        jetpack::SHA256::sha256_hex(orphan_bytes)
+    );
+    let orphan_path = root.join("hangar/receipts").join(&orphan_digest);
+    fs::write(&orphan_path, orphan_bytes).unwrap();
+    let cleaned = jetpack()
+        .args(["clean", "--no-color", "--yes"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        cleaned.status.success(),
+        "receipt cleanup failed: {}",
+        String::from_utf8_lossy(&cleaned.stderr)
+    );
+    assert!(!orphan_path.exists(), "unreachable receipt was not collected");
+    assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
 }
 
 #[test]
@@ -3117,6 +3148,55 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
         fs::read_to_string(second.join("blob")).unwrap(),
         "same payload"
     );
+}
+
+#[test]
+fn clean_reclaims_unreachable_canonical_hangar_objects() {
+    let root = Scratch::new("canonical-gc-root");
+    let source = Scratch::new("canonical-gc-source");
+    fs::write(source.join("payload"), "orphaned bytes\n").unwrap();
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "canonical-gc".into(),
+            version: "1".into(),
+            reference: "path:canonical-gc".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256:canonical-gc-source".into(),
+                recipe_fingerprint: "sha256:canonical-gc-recipe".into(),
+                policy_fingerprint: "sha256:canonical-gc-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+            signature: String::new(),
+            provenance: "canonical GC test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    let output = Path::new(&entry.out).to_path_buf();
+    let receipt = roots
+        .hangar_dir()
+        .join("receipts")
+        .join(&entry.receipt);
+    assert!(output.is_dir());
+    assert!(receipt.is_file());
+    assert!(jetpack::Store::remove_closure_record(&roots, &entry.id).unwrap());
+
+    let plan = jetpack::Store::clean_plan(&roots).unwrap();
+    assert!(plan.removed_objects >= 1, "canonical object missing from GC plan");
+    assert_eq!(plan.removed_receipts, 1);
+    let report = jetpack::Store::clean(&roots).unwrap();
+    assert!(report.removed_objects >= 1);
+    assert_eq!(report.removed_receipts, 1);
+    assert!(!output.exists(), "unreachable canonical object survived GC");
+    assert!(!receipt.exists(), "unreachable receipt survived GC");
 }
 
 #[test]
@@ -5249,7 +5329,7 @@ fn env_info_rejects_unredactable_integration_secret() {
     fs::write(
         project.join("env.jet"),
         r#"module env.dev {
-    imports: [env.security.certificates(42)]
+    imports: [env.cloud.credentials("super_secret_value")]
 }
 "#,
     )
@@ -5262,7 +5342,7 @@ fn env_info_rejects_unredactable_integration_secret() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1335"), "stderr: {stderr}");
-    assert!(!stderr.contains("42"), "stderr: {stderr}");
+    assert!(!stderr.contains("super_secret_value"), "stderr: {stderr}");
 }
 
 #[test]
@@ -6409,7 +6489,7 @@ fn env_jet_sources_resolve_without_toml() {
 fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let env_project = Scratch::new("transition-cli-env");
     let env_original =
-        "name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
+        "name: \"demo\"\nenvironments: .{ development: Environment{ tools: [\"git\"] } }\n";
     fs::write(env_project.join("package.jet"), env_original).unwrap();
 
     let checked = jet()
@@ -6466,7 +6546,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     assert!(!env_project.join("package/env.jet").exists());
 
     let package_project = Scratch::new("transition-cli-package");
-    let package_original = "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n";
+    let package_original = "name: \"workspace\"\napp :: Config{ version: \"1\" }\n";
     fs::write(package_project.join("package.jet"), package_original).unwrap();
     let package_split = jet()
         .args(["split", "package", "app", "--check"])
@@ -6555,7 +6635,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     )
     .unwrap();
     let duplicate_original =
-        "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+        "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config{ version: \"1\" }\n";
     fs::write(duplicate_project.join("package.jet"), duplicate_original).unwrap();
     let duplicate = jet()
         .args(["split", "package", "app"])
@@ -6574,7 +6654,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let hosts_project = Scratch::new("transition-cli-hosts");
     fs::write(
         hosts_project.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let hosts_split = jet()
@@ -6602,7 +6682,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let unknown_hosts = Scratch::new("transition-cli-unknown-host");
     fs::write(
         unknown_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let unknown = jet()
@@ -6617,7 +6697,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let stale_hosts = Scratch::new("transition-cli-stale-host");
     fs::write(
         stale_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let stale_split = jet()
@@ -6647,7 +6727,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let ambiguous_hosts = Scratch::new("transition-cli-ambiguous-host-journal");
     fs::write(
         ambiguous_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let ambiguous_split = jet()
@@ -6679,7 +6759,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
     let invalid_hosts = Scratch::new("transition-cli-invalid-host");
     fs::write(
         invalid_hosts.join("package.jet"),
-        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
     )
     .unwrap();
     let invalid = jet()
@@ -6697,7 +6777,7 @@ fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
         ("pkg.jet", "name: \"demo\"\nversion: \"0.1.0\"\n"),
         ("env.jet", "module env.dev { tools: [\"git@nixpkgs\"] }\n"),
         ("workspace.jet", "module workspace { members: [] }\n"),
-        ("config.jet", "Config.{ }\n"),
+        ("config.jet", "Config{ }\n"),
     ];
     for (name, source) in originals {
         fs::write(legacy_project.join(name), source).unwrap();
@@ -6841,7 +6921,7 @@ fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
             .args(["build", "--no-color"])
             .current_dir(&project)
             .env("JETPACK_ROOT", &root)
-            .env("PATH", "/usr/bin:/bin");
+            .env("PATH", &missing_tools);
         if offline {
             command.arg("--offline");
         }
@@ -7900,14 +7980,14 @@ fn jetos_plan_projects_package_system_output_deterministically() {
         project.join("package.jet"),
         r#"name: "demo"
 outputs: .{
-    workstation: .System.{
+    workstation: System{
         name: "workstation"
         target: linux.x64
         packages: [ripgrep, "fd@nixpkgs", ripgrep]
         services: .{ ssh: .{ enable: true, ports: [22] } }
         options: .{ network: .{ hostName: "workstation" } }
     }
-    prod: .Fleet.{ hosts: .{ edge: "system.workstation" } }
+    prod: Fleet{ hosts: .{ edge: "system.workstation" } }
 }"#,
     )
     .unwrap();
@@ -8023,7 +8103,7 @@ fn jetos_plan_rejects_invalid_package_system_without_mutating_store() {
     fs::write(
         project.join("package.jet"),
         r#"name: "demo"
-outputs: .{ workstation: .System.{ target: linux.x64, services: .{ ssh: .{} } } }"#,
+outputs: .{ workstation: System{ target: linux.x64, services: .{ ssh: .{} } } }"#,
     )
     .unwrap();
 

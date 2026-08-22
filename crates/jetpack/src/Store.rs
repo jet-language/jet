@@ -3083,10 +3083,53 @@ pub(crate) fn commit_external_consumer_root(
 }
 
 fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
-    let mut live = current_lock_roots()?;
+    let cwd = std::env::current_dir()?;
+    live_roots_from(roots, &cwd)
+}
+
+fn live_roots_from(roots: &Roots, start: &Path) -> std::io::Result<LiveRoots> {
+    let mut live = lock_roots_from(start)?;
     let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
     let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
     let mut targets = live.output_hashes.clone();
+    for (receipt, package) in &live.receipt_packages {
+        let Some(record) = graph.records.values().find(|record| {
+            parse_meta(&record.package_meta)
+                .is_some_and(|meta| meta.receipt == *receipt)
+        }) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "project lock receipt `{receipt}` has no matching Hangar closure record"
+                ),
+            ));
+        };
+        let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Hangar closure record `{}` has invalid package metadata for receipt `{receipt}`",
+                    record.id
+                ),
+            )
+        })?;
+        if meta.name != package.name
+            || meta.version != package.version
+            || !receipt_source_matches(package, &meta.reference)
+            || !receipt_envelope_matches(package, &meta.envelope.output_hash)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "project lock receipt `{receipt}` disagrees with Hangar closure record `{}`",
+                    record.id
+                ),
+            ));
+        }
+        // A receipt is the lock's projection of the action root. Reachability
+        // follows the same graph closure as output and lifecycle roots.
+        targets.insert(record.primary.clone());
+    }
     for id in &live.ids {
         if let Some(record) = graph.records.get(id) {
             targets.insert(record.primary.clone());
@@ -3110,6 +3153,241 @@ fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
     Ok(live)
 }
 
+fn current_project_root() -> std::io::Result<Option<PathBuf>> {
+    let cwd = std::env::current_dir()?;
+    let mut dir = Some(cwd.clone());
+    while let Some(current) = dir {
+        let managed = managed_dir(&current);
+        match fs::symlink_metadata(&managed) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is not a real directory",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(_) => return Ok(Some(current)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                dir = current.parent().map(Path::to_path_buf);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    // A project can be preparing its first lock. Serialize that preparation
+    // against cleanup at the current root even before `.jet/lock` exists.
+    Ok(Some(cwd))
+}
+
+/// Cleanup uses the project lock before the Hangar lock. Build publication has
+/// the same order when it updates a project projection and then refreshes the
+/// Hangar record; keeping one order prevents a concurrent lock update from
+/// being published after cleanup has taken its reachability snapshot.
+fn with_clean_locks<T>(roots: &Roots, action: impl FnOnce() -> std::io::Result<T>) -> std::io::Result<T> {
+    match current_project_root()? {
+        Some(project) => super::RuntimePolicy::with_project_lock(
+            &project,
+            "hangar-clean-project",
+            || super::RuntimePolicy::with_lock(&roots.root, "hangar", action),
+        ),
+        None => super::RuntimePolicy::with_lock(&roots.root, "hangar", action),
+    }
+}
+
+fn retained_receipts(
+    roots: &Roots,
+    live: &LiveRoots,
+    now: u64,
+    retired: &BTreeSet<String>,
+) -> std::io::Result<BTreeSet<String>> {
+    let mut retained = live.receipts.clone();
+    for ent in object_dirs(&roots.hangar_dir())? {
+        let path = ent.path();
+        let id = ent.file_name().to_string_lossy().into_owned();
+        if retired.contains(&id) {
+            continue;
+        }
+        let metadata_path = path.join("meta.json");
+        match fs::symlink_metadata(&metadata_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Hangar metadata `{}` is not a regular file; repair it before receipt cleanup",
+                        metadata_path.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Hangar object `{id}` has no metadata; repair it before receipt cleanup"
+                    ),
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+        let meta = read_meta(&path).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object `{id}` has invalid metadata; repair it before receipt cleanup"),
+            )
+        })?;
+        let keep = is_live(&id, &meta, live)
+            || meta.last_used_at.is_none()
+            || now.saturating_sub(meta.last_used_at.unwrap_or(now)) < STALE_AFTER.as_secs();
+        if keep && !meta.receipt.is_empty() {
+            if !valid_receipt_digest(&meta.receipt) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Hangar object `{id}` has an invalid receipt digest"),
+                ));
+            }
+            retained.insert(meta.receipt);
+        }
+    }
+    Ok(retained)
+}
+
+#[derive(Debug, Clone)]
+struct OrphanedCanonicalObject {
+    path: PathBuf,
+    bytes: u64,
+}
+
+fn collect_orphaned_canonical_objects(
+    roots: &Roots,
+    live: &LiveRoots,
+    retired: &BTreeSet<String>,
+) -> std::io::Result<Vec<OrphanedCanonicalObject>> {
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    let mut protected = live.output_hashes.clone();
+    for (id, record) in &graph.records {
+        if !retired.contains(id) {
+            protected.extend(graph.closure(&record.primary));
+        }
+    }
+
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
+    let metadata = match fs::symlink_metadata(&objects) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object pool is not a real directory: {}", objects.display()),
+            ));
+        }
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let _ = metadata;
+    let mut orphaned = Vec::new();
+    for item in fs::read_dir(&objects)? {
+        let item = item?;
+        let path = item.path();
+        let name = item.file_name().to_string_lossy().into_owned();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object entry is a symlink: {}", path.display()),
+            ));
+        }
+        if metadata.is_dir() && valid_receipt_digest(&name) && !protected.contains(&name) {
+            orphaned.push(OrphanedCanonicalObject {
+                path,
+                bytes: dir_size(&item.path()),
+            });
+        }
+    }
+    orphaned.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(orphaned)
+}
+
+fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("refusing to remove Hangar symlink `{}`", path.display()),
+        ));
+    }
+    if metadata.is_dir() {
+        make_tree_writable_for_removal(path)?;
+        fs::remove_dir_all(path)
+    } else if metadata.is_file() {
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+        fs::remove_file(path)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("refusing to remove unsupported Hangar node `{}`", path.display()),
+        ))
+    }
+}
+
+fn sweep_receipts(
+    hangar: &Path,
+    retained: &BTreeSet<String>,
+    apply: bool,
+) -> std::io::Result<CleanReport> {
+    let receipts = hangar.join(Closure::RECEIPTS_DIR);
+    match fs::symlink_metadata(&receipts) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar receipt directory is not a real directory: {}", receipts.display()),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(CleanReport::default())
+        }
+        Err(error) => return Err(error),
+    }
+    let mut report = CleanReport::default();
+    let mut changed = false;
+    for item in fs::read_dir(&receipts)? {
+        let item = item?;
+        let path = item.path();
+        let name = item.file_name().to_string_lossy().into_owned();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar receipt entry is a symlink: {}", path.display()),
+            ));
+        }
+        if !valid_receipt_digest(&name) {
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar receipt `{name}` is not a regular file"),
+            ));
+        }
+        if retained.contains(&name) {
+            continue;
+        }
+        report.removed_receipts += 1;
+        report.removed_receipt_bytes += metadata.len();
+        if apply {
+            fs::remove_file(&path)?;
+            changed = true;
+        }
+    }
+    if apply && changed {
+        sync_store_directory(&receipts)?;
+    }
+    Ok(report)
+}
+
 /// D-JPK-GC1=B / U22: collect only unreferenced stale hangar objects, sweep
 /// orphan build scratch, then optimize duplicate Jet-owned files. Lockfile
 /// reachable entries and unknown legacy records are retained.
@@ -3122,7 +3400,7 @@ pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
         }
         Err(error) => return Err(error),
     }
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || clean_plan_unlocked(roots))
+    with_clean_locks(roots, || clean_plan_unlocked(roots))
 }
 
 fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
@@ -3130,6 +3408,7 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let live = live_roots_unlocked(roots)?;
     let mut report = sweep_build_scratch_plan(&store)?;
     let now = now_secs();
+    let mut retired = BTreeSet::new();
 
     for ent in object_dirs(&store)? {
         let path = ent.path();
@@ -3144,9 +3423,19 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
         if now.saturating_sub(last_used) < STALE_AFTER.as_secs() {
             continue;
         }
+        retired.insert(id);
         report.removed_objects += 1;
         report.removed_bytes += dir_size(&path);
     }
+
+    let orphaned = collect_orphaned_canonical_objects(roots, &live, &retired)?;
+    report.removed_objects += orphaned.len();
+    report.removed_bytes += orphaned.iter().map(|node| node.bytes).sum::<u64>();
+
+    let retained = retained_receipts(roots, &live, now, &retired)?;
+    let receipts = sweep_receipts(&store, &retained, false)?;
+    report.removed_receipts += receipts.removed_receipts;
+    report.removed_receipt_bytes += receipts.removed_receipt_bytes;
 
     let opt = optimize_hangar_plan(&store)?;
     report.optimized_files += opt.optimized_files;
@@ -3158,7 +3447,7 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
 }
 
 pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || clean_unlocked(roots))
+    with_clean_locks(roots, || clean_unlocked(roots))
 }
 
 fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
@@ -3167,6 +3456,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let live = live_roots_unlocked(roots)?;
     let mut report = sweep_build_scratch(&store)?;
     let now = now_secs();
+    let mut retired = BTreeSet::new();
 
     for ent in object_dirs(&store)? {
         let path = ent.path();
@@ -3182,11 +3472,27 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
             continue;
         }
         let bytes = dir_size(&path);
+        retired.insert(id.clone());
         Closure::tombstone_closure_record_unlocked(roots, &id)?;
         fs::remove_dir_all(&path)?;
         report.removed_objects += 1;
         report.removed_bytes += bytes;
     }
+
+    let orphaned = collect_orphaned_canonical_objects(roots, &live, &retired)?;
+    for node in &orphaned {
+        remove_hangar_node(&node.path)?;
+        report.removed_objects += 1;
+        report.removed_bytes += node.bytes;
+    }
+    if !orphaned.is_empty() {
+        sync_store_directory(&store.join(OBJECTS_DIR))?;
+    }
+
+    let retained = retained_receipts(roots, &live, now, &retired)?;
+    let receipts = sweep_receipts(&store, &retained, true)?;
+    report.removed_receipts += receipts.removed_receipts;
+    report.removed_receipt_bytes += receipts.removed_receipt_bytes;
 
     let opt = optimize_hangar(&store)?;
     report.optimized_files += opt.optimized_files;
@@ -3195,7 +3501,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
 }
 
 pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+    with_clean_locks(roots, || {
         let hangar = roots.hangar_dir();
         Ingest::ensure_real_directory(&hangar, "Hangar root")?;
         let stamp = hangar.join(AUTO_CLEAN_STAMP);
@@ -3735,11 +4041,7 @@ struct LiveRoots {
     output_hashes: BTreeSet<String>,
     name_versions: BTreeSet<(String, String)>,
     receipts: BTreeSet<String>,
-}
-
-fn current_lock_roots() -> std::io::Result<LiveRoots> {
-    let cwd = std::env::current_dir()?;
-    lock_roots_from(&cwd)
+    receipt_packages: Vec<(String, crate::Lock::LockedPackage)>,
 }
 
 fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
@@ -3760,15 +4062,18 @@ fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
     })?;
     let mut roots = LiveRoots::default();
     for pkg in lock.packages {
-        roots.name_versions.insert((pkg.name, pkg.version));
-        if let Some(receipt) = pkg.receipt {
+        roots
+            .name_versions
+            .insert((pkg.name.clone(), pkg.version.clone()));
+        if let Some(receipt) = pkg.receipt.clone() {
             if !valid_receipt_digest(&receipt) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("project lock `{}` contains an invalid Hangar receipt", lock_path.display()),
                 ));
             }
-            roots.receipts.insert(receipt);
+            roots.receipts.insert(receipt.clone());
+            roots.receipt_packages.push((receipt, pkg.clone()));
         }
         if let Some(env) = pkg.envelope {
             if !env.output_hash.is_empty() {
