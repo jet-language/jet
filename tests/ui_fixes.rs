@@ -158,7 +158,8 @@ fn liveness_fix_renames_to_existing_underscore_form() {
 fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
     let scratch = Scratch::new("liveness_fix_removal");
     let path = scratch.join("liveness.jet");
-    let original = "fn empty_private() {}\n\n\
+    let original = "pub fn public_api() {}\n\n\
+                    fn empty_private() {}\n\n\
                     fn run() {\n    pure_local :: 42\n    effectful :: print(\"side\")\n    print(\"done\")\n}\n";
     fs::write(&path, original).unwrap();
 
@@ -189,6 +190,7 @@ fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
         String::from_utf8_lossy(&fixed.stderr)
     );
     let source = fs::read_to_string(&path).unwrap();
+    assert!(source.contains("pub fn public_api() {}"));
     assert!(!source.contains("empty_private"));
     assert!(!source.contains("pure_local"));
     assert!(source.contains("_effectful :: print(\"side\")"));

@@ -30,13 +30,33 @@ fn assert_liveness_warnings(label: &str, output: &Output) {
     }
 }
 
+fn assert_liveness_policy_denied(label: &str, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "{label} unexpectedly ran: {stderr}"
+    );
+    assert!(output.stdout.is_empty(), "{label} executed user code");
+    assert!(
+        stderr.contains("E1293") && stderr.contains("L0101"),
+        "{label} missing denied liveness lint: {stderr}"
+    );
+    assert!(
+        !stderr.contains("Warning [L0101]"),
+        "{label} printed denied lint as warning: {stderr}"
+    );
+}
+
 #[test]
 fn liveness_facts_and_fixes_are_one_checked_result() {
     let source = fs::read_to_string(repo().join(example())).expect("liveness example source");
     let mut bundle = jet::Loader::load_entry(example()).expect("liveness example loads");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
 
-    let mut codes: Vec<_> = diagnostics.iter().map(|diagnostic| diagnostic.code.as_str()).collect();
+    let mut codes: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect();
     codes.sort_unstable();
     assert_eq!(codes, ["L0101", "L0103", "L0104", "L0105"]);
     assert!(diagnostics.iter().all(|diagnostic| {
@@ -68,7 +88,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
         let span = diagnostic.span.expect("liveness diagnostic span");
         let edit = diagnostic.edit.as_ref().expect("liveness source edit");
         if edit.new_text.is_empty() {
-            assert_eq!(diagnostic.code.as_str(), "L0104");
+            assert!(matches!(diagnostic.code.as_str(), "L0101" | "L0104"));
             assert!(edit.span.start <= span.start && edit.span.end >= span.end);
         } else {
             assert_eq!(edit.span, span);
@@ -86,14 +106,22 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     )
     .expect("structure text golden");
     assert_eq!(text, expected_text);
-    for subject in ["support", "unused_binding", "unused_private", "package_export"] {
+    for subject in [
+        "support",
+        "unused_binding",
+        "unused_private",
+        "package_export",
+    ] {
         assert!(text.contains(subject), "missing {subject} in {text}");
     }
     assert!(text.contains("Structure.Liveness"));
     assert!(text.contains("gates=_name"));
 
     let json = run_jet(&["inspect", "structure", "--json", example()]);
-    assert!(json.status.success(), "JSON structure inspect failed: {json:?}");
+    assert!(
+        json.status.success(),
+        "JSON structure inspect failed: {json:?}"
+    );
     let json = String::from_utf8(json.stdout).expect("structure JSON is utf8");
     let expected_json = fs::read_to_string(
         repo().join("examples/features/expected/tooling/structure_liveness.structure.json"),
@@ -103,7 +131,10 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     assert!(json.contains("\"registry\":\"Structure.Liveness\""));
     assert!(json.contains("\"gate\":\"_name\""));
 
-    let cache = std::env::temp_dir().join(format!("jet_structure_liveness_tiers_{}", std::process::id()));
+    let cache = std::env::temp_dir().join(format!(
+        "jet_structure_liveness_tiers_{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&cache);
     for (mode, args) in [
         ("release", vec!["run", "--release", example()]),
@@ -137,13 +168,48 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     );
     assert_eq!(dev.stdout, b"structure liveness\n", "dev output");
     assert_liveness_warnings("dev", &dev);
+
+    for (mode, args) in [
+        (
+            "policy-aot",
+            vec!["run", "--release", "tests/ui/lint_policy_liveness/run.jet"],
+        ),
+        (
+            "policy-jit",
+            vec!["run", "tests/ui/lint_policy_liveness/run.jet"],
+        ),
+        (
+            "policy-interpreter",
+            vec![
+                "run",
+                "--interpret",
+                "tests/ui/lint_policy_liveness/run.jet",
+            ],
+        ),
+        (
+            "policy-dev",
+            vec![
+                "dev",
+                "tests/ui/lint_policy_liveness/run.jet",
+                "--watch=off",
+            ],
+        ),
+    ] {
+        let output = run_jet(&args);
+        assert_liveness_policy_denied(mode, &output);
+    }
     let _ = fs::remove_dir_all(cache);
 }
 
 #[test]
 fn liveness_web_compile_keeps_the_same_front_end_result() {
     let rustc = Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .expect("probe wasm target");
     if !rustc.status.success() {

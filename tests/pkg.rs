@@ -1854,6 +1854,10 @@ fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
 
     let warning = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let warning_stderr = String::from_utf8_lossy(&warning.stderr);
+    assert!(
+        warning.status.success(),
+        "default warning must not block the build:\n{warning_stderr}"
+    );
     assert!(warning_stderr.contains("L0101"), "expected unused-local warning:\n{warning_stderr}");
     assert!(warning_stderr.contains("effects:"), "default build did not pass the lint gate:\n{warning_stderr}");
     assert!(

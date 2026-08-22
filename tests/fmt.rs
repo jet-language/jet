@@ -1077,7 +1077,7 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 
 #[test]
 fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
-    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn effect() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } }\n";
+    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn impure() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } }\n";
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() Int -> { return 1 }"), "{once}");
     assert!(once.contains("fn concise() Int -> 1"), "{once}");

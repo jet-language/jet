@@ -1782,7 +1782,7 @@ fn notify(ready: Bool) -[Net]> {
         let parsed = program(
             "struct Holder { value: Int? IOError! }\n\
              alias Box<T> :: T\n\
-             fn take(value: Int? IOError!) Box<Int? IOError!> -> { return value }\n\
+             fn fetch(value: Int? IOError!) Box<Int? IOError!> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
@@ -1793,8 +1793,8 @@ fn notify(ready: Bool) -[Net]> {
     fn failure_suffixes_compose_optional_success_and_error_union() {
         let parsed = program(
             "struct Holder { value: Int? IOError! }\n\
-             fn take(value: Int? IOError!) Int (DbError | TimeoutError)! -> { return value }\n\
-             fn apply(callback: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> { return None }\n\
+             fn fetch(value: Int? IOError!) Int (DbError | TimeoutError)! -> value\n\
+             fn invoke(callback: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
              fn run() {}\n",
         );
         let holder = parsed.items.iter().find_map(|item| match item {
@@ -1808,12 +1808,12 @@ fn notify(ready: Bool) -[Net]> {
                     && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
         ));
 
-        let take = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::Func(func) if func.name == "take" => Some(func),
+        let fetch = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(func) if func.name == "fetch" => Some(func),
             _ => None,
-        }).expect("take");
+        }).expect("fetch");
         assert!(matches!(
-            take.return_type.as_ref(),
+            fetch.return_type.as_ref(),
             Some(crate::AST::Type::Result { ok, err })
                 if matches!(ok.as_ref(), crate::AST::Type::Int)
                     && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2)

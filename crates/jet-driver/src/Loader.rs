@@ -24,6 +24,7 @@ pub struct LoaderDiagnostic {
     pub file: String,
     pub source: String,
     pub diagnostic: Diagnostic,
+    pub structure_fact: Option<jet_foundation::Names::StructureFact>,
 }
 
 #[derive(Debug)]
@@ -40,9 +41,19 @@ impl LoaderError {
                     file: file.to_string(),
                     source: source.to_string(),
                     diagnostic,
+                    structure_fact: None,
                 })
                 .collect(),
         }
+    }
+
+    fn with_structure_fact(mut self, fact: Option<jet_foundation::Names::StructureFact>) -> Self {
+        if let Some(fact) = fact {
+            if let Some(diagnostic) = self.diagnostics.first_mut() {
+                diagnostic.structure_fact = Some(fact);
+            }
+        }
+        self
     }
 
     fn into_plain(self) -> Vec<Diagnostic> {
@@ -134,6 +145,7 @@ fn project_parts_loader_error(
                 file,
                 source,
                 diagnostic: conflict.diagnostic(project_root, None),
+                structure_fact: None,
             }
         })
         .collect();
@@ -284,6 +296,31 @@ fn import_boundary_violation(
     Some((from_index, rule_index, diagnostic))
 }
 
+fn import_edge_fact(
+    policies: &[ImportBoundaryPolicy],
+    from_module: &LoadedModule,
+    to_module: &LoadedModule,
+    span: Span,
+    status: &str,
+    detail: String,
+    gate: Option<String>,
+) -> Option<jet_foundation::Names::StructureFact> {
+    let from_index = boundary_policy_index(policies, &from_module.path)?;
+    let to_index = boundary_policy_index(policies, &to_module.path)?;
+    let from_policy = &policies[from_index];
+    let from_name = from_policy.module_name(&from_module.path, &from_module.items);
+    let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
+    Some(jet_foundation::Names::StructureFact::new(
+        jet_foundation::Names::StructureFactKind::ImportEdge,
+        format!("{from_name} -> {to_name}"),
+        from_module.display.clone(),
+        span,
+        status,
+        detail,
+        gate,
+    ))
+}
+
 /// D-STRUCT-EDGE1=A / D-STRUCT-PLANE1=A: preserve the loader's checked edge
 /// observation in the one structure ledger. A package manifest with at least
 /// one boundary rule supplies the written gate; a manifest without the block
@@ -298,17 +335,17 @@ fn record_import_edge_fact(
     let Some(from_index) = boundary_policy_index(policies, &from_module.path) else {
         return;
     };
-    let Some(to_index) = boundary_policy_index(policies, &to_module.path) else {
+    // Presence-only guard: `import_edge_fact` re-resolves this index itself and
+    // the `.expect` below relies on both lookups having succeeded here.
+    let Some(_to_index) = boundary_policy_index(policies, &to_module.path) else {
         return;
     };
     let from_policy = &policies[from_index];
-    let from_name = from_policy.module_name(&from_module.path, &from_module.items);
-    let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
     let policy_checked = !from_policy.deny.is_empty();
-    ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(
-        jet_foundation::Names::StructureFactKind::ImportEdge,
-        format!("{from_name} -> {to_name}"),
-        from_module.display.clone(),
+    let fact = import_edge_fact(
+        policies,
+        from_module,
+        to_module,
         span,
         if policy_checked {
             "allowed"
@@ -316,12 +353,14 @@ fn record_import_edge_fact(
             "resolved"
         },
         if policy_checked {
-            "manifest boundary policy checked"
+            "manifest boundary policy checked".to_string()
         } else {
-            "resolved import edge"
+            "resolved import edge".to_string()
         },
         policy_checked.then(|| "manifest rule edit".to_string()),
-    ));
+    )
+    .expect("boundary policy indexes were checked above");
+    ledger.record_structure_fact(fact);
 }
 
 /// Build the U17 package resolution from a project's `package.jet` text and the
@@ -390,15 +429,10 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
 /// Load an entry file and retain source provenance for every loader failure.
 pub fn load_entry_with_diagnostics(entry_path: &str) -> Result<ProgramBundle, Vec<LoaderDiagnostic>> {
     crate::boot_tir_eval();
-    let mut dependencies = Vec::new();
-    let mut diagnostics = Vec::new();
-    let result = load_entry_with_overlays_mode_with_sink(
+    let (result, _, mut diagnostics) = load_entry_with_overlays_and_dependencies_with_diagnostics(
         entry_path,
         &[],
         false,
-        false,
-        &mut dependencies,
-        Some(&mut diagnostics),
     );
     match result {
         Ok(bundle) => Ok(bundle),
@@ -412,6 +446,7 @@ pub fn load_entry_with_diagnostics(entry_path: &str) -> Result<ProgramBundle, Ve
                     file: entry_path.to_string(),
                     source: source.clone(),
                     diagnostic,
+                    structure_fact: None,
                 }));
             }
             Err(diagnostics)
@@ -450,15 +485,31 @@ pub fn load_entry_with_overlays_and_dependencies(
     overlays: &[(&Path, &str)],
     for_check: bool,
 ) -> (Result<ProgramBundle, Vec<Diagnostic>>, Vec<PathBuf>) {
+    let (result, dependencies, _) =
+        load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, overlays, for_check);
+    (result, dependencies)
+}
+
+pub(crate) fn load_entry_with_overlays_and_dependencies_with_diagnostics(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+) -> (
+    Result<ProgramBundle, Vec<Diagnostic>>,
+    Vec<PathBuf>,
+    Vec<LoaderDiagnostic>,
+) {
     let mut dependencies = Vec::new();
-    let result = load_entry_with_overlays_mode(
+    let mut diagnostics = Vec::new();
+    let result = load_entry_with_overlays_mode_with_sink(
         entry_path,
         overlays,
         for_check,
         false,
         &mut dependencies,
+        Some(&mut diagnostics),
     );
-    (result, dependencies)
+    (result, dependencies, diagnostics)
 }
 
 /// Structural tooling loads adjacent modules named by `use alias.Item` from
@@ -1284,13 +1335,21 @@ fn load_entry_with_overlays_mode_on_stack(
                     ) {
                         boundary_hits[policy_idx][rule_idx] = true;
                         let module = &modules[module_idx];
+                        let rule = &boundary_policies[policy_idx].deny[rule_idx];
+                        let rule_display = format!("{} -> {}", rule.from, rule.to);
+                        let denied_fact = import_edge_fact(
+                            &boundary_policies,
+                            &modules[module_idx],
+                            &modules[target_idx],
+                            imp.span,
+                            "denied",
+                            format!("manifest boundary policy denied edge under {rule_display}"),
+                            Some("manifest rule edit".to_string()),
+                        );
                         return Err(record_loader_error(
                             &mut sink,
-                            LoaderError::at(
-                                &module.display,
-                                &module.source,
-                                vec![diagnostic],
-                            ),
+                            LoaderError::at(&module.display, &module.source, vec![diagnostic])
+                                .with_structure_fact(denied_fact),
                         ));
                     }
                     name_ledger.record_import_target(module_idx, imp.span, target_idx);
@@ -1435,6 +1494,9 @@ fn load_entry_with_overlays_mode_on_stack(
                         file: entry.file,
                         source: entry.source,
                         diagnostic: entry.diagnostic,
+                        // Namespace assembly reports a name clash, not a
+                        // structure observation; the fact plane stays empty.
+                        structure_fact: None,
                     })
                     .collect(),
             },
@@ -1452,6 +1514,9 @@ fn load_entry_with_overlays_mode_on_stack(
                             file: entry.file,
                             source: entry.source,
                             diagnostic: entry.diagnostic,
+                            // Same as above: a CFFI provenance failure carries
+                            // no structure fact.
+                            structure_fact: None,
                         })
                         .collect(),
                 },

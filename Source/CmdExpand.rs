@@ -573,6 +573,7 @@ fn ct_to_expand(value: &jet::CtValue) -> ExpandValue {
         jet::CtValue::Int(value) => ExpandValue::String(value.to_string()),
         jet::CtValue::Bool(value) => ExpandValue::Bool(*value),
         jet::CtValue::Str(value) => ExpandValue::String(value.clone()),
+        jet::CtValue::Present(value) => ct_to_expand(value),
         jet::CtValue::Failed(jet::CtReport::Clean(_)) => ExpandValue::Null,
         jet::CtValue::List(values) => {
             ExpandValue::Array(values.iter().map(ct_to_expand).collect())

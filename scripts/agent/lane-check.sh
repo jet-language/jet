@@ -38,9 +38,22 @@ mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export CARGO_INCREMENTAL=0
 export JET_NIX_TMP_CLEANED=1
-# One rustc per hardware thread put this machine into swap on a cold build; the
-# Jet crates are large enough that eight is plenty.
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-8}"
+# One rustc per hardware thread put this machine into swap on a cold build.
+# Eight was still too many: with up to 30 lanes queuing on cargo's build lock,
+# each holder forking eight rustc drove the box into an OOM kill. Four keeps a
+# single holder near ~8G peak while staying fast on a warm target dir.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+
+# Memory floor. Cargo's lock serializes the *check*, but a lane can still hold
+# rustc while the orchestrator builds. Rather than race, wait for headroom and
+# then proceed; a lane that waits is cheaper than a box that dies.
+floor_mb="${JET_MIN_FREE_MB:-8000}"
+for _ in $(seq 1 60); do
+  avail="$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)"
+  [ "${avail:-0}" -ge "$floor_mb" ] && break
+  echo "lane-check: waiting for memory (${avail}MB < ${floor_mb}MB floor)" >&2
+  sleep 10
+done
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
