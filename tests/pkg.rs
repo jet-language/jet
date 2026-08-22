@@ -5516,7 +5516,7 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
         "tampered metadata must be rejected as an identity failure: {tampered_error:?}"
     );
     assert!(
-        jetpack::Store::list(&jetpack::Store::Roots::at(&tampered_hangar))
+        jetpack::Store::list(&jetpack::Store::Roots::at(tampered_hangar.clone()))
             .into_iter()
             .all(|entry| !(entry.name == "rolekit" && entry.version == "1.0.0")),
         "tampered registry metadata must not reach Hangar"
