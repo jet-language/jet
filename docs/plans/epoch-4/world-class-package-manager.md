@@ -352,6 +352,18 @@ expiry alongside the provenance decision.
   `jet explain --json` reports this as `rebuild.cache_admissions`; the view is
   read-only and distinguishes an accepted, expired, missing, or invalid host
   admission pin.
+- The signed cache action identity is derived from the exact producer facts and
+  the canonical realized closure digest set. The signed cache deriver then
+  commits the complete action-store key, producer record, output projection,
+  platform, policy, and toolchain facts. A cache reader therefore cannot
+  relabel an output with a different dependency closure or worker/build record.
+- The read-only audit uses the checked Store projection and stops with a repair
+  path when Hangar metadata or closure state is malformed; it never presents a
+  partial inventory as a clean trust report.
+- Trust material created for Hangar archives, native cache bindings, and the
+  optional shared-store broker reads exactly 32 bytes from the platform OS
+  CSPRNG. A failed or unsupported CSPRNG is a hard error with explicit-key
+  recovery; process, path, and wall-clock values never become signing keys.
 
 ### E4-JP7 — remote builders and execution
 
@@ -773,6 +785,10 @@ Shipped slice evidence:
   persisted build-attempt lookup, so selector and source-authority spellings
   do not hide the same package's failure record.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
+- `jet hangar copy` locks and snapshots the source closure, verifies its signed
+  archive with the source Hangar key, then imports it through the locked
+  destination staging and closure-registration path. A fresh destination does
+  not need an unrelated local signer key.
 - Repair is one locked Hangar transaction: a signed archive is staged and
   re-hashed, a corrupt object is quarantined, and failed import restores the
   prior object; crash leftovers are recoverable through `hangar recover`.
@@ -806,8 +822,9 @@ Shipped slice evidence:
   trust-root failures and matching advisories still deny the candidate.
 - The allow or deny result carries the matched source rule and policy
   fingerprint into Hangar provenance, cache identity, and semantic-lock
-  explanation. Exception id, scope, reason, and expiry are carried in the
-  same evidence. Locked and offline resolution repeat the metadata check.
+  explanation. Only active exact exceptions carry their id, scope, reason, and
+  expiry as applied evidence; expired declarations cannot authorize a result.
+  Locked and offline resolution repeat the metadata check.
 - Yanks/retractions, release maturity, and trust-evidence no-downgrade remain
   part of the same fail-closed policy path.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.
@@ -853,6 +870,44 @@ Shipped slice evidence:
 - Dogfood: CLI, full-stack server, native app, plugin, cross build, monorepo,
   public registry package, Nix flake import, remote build, offline rebuild.
 - Epoch remains open until all evidence is attached and independently verified.
+
+Card #954 ships the store, action-graph, resolver, and evaluator budget seams
+used by this gate. Checked Hangar listing fails closed above one million
+objects or one MiB of metadata, closure journals bound objects, records,
+deletions, and transactions, and read-only model listing remains a separate
+infallible observation view. Build plans admit at most 100,000 actions and
+construct execution stages with a dependency-indexed topological walk. The
+source-backed package-profile resolver admits and resolves 100,000 profiles
+iteratively, with bounded package, source, collision, and inheritance output.
+The native evaluator keeps its existing input, token, expression, import,
+string, memory, and JSON-depth budgets. Focused proof is
+`tests/jetpack_engine.rs::checked_hangar_listing_rejects_oversized_metadata`,
+`jet_comptime::Comptime::Build::execution_helpers::tests::action_admission_budget_accepts_the_limit_and_rejects_the_next_action`,
+and `jet_env_model::ModuleEval::Environment::tests::package_profile_resolver_handles_its_full_depth_budget_iteratively`.
+
+Card #955 makes the dogfood claim auditable as one portfolio. Each row needs a
+real production entry point, a success check, and a failure check. A fixture
+may supply deterministic bytes, but it cannot replace the engine, provider,
+store, lock, or front-door dispatch being tested.
+
+| Workload | Production entry | Success proof | Failure proof |
+|---|---|---|---|
+| CLI | `jet` → `jetpack` | `tests/jetpack_dispatch.rs::jet_env_delegates_to_jetpack_enter` | `tests/jetpack_dispatch.rs::jet_run_without_nix_compatibility_output_reports_e1272` |
+| Full-stack server | Jetpack service supervisor | `tests/jetpack_services.rs::services_up_health_logs_down_roundtrip` | `tests/jetpack_services.rs::dev_service_never_healthy_is_e1261` |
+| Native app | Core provider → Hangar executable | `tests/jetpack_engine.rs::epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss` | same test's missing-output/source-component run |
+| Plugin | BuildPlan packaged-component seam | `tests/build_graph.rs::packaged_build_plugins_verify_bytes_and_roll_back_rejected_contributions` | same test's rejected contribution path |
+| Cross build | typed target/action identity | `tests/build_graph.rs::compiler_package_identity_target_and_profile_force_rebuild_keys` | `tests/jetpack_engine.rs::bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix` |
+| Monorepo | workspace/member resolver | `tests/jetpack_engine.rs::two_process_reverse_package_order_does_not_deadlock` | `tests/jetpack_engine.rs::mono_example_has_two_package_jet_members` structural guard |
+| Public registry package | `jet registry publish` → fetch → Hangar | `tests/pkg.rs::registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it` | `tests/pkg.rs::registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest` |
+| Nix flake import | native `jetpack bridge flake` evaluator | `tests/jetpack_engine.rs::bridge_flake_native_evaluator_without_nix` | `tests/jetpack_engine.rs::bridge_flake_rejects_dynamic_native_evaluator_input` |
+| Remote build | authenticated BuildPlan remote seam | `tests/build_graph.rs::remote_driver_consumes_authenticated_worker_result` | `tests/jetpack_engine.rs::remote_ineligible_builder_honors_local_fallback` |
+| Offline rebuild | Hangar verification + local provider | `tests/jetpack_engine.rs::committed_example_builds_offline_end_to_end` and the card #955 gate above | `tests/jetpack_engine.rs::offline_without_fixtures_errors` |
+
+The card gate also runs with an empty tool directory, exercises `--offline`,
+removes a realized component before retry, and runs `clean` against stale
+Hangar state. Platform coverage remains the native Linux/macOS/Windows lane
+in `tests/jetpack_platform.rs`; an unsupported host is a failed lane, never a
+skip.
 
 ## Dependency order
 

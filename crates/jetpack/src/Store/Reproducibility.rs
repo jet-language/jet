@@ -346,6 +346,7 @@ fn entry_from_realized(
         &realized.reference,
         &realized.envelope.output_hash,
         &realized.cache_identity,
+        &realized.references,
     );
     super::super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -465,7 +466,7 @@ fn certify_registration_unlocked_mode(
         ));
     }
     let mut candidates = BTreeMap::new();
-    for candidate in list_unlocked(roots)
+    for candidate in list_unlocked(roots)?
         .into_iter()
         .chain(additional.iter().cloned())
     {

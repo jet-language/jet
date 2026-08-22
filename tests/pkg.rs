@@ -4926,6 +4926,9 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
     .expect_err("wrong source mapping must deny before Hangar ingest");
     assert_eq!(denied[0].code, "E1207");
     assert!(denied[0].what.contains("source authority"));
+    assert!(denied[0].what.contains("consumer -> textkit#1.2.0"));
+    assert!(denied[0].why.contains("package `consumer`"));
+    assert!(denied[0].fix.contains("use an allowed source"));
     assert!(jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
         .into_iter()
         .all(|entry| !(entry.name == "textkit" && entry.version == "1.2.0")));
@@ -5011,6 +5014,11 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
             .policy_fingerprint
             .starts_with("sha256-"),
         "Hangar cache identity must bind the package policy"
+    );
+    assert_eq!(
+        hangar_entry.cache_identity.policy_fingerprint,
+        jet::Publish::policy_fingerprint(&manifest.policy),
+        "Hangar cache identity must use the canonical policy fingerprint"
     );
     assert!(
         hangar_entry
@@ -5382,6 +5390,136 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
     assert!(
         lock_text.contains("dependency-metadata = "),
         "semantic lock must carry the exact artifact-bound dependency meaning"
+    );
+
+    let locked_opts = jet::Fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Latest,
+    };
+    let (locked, locked_dirs) = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &locked_opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result.expect("locked registry metadata must agree with the dependency lock")
+    });
+    assert!(locked.packages.iter().any(|package| {
+        package.name == "rolekit"
+            && package.dependencies.contains(&"runtime".to_string())
+            && package.dependencies.contains(&"buildtool".to_string())
+            && package.dependencies.contains(&"trace".to_string())
+    }));
+    assert!(locked_dirs.contains_key("rolekit"));
+
+    // The dependency meaning is part of the immutable artifact identity. A
+    // valid metadata edit must fail before a fresh Hangar can ingest it even
+    // when the package source and signed referrer evidence are unchanged.
+    let tamper_work = tmp.join("tamper-registry");
+    assert!(
+        Command::new("git")
+            .args(["clone", url.as_str(), tamper_work.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let metadata_path = tamper_work
+        .join("artifacts")
+        .join("rolekit")
+        .join("1.0.0")
+        .join("registry.json");
+    let metadata = fs::read_to_string(&metadata_path).unwrap();
+    let tampered_metadata = metadata.replace(
+        "\"build_dependencies\":{\"buildtool\":\"1.0.0\"}",
+        "\"build_dependencies\":{\"runtime\":\"1.0.0\"}",
+    );
+    assert_ne!(metadata, tampered_metadata, "tamper fixture must change meaning");
+    fs::write(&metadata_path, tampered_metadata).unwrap();
+    for args in [
+        vec!["config", "user.email", "test@jet.test"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["add", "artifacts/rolekit/1.0.0/registry.json"],
+        vec!["commit", "-m", "tamper registry metadata"],
+        vec!["push", "origin", "HEAD:main"],
+    ] {
+        assert!(
+            Command::new("git")
+                .args(&args)
+                .current_dir(&tamper_work)
+                .status()
+                .unwrap()
+                .success(),
+            "git command failed: {args:?}"
+        );
+    }
+
+    let tampered_consumer = tmp.join("consumer-tampered");
+    let tampered_cache = tmp.join("registry-cache-tampered");
+    let tampered_hangar = tmp.join("jetpack-root-tampered");
+    fs::create_dir_all(&tampered_consumer).unwrap();
+    let tampered_raw = manifest_with_deps(
+        "tampered-consumer",
+        "0.1.0",
+        "    rolekit: rolekit#1.0.0,",
+    );
+    write(&tampered_consumer, "package.jet", &tampered_raw);
+    let tampered_manifest =
+        jet::Manifest::parse(&tampered_consumer.join("package.jet"), &tampered_raw).unwrap();
+    let tampered_result = with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &tampered_cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &tampered_hangar);
+        let result = jet::Fetch::fetch(&tampered_consumer, &tampered_manifest, None, &opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result
+    });
+    let tampered_error = tampered_result.expect_err("metadata tampering must fail closed");
+    assert_eq!(first_diag_code(&tampered_error), "E1207");
+    assert!(
+        tampered_error
+            .iter()
+            .any(|diagnostic| diagnostic.what.contains("content hash")),
+        "tampered metadata must be rejected as an identity failure: {tampered_error:?}"
+    );
+    assert!(
+        jetpack::Store::list(&jetpack::Store::Roots::at(&tampered_hangar))
+            .into_iter()
+            .all(|entry| !(entry.name == "rolekit" && entry.version == "1.0.0")),
+        "tampered registry metadata must not reach Hangar"
     );
 
     common::make_tree_writable(&tmp);

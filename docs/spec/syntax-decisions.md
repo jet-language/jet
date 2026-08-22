@@ -7847,7 +7847,8 @@ suffix of the callable interface — return type, error, effect row — in the
 same shape as a named function. Inference law (D-LAMBDA-INFER1) is untouched:
 annotations stay optional wherever an expected type exists.
 
-**2026-08-21 — D-ERRSUFFIX1=B** *(card #2144)*: the failure surface is a
+**2026-08-21 — D-ERRSUFFIX1=B** *(implementation card #2149; reading-first
+slate card #2144)*: the failure surface is a
 suffix zone: `[Success?] [ErrorUnion!]`, one `!` mark on the error type or on
 an explicit parenthesized union — `Entry? StoreError!`,
 `Int (DbError | TimeoutError)!`. Unit-fallible is the error suffix alone

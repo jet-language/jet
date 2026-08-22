@@ -76,6 +76,21 @@ fn hangar_path_reports_the_native_user_data_location() {
 }
 
 #[test]
+fn checked_hangar_listing_rejects_oversized_metadata() {
+    let scratch = Scratch::new("hangar-scale-budget");
+    let roots = jetpack::Store::Roots::at(scratch.path.clone());
+    let object = roots.hangar_dir().join("oversized");
+    fs::create_dir_all(&object).unwrap();
+    fs::write(object.join("meta.json"), vec![b'x'; (1 << 20) + 1]).unwrap();
+
+    let error = jetpack::Store::list_checked(&roots).unwrap_err();
+    assert!(
+        error.to_string().contains("exceeds 1048576 bytes"),
+        "{error}"
+    );
+}
+
+#[test]
 fn hangar_migration_round_trips_without_consuming_legacy_state() {
     let legacy = Scratch::new("hangar-migration-legacy");
     let data = Scratch::new("hangar-migration-data");
@@ -529,11 +544,43 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
 fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     let root = Scratch::new("cache-trust-root");
     let source = Scratch::new("cache-trust-source");
+    let dependency_source = Scratch::new("cache-trust-dependency-source");
     let mirror = Scratch::new("cache-trust-mirror");
     fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+    fs::write(dependency_source.join("payload"), "dependency bytes\n").unwrap();
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
         dev_mode: false,
+    };
+    let dependency = jetpack::Store::ingest_tree(
+        &roots,
+        &jetpack::Store::IngestRequest {
+            name: "cache-trust-dependency".into(),
+            version: "1".into(),
+            reference: "./cache-trust-dependency".into(),
+            cache_identity: jetpack::Store::CacheIdentity {
+                source_fingerprint: "sha256:cache-trust-dependency-source".into(),
+                recipe_fingerprint: "sha256:cache-trust-dependency-recipe".into(),
+                policy_fingerprint: "sha256:cache-trust-dependency-policy".into(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            references: Vec::new(),
+            outputs: std::collections::BTreeMap::from([(
+                "out".into(),
+                dependency_source.path.clone(),
+            )]),
+            signature: String::new(),
+            provenance: "cache trust dependency".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    let identity = jetpack::Store::CacheIdentity {
+        source_fingerprint: "sha256:cache-trust-source".into(),
+        recipe_fingerprint: "sha256:cache-trust-recipe".into(),
+        policy_fingerprint: "sha256:cache-trust-policy".into(),
+        platform: jetpack::Envelope::host_platform(),
     };
     let entry = jetpack::Store::ingest_tree(
         &roots,
@@ -541,12 +588,28 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
             name: "cache-trust-demo".into(),
             version: "1".into(),
             reference: "./cache-trust-demo".into(),
-            cache_identity: jetpack::Store::CacheIdentity {
-                source_fingerprint: "sha256:cache-trust-source".into(),
-                recipe_fingerprint: "sha256:cache-trust-recipe".into(),
-                policy_fingerprint: "sha256:cache-trust-policy".into(),
-                platform: jetpack::Envelope::host_platform(),
-            },
+            cache_identity: identity.clone(),
+            references: vec![dependency.envelope.output_hash.clone()],
+            outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
+            signature: String::new(),
+            provenance: "cache trust test".into(),
+            platform_artifact_kind: String::new(),
+        },
+    )
+    .unwrap()
+    .entry;
+    let no_closure_root = Scratch::new("cache-trust-no-closure-root");
+    let no_closure_roots = jetpack::Store::Roots {
+        root: no_closure_root.path.clone(),
+        dev_mode: false,
+    };
+    let no_closure = jetpack::Store::ingest_tree(
+        &no_closure_roots,
+        &jetpack::Store::IngestRequest {
+            name: "cache-trust-demo".into(),
+            version: "1".into(),
+            reference: "./cache-trust-demo".into(),
+            cache_identity: identity,
             references: Vec::new(),
             outputs: std::collections::BTreeMap::from([("out".into(), source.path.clone())]),
             signature: String::new(),
@@ -556,6 +619,22 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     )
     .unwrap()
     .entry;
+    let with_closure_action = jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+        .unwrap()
+        .facts
+        .get("cache.action")
+        .cloned()
+        .unwrap();
+    let without_closure_action = jetpack::Store::ProducerRecord::decode(&no_closure.producer_record)
+        .unwrap()
+        .facts
+        .get("cache.action")
+        .cloned()
+        .unwrap();
+    assert_ne!(
+        with_closure_action, without_closure_action,
+        "the production Store action identity must bind the realized closure"
+    );
     jetpack::Store::bind_cache(
         &roots,
         "public",
@@ -616,6 +695,27 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
             receipt.signature.sig_hex,
         )
     };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut wrong_closure = provenance.clone();
+    wrong_closure.action = without_closure_action;
+    let wrong_closure = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        wrong_closure,
+        2,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&wrong_closure)).unwrap();
+    let closure_error = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(closure_error.contains("mix-and-match"), "{closure_error}");
+    fs::write(&receipt_path, &receipt_bytes).unwrap();
     let tampered = String::from_utf8(receipt_bytes.clone())
         .unwrap()
         .replace(&format!("signature={}", field("signature")), "signature=00");
@@ -636,10 +736,6 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     assert!(missing.contains("no signed trust receipt"), "{missing}");
     fs::write(&receipt_path, &receipt_bytes).unwrap();
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
     let v2 = jetpack::TrustRoot::CacheReceipt::issue(
         "public",
         provenance.clone(),
@@ -1140,12 +1236,8 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     );
 
     let generation_one_root = project.join(".jet/profiles/dev/generations/1/root");
-    let generation_one_bin = generation_one_root.join("bin");
     let generation_one_binary = generation_one_root.join("bin/greet");
     let generation_one_original = fs::read(&generation_one_binary).unwrap();
-    let generation_one_root_permissions = fs::metadata(&generation_one_root).unwrap().permissions();
-    let generation_one_bin_permissions = fs::metadata(&generation_one_bin).unwrap().permissions();
-    let generation_one_permissions = fs::metadata(&generation_one_binary).unwrap().permissions();
     make_writable(&generation_one_root.to_string_lossy());
     fs::write(&generation_one_binary, "tampered generation\n").unwrap();
     let failed_rollback = run(["profile", "rollback", "dev", "1", "--no-color"].as_slice());
@@ -1161,9 +1253,6 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
             .contains("\"generation\":2")
     );
     fs::write(&generation_one_binary, generation_one_original).unwrap();
-    fs::set_permissions(generation_one_root, generation_one_root_permissions).unwrap();
-    fs::set_permissions(generation_one_bin, generation_one_bin_permissions).unwrap();
-    fs::set_permissions(generation_one_binary, generation_one_permissions).unwrap();
 
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
@@ -1173,8 +1262,12 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         .into_iter()
         .find(|entry| entry.name == "greet")
         .expect("profile build must publish greet to the Store");
+    let store_binary = Path::new(&entry.out).join("bin/greet");
+    let store_binary_original = fs::read(&store_binary).unwrap();
+    let store_out_permissions = fs::metadata(&entry.out).unwrap().permissions();
+    let store_binary_permissions = fs::metadata(&store_binary).unwrap().permissions();
     make_writable(&entry.out);
-    fs::write(Path::new(&entry.out).join("bin/greet"), "tampered\n").unwrap();
+    fs::write(&store_binary, "tampered\n").unwrap();
     let rebuild = jet()
         .args(["explain", "rebuild", "greet", "--json", "--no-color"])
         .current_dir(&project.path)
@@ -1192,6 +1285,10 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
     assert!(rebuild_stdout.contains("stored output digest differs"));
+
+    fs::write(&store_binary, store_binary_original).unwrap();
+    fs::set_permissions(&entry.out, store_out_permissions).unwrap();
+    fs::set_permissions(&store_binary, store_binary_permissions).unwrap();
 
     fs::remove_dir_all(root.join("hangar/lifecycle-db")).unwrap();
     let missing_root = run(["profile", "generations", "dev", "--json"].as_slice());
@@ -1496,6 +1593,29 @@ policy: {
     .expect_err("exception scope ranges must fail closed");
     assert_eq!(invalid.code, "E1206");
     assert!(invalid.why.contains("PolicyException.scope"));
+}
+
+#[test]
+fn package_policy_drops_expired_source_exception_from_receipt() {
+    let policy = jet::Package::PackagePolicy {
+        exceptions: vec![jet::Package::PackagePolicyException {
+            id: "JSA-EXPIRED".to_string(),
+            scope: "Acme.Widget#1.2.3".to_string(),
+            reason: "old waiver".to_string(),
+            expires_at: 0,
+        }],
+        ..Default::default()
+    };
+    let receipt = jet::Publish::authorize_package_candidate(
+        &policy,
+        "Acme.Widget",
+        "1.2.3",
+        Some("MIT"),
+        "public",
+    )
+    .expect("expired exceptions do not invalidate an otherwise valid candidate");
+    assert!(receipt.exception.is_none());
+    assert!(!receipt.summary().contains("exception="));
 }
 
 #[test]
@@ -3361,7 +3481,12 @@ module dev {
         root: root.path.clone(),
         dev_mode: false,
     };
-    let entries = jetpack::Store::list(&roots);
+    let entries = jetpack::Store::list_checked(&roots).unwrap_or_else(|error| {
+        panic!(
+            "portfolio Hangar listing failed under {}: {error}",
+            roots.hangar_dir().display()
+        )
+    });
     assert!(
         entries.iter().any(|entry| {
             fs::read_to_string(Path::new(&entry.out).join("share/readme.txt")).unwrap_or_default()
@@ -6628,6 +6753,130 @@ fn jet_build_reports_source_states() {
 }
 
 #[test]
+fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
+    // Card #955: this is the smallest real package-manager portfolio gate. It
+    // uses the local Core provider, the Hangar, and the CLI build path. An
+    // empty PATH proves the result does not depend on an installed Nix or
+    // ambient build tool. Removing both the realized output and its source
+    // executable injects a component failure; that run must not look cached.
+    let (base, project, root) = core_hello_project("epoch4-dogfood-portfolio");
+    let missing_tools = base.join("missing-tools");
+    fs::create_dir_all(&missing_tools).unwrap();
+    let source_executable = base.join("jet-pkgs/pkgs/hello/bin/hello");
+    let build = |offline: bool| {
+        let mut command = jetpack();
+        command
+            .args(["build", "--no-color"])
+            .current_dir(&project)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin");
+        if offline {
+            command.arg("--offline");
+        }
+        command.output().unwrap()
+    };
+
+    let first = build(false);
+    assert!(
+        first.status.success(),
+        "first portfolio build failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(
+        first_stderr.contains("built") && first_stderr.contains("1 built"),
+        "first portfolio build must publish a real result: {first_stderr}"
+    );
+
+    let cached = build(true);
+    assert!(
+        cached.status.success(),
+        "offline portfolio reuse failed: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    let cached_stderr = String::from_utf8_lossy(&cached.stderr);
+    assert!(
+        cached_stderr.contains("cached") && cached_stderr.contains("1 cached"),
+        "offline portfolio reuse must report a verified cache hit: {cached_stderr}"
+    );
+
+    let entered = jetpack()
+        .args(["enter", "--no-color", "--trust", "--offline", "--", "hello"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", &missing_tools)
+        .output()
+        .unwrap();
+    assert!(
+        entered.status.success(),
+        "offline front-door entry needs no ambient tools: {}",
+        String::from_utf8_lossy(&entered.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&entered.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let entry = fs::read_dir(roots.hangar_dir())
+        .unwrap()
+        .filter_map(Result::ok)
+        .find_map(|node| {
+            let text = fs::read_to_string(node.path().join("meta.json")).ok()?;
+            let entry = jetpack::Store::parse_meta(&text)?;
+            (entry.reference == "hello@mine").then_some(entry)
+        })
+        .expect("portfolio build must register its Hangar entry");
+    make_writable(&entry.out);
+    fs::remove_dir_all(&entry.out).unwrap();
+    fs::remove_file(&source_executable).unwrap();
+
+    let failed = build(true);
+    assert!(
+        !failed.status.success(),
+        "missing portfolio component must fail closed"
+    );
+    let failed_stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(
+        !failed_stderr.contains("built 1 package(s): 0 built, 1 cached"),
+        "missing portfolio component was falsely reported as cached: {failed_stderr}"
+    );
+
+    fs::write(&source_executable, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&source_executable, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let rebuilt = build(true);
+    assert!(
+        rebuilt.status.success(),
+        "offline portfolio rebuild failed: {}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let rebuilt_stderr = String::from_utf8_lossy(&rebuilt.stderr);
+    assert!(
+        rebuilt_stderr.contains("built") && !rebuilt_stderr.contains("1 cached"),
+        "repaired portfolio must rebuild instead of hiding the failure: {rebuilt_stderr}"
+    );
+
+    let stale = write_hangar_meta(&root, "epoch4-dogfood-stale", "stale", "1.0", Some(1)).0;
+    let clean = jetpack()
+        .args(["clean", "--no-color", "--yes"])
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", &missing_tools)
+        .output()
+        .unwrap();
+    assert!(
+        clean.status.success(),
+        "portfolio clean failed: {}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    assert!(!stale.exists(), "portfolio clean left stale Hangar state");
+}
+
+#[test]
 fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     let (_base, proj, root) = core_hello_project("cache-source-fallback");
     let mirror = Scratch::new("cache-source-fallback-mirror");
@@ -7131,6 +7380,19 @@ fn jet_audit_reads_without_exec() {
         report.contains("provenance"),
         "audit reports provenance: {report}"
     );
+    assert!(
+        report.contains("source:"),
+        "audit reports source identity: {report}"
+    );
+    assert!(
+        report.contains("action:"),
+        "audit reports action identity: {report}"
+    );
+    assert!(
+        report.contains("sandbox:"),
+        "audit reports sandbox policy: {report}"
+    );
+    assert!(report.contains("closure:"), "audit reports closure: {report}");
     // Audit must not run a build: it never prints the realize progress line.
     assert!(
         !report.contains("resolving"),

@@ -948,11 +948,11 @@ impl<'a> Resolver<'a> {
                 };
                 let reused_exact_lock = !update_requested
                     && locked_version.as_deref() == Some(selected.version.as_str());
-                let source_exception = self
-                    .policy
-                    .exceptions
-                    .iter()
-                    .find(|exception| exception.matches(dep_name, &selected.version))
+                let source_exception = Publish::active_source_exception(
+                    &self.policy.exceptions,
+                    dep_name,
+                    &selected.version,
+                )
                     .cloned();
                 if !reused_exact_lock {
                     if let Some(policy) = self.load_advisory_policy()? {
@@ -1146,8 +1146,7 @@ impl<'a> Resolver<'a> {
                         "repair the canonical Jetpack Hangar or retry the verified registry ingest",
                     )]
                 })?;
-                Store::verify_entry(dep_name, &store_path, &content_hash)
-                    .map_err(|diagnostic| vec![diagnostic])?;
+                verify_registry_hangar_entry(dep_name, &store_path, &content_hash)?;
                 let link_dir = self
                     .project_root
                     .join(".jet-build")
@@ -1490,7 +1489,18 @@ fn registry_update_rationales(
             dep_manifest.package.license.as_deref(),
             registry,
         )
-        .map_err(|error| registry_diagnostic(&package.name, &error.detail, &error.fix))?;
+        .map_err(|error| {
+            let edge = format!(
+                "{} -> {}#{}",
+                manifest.package.name, package.name, package.version
+            );
+            Publish::package_policy_edge_diagnostic(
+                &manifest.package.name,
+                &edge,
+                registry,
+                &error,
+            )
+        })?;
         let registry_metadata = Publish::read_registry_package_metadata(
             Path::new(output),
             &package.name,
@@ -1519,11 +1529,11 @@ fn registry_update_rationales(
                     package.version,
                     opts.resolution.label(),
                     policy_receipt.summary(),
-                    manifest
-                        .policy
-                        .exceptions
-                        .iter()
-                        .find(|exception| exception.matches(&package.name, &package.version))
+                    Publish::active_source_exception(
+                        &manifest.policy.exceptions,
+                        &package.name,
+                        &package.version,
+                    )
                         .map(|exception| {
                             format!("; source-policy-exception={}", exception.summary())
                         })
@@ -1637,6 +1647,28 @@ fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
     )
 }
 
+fn verify_registry_hangar_entry(
+    package: &str,
+    store_entry: &Path,
+    expected_hash: &str,
+) -> Result<(), Vec<Diagnostic>> {
+    let actual = Publish::registry_artifact_hash(store_entry).map_err(|error| {
+        vec![registry_diagnostic(
+            package,
+            &format!("stored registry artifact cannot be hashed: {error}"),
+            "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+        )]
+    })?;
+    if actual != expected_hash {
+        return Err(vec![registry_diagnostic(
+            package,
+            "stored registry artifact failed its content hash",
+            "repair the canonical Jetpack Hangar or retry the verified registry ingest",
+        )]);
+    }
+    Ok(())
+}
+
 /// Move a verified registry source tree into the canonical Jetpack Hangar.
 /// Registry verification happens before this call; Hangar then supplies the
 /// durable, content-addressed project input used by linking and locked fetch.
@@ -1679,6 +1711,7 @@ fn ingest_registry_artifact(
             receipt.sequence, receipt.digest, receipt.key_id, receipt.maturity_seconds
         )
     });
+    let package_policy_fingerprint = package_policy.map(|receipt| receipt.fingerprint.clone());
     let package_policy = package_policy.map(Publish::PackagePolicyReceipt::summary);
     let source_exception = source_exception.map(PackagePolicyException::summary);
     let policy = package_policy
@@ -1734,10 +1767,13 @@ fn ingest_registry_artifact(
         .as_ref()
         .map(|existing| existing.references.clone())
         .unwrap_or_else(|| references.to_vec());
-    let policy_fingerprint = existing
-        .as_ref()
-        .filter(|_| advisory_receipt.is_none() && package_policy.is_none())
-        .map(|existing| existing.cache_identity.policy_fingerprint.clone())
+    let policy_fingerprint = package_policy_fingerprint
+        .or_else(|| {
+            existing
+                .as_ref()
+                .filter(|_| advisory_receipt.is_none())
+                .map(|existing| existing.cache_identity.policy_fingerprint.clone())
+        })
         .unwrap_or_else(|| format!("sha256-{}", crate::SHA256::sha256_hex(policy.as_bytes())));
     let provenance = existing
         .as_ref()
@@ -1924,6 +1960,42 @@ fn build_dep_dirs_from_lock(
                         "refresh the lock from a trusted immutable registry artifact",
                     )]);
                 }
+                let registry_metadata = crate::Publish::read_registry_package_metadata(
+                    &artifact,
+                    dep_name,
+                    &locked.version,
+                )
+                .map_err(|error| {
+                    vec![registry_diagnostic(
+                        dep_name,
+                        &format!("locked registry dependency metadata is invalid: {error}"),
+                        "refresh the lock from a trusted immutable registry artifact",
+                    )]
+                })?;
+                let registry_dependencies = registry_dependency_edges(
+                    &dep_manifest,
+                    registry_metadata.as_ref(),
+                    dep_name,
+                )?;
+                let expected_dependencies = registry_dependencies
+                    .iter()
+                    .map(|dependency| dependency.name.clone())
+                    .chain(dep_manifest.dependencies.iter().filter_map(|(name, spec)| {
+                        (!matches!(spec, DepSpec::Registry(_))).then_some(name.clone())
+                    }))
+                    .collect::<BTreeSet<_>>();
+                let locked_dependencies = locked
+                    .dependencies
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                if locked_dependencies != expected_dependencies {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked dependency roles, features, or constraints disagree with the artifact metadata",
+                        "refresh the lock from the trusted immutable registry artifact",
+                    )]);
+                }
                 let policy_receipt = crate::Publish::authorize_package_candidate(
                     &manifest.policy,
                     dep_name,
@@ -1941,12 +2013,12 @@ fn build_dep_dirs_from_lock(
                         &error,
                     )]
                 })?;
-                let source_exception = manifest
-                    .policy
-                    .exceptions
-                    .iter()
-                    .find(|exception| exception.matches(dep_name, &locked.version));
-                ingest_registry_artifact(
+                let source_exception = crate::Publish::active_source_exception(
+                    &manifest.policy.exceptions,
+                    dep_name,
+                    &locked.version,
+                );
+                let store_path = ingest_registry_artifact(
                     &config,
                     &entry,
                     &artifact,
@@ -1961,7 +2033,9 @@ fn build_dep_dirs_from_lock(
                         &error,
                         "repair the canonical Jetpack Hangar or retry the verified registry ingest",
                     )]
-                })?
+                })?;
+                verify_registry_hangar_entry(dep_name, &store_path, source_hash)?;
+                store_path
             }
         };
         dep_dirs.insert(dep_name.clone(), source_dir);

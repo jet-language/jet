@@ -19,6 +19,7 @@ use super::plan_graph::{
     BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
     BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphFile, BuildGraphSubject,
     BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation,
+    MAX_ACTIONS,
 };
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
@@ -238,6 +239,11 @@ impl BuildPlan {
     ) -> Result<Vec<ActionHandle>, BuildError> {
         if packages.is_empty() {
             return Ok(Vec::new());
+        }
+        if packages.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) {
+            return Err(BuildError::PackagedPlugin(format!(
+                "action graph exceeds {MAX_ACTIONS} actions"
+            )));
         }
 
         let target_id = self

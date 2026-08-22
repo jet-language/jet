@@ -1924,6 +1924,62 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
+    fn suffix_zone_reaches_nested_general_type_positions() {
+        let parsed = program(
+            "struct Holder {\n\
+                 map: [String: IOError!]\n\
+                 tuple: (entry: Entry? StoreError!, failure: !)\n\
+                 callback: fn(Int? StoreError!) IOError!\n\
+             }\n\
+             alias Callback :: fn(Int? StoreError!) IOError!;\n\
+             fn run() {}\n",
+        );
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
+        assert!(matches!(
+            &holder.fields[0].ty,
+            crate::AST::Type::Map { value, .. }
+                if matches!(value.as_ref(), crate::AST::Type::Result { ok, err }
+                    if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                        && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError"))
+        ));
+        assert!(matches!(
+            &holder.fields[1].ty,
+            crate::AST::Type::Tuple(fields)
+                if matches!(fields.first(), Some((name, ty))
+                    if name == "entry"
+                        && matches!(ty.as_ref(), crate::AST::Type::Result { .. }))
+                    && matches!(fields.get(1), Some((name, ty))
+                        if name == "failure"
+                            && matches!(ty.as_ref(), crate::AST::Type::Result { ok, err }
+                                if matches!(ok.as_ref(), crate::AST::Type::Named(unit) if unit == Syntax::INTERNAL_UNIT_TYPE)
+                                    && matches!(err.as_ref(), crate::AST::Type::Named(default) if default == Syntax::TYPE_ERR)))
+        ));
+        assert!(matches!(
+            &holder.fields[2].ty,
+            crate::AST::Type::Fn { ret: Some(ret), .. }
+                if matches!(ret.as_ref(), crate::AST::Type::Result { ok, err }
+                    if matches!(ok.as_ref(), crate::AST::Type::Named(unit) if unit == Syntax::INTERNAL_UNIT_TYPE)
+                        && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError"))
+        ));
+        let alias = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::TypeAlias(alias) if alias.name == "Callback" => Some(alias),
+                _ => None,
+            })
+            .expect("Callback alias");
+        assert!(matches!(&alias.target, crate::AST::Type::Fn { .. }));
+    }
+
+    #[test]
     fn bare_default_error_does_not_consume_the_next_struct_field() {
         let parsed = program(
             "struct Holder {\n\

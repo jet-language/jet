@@ -9,6 +9,10 @@ const TXN_SUFFIX: &str = ".txn";
 const COMPACT_AFTER: usize = 64;
 const RECEIPTS_DIR: &str = "receipts";
 const RECEIPT_PARTIAL_SUFFIX: &str = ".partial";
+const MAX_CLOSURE_OBJECTS: usize = 1_000_000;
+const MAX_CLOSURE_RECORDS: usize = 1_000_000;
+const MAX_CLOSURE_DELETIONS: usize = 1_000_000;
+const MAX_CLOSURE_TRANSACTIONS: usize = 100_000;
 static RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub struct DuEntry {
     pub id: String,
@@ -425,29 +429,31 @@ struct CanonicalActionRecord {
 
 impl ClosureGraph {
     pub fn direct_references(&self, digest: &str) -> Vec<String> {
-        let mut out = BTreeSet::new();
-        // IngestRequest references describe the whole realization today, so
-        // every independently stored named output carries the same closure.
-        for record in self
-            .records
-            .values()
-            .filter(|record| record.outputs.values().any(|output| output == digest))
-        {
-            out.extend(record.references.iter().cloned());
-        }
-        out.into_iter().collect()
+        self.reference_index()
+            .remove(digest)
+            .unwrap_or_default()
+            .into_iter()
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn transitive_references(&self, digest: &str) -> Vec<String> {
+        let index = self.reference_index();
         let mut seen = BTreeSet::new();
-        let mut pending = self.direct_references(digest);
+        let mut pending = index
+            .get(digest)
+            .into_iter()
+            .flat_map(|references| references.iter().copied())
+            .collect::<Vec<_>>();
         while let Some(next) = pending.pop() {
-            if next == digest || !seen.insert(next.clone()) {
+            if next == digest || !seen.insert(next) {
                 continue;
             }
-            pending.extend(self.direct_references(&next));
+            if let Some(references) = index.get(next) {
+                pending.extend(references.iter().copied());
+            }
         }
-        seen.into_iter().collect()
+        seen.into_iter().map(str::to_string).collect()
     }
 
     pub fn closure(&self, digest: &str) -> Vec<String> {
@@ -459,25 +465,31 @@ impl ClosureGraph {
     }
 
     pub fn referrers(&self, digest: &str) -> Vec<String> {
-        self.records
-            .values()
-            .filter(|record| record.references.contains(digest))
-            .flat_map(|record| record.outputs.values().cloned())
-            .collect::<BTreeSet<_>>()
+        self.referrer_index()
+            .remove(digest)
+            .unwrap_or_default()
             .into_iter()
+            .map(str::to_string)
             .collect()
     }
 
     pub fn transitive_referrers(&self, digest: &str) -> Vec<String> {
+        let index = self.referrer_index();
         let mut seen = BTreeSet::new();
-        let mut pending = self.referrers(digest);
+        let mut pending = index
+            .get(digest)
+            .into_iter()
+            .flat_map(|referrers| referrers.iter().copied())
+            .collect::<Vec<_>>();
         while let Some(next) = pending.pop() {
-            if next == digest || !seen.insert(next.clone()) {
+            if next == digest || !seen.insert(next) {
                 continue;
             }
-            pending.extend(self.referrers(&next));
+            if let Some(referrers) = index.get(next) {
+                pending.extend(referrers.iter().copied());
+            }
         }
-        seen.into_iter().collect()
+        seen.into_iter().map(str::to_string).collect()
     }
 
     pub fn reverse_closure(&self, digest: &str) -> Vec<String> {
@@ -512,6 +524,32 @@ impl ClosureGraph {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
+    }
+
+    fn reference_index(&self) -> BTreeMap<&str, BTreeSet<&str>> {
+        let mut index = BTreeMap::new();
+        for record in self.records.values() {
+            for output in record.outputs.values() {
+                index
+                    .entry(output.as_str())
+                    .or_insert_with(BTreeSet::new)
+                    .extend(record.references.iter().map(String::as_str));
+            }
+        }
+        index
+    }
+
+    fn referrer_index(&self) -> BTreeMap<&str, BTreeSet<&str>> {
+        let mut index = BTreeMap::new();
+        for record in self.records.values() {
+            for reference in &record.references {
+                index
+                    .entry(reference.as_str())
+                    .or_insert_with(BTreeSet::new)
+                    .extend(record.outputs.values().map(String::as_str));
+            }
+        }
+        index
     }
 }
 
@@ -721,7 +759,7 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 
 fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
     let (_, mut graph) = recover_closure_journal_graph_unlocked(roots)?;
-    let mut entries = list_unlocked(roots);
+    let mut entries = list_unlocked(roots)?;
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let mut seen_records = BTreeSet::new();
     let mut objects = BTreeMap::new();
@@ -1000,7 +1038,7 @@ pub fn test_backdate_last_used_at(
 ) -> std::io::Result<()> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_closure_journal_unlocked(roots)?;
-        let mut entry = list_unlocked(roots)
+        let mut entry = list_unlocked(roots)?
             .into_iter()
             .find(|entry| entry.id == id)
             .ok_or_else(|| std::io::Error::other(format!("no hangar entry `{id}`")))?;
@@ -1428,7 +1466,12 @@ fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> 
         BTreeMap::from([("legacy.reference".into(), entry.reference.clone())]),
     )?)
     .map_err(std::io::Error::other)?;
-    producer.bind_cache_provenance(&entry.reference, &entry.envelope.output_hash, identity);
+    producer.bind_cache_provenance(
+        &entry.reference,
+        &entry.envelope.output_hash,
+        identity,
+        &entry.references,
+    );
     super::super::Provider::refresh_provider_facts(&mut producer, &entry.reference)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     entry.producer_record = producer.encode();
@@ -1514,6 +1557,12 @@ fn load_graph_mode_with_proofs(
     for entry in entries {
         let path = entry?.path();
         if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
+            if paths.len() >= MAX_CLOSURE_TRANSACTIONS {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("closure journal exceeds {MAX_CLOSURE_TRANSACTIONS} transactions"),
+                ));
+            }
             paths.push(path);
         }
     }
@@ -1541,6 +1590,66 @@ fn load_graph_mode_with_proofs(
 }
 
 fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), String> {
+    if entry.objects.len() > MAX_CLOSURE_OBJECTS {
+        return Err(format!(
+            "closure transaction exceeds {MAX_CLOSURE_OBJECTS} objects"
+        ));
+    }
+    if entry.records.len() > MAX_CLOSURE_RECORDS {
+        return Err(format!(
+            "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
+        ));
+    }
+    if entry.deleted_records.len() > MAX_CLOSURE_DELETIONS {
+        return Err(format!(
+            "closure transaction exceeds {MAX_CLOSURE_DELETIONS} deleted records"
+        ));
+    }
+    if entry.kind != JournalKind::Snapshot {
+        let new_objects = entry
+            .objects
+            .iter()
+            .filter(|object| !graph.objects.contains_key(&object.digest))
+            .count();
+        if graph.objects.len().saturating_add(new_objects) > MAX_CLOSURE_OBJECTS {
+            return Err(format!(
+                "closure graph exceeds {MAX_CLOSURE_OBJECTS} objects"
+            ));
+        }
+        let deleted_records = entry
+            .deleted_records
+            .iter()
+            .filter(|id| graph.records.contains_key(*id))
+            .count();
+        let deleted_record_ids = entry
+            .deleted_records
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut record_count = graph.records.len().saturating_sub(deleted_records);
+        for record in &entry.records {
+            if !graph.records.contains_key(&record.id)
+                || deleted_record_ids.contains(record.id.as_str())
+            {
+                record_count = record_count.saturating_add(1);
+            }
+        }
+        if record_count > MAX_CLOSURE_RECORDS {
+            return Err(format!(
+                "closure graph exceeds {MAX_CLOSURE_RECORDS} records"
+            ));
+        }
+        if graph
+            .deleted_records
+            .len()
+            .saturating_add(entry.deleted_records.len())
+            > MAX_CLOSURE_DELETIONS
+        {
+            return Err(format!(
+                "closure graph exceeds {MAX_CLOSURE_DELETIONS} deleted records"
+            ));
+        }
+    }
     if entry.kind == JournalKind::Snapshot {
         *graph = ClosureGraph::default();
     }
@@ -2181,15 +2290,27 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
     for line in lines {
         let fields = line.split('\t').collect::<Vec<_>>();
         match fields.as_slice() {
-            ["object", digest, path, external @ ("0" | "1")] => objects.push(ClosureObject {
-                digest: unhex(digest)?,
-                path: unhex(path)?,
-                external: *external == "1",
-            }),
+            ["object", digest, path, external @ ("0" | "1")] => {
+                if objects.len() >= MAX_CLOSURE_OBJECTS {
+                    return Err(format!(
+                        "closure transaction exceeds {MAX_CLOSURE_OBJECTS} objects"
+                    ));
+                }
+                objects.push(ClosureObject {
+                    digest: unhex(digest)?,
+                    path: unhex(path)?,
+                    external: *external == "1",
+                });
+            }
             ["record", id, primary, action_key, producer_record, package_meta] => {
                 let id = unhex(id)?;
                 if records.contains_key(&id) {
                     return Err(format!("duplicate closure record `{id}`"));
+                }
+                if records.len() >= MAX_CLOSURE_RECORDS {
+                    return Err(format!(
+                        "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
+                    ));
                 }
                 records.insert(
                     id.clone(),
@@ -2208,6 +2329,11 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
                 let id = unhex(id)?;
                 if records.contains_key(&id) {
                     return Err(format!("duplicate closure record `{id}`"));
+                }
+                if records.len() >= MAX_CLOSURE_RECORDS {
+                    return Err(format!(
+                        "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
+                    ));
                 }
                 records.insert(
                     id.clone(),
@@ -2242,7 +2368,14 @@ fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
                     .ok_or_else(|| format!("reference precedes record `{id}`"))?;
                 record.references.insert(unhex(digest)?);
             }
-            ["delete", id] => deleted_records.push(unhex(id)?),
+            ["delete", id] => {
+                if deleted_records.len() >= MAX_CLOSURE_DELETIONS {
+                    return Err(format!(
+                        "closure transaction exceeds {MAX_CLOSURE_DELETIONS} deleted records"
+                    ));
+                }
+                deleted_records.push(unhex(id)?);
+            }
             _ => return Err(format!("invalid journal line `{line}`")),
         }
     }
@@ -2276,6 +2409,12 @@ fn transaction_paths(journal: &Path) -> std::io::Result<Vec<PathBuf>> {
     for entry in entries {
         let path = entry?.path();
         if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
+            if paths.len() >= MAX_CLOSURE_TRANSACTIONS {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("closure journal exceeds {MAX_CLOSURE_TRANSACTIONS} transactions"),
+                ));
+            }
             paths.push(path);
         }
     }

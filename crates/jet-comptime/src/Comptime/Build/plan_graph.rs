@@ -7,6 +7,8 @@ use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
 use super::targets::{BuildTarget, TargetKind};
 
+pub(super) const MAX_ACTIONS: usize = 100_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildPlan {
     pub(super) context: u64,

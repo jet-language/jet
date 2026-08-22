@@ -10,8 +10,8 @@
 use super::{entry_action_key, NarInfo, ProducerRecord, Roots, StoreEntry};
 use crate::TrustRoot::{
     allow_cache_builder, cache_builder_identity, is_cache_builder_allowed,
-    is_cache_builder_revoked, pin_cache_key, verify_pinned_cache_key, CacheProvenance,
-    CacheReceipt, Signature, SystemTrustedClock, TrustKey,
+    is_cache_builder_revoked, os_random_bytes, pin_cache_key, verify_pinned_cache_key,
+    CacheProvenance, CacheReceipt, Signature, SystemTrustedClock, TrustKey,
 };
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -366,7 +366,7 @@ pub fn bind_cache(
                 read_trust_key(&binding.trust_key)?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                write_new_key(&binding.trust_key, role)?;
+                write_new_key(&binding.trust_key)?;
             }
             Err(error) => return Err(error),
         }
@@ -399,6 +399,7 @@ pub fn read_cache_binding(roots: &Roots, role: &str) -> io::Result<CacheBinding>
     if binding.role != role {
         return Err(invalid("cache binding role disagrees with its file name"));
     }
+    validate_cache_binding_trust(roots, &binding)?;
     Ok(binding)
 }
 
@@ -437,9 +438,15 @@ pub fn list_cache_bindings(roots: &Roots) -> io::Result<Vec<CacheBinding>> {
         if binding.role != file_role {
             return Err(invalid("cache binding role disagrees with its file name"));
         }
+        validate_cache_binding_trust(roots, &binding)?;
         bindings.push(binding);
     }
     Ok(bindings)
+}
+
+fn validate_cache_binding_trust(roots: &Roots, binding: &CacheBinding) -> io::Result<()> {
+    let key = read_trust_key(&binding.trust_key)?;
+    verify_pinned_cache_key(&roots.root, &binding.role, &key).map_err(io::Error::other)
 }
 
 pub fn remove_cache_binding(roots: &Roots, role: &str) -> io::Result<bool> {
@@ -1242,7 +1249,16 @@ fn nar_info_matches_entry(info: &NarInfo, entry: &StoreEntry) -> bool {
 }
 
 fn read_trust_key(path: &Path) -> io::Result<TrustKey> {
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            invalid(&format!(
+                "cache trust key `{}` is missing; rebind the cache role",
+                path.display()
+            ))
+        } else {
+            error
+        }
+    })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 4096 {
         return Err(invalid("cache trust key is not a regular file"));
     }
@@ -1352,7 +1368,12 @@ fn cache_provenance_for_entry(entry: &StoreEntry) -> io::Result<CacheProvenance>
         || provenance.source != producer.immutable_source
         || provenance.builder != builder
         || provenance.action
-            != super::cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
+            != super::cache_action_identity(
+                &producer,
+                &entry.reference,
+                &entry.cache_identity,
+                &entry.references,
+            )
         || provenance.output != entry.envelope.output_hash
         || provenance.platform != entry.cache_identity.platform
         || provenance.sandbox != "sandbox:policy-bound"
@@ -1662,25 +1683,9 @@ fn verify_cache_receipt(
     })
 }
 
-fn write_new_key(path: &Path, role: &str) -> io::Result<()> {
+fn write_new_key(path: &Path) -> io::Result<()> {
     ensure_parent(path)?;
-    let mut secret = vec![0u8; 32];
-    if let Ok(mut random) = fs::File::open("/dev/urandom") {
-        random.read_exact(&mut secret)?;
-    } else {
-        let seed = format!(
-            "jet-cache-key-v1\n{role}\n{}\n{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|value| value.as_nanos())
-                .unwrap_or_default()
-        );
-        let digest = SHA256::sha256_hex(seed.as_bytes());
-        for (slot, pair) in secret.iter_mut().zip(digest.as_bytes().chunks(2)) {
-            *slot = u8::from_str_radix(std::str::from_utf8(pair).unwrap_or("00"), 16).unwrap_or(0);
-        }
-    }
+    let secret = os_random_bytes::<32>()?.to_vec();
     if fs::symlink_metadata(path).is_ok() {
         return Ok(());
     }
@@ -3274,6 +3279,35 @@ mod tests {
         };
         let error = list_cache_bindings(&roots).unwrap_err();
         assert!(error.to_string().contains("cache binding"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cache_binding_missing_trust_key_fails_before_local_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-cache-key-{}-{}",
+            std::process::id(),
+            now_seconds()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("mirror")).unwrap();
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        bind_cache(
+            &roots,
+            "public",
+            vec![format!("file://{}", root.join("mirror").display())],
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        fs::remove_file(root.join("trust/cache-public.key")).unwrap();
+
+        let error = list_cache_bindings(&roots).unwrap_err();
+        assert!(error.to_string().contains("cache trust key"), "{error}");
         fs::remove_dir_all(root).unwrap();
     }
 }

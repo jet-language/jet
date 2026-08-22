@@ -22,6 +22,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::io;
+#[cfg(unix)]
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -35,6 +38,74 @@ pub const DEFAULT_MAX_CLOCK_SKEW: Duration = Duration::from_secs(5 * 60);
 
 /// Algorithm id recorded on every signature (crypto-agility seam).
 pub const ALG_HMAC_SHA256: &str = "hmac-sha256";
+
+/// Read key material only from the platform OS CSPRNG. Trust material must
+/// not fall back to predictable process, path, or wall-clock data.
+pub(crate) fn os_random_bytes<const N: usize>() -> io::Result<[u8; N]> {
+    #[cfg(unix)]
+    {
+        let mut bytes = [0u8; N];
+        let mut file = std::fs::File::open("/dev/urandom").map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("trust key generation requires an OS CSPRNG: {error}"),
+            )
+        })?;
+        file.read_exact(&mut bytes).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("trust key generation requires an OS CSPRNG: {error}"),
+            )
+        })?;
+        return Ok(bytes);
+    }
+
+    #[cfg(windows)]
+    {
+        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+        #[link(name = "bcrypt")]
+        unsafe extern "system" {
+            fn BCryptGenRandom(
+                algorithm: *mut std::ffi::c_void,
+                buffer: *mut u8,
+                length: u32,
+                flags: u32,
+            ) -> i32;
+        }
+
+        let mut bytes = [0u8; N];
+        let length = u32::try_from(bytes.len()).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "trust key request is too large for the platform CSPRNG",
+            )
+        })?;
+        // SAFETY: BCryptGenRandom writes only to the bounded buffer supplied;
+        // the null algorithm selects Windows' system-preferred CSPRNG.
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                bytes.as_mut_ptr(),
+                length,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status));
+        }
+        return Ok(bytes);
+    }
+
+    // Only reachable off unix and windows: both arms above return. Without the
+    // gate this tail is dead code on every platform we build for.
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "trust key generation requires an OS CSPRNG; provide explicit trust material",
+        ))
+    }
+}
 
 /// Separate trust-domain identities (D-JPK-TRUSTROOT1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -248,7 +319,9 @@ pub struct Signature {
     pub sig_hex: String,
 }
 
-/// SLSA-shaped facts that make one cache result usable.
+/// SLSA-shaped facts that make one cache result usable. `action` is the
+/// versioned producer/action digest; the live cache binding includes the
+/// canonical realized closure in that digest before this receipt is signed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheProvenance {
     pub reference: String,
@@ -2034,6 +2107,15 @@ mod tests {
         )
         .unwrap();
         (eng, keys, dir)
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn production_trust_material_comes_from_bounded_os_randomness() {
+        let first = os_random_bytes::<32>().unwrap();
+        let second = os_random_bytes::<32>().unwrap();
+        assert_eq!(first.len(), 32);
+        assert_ne!(first, second);
     }
 
     #[test]

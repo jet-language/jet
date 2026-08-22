@@ -6,6 +6,7 @@
 //! A missing broker is transparent: callers keep using their per-user Hangar.
 
 use super::{Archive, CacheExpectation, Roots, StoreEntry};
+use crate::TrustRoot::os_random_bytes;
 use crate::SHA256;
 use std::collections::BTreeSet;
 use std::fs;
@@ -223,7 +224,7 @@ fn read_shared_store_config(layout: &BrokerLayout) -> io::Result<Option<SharedSt
 /// socket-activation units. The command does not create a resident daemon;
 /// systemd starts the one-request service only on demand. Ordinary callers
 /// continue to use their per-user Hangar when this configuration is absent.
-pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallReport> {
+pub fn install_shared_store(_roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     if !is_effective_root() {
         return Err(invalid(
             "shared-store install requires administrator authority; run `sudo jet shared-store install`",
@@ -240,7 +241,7 @@ pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallRepor
         .ok_or_else(|| invalid("shared-store trust key has no parent"))?;
     ensure_private_dir(trust_dir)?;
     ensure_admin_public_dir(&layout.grants)?;
-    ensure_secret(&layout.trust_key, b"shared-store trust key", roots)?;
+    ensure_secret(&layout.trust_key)?;
 
     let config = SharedStoreConfig {
         socket: layout.socket.clone(),
@@ -1156,7 +1157,7 @@ pub fn enroll_shared_store(roots: &Roots, uid: &str, writable: bool) -> io::Resu
     if writable {
         text.push_str("write\n");
         let expires = now_secs().saturating_add(GRANT_TTL_SECS);
-        let credential = encode_hex(&entropy(roots, b"shared-store-writer-credential"));
+        let credential = encode_hex(&os_random_bytes::<32>()?);
         text.push_str(&format!("expires={expires}\ncredential={credential}\n"));
     }
     atomic_write(&path, text.as_bytes())?;
@@ -1527,7 +1528,7 @@ fn set_private_mode(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn ensure_secret(path: &Path, label: &[u8], roots: &Roots) -> io::Result<()> {
+fn ensure_secret(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             Err(invalid("shared-store secret is not a regular file"))
@@ -1542,7 +1543,7 @@ fn ensure_secret(path: &Path, label: &[u8], roots: &Roots) -> io::Result<()> {
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let mut secret = entropy(roots, label);
+            let mut secret = os_random_bytes::<32>()?.to_vec();
             let result = atomic_write(path, &secret);
             if result.is_ok() {
                 set_private_mode(path)?;
@@ -1554,31 +1555,6 @@ fn ensure_secret(path: &Path, label: &[u8], roots: &Roots) -> io::Result<()> {
         }
         Err(error) => Err(error),
     }
-}
-
-fn entropy(roots: &Roots, label: &[u8]) -> Vec<u8> {
-    #[cfg(unix)]
-    if let Ok(mut file) = fs::File::open("/dev/urandom") {
-        let mut bytes = [0u8; 32];
-        if file.read_exact(&mut bytes).is_ok() {
-            return bytes.to_vec();
-        }
-    }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos().to_string())
-        .unwrap_or_else(|_| "0".to_string());
-    SHA256::sha256_hex(
-        format!(
-            "jet-shared-store-secret-v1\n{}\n{}\n{}\n{}",
-            roots.root.display(),
-            std::process::id(),
-            now,
-            String::from_utf8_lossy(label)
-        )
-        .as_bytes(),
-    )
-    .into_bytes()
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {

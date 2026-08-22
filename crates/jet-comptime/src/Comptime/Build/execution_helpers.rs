@@ -55,31 +55,49 @@ pub(super) fn execution_stages(
     prereqs: &BTreeMap<ActionId, Vec<ActionId>>,
 ) -> Result<Vec<BuildExecutionStage>, BuildError> {
     let mut remaining = prereqs.keys().copied().collect::<BTreeSet<_>>();
-    let mut done = BTreeSet::new();
-    let mut stages = Vec::new();
-    while !remaining.is_empty() {
-        let ready = remaining
-            .iter()
-            .copied()
-            .filter(|action| {
-                prereqs
-                    .get(action)
-                    .into_iter()
-                    .flat_map(|deps| deps.iter())
-                    .all(|dep| done.contains(dep))
-            })
-            .collect::<Vec<_>>();
-        if ready.is_empty() {
-            return Err(action_cycle_error(plan, &remaining, prereqs));
+    let mut indegree = prereqs
+        .iter()
+        .map(|(action, dependencies)| (*action, dependencies.len()))
+        .collect::<BTreeMap<_, _>>();
+    let mut dependents = BTreeMap::<ActionId, Vec<ActionId>>::new();
+    for (action, dependencies) in prereqs {
+        for dependency in dependencies {
+            dependents.entry(*dependency).or_default().push(*action);
         }
-        for action in &ready {
+    }
+    for actions in dependents.values_mut() {
+        actions.sort();
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(action, count)| (*count == 0).then_some(*action))
+        .collect::<BTreeSet<_>>();
+    let mut stages = Vec::new();
+    while !ready.is_empty() {
+        let current = ready.into_iter().collect::<Vec<_>>();
+        for action in &current {
             remaining.remove(action);
-            done.insert(*action);
+        }
+        let mut next_ready = BTreeSet::new();
+        for action in &current {
+            for dependent in dependents.get(action).into_iter().flatten() {
+                let count = indegree
+                    .get_mut(dependent)
+                    .expect("dependency graph node must have an indegree");
+                *count -= 1;
+                if *count == 0 {
+                    next_ready.insert(*dependent);
+                }
+            }
         }
         stages.push(BuildExecutionStage {
             index: stages.len(),
-            actions: ready,
+            actions: current,
         });
+        ready = next_ready;
+    }
+    if !remaining.is_empty() {
+        return Err(action_cycle_error(plan, &remaining, prereqs));
     }
     Ok(stages)
 }
@@ -132,10 +150,53 @@ pub(super) fn collect_target_actions(
 
 #[cfg(test)]
 mod tests {
+    use super::super::actions_policy::ActionSpec;
     use super::super::context::BuildContext;
     use super::super::errors_keys::BuildError;
     use super::super::handles::TargetRef;
+    use super::super::plan_graph::MAX_ACTIONS;
     use super::super::targets::TargetSpec;
+
+    #[test]
+    fn action_admission_budget_accepts_the_limit_and_rejects_the_next_action() {
+        let mut context = BuildContext::new();
+        let mut target_spec = TargetSpec::new();
+        for index in 0..MAX_ACTIONS {
+            let mut spec = ActionSpec::cached(["true"])
+                .with_outputs([format!("out/{index}")]);
+            if index > 0 {
+                spec = spec.with_inputs([format!("out/{}", index - 1)]);
+            }
+            let action = context
+                .action(
+                    format!("scale-{index}"),
+                    spec,
+                )
+                .expect("the declared action budget must be usable");
+            target_spec = target_spec.with_action(action);
+        }
+
+        let error = context
+            .action(
+                "scale-overflow",
+                ActionSpec::cached(["true"]).with_outputs(["out/overflow"]),
+            )
+            .expect_err("the action graph must fail closed at its scale budget");
+        assert!(matches!(
+            error,
+            BuildError::PackagedPlugin(message) if message.contains("100000")
+        ));
+        let target = context
+            .add_library("scale", target_spec)
+            .expect("the limit-sized graph must remain buildable");
+        let plan = context.plan_with_default(target).unwrap();
+        let model = plan
+            .execution_model()
+            .expect("the limit-sized graph must schedule");
+        assert_eq!(model.metrics.actions_total, MAX_ACTIONS);
+        assert_eq!(model.stages.len(), MAX_ACTIONS);
+        assert!(model.stages.iter().all(|stage| stage.actions.len() == 1));
+    }
 
     /// #1522 criterion 4: a target cycle is reported as the whole loop, in
     /// the order the walk found it.

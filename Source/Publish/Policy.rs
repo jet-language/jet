@@ -45,6 +45,20 @@ impl PackagePolicyReceipt {
     }
 }
 
+/// Return the one source exception that is active for this exact package
+/// identity. Expiry is part of the authorization decision, not just display
+/// metadata; stale exceptions must not enter receipts, locks, or provenance.
+pub(crate) fn active_source_exception<'a>(
+    exceptions: &'a [PackagePolicyException],
+    package: &str,
+    version: &str,
+) -> Option<&'a PackagePolicyException> {
+    let now = super::advisory_now();
+    exceptions
+        .iter()
+        .find(|exception| exception.matches(package, version) && exception.expires_at > now)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackagePolicyError {
     pub detail: String,
@@ -152,10 +166,7 @@ pub fn authorize_package_candidate(
         license: license.to_string(),
         source: source.to_string(),
         source_rule,
-        exception: policy
-            .exceptions
-            .iter()
-            .find(|exception| exception.matches(package, version))
+        exception: active_source_exception(&policy.exceptions, package, version)
             .map(PackagePolicyException::summary),
         fingerprint: policy_fingerprint(policy),
     })

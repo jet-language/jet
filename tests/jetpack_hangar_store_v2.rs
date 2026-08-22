@@ -218,6 +218,278 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
 }
 
 #[test]
+fn hangar_export_import_rekeys_and_rejects_corruption_without_mutation() {
+    let source_root = Scratch::new("hangar-archive-source-root");
+    let destination_root = Scratch::new("hangar-archive-destination-root");
+    let project = Scratch::new("hangar-archive-project");
+    let source = Scratch::new("hangar-archive-source");
+    fs::write(source.join("payload"), "portable bytes\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "portable",
+            "--ref",
+            "portable@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &source_root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let source_roots = jetpack::Store::Roots {
+        root: source_root.path.clone(),
+        dev_mode: false,
+    };
+    let source_entry =
+        jetpack::Store::find_by_reference(&source_roots, "portable@fixture").unwrap();
+    let archive = source_root.path.join("portable.hangar");
+    let export = jet()
+        .args([
+            "hangar",
+            "export",
+            "portable@fixture",
+            "--to",
+            archive.to_str().unwrap(),
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &source_root.path)
+        .output()
+        .unwrap();
+    let export_stderr = String::from_utf8_lossy(&export.stderr);
+    assert!(export.status.success(), "stderr: {export_stderr}");
+    assert!(export_stderr.contains("export: ") && export_stderr.contains(" object(s)"));
+    assert!(archive.is_file());
+
+    let key = source_root.path.join("trust/hangar.key");
+    assert!(key.is_file());
+    let import = || {
+        jet()
+            .args([
+                "hangar",
+                "import",
+                archive.to_str().unwrap(),
+                "--key",
+                key.to_str().unwrap(),
+                "--yes",
+                "--no-color",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &destination_root.path)
+            .output()
+            .unwrap()
+    };
+    let imported = import();
+    assert!(
+        imported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+
+    let destination_roots = jetpack::Store::Roots {
+        root: destination_root.path.clone(),
+        dev_mode: false,
+    };
+    let destination_entry =
+        jetpack::Store::find_by_reference(&destination_roots, "portable@fixture").unwrap();
+    assert_eq!(
+        destination_entry.envelope.output_hash,
+        source_entry.envelope.output_hash
+    );
+    let expected_destination_id = jetpack::Store::entry_id(
+        &destination_entry.name,
+        &destination_entry.version,
+        &destination_entry.reference,
+        &destination_entry.out,
+    );
+    assert_eq!(
+        destination_entry.id,
+        expected_destination_id,
+        "source id: {}; source out: {}; destination out: {}",
+        source_entry.id,
+        source_entry.out,
+        destination_entry.out
+    );
+    assert_ne!(destination_entry.id, source_entry.id);
+    assert_eq!(
+        destination_entry.id,
+        jetpack::Store::entry_id(
+            &destination_entry.name,
+            &destination_entry.version,
+            &destination_entry.reference,
+            &destination_entry.out,
+        )
+    );
+    jetpack::Store::verify_hangar_object(&destination_roots, &destination_entry).unwrap();
+    let graph = jetpack::Store::closure_graph(&destination_roots).unwrap();
+    assert_eq!(
+        graph.records.get(&destination_entry.id).unwrap().primary,
+        destination_entry.envelope.output_hash
+    );
+    assert!(!destination_entry.receipt.is_empty());
+    assert!(destination_roots
+        .hangar_dir()
+        .join("receipts")
+        .join(&destination_entry.receipt)
+        .is_file());
+
+    let repeated = import();
+    assert!(
+        repeated.status.success(),
+        "repeated import stderr: {}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(
+        jetpack::Store::list_checked(&destination_roots)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let corrupted = source_root.path.join("portable-corrupt.hangar");
+    let mut bytes = fs::read(&archive).unwrap();
+    let last = bytes.last_mut().unwrap();
+    *last ^= 1;
+    fs::write(&corrupted, bytes).unwrap();
+    let rejected = jet()
+        .args([
+            "hangar",
+            "import",
+            corrupted.to_str().unwrap(),
+            "--key",
+            key.to_str().unwrap(),
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &destination_root.path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("Hangar import failed"));
+    let after =
+        jetpack::Store::find_by_reference(&destination_roots, "portable@fixture").unwrap();
+    assert_eq!(after.id, destination_entry.id);
+    assert_eq!(
+        after.envelope.output_hash,
+        destination_entry.envelope.output_hash
+    );
+    assert_eq!(
+        fs::read_to_string(Path::new(&after.out).join("payload")).unwrap(),
+        "portable bytes\n"
+    );
+}
+
+#[test]
+fn hangar_copy_roundtrip_is_idempotent_and_conflict_safe() {
+    let source_root = Scratch::new("hangar-copy-source-root");
+    let destination_root = Scratch::new("hangar-copy-destination-root");
+    let project = Scratch::new("hangar-copy-project");
+    let source = Scratch::new("hangar-copy-source");
+    fs::write(source.join("payload"), "copy me\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "copyable",
+            "--ref",
+            "copyable@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &source_root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+    let source_roots = jetpack::Store::Roots {
+        root: source_root.path.clone(),
+        dev_mode: false,
+    };
+    let source_entry = jetpack::Store::find_by_reference(&source_roots, "copyable@fixture")
+        .expect("ingest must publish the source package record");
+    let source_payload = Path::new(&source_entry.out).join("payload");
+
+    let copy = || {
+        jet()
+            .args([
+                "hangar",
+                "copy",
+                "copyable@fixture",
+                "--to",
+                destination_root.path.to_str().unwrap(),
+                "--yes",
+                "--json",
+                "--no-color",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &source_root.path)
+            .output()
+            .unwrap()
+    };
+
+    let first = copy();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout).into_owned();
+    assert!(first_stdout.contains("\"action\":\"copy\""), "{first_stdout}");
+
+    let destination_roots = jetpack::Store::Roots {
+        root: destination_root.path.clone(),
+        dev_mode: false,
+    };
+    let destination_entry = jetpack::Store::find_by_reference(
+        &destination_roots,
+        "copyable@fixture",
+    )
+    .expect("copy must publish the destination package record");
+    jetpack::Store::verify_hangar_object(&destination_roots, &destination_entry).unwrap();
+    assert_eq!(
+        fs::read_to_string(Path::new(&destination_entry.out).join("payload")).unwrap(),
+        "copy me\n"
+    );
+
+    let repeated = copy();
+    assert!(
+        repeated.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(first_stdout, String::from_utf8_lossy(&repeated.stdout));
+    assert_eq!(jetpack::Store::list_checked(&destination_roots).unwrap().len(), 1);
+
+    make_tree_writable(Path::new(&destination_entry.out));
+    let destination_payload = Path::new(&destination_entry.out).join("payload");
+    fs::write(&destination_payload, "keep corrupt bytes\n").unwrap();
+    let rejected = copy();
+    assert_eq!(rejected.status.code(), Some(2));
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("conflicting digest"), "{rejected_stderr}");
+    assert_eq!(fs::read_to_string(destination_payload).unwrap(), "keep corrupt bytes\n");
+    assert_eq!(fs::read_to_string(source_payload).unwrap(), "copy me\n");
+}
+
+#[test]
 fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
     let root = Scratch::new("hangar-repair-root");
     let project = Scratch::new("hangar-repair-project");

@@ -712,8 +712,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 
 /// Source hash + plan fingerprint for the index entry. Reuses the lock's
 /// recorded values (the exact `LockedPackage` fields) when a lock exists; falls
-/// back to hashing the source tree so `jet registry publish` works before a first
-/// `jet fetch`.
+/// back to hashing the registry artifact so publish binds dependency metadata
+/// before a first `jet fetch`.
 fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) {
     if let Some(lock) = jet::Lock::load(root) {
         if let Some(pkg) = lock
@@ -726,14 +726,18 @@ fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) 
                     .content_hash
                     .clone()
                     .filter(|hash| !hash.is_empty())
-                    .unwrap_or_else(|| jet::SHA256::tree_hash(root));
+                    .unwrap_or_else(|| {
+                        jet::Publish::registry_artifact_hash(root)
+                            .unwrap_or_else(|_| jet::SHA256::tree_hash(root))
+                    });
                 return (content_hash, pkg.fingerprint.clone());
             }
         }
     }
-    let tree_hash = jet::SHA256::tree_hash(root);
-    let fingerprint = jet::Lock::compute_fingerprint(&tree_hash, &[], "");
-    (tree_hash, fingerprint)
+    let content_hash = jet::Publish::registry_artifact_hash(root)
+        .unwrap_or_else(|_| jet::SHA256::tree_hash(root));
+    let fingerprint = jet::Lock::compute_fingerprint(&content_hash, &[], "");
+    (content_hash, fingerprint)
 }
 
 /// `jet registry keygen [--registry <name>] [--force]` — create the Ed25519 signing key

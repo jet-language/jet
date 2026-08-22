@@ -96,7 +96,7 @@ pub fn quarantine_invalid_entry(
             return Err(std::io::Error::other("invalid cache record identity"));
         }
         let graph = Closure::closure_graph_structure_unlocked(roots)?;
-        let Some(current) = list_unlocked(roots)
+        let Some(current) = list_unlocked(roots)?
             .into_iter()
             .find(|candidate| candidate.id == entry.id)
         else {
@@ -609,7 +609,12 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
                 .collect(),
         )?)
         .map_err(std::io::Error::other)?;
-        producer.bind_cache_provenance(&req.reference, &primary, &req.cache_identity);
+        producer.bind_cache_provenance(
+            &req.reference,
+            &primary,
+            &req.cache_identity,
+            &req.references,
+        );
         let mut entry = StoreEntry {
             id: id.clone(),
             name: req.name.clone(),

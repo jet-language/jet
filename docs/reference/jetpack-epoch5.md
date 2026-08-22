@@ -346,6 +346,7 @@ only when their digest matches.
 jet hangar export app --to app.hangar
 jet hangar verify app.hangar
 jet hangar import app.hangar
+jet hangar copy app --to /srv/jet-root --yes
 jet hangar repair app --from app.hangar
 ```
 
@@ -353,6 +354,9 @@ Unsigned archives are refused by default. `--allow-unsigned` is an explicit
 local migration escape and never becomes the default. Remote `ssh://` and
 `https://` copy destinations fail with a transport error; Jet does not claim
 to have transferred bytes when no verified transport is configured.
+
+`copy` verifies the source-signed archive before it changes the destination.
+The destination does not need a separate copy of the source Hangar key.
 
 Repair takes the Hangar lock for selection, verification, quarantine, and
 publication. It accepts a missing or corrupt canonical object only from a

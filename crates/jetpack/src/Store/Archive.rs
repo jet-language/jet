@@ -10,8 +10,8 @@
 use super::Closure;
 use super::{list_checked, parse_meta, Roots, StoreEntry};
 use crate::RuntimePolicy;
-use crate::TrustRoot::{Signature as TrustSignature, TrustKey};
-use crate::{Envelope, JSON, SHA256};
+use crate::TrustRoot::{os_random_bytes, Signature as TrustSignature, TrustKey};
+use crate::{Envelope, JSON};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -81,23 +81,18 @@ pub fn export_archive(
     include_closure: bool,
     key: Option<&str>,
 ) -> io::Result<(Vec<u8>, ArchiveReport)> {
-    let archive = build_archive(roots, target, include_closure)?;
-    let key = signing_key(roots, key, true)?;
-    let payload = archive.encode_unsigned()?;
-    let signed = Archive {
-        root_id: archive.root_id,
-        objects: archive.objects,
-        signature: Some(ArchiveSignature::from(key.sign(&payload))),
-    };
-    let bytes = signed.encode()?;
-    let root = target.to_string();
-    let report = ArchiveReport {
-        objects: signed.objects.len(),
-        bytes: bytes.len() as u64,
-        signed: true,
-        root,
-    };
-    Ok((bytes, report))
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let archive = build_archive(roots, target, include_closure)?;
+        let key = signing_key(roots, key, true)?;
+        let payload = archive.encode_unsigned()?;
+        let signed = Archive {
+            root_id: archive.root_id,
+            objects: archive.objects,
+            signature: Some(ArchiveSignature::from(key.sign(&payload))),
+        };
+        let bytes = signed.encode()?;
+        Ok((bytes, signed.report()))
+    })
 }
 
 /// Export a closure without a signer secret for an authenticated broker
@@ -108,10 +103,12 @@ pub fn export_unsigned_archive(
     target: &str,
     include_closure: bool,
 ) -> io::Result<Vec<u8>> {
-    // Keep the unsigned archive structurally complete.  `encode_unsigned`
-    // is the signature payload and intentionally omits the trailer; callers
-    // that hand bytes to the archive decoder need the explicit `None` trailer.
-    build_archive(roots, target, include_closure)?.encode()
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        // Keep the unsigned archive structurally complete.  `encode_unsigned`
+        // is the signature payload and intentionally omits the trailer; callers
+        // that hand bytes to the archive decoder need the explicit `None` trailer.
+        build_archive(roots, target, include_closure)?.encode()
+    })
 }
 
 /// Import a complete archive.  Objects are decoded and hashed in a private
@@ -129,11 +126,7 @@ pub fn import_archive(
     }
     let archive = Archive::decode(bytes)?;
     archive.verify_signature(roots, key, allow_unsigned)?;
-    let report = archive.report();
-    RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        import_archive_unlocked(roots, archive)
-    })?;
-    Ok(report)
+    import_verified_archive(roots, archive)
 }
 
 /// Import an archive returned by an authenticated shared-store broker.
@@ -151,7 +144,20 @@ pub fn import_broker_archive(roots: &Roots, bytes: &[u8]) -> io::Result<ArchiveR
         return Err(invalid("shared-store broker returned an unsigned archive"));
     }
     verify_archive_contents(roots, &archive)?;
-    let report = archive.report();
+    import_verified_archive(roots, archive)
+}
+
+fn import_verified_archive(roots: &Roots, archive: Archive) -> io::Result<ArchiveReport> {
+    let mut report = archive.report();
+    if let Some(root) = archive
+        .objects
+        .iter()
+        .find(|object| object.id == archive.root_id && !object.meta.is_empty())
+    {
+        let meta = parse_meta(&root.meta)
+            .ok_or_else(|| invalid("archive root has malformed package metadata"))?;
+        report.root = portable_entry(roots, root, &meta)?.id;
+    }
     RuntimePolicy::with_lock(&roots.root, "hangar", || {
         import_archive_unlocked(roots, archive)
     })?;
@@ -384,9 +390,10 @@ pub fn sign_archive(
 }
 
 /// Copy a closure to another local Jetpack root through the same archive path
-/// used by export/import. Remote archive transport is deliberately not
-/// inferred from a URL: the archive command has no host-owned transport
-/// binding, so SSH/HTTP endpoints fail before any bytes are claimed as copied.
+/// used by export/import. The source lock covers the complete archive snapshot;
+/// the destination imports the source-verified archive without requiring a
+/// second, unrelated local trust key. Remote archive transport is deliberately
+/// not inferred from a URL: SSH/HTTP endpoints fail before any bytes are copied.
 pub fn copy_archive(
     roots: &Roots,
     target: &str,
@@ -399,12 +406,12 @@ pub fn copy_archive(
             "Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive",
         ));
     }
-    let (bytes, _) = export_archive(roots, target, true, key)?;
-    let destination_root = Roots {
-        root: destination.to_path_buf(),
-        dev_mode: false,
-    };
-    import_archive(&destination_root, &bytes, key, false)
+    let (bytes, _) = RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        export_archive(roots, target, true, key)
+    })?;
+    let archive = Archive::decode(&bytes)?;
+    archive.verify_signature(roots, key, false)?;
+    import_verified_archive(&Roots::at(destination.to_path_buf()), archive)
 }
 
 /// Repair a corrupt live object from a signed archive.  No source archive is
@@ -747,6 +754,16 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                     )));
                 }
             }
+            if entry
+                .named_outputs
+                .values()
+                .any(|digest| !seen_digests.contains(digest))
+            {
+                return Err(invalid(&format!(
+                    "package record `{}` names a missing output",
+                    entry.id
+                )));
+            }
         }
 
         validate_import_destinations(roots, &package_records, &seen_digests)?;
@@ -813,13 +830,22 @@ fn portable_entry(
     meta: &super::ParsedMeta,
 ) -> io::Result<StoreEntry> {
     validate_id(&object.id)?;
+    let source_id = super::entry_id(&meta.name, &meta.version, &meta.reference, &meta.out);
+    if source_id != object.id {
+        return Err(invalid(&format!(
+            "archive package record `{}` does not match its metadata identity",
+            object.id
+        )));
+    }
     let destination = roots.hangar_dir().join("objects").join(&object.digest);
     let source_out = Path::new(&meta.out);
     let out = destination.to_string_lossy().into_owned();
     let bin = map_member_path(source_out, &meta.bin, &destination)?;
     let rlib = map_member_path(source_out, &meta.rlib, &destination)?;
+    let id = super::entry_id(&meta.name, &meta.version, &meta.reference, &out);
+    validate_id(&id)?;
     Ok(StoreEntry {
-        id: object.id.clone(),
+        id,
         name: meta.name.clone(),
         version: meta.version.clone(),
         reference: meta.reference.clone(),
@@ -927,6 +953,12 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
             if meta.envelope.output_hash != object.digest || !outputs.contains(&object.digest) {
                 return Err(invalid("archive package metadata has no matching output"));
             }
+            let source_id = super::entry_id(&meta.name, &meta.version, &meta.reference, &meta.out);
+            if source_id != object.id {
+                return Err(invalid(
+                    "archive package metadata does not match its identity",
+                ));
+            }
             if meta
                 .references
                 .iter()
@@ -935,6 +967,13 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
                 return Err(invalid(
                     "archive package metadata references a missing output",
                 ));
+            }
+            if meta
+                .named_outputs
+                .values()
+                .any(|digest| !outputs.contains(digest))
+            {
+                return Err(invalid("archive package metadata names a missing output"));
             }
         }
         Ok(())
@@ -949,7 +988,8 @@ fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
 }
 
 fn select_entry_unlocked(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
-    select_entry_from(&super::list_unlocked(roots), target)
+    let entries = super::list_unlocked(roots)?;
+    select_entry_from(&entries, target)
 }
 
 fn select_entry_from(entries: &[StoreEntry], target: &str) -> io::Result<StoreEntry> {
@@ -1282,7 +1322,15 @@ fn validate_import_destinations(
                 )))
             }
             Ok(_) => {
-                let meta = fs::read_to_string(destination.join("meta.json"))?;
+                let meta_path = destination.join("meta.json");
+                let metadata = fs::symlink_metadata(&meta_path)?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(invalid(&format!(
+                        "existing Hangar record `{}` has an unsafe meta.json",
+                        entry.id
+                    )));
+                }
+                let meta = fs::read_to_string(meta_path)?;
                 if meta != entry.meta_json() {
                     return Err(invalid(&format!(
                         "existing Hangar record `{}` conflicts with the archive",
@@ -1328,7 +1376,7 @@ fn signing_key(roots: &Roots, requested: Option<&str>, create: bool) -> io::Resu
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let secret = entropy(roots);
+        let secret = entropy()?;
         write_atomic(&path, &secret)?;
         set_mode(&path, 0o600)?;
     }
@@ -1368,32 +1416,10 @@ fn decode_secret(bytes: &[u8]) -> io::Result<Vec<u8>> {
     Ok(trimmed.to_vec())
 }
 
-fn entropy(roots: &Roots) -> Vec<u8> {
-    #[cfg(unix)]
-    if let Ok(mut file) = fs::File::open("/dev/urandom") {
-        let mut bytes = [0u8; 32];
-        if file.read_exact(&mut bytes).is_ok() {
-            return bytes.to_vec();
-        }
-    }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos().to_string())
-        .unwrap_or_else(|_| "0".to_string());
-    let material = format!(
-        "jet-hangar-key-v1\n{}\n{}\n{}",
-        roots.root.display(),
-        std::process::id(),
-        now
-    );
-    let digest = SHA256::sha256_hex(material.as_bytes());
-    let mut out = Vec::new();
-    for pair in digest.as_bytes().chunks_exact(2) {
-        let high = hex_value(pair[0]).unwrap_or(0);
-        let low = hex_value(pair[1]).unwrap_or(0);
-        out.push((high << 4) | low);
-    }
-    out
+fn entropy() -> io::Result<Vec<u8>> {
+    os_random_bytes::<32>()
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| io::Error::new(error.kind(), format!("archive signer key: {error}")))
 }
 
 impl ArchiveSignature {
@@ -1897,10 +1923,11 @@ fn fsync_directory(path: &Path) -> io::Result<()> {
 }
 
 fn remove_tree(path: &Path) -> io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
     if metadata.file_type().is_symlink() {
         fs::remove_file(path)
     } else if metadata.is_dir() {
@@ -1980,6 +2007,26 @@ mod tests {
         assert!(validate_relative("../outside").is_err());
         assert!(validate_relative("a/../../outside").is_err());
         assert!(validate_relative("a\\outside").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_tree_removes_dangling_symlinks_without_following_them() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-archive-remove-tree-{}-{}",
+            std::process::id(),
+            unique_suffix()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let outside = root.join("outside");
+        let link = root.join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        remove_tree(&link).unwrap();
+
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(!outside.exists());
+        let _ = remove_tree(&root);
     }
 
     #[test]

@@ -41,6 +41,15 @@ Confirmed candidates need a root-cause fix, hostile regression proof, and an ind
 
 Rejected and out-of-scope candidates need source-backed reasons.
 
+## Current tree follow-up (2026-08-22)
+
+The package-trust key-generation candidates are addressed in the current tree:
+Hangar, native cache, and shared-store trust material now use the shared bounded
+OS-CSPRNG helper in `crates/jetpack/src/TrustRoot.rs` and fail closed when it is
+unavailable. The historical candidate counts and unvalidated status above remain
+unchanged; this note records the current source disposition for the package-trust
+slice and does not replace independent security validation.
+
 ## tower-control-plane
 
 ### Tower authorization, CSRF, and document containment

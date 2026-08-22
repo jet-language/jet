@@ -11,7 +11,7 @@ use super::Tuf::verify_registry_package;
 use super::Tier::{RegistryTier, community_gate_error};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1161,7 +1161,7 @@ pub fn publish_artifact(
         ));
     }
     validate_registry_metadata_file(source, name, version)?;
-    let actual = SHA256::tree_hash(source);
+    let actual = registry_artifact_hash(source)?;
     if !expected_hash.is_empty() && actual != expected_hash {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -1178,7 +1178,7 @@ pub fn publish_artifact(
         }
     }
     if destination.is_dir() {
-        if SHA256::tree_hash(&destination) != actual {
+        if registry_artifact_hash(&destination)? != actual {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 "registry artifact already exists with conflicting source bytes",
@@ -1218,7 +1218,7 @@ pub fn publish_artifact(
     }
     let result = (|| {
         copy_artifact_tree(source, &staging)?;
-        if SHA256::tree_hash(&staging) != actual {
+        if registry_artifact_hash(&staging)? != actual {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "staged registry artifact does not match its source hash",
@@ -1835,7 +1835,9 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
             format!("registry has no source artifact for {} {}", entry.name, entry.version),
         ));
     }
-    if !entry.content_hash.is_empty() && SHA256::tree_hash(&path) != entry.content_hash {
+    if !entry.content_hash.is_empty()
+        && registry_artifact_hash(&path)? != entry.content_hash
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("registry source artifact for {} {} failed its content hash", entry.name, entry.version),
@@ -1849,13 +1851,89 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
 // Registry package dependency metadata
 // ──────────────────────────────────────────────
 
-/// Optional metadata shipped inside an immutable registry artifact. The
-/// source tree hash binds this file to the index entry; the resolver therefore
-/// never mixes dependency meaning from one artifact with bytes from another.
-/// The wire shape reuses the provider registry JSON vocabulary and does not
-/// add a second Jet manifest syntax.
 const REGISTRY_PACKAGE_METADATA_FILE: &str = "registry.json";
 const MAX_REGISTRY_PACKAGE_METADATA_BYTES: u64 = 1024 * 1024;
+
+/// Compute the registry content identity. Ordinary source identity remains
+/// the foundation `tree_hash`; registry metadata is the one additional
+/// package input because it changes dependency meaning and must be immutable
+/// with the published artifact. The wire shape reuses the provider registry
+/// JSON vocabulary and does not add a second Jet manifest syntax.
+pub fn registry_artifact_hash(root: &Path) -> io::Result<String> {
+    let mut entries = Vec::new();
+    collect_registry_identity_files(root, root, &mut entries)?;
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut input = Vec::new();
+    for (relative, content) in entries {
+        input.extend_from_slice(relative.as_bytes());
+        input.push(0);
+        input.extend_from_slice(&(content.len() as u64).to_be_bytes());
+        input.extend_from_slice(&content);
+    }
+    Ok(format!("sha256-{}", SHA256::sha256_hex(&input)))
+}
+
+fn collect_registry_identity_files(
+    dir: &Path,
+    root: &Path,
+    out: &mut Vec<(String, Vec<u8>)>,
+) -> io::Result<()> {
+    let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "build" || name == "target" {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            collect_registry_identity_files(&path, root, out)?;
+            continue;
+        }
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("registry source contains an unsupported node `{}`", path.display()),
+            ));
+        }
+        if !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("registry source contains an unsupported node `{}`", path.display()),
+            ));
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let is_registry_metadata = name == REGISTRY_PACKAGE_METADATA_FILE;
+        if path.extension().and_then(|extension| extension.to_str())
+            == Some(crate::Syntax::FILE_EXT)
+            || is_registry_metadata
+        {
+            let content = if is_registry_metadata {
+                let mut content = Vec::new();
+                std::fs::File::open(&path)?
+                    .take(MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1)
+                    .read_to_end(&mut content)?;
+                if content.len() as u64 > MAX_REGISTRY_PACKAGE_METADATA_BYTES {
+                    return Err(invalid_registry_metadata(
+                        "registry.json exceeds its size limit",
+                    ));
+                }
+                content
+            } else {
+                std::fs::read(&path)?
+            };
+            out.push((relative, content));
+        }
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegistryDependency {

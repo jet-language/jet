@@ -2500,7 +2500,7 @@ fn external_root_targets_unlocked(
     reference: &str,
     graph: &Closure::ClosureGraph,
 ) -> std::io::Result<Vec<String>> {
-    let entry = super::list_unlocked(roots)
+    let entry = super::list_unlocked(roots)?
         .into_iter()
         .find(|entry| entry.reference == reference)
         .ok_or_else(|| {

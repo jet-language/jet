@@ -4,12 +4,15 @@
 //! values into these facts; Jetpack consumes them without reparsing source or
 //! inventing a second policy language.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::AST::CtKey;
 use crate::Comptime::CtValue;
 use jet_pkg_model::ProviderFacts::ProviderFacts;
+
+const MAX_RESOLVER_NODES: usize = 100_000;
+const RESOLVER_BUDGET_NAME: &str = "__jet_resolver_budget__:";
 
 /// Return the fully-qualified name of a first-party integration call.
 ///
@@ -772,6 +775,11 @@ impl std::fmt::Display for PackageProfileError {
         match self {
             Self::Missing(name) => write!(f, "package generation '{name}' does not exist"),
             Self::Cycle(names) => write!(f, "package generation inheritance cycle: {}", names.join(" -> ")),
+            Self::Conflict { name } if name.starts_with(RESOLVER_BUDGET_NAME) => write!(
+                f,
+                "package generation resolver exceeds {} entries",
+                name.trim_start_matches(RESOLVER_BUDGET_NAME)
+            ),
             Self::Conflict { name } => write!(f, "package generation fact '{name}' conflicts"),
         }
     }
@@ -930,12 +938,16 @@ impl PackageProfileSet {
                     name: profile.name.clone(),
                 });
             }
+            let mut sources = existing.sources.iter().cloned().collect::<BTreeSet<_>>();
             for source in profile.sources {
-                if !existing.sources.iter().any(|item| item == &source) {
+                if sources.insert(source.clone()) {
                     existing.sources.push(source);
                 }
             }
             return Ok(());
+        }
+        if self.profiles.len() >= MAX_RESOLVER_NODES {
+            return Err(resolver_budget_error());
         }
         self.profiles.insert(profile.name.clone(), profile);
         Ok(())
@@ -947,8 +959,12 @@ impl PackageProfileSet {
 
     pub fn resolve_many(&self, names: &[String]) -> Result<ResolvedPackageProfile, PackageProfileError> {
         let mut selected_profiles = Vec::new();
+        let mut selected_seen = BTreeSet::new();
         for name in names {
-            if !selected_profiles.iter().any(|item| item == name) {
+            if selected_seen.insert(name.clone()) {
+                if selected_profiles.len() >= MAX_RESOLVER_NODES {
+                    return Err(resolver_budget_error());
+                }
                 selected_profiles.push(name.clone());
             }
         }
@@ -957,66 +973,116 @@ impl PackageProfileSet {
             selected_profiles,
             ..Default::default()
         };
+        let mut state = BTreeMap::<String, u8>::new();
         let mut stack = Vec::new();
+        let mut frames = Vec::<(String, usize)>::new();
+        let mut source_seen = BTreeSet::new();
+        let mut declared_by_seen = BTreeSet::new();
+        let mut package_indices = BTreeMap::<String, usize>::new();
         for name in resolved.selected_profiles.clone() {
-            self.resolve_into(&name, &mut stack, &mut resolved)?;
+            if state.get(&name) == Some(&2) {
+                continue;
+            }
+            frames.push((name, 0));
+            while !frames.is_empty() {
+                let current = frames
+                    .last()
+                    .map(|(name, _)| name.clone())
+                    .expect("resolver frame exists");
+                if !state.contains_key(&current) {
+                    if !self.profiles.contains_key(&current) {
+                        return Err(PackageProfileError::Missing(current));
+                    }
+                    if state.len() >= MAX_RESOLVER_NODES {
+                        return Err(resolver_budget_error());
+                    }
+                    state.insert(current.clone(), 1);
+                    stack.push(current.clone());
+                }
+                let parent = {
+                    let (_, next_parent) = frames.last_mut().expect("resolver frame exists");
+                    let parent = self
+                        .profiles
+                        .get(&current)
+                        .and_then(|profile| profile.extends.get(*next_parent))
+                        .cloned();
+                    *next_parent = (*next_parent).saturating_add(1);
+                    parent
+                };
+                let Some(parent) = parent else {
+                    frames.pop();
+                    stack.pop();
+                    state.insert(current.clone(), 2);
+                    let profile = self
+                        .profiles
+                        .get(&current)
+                        .expect("validated resolver profile exists");
+                    resolved.applied.push(current.clone());
+                    for source in &profile.sources {
+                        if source_seen.insert(source.clone()) {
+                            if resolved.sources.len() >= MAX_RESOLVER_NODES {
+                                return Err(resolver_budget_error());
+                            }
+                            resolved.sources.push(source.clone());
+                        }
+                    }
+                    for raw in &profile.packages {
+                        let package_index = if let Some(index) = package_indices.get(raw) {
+                            *index
+                        } else {
+                            if resolved.packages.len() >= MAX_RESOLVER_NODES {
+                                return Err(resolver_budget_error());
+                            }
+                            let index = resolved.packages.len();
+                            package_indices.insert(raw.clone(), index);
+                            resolved.packages.push(PackageProfilePackage {
+                                raw: raw.clone(),
+                                declared_by: Vec::new(),
+                            });
+                            index
+                        };
+                        if declared_by_seen.insert((raw.clone(), current.clone())) {
+                            resolved.packages[package_index]
+                                .declared_by
+                                .push(current.clone());
+                        }
+                    }
+                    for (path, provider) in &profile.collisions {
+                        if let Some(existing) = resolved.collisions.get(path) {
+                            if existing != provider {
+                                return Err(PackageProfileError::Conflict {
+                                    name: format!("{current}.collisions.{path}"),
+                                });
+                            }
+                        } else {
+                            if resolved.collisions.len() >= MAX_RESOLVER_NODES {
+                                return Err(resolver_budget_error());
+                            }
+                            resolved.collisions.insert(path.clone(), provider.clone());
+                        }
+                    }
+                    continue;
+                };
+                match state.get(&parent).copied() {
+                    Some(1) => {
+                        let start = stack.iter().position(|item| item == &parent).unwrap_or(0);
+                        let mut cycle = stack[start..].to_vec();
+                        cycle.push(parent);
+                        return Err(PackageProfileError::Cycle(cycle));
+                    }
+                    Some(2) => {}
+                    None => frames.push((parent, 0)),
+                    Some(_) => unreachable!("resolver state is binary"),
+                }
+            }
         }
         Ok(resolved)
     }
+}
 
-    fn resolve_into(
-        &self,
-        name: &str,
-        stack: &mut Vec<String>,
-        resolved: &mut ResolvedPackageProfile,
-    ) -> Result<(), PackageProfileError> {
-        if stack.iter().any(|item| item == name) {
-            let start = stack.iter().position(|item| item == name).unwrap_or(0);
-            let mut cycle = stack[start..].to_vec();
-            cycle.push(name.to_string());
-            return Err(PackageProfileError::Cycle(cycle));
-        }
-        let profile = self
-            .profiles
-            .get(name)
-            .ok_or_else(|| PackageProfileError::Missing(name.to_string()))?;
-        stack.push(name.to_string());
-        for parent in &profile.extends {
-            self.resolve_into(parent, stack, resolved)?;
-        }
-        if !resolved.applied.iter().any(|item| item == name) {
-            resolved.applied.push(name.to_string());
-        }
-        for source in &profile.sources {
-            if !resolved.sources.iter().any(|item| item == source) {
-                resolved.sources.push(source.clone());
-            }
-        }
-        for raw in &profile.packages {
-            if let Some(existing) = resolved.packages.iter_mut().find(|item| item.raw == *raw) {
-                if !existing.declared_by.iter().any(|item| item == name) {
-                    existing.declared_by.push(name.to_string());
-                }
-            } else {
-                resolved.packages.push(PackageProfilePackage {
-                    raw: raw.clone(),
-                    declared_by: vec![name.to_string()],
-                });
-            }
-        }
-        for (path, provider) in &profile.collisions {
-            if let Some(existing) = resolved.collisions.get(path) {
-                if existing != provider {
-                    return Err(PackageProfileError::Conflict {
-                        name: format!("{name}.collisions.{path}"),
-                    });
-                }
-            } else {
-                resolved.collisions.insert(path.clone(), provider.clone());
-            }
-        }
-        stack.pop();
-        Ok(())
+fn resolver_budget_error() -> PackageProfileError {
+    PackageProfileError::Conflict {
+        name: format!("{RESOLVER_BUDGET_NAME}{MAX_RESOLVER_NODES}"),
     }
 }
 
@@ -2729,6 +2795,31 @@ mod tests {
             ..Default::default()
         }).unwrap();
         assert!(matches!(set.resolve("a"), Err(PresetError::Cycle(_))));
+    }
+
+    #[test]
+    fn package_profile_resolver_handles_its_full_depth_budget_iteratively() {
+        let mut set = PackageProfileSet::default();
+        for index in 0..MAX_RESOLVER_NODES {
+            let name = format!("profile-{index}");
+            let extends = (index > 0).then(|| format!("profile-{}", index - 1));
+            set.insert_checked(PackageProfileSpec {
+                name,
+                extends: extends.into_iter().collect(),
+                ..Default::default()
+            })
+            .expect("the resolver budget must admit its declared limit");
+        }
+
+        let resolved = set.resolve(&format!("profile-{}", MAX_RESOLVER_NODES - 1));
+        assert_eq!(resolved.unwrap().applied.len(), MAX_RESOLVER_NODES);
+        let error = set
+            .insert_checked(PackageProfileSpec {
+                name: "profile-overflow".to_string(),
+                ..Default::default()
+            })
+            .expect_err("the resolver must fail closed above its scale budget");
+        assert!(error.to_string().contains("100000"));
     }
 
     #[test]

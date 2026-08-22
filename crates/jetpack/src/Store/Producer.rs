@@ -1,7 +1,7 @@
 use super::{CacheExpectation, CacheIdentity, Closure, Roots, StoreEntry};
 use crate::Comptime::Build::BuildPlanReplay;
 use crate::SHA256;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const HEADER: &str = "jet-producer-record-v1";
 /// Build the canonical producer record shared by every store ingestion phase.
@@ -66,6 +66,7 @@ pub(crate) fn refresh_nix_lock_digest(
         &entry.reference,
         &entry.envelope.output_hash,
         &entry.cache_identity,
+        &entry.references,
     );
     super::super::Provider::refresh_provider_facts(&mut producer, &entry.reference)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -154,6 +155,7 @@ impl ProducerRecord {
         reference: &str,
         output: &str,
         identity: &CacheIdentity,
+        references: &[String],
     ) {
         // Providers keep the detailed recipe in the replay plan. The cache
         // admission fact is the stable recipe fingerprint shared by the
@@ -174,7 +176,7 @@ impl ProducerRecord {
         );
         self.facts.insert(
             "cache.action".into(),
-            cache_action_identity(self, reference, identity),
+            cache_action_identity(self, reference, identity, references),
         );
         self.facts.insert("cache.output".into(), output.into());
         self.facts
@@ -272,8 +274,9 @@ pub(crate) fn cache_action_identity(
     producer: &ProducerRecord,
     reference: &str,
     identity: &CacheIdentity,
+    references: &[String],
 ) -> String {
-    let mut canonical = b"jet-slsa-action-v1\0".to_vec();
+    let mut canonical = b"jet-slsa-action-v2\0".to_vec();
     let plan = producer.plan.encode();
     for value in [
         reference,
@@ -288,6 +291,18 @@ pub(crate) fn cache_action_identity(
     ] {
         canonical.extend_from_slice(&(value.len() as u64).to_be_bytes());
         canonical.extend_from_slice(value.as_bytes());
+    }
+    let closure = references
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    canonical.extend_from_slice(&(closure.len() as u64).to_be_bytes());
+    // BTreeSet iteration is canonical. Keep the set separate from the frame
+    // loop above so the signed action cannot silently change with dependency
+    // ordering or duplicate input edges.
+    for reference in closure {
+        canonical.extend_from_slice(&(reference.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(reference.as_bytes());
     }
     format!("sha256:{}", SHA256::sha256_hex(&canonical))
 }
@@ -559,5 +574,30 @@ mod tests {
         assert!(ProducerRecord::decode(&format!("{encoded}\n")).is_err());
         let duplicate = encoded.replacen("checksum\t", "70726f7669646572\t78\nchecksum\t", 1);
         assert!(ProducerRecord::decode(&duplicate).is_err());
+    }
+
+    #[test]
+    fn cache_action_identity_binds_a_canonical_realized_closure() {
+        let producer = record();
+        let identity = CacheIdentity {
+            source_fingerprint: "source".into(),
+            recipe_fingerprint: "recipe".into(),
+            policy_fingerprint: "policy".into(),
+            platform: "x86_64-linux".into(),
+        };
+        let unordered = vec![
+            "sha256:dependency-b".into(),
+            "sha256:dependency-a".into(),
+            "sha256:dependency-a".into(),
+        ];
+        let sorted = vec!["sha256:dependency-a".into(), "sha256:dependency-b".into()];
+        let without_closure = cache_action_identity(&producer, "ref", &identity, &[]);
+        let with_closure = cache_action_identity(&producer, "ref", &identity, &unordered);
+
+        assert_ne!(without_closure, with_closure);
+        assert_eq!(
+            with_closure,
+            cache_action_identity(&producer, "ref", &identity, &sorted)
+        );
     }
 }

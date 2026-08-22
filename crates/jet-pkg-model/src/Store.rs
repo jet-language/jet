@@ -13,6 +13,7 @@
 use crate::JSON::{self, JSONValue};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -22,6 +23,8 @@ const HANGAR_SUBDIR: &str = "Hangar";
 #[cfg(not(any(target_os = "macos", windows)))]
 const HANGAR_SUBDIR: &str = "hangar";
 const LEGACY_HANGAR_SUBDIR: &str = "hangar";
+const MAX_STORE_OBJECTS: usize = 1_000_000;
+const MAX_STORE_META_BYTES: u64 = 1 << 20;
 
 /// The resolved root, plus whether we are using the default user-owned root.
 pub struct Roots {
@@ -275,17 +278,80 @@ pub struct CacheIdentity {
 
 /// Read all recorded store entries (skipping malformed ones quietly).
 pub fn list(roots: &Roots) -> Vec<StoreEntry> {
+    list_impl(roots, false).unwrap_or_default()
+}
+
+/// Read all recorded store entries and fail closed on a malformed or
+/// over-budget projection. The engine uses this boundary for integrity-
+/// sensitive operations; the infallible `list` above remains a read-only
+/// compatibility view for the driver.
+pub fn list_checked(roots: &Roots) -> io::Result<Vec<StoreEntry>> {
+    list_impl(roots, true)
+}
+
+fn list_impl(roots: &Roots, strict: bool) -> io::Result<Vec<StoreEntry>> {
     let mut out = Vec::new();
     let store = roots.hangar_dir();
-    let Ok(rd) = fs::read_dir(&store) else {
-        return out;
+    let rd = match fs::read_dir(&store) {
+        Ok(rd) => rd,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(out),
+        Err(_error) if !strict => return Ok(out),
+        Err(error) => return Err(error),
     };
-    for ent in rd.flatten() {
-        let meta = ent.path().join("meta.json");
-        let Ok(text) = fs::read_to_string(&meta) else {
-            continue;
+    let mut object_count = 0usize;
+    for ent in rd {
+        let ent = match ent {
+            Ok(ent) => ent,
+            Err(_error) if !strict => continue,
+            Err(error) => return Err(error),
         };
-        if let Some(parsed) = parse_meta(&text) {
+        let entry_type = match ent.file_type() {
+            Ok(entry_type) => entry_type,
+            Err(_error) if !strict => continue,
+            Err(error) => return Err(error),
+        };
+        if !entry_type.is_dir() {
+            continue;
+        }
+        let meta = ent.path().join("meta.json");
+        let metadata = match fs::symlink_metadata(&meta) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_error) if !strict => continue,
+            Err(error) => return Err(error),
+        };
+        if !metadata.file_type().is_file() {
+            if strict {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Hangar metadata `{}` is not a regular file", meta.display()),
+                ));
+            }
+            continue;
+        }
+        object_count = object_count.saturating_add(1);
+        if object_count > MAX_STORE_OBJECTS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Hangar contains more than {MAX_STORE_OBJECTS} store objects"),
+            ));
+        }
+        let text = match read_bounded_text(&meta, MAX_STORE_META_BYTES) {
+            Ok(text) => text,
+            Err(_error) if !strict => continue,
+            Err(error) => return Err(error),
+        };
+        let parsed = match parse_meta(&text) {
+            Some(parsed) => parsed,
+            None if !strict => continue,
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid Hangar metadata `{}`", meta.display()),
+                ));
+            }
+        };
+        {
             out.push(StoreEntry {
                 id: ent.file_name().to_string_lossy().into_owned(),
                 name: parsed.name,
@@ -307,7 +373,32 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
         }
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
-    out
+    Ok(out)
+}
+
+fn read_bounded_text(path: &Path, limit: u64) -> io::Result<String> {
+    if fs::metadata(path)?.len() > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Hangar metadata `{}` exceeds {limit} bytes", path.display()),
+        ));
+    }
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Hangar metadata `{}` exceeds {limit} bytes", path.display()),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Hangar metadata `{}` is not UTF-8", path.display()),
+        )
+    })
 }
 
 /// A `meta.json` record parsed back into typed fields. Public so the

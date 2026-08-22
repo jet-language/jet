@@ -567,6 +567,12 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
         &root_reference,
         "Cargo.toml",
     );
+    if cargo_lock.trim().is_empty() {
+        plan.record_provider_finding(
+            "Cargo.lock".to_string(),
+            "Cargo.lock is missing; dependency identities remain unresolved".to_string(),
+        );
+    }
     let native_document = format!("Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}");
     for (section, dev, kind, platform) in cargo_dependency_sections(cargo_toml) {
         for dep in dependency_keys(cargo_toml, &section) {
@@ -921,11 +927,52 @@ pub fn merge_generated_file(
 }
 
 fn toml_string(raw: &str, key: &str) -> Option<String> {
+    let mut section = String::new();
     raw.lines().find_map(|line| {
         let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line.trim_matches(['[', ']']).trim().to_string();
+            return None;
+        }
+        if section != "package" {
+            return None;
+        }
         let (k, v) = line.split_once('=')?;
-        (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
+        (k.trim() == key).then(|| toml_value_text(v))
     })
+}
+
+fn toml_value_text(value: &str) -> String {
+    let mut quoted = None;
+    let mut escaped = false;
+    for (index, character) in value.char_indices() {
+        match quoted {
+            Some('"') if character == '"' && !escaped => quoted = None,
+            Some('\'') if character == '\'' => quoted = None,
+            None if character == '"' || character == '\'' => quoted = Some(character),
+            None if character == '#' => return unquote_toml_value(&value[..index]),
+            _ => {}
+        }
+        escaped = character == '\\' && !escaped;
+        if character != '\\' {
+            escaped = false;
+        }
+    }
+    unquote_toml_value(value)
+}
+
+fn unquote_toml_value(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2
+        && matches!(
+            (value.as_bytes().first(), value.as_bytes().last()),
+            (Some(b'"'), Some(b'"')) | (Some(b'\''), Some(b'\''))
+        )
+    {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn cargo_dependency_sections(raw: &str) -> Vec<(String, bool, &'static str, Option<String>)> {
@@ -1086,7 +1133,22 @@ fn lock_field(raw: &str, package: &str, field: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::import_nix_facts;
+    use super::{import_cargo, import_nix_facts};
+
+    #[test]
+    fn cargo_import_keeps_commented_root_identity_and_reports_missing_lock() {
+        let plan = import_cargo(
+            "[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n",
+            "",
+        );
+        assert!(plan
+            .provider_facts
+            .contains_key("app#version=1.0.0@cargo"));
+        assert!(plan
+            .todos
+            .iter()
+            .any(|todo| todo.source_path == "Cargo.lock" && todo.message.contains("missing")));
+    }
 
     #[test]
     fn nix_import_production_path_retains_exact_provider_facts() {

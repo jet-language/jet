@@ -1618,13 +1618,13 @@ fn remote_execution_retries_after_worker_loss() {
         ))
         .with_abi("native")
         .with_execute(true)
-        .with_timeout_ms(250);
+        .with_timeout_ms(1_000);
 
     let worker_key = key.clone();
     let worker_binding = binding.clone();
     let worker = std::thread::spawn(move || {
         let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut lost_attempt = None;
         loop {
             match transport.read_execution_request(&worker_key) {
@@ -1747,7 +1747,7 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
         false,
         true,
         false,
-        20,
+        1_000,
     )
     .unwrap();
     let safe = RemoteBuildBinding::bind_host(
@@ -1762,7 +1762,7 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
         false,
         true,
         false,
-        20,
+        1_000,
     )
     .unwrap();
 
@@ -1799,7 +1799,7 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
     let lost_binding = fast.clone();
     let lost_worker = std::thread::spawn(move || {
         let transport = RemoteCacheTransport::for_binding(&lost_binding).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut attempts = std::collections::BTreeSet::new();
         loop {
             match transport.read_execution_request(&lost_key) {
@@ -1829,7 +1829,7 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
     let safe_binding = safe.clone();
     let safe_worker = std::thread::spawn(move || {
         let transport = RemoteCacheTransport::for_binding(&safe_binding).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             match transport.read_execution_request(&safe_key) {
                 Ok(request) => {

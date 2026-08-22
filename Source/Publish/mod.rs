@@ -490,7 +490,8 @@ mod tests {
         let diagnostic = e2609("mylib", "1.0.3", 86_500, SourceClass::ThirdParty);
         assert_eq!(diagnostic.code, "E2609");
         assert!(diagnostic.what.contains("mylib#1.0.3"));
-        assert!(diagnostic.fix.contains("package#version"));
+        assert!(diagnostic.fix.contains("policy.exceptions"));
+        assert!(diagnostic.fix.contains("mylib#1.0.3"));
     }
 
     #[test]

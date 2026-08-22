@@ -61,21 +61,21 @@ pub(crate) use Reproducibility::{
     reproducibility_blocked,
 };
 
-fn list_unlocked(roots: &Roots) -> Vec<StoreEntry> {
-    jet_pkg_model::Store::list(roots)
+fn list_unlocked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
+    jet_pkg_model::Store::list_checked(roots)
 }
 
 /// Inspect package projections without taking a lock or replaying journals.
 /// Health/reporting paths use this so observation cannot create or repair
 /// store state.
 pub(crate) fn list_read_only(roots: &Roots) -> Vec<StoreEntry> {
-    list_unlocked(roots)
+    jet_pkg_model::Store::list(roots)
 }
 
 pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         Closure::recover_closure_journal_unlocked(roots)?;
-        Ok(list_unlocked(roots))
+        list_unlocked(roots)
     })
 }
 
@@ -466,7 +466,7 @@ fn record_verified_mode(
             BTreeMap::from([("reference".into(), reference.to_string())]),
         )?)
         .map_err(std::io::Error::other)?;
-        producer.bind_cache_provenance(reference, &envelope.output_hash, cache_identity);
+        producer.bind_cache_provenance(reference, &envelope.output_hash, cache_identity, &[]);
         super::Provider::refresh_provider_facts(&mut producer, reference)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let mut entry = StoreEntry {
@@ -589,6 +589,7 @@ fn record_realized_mode_unlocked(
         &realized.reference,
         &realized.envelope.output_hash,
         &realized.cache_identity,
+        &realized.references,
     );
     super::Provider::refresh_provider_facts(&mut producer, &realized.reference)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -1127,7 +1128,12 @@ fn producer_authority_verified(
         && provenance.source == producer.immutable_source
         && provenance.builder == builder
         && provenance.action
-            == cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
+            == cache_action_identity(
+                &producer,
+                &entry.reference,
+                &entry.cache_identity,
+                &entry.references,
+            )
         && provenance.output == entry.envelope.output_hash
         && provenance.platform == expectation.identity.platform
         && provenance.sandbox == "sandbox:policy-bound"
@@ -1568,7 +1574,7 @@ pub fn find_verified_by_reference(
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
     let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
     let graph = Closure::closure_graph_structure_unlocked(roots)?;
-    let entry = list_unlocked(roots)
+    let entry = list_unlocked(roots)?
         .into_iter()
         .filter(|entry| entry.reference == reference)
         .filter(|entry| {
@@ -2480,7 +2486,7 @@ fn restore_substituted_candidate(
     stage: &Path,
 ) -> std::io::Result<bool> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        if list_unlocked(roots)
+        if list_unlocked(roots)?
             .into_iter()
             .any(|entry| entry.id == candidate.id)
         {

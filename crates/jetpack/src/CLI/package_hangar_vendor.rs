@@ -1070,12 +1070,23 @@ pub(super) fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 /// `jetpack audit` — read the build provenance of every realized object
-/// (D-BUILDSCOPE1 audit contract, T4): source ref + recipe id, output hash,
-/// platform, and locked source hash. **Executes nothing** — a pure read of the
-/// hangar records, so it is safe to run against untrusted builds.
+/// (D-BUILDSCOPE1 audit contract, T4): source ref + recipe/action identity,
+/// output hash, platform, closure, and signed producer facts. **Executes
+/// nothing** — a pure read of the hangar records, so it is safe to run against
+/// untrusted builds.
 pub(super) fn cmd_audit(theme: &Theme) -> i32 {
     let roots = Store::resolve();
-    let entries = Store::list(&roots);
+    let entries = match Store::list_checked(&roots) {
+        Ok(entries) => entries,
+        Err(error) => {
+            theme.error(
+                "could not read Hangar provenance",
+                &error.to_string(),
+                "repair the Hangar journal or metadata, then retry audit.",
+            );
+            return 2;
+        }
+    };
     if entries.is_empty() {
         theme.status("audit: hangar is empty, nothing to read.");
         return 0;
@@ -1102,11 +1113,22 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
             "  platform:    {}",
             theme.gray(&e.envelope.platform)
         ));
+        theme.detail(&format!(
+            "  closure:     {}",
+            if e.references.is_empty() {
+                "<none recorded>".to_string()
+            } else {
+                e.references.join(",")
+            }
+        ));
         match Store::ProducerRecord::decode(&e.producer_record) {
             Ok(producer) => {
                 for (label, key) in [
+                    ("source", "cache.source"),
+                    ("recipe", "action.recipe"),
                     ("action", "cache.action"),
                     ("builder", "cache.builder"),
+                    ("sandbox", "cache.sandbox"),
                     ("policy", "cache.policy"),
                     ("reproducibility", "cache.reproducibility"),
                     ("toolchain", "toolchain_facts"),

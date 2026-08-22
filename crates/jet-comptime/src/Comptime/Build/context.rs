@@ -10,7 +10,7 @@ use super::handles::{
     ProbeHandle, ProbeId, PublishTarget, SigningIdentityHandle, SigningIdentityId, TargetId,
     TargetRef, TestTarget, ToolchainHandle, ToolchainId,
 };
-use super::plan_graph::BuildPlan;
+use super::plan_graph::{BuildPlan, MAX_ACTIONS};
 use super::plugins_modules::{
     BuildGeneratedModule, BuildPlugin, GeneratedModuleSpec, PackagedPluginContribution,
     PackagedPluginTarget, PluginApplication, PluginContribution, PluginTargetSpec,
@@ -455,6 +455,11 @@ impl BuildContext {
         &self,
         wire: PackagedPluginContribution,
     ) -> Result<PluginContribution, BuildError> {
+        if wire.actions.len() > MAX_ACTIONS.saturating_sub(self.actions.len()) {
+            return Err(BuildError::PackagedPlugin(format!(
+                "action graph exceeds {MAX_ACTIONS} actions"
+            )));
+        }
         let action_names = wire
             .actions
             .iter()
@@ -889,6 +894,11 @@ impl BuildContext {
         spec: ActionSpec,
         plugin: Option<PluginHandle>,
     ) -> Result<ActionHandle, BuildError> {
+        if self.actions.len() >= MAX_ACTIONS {
+            return Err(BuildError::PackagedPlugin(format!(
+                "action graph exceeds {MAX_ACTIONS} actions"
+            )));
+        }
         let name = check_name(name.into(), NameKind::Action)?;
         if self.action_names.contains(&name) {
             return Err(BuildError::DuplicateActionName(name));
@@ -991,6 +1001,11 @@ impl BuildContext {
     }
 
     fn snapshot(&self, default: Option<TargetRef>) -> Result<BuildPlan, BuildError> {
+        if self.actions.len() > MAX_ACTIONS {
+            return Err(BuildError::PackagedPlugin(format!(
+                "action graph exceeds {MAX_ACTIONS} actions"
+            )));
+        }
         for target in &self.targets {
             self.validate_refs(&target.deps, &target.actions)?;
         }

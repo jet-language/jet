@@ -174,8 +174,25 @@ fails closed without a partial store entry. The focused lane also runs with an
 empty tool directory and rejects platform values outside the typed tier-1
 matrix, so installed host tools and unsupported hosts cannot create a
 false-green result.
+Card #954 supplies the scale boundaries used by that gate: checked Hangar
+metadata/listing and closure journals are bounded, the production build graph
+admits 100,000 actions and schedules them with an indexed topological walk, and
+the source-backed package-profile resolver handles its 100,000-profile depth
+budget iteratively. Existing native evaluator budgets remain the shared
+evaluator boundary. The focused success and overflow checks exercise these
+production seams; the full Epoch 4 portfolio remains open until its cross-tier
+acceptance evidence is complete.
 `D-JPK-EPOCHBOUNDARY1=B` reserves hostile Linux/macOS/Windows isolation and the
 full Nix-replacement claim for Epoch 8 card #398.
+
+Card #955 adds the Epoch 4 dogfood portfolio gate. Its reproducible matrix
+covers the `jet` front door, service workload, native executable, packaged
+plugin, target identity, workspace members, registry publication/fetch,
+native flake import, authenticated remote build, and offline rebuild. The
+focused Jetpack engine and dispatch tests also exercise empty-tool, offline,
+stale-store, missing-component, and unsupported-platform failure paths. These
+checks prove the current functional package-manager claim; they do not widen
+the Epoch 4 boundary into hostile cross-platform confinement.
 
 **jetos** is Epoch 7. It builds on jetpack and owns declarative OS activation,
 proof-before-switch, generations, installable images, source-backed Studio, and

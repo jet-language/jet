@@ -130,15 +130,15 @@ module dev {
 
 #[test]
 fn jet_env_delegates_to_jetpack_enter() {
-    // D-DEV4 (ratified 2026-06-17): `jet env` is the friendly Scale-2 front door
+    // Card #955 / D-DEV4 (ratified 2026-06-17): `jet env` is the friendly Scale-2 front door
     // into the project dev shell — it delegates straight to `jetpack enter`,
     // forwarding flags and the trailing `-- cmd`. (`jet dev` is now reserved for
     // the E2-M4 watch/interpret loop.) Running through the `jet` binary must
-    // reach the same composed env.
+    // reach the same composed env with no installed tool or network fallback.
     let (base, proj, root) = core_hello_project("jet-env");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         // U19: same trust gate reached through `jet env`; `--trust` bypasses.
-        .args(["env", "--no-color", "--trust", "--", "hello"])
+        .args(["env", "--no-color", "--trust", "--offline", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
