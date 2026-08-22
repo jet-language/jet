@@ -71,7 +71,7 @@ fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
         name,
         reference,
         binary,
-        jetpack::Envelope::host_platform(),
+        &jetpack::Envelope::host_platform(),
     );
 }
 
@@ -986,22 +986,27 @@ fn environment_image_projects_supervised_services() {
     );
     let layer = image_layer(&project.path.join(".jet/images/server"));
     assert!(
-        layer.windows(b"jet/supervise").any(),
+        layer
+            .windows(b"jet/supervise".len())
+            .any(|window| window == b"jet/supervise"),
         "supervisor path is not in the OCI layer"
     );
+    let worker_cmd = b"start '/usr/local/bin/worker' '--port' '8080'";
     assert!(
         layer
-            .windows(b"start '/usr/local/bin/worker' '--port' '8080'")
-            .any(),
+            .windows(worker_cmd.len())
+            .any(|window| window == worker_cmd),
         "service command is not in the generated supervisor"
     );
+    let db_cmd = b"start '/usr/local/bin/db'";
     let db_start = layer
-        .windows(b"start '/usr/local/bin/db'")
-        .position(|window| window == b"start '/usr/local/bin/db'")
+        .windows(db_cmd.len())
+        .position(|window| window == db_cmd)
         .expect("dependency command");
+    let worker_prefix = b"start '/usr/local/bin/worker'";
     let worker_start = layer
-        .windows(b"start '/usr/local/bin/worker'")
-        .position(|window| window == b"start '/usr/local/bin/worker'")
+        .windows(worker_prefix.len())
+        .position(|window| window == worker_prefix)
         .expect("dependent command");
     assert!(db_start < worker_start, "dependency must start first");
     let report =
