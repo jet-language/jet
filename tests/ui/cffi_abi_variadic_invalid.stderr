@@ -1,3 +1,19 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/cffi_abi_variadic_invalid.jet:4:52
+    |
+  4 |     #ABI(sysv64) fn log(fmt: String, args: ...I32) => I32 = "log"
+    |                                                    ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_abi_variadic_invalid.jet:4:52
+    |
+  4 |     #ABI(sysv64) fn log(fmt: String, args: ...I32) => I32 = "log"
+    |                                                    ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E3214]: variadic C function `log` cannot use `sysv64`
   --> tests/ui/cffi_abi_variadic_invalid.jet:4:10
     |

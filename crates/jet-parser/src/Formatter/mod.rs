@@ -254,10 +254,12 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
     match stmt {
         // Bare `return` must stay multiline: `{ return }` is not a recoverable parse.
         Stmt::Return(None, _) => false,
-        Stmt::Expr(_)
-        | Stmt::DeferClose { .. }
-        | Stmt::Val(_)
-        | Stmt::Assign { .. }
+        // Compiler-private loop carriers restore a source loop expression that
+        // may contain a block. Keeping that expression in a one-line outer
+        // body can change the parser's body boundary on the next pass.
+        Stmt::Expr(expr) => is_simple_expr(expr),
+        Stmt::Val(binding) => is_simple_expr(&binding.init),
+        Stmt::Assign { .. }
         | Stmt::Return(Some(_), _)
         | Stmt::Break(_)
         | Stmt::Continue(_)
@@ -265,6 +267,18 @@ fn is_simple_stmt(stmt: &Stmt) -> bool {
         | Stmt::ContinueLabel(..) => true,
         _ => false,
     }
+}
+
+fn is_simple_expr(expr: &crate::AST::Expr) -> bool {
+    !matches!(
+        expr,
+        crate::AST::Expr::CallValue { callee, .. }
+            if matches!(
+                callee.as_ref(),
+                crate::AST::Expr::Lambda(lambda)
+                    if lambda.meta.collecting_loop || lambda.meta.result_loop
+            )
+    )
 }
 
 pub(super) fn is_generated_label(name: &str) -> bool {
@@ -1813,9 +1827,18 @@ pub fn format_source_with_options(
     // `parse_for_fmt` drops; a source it rejects outright is recovered too.
     let prog = match crate::Parser::parse_for_check(&toks) {
         Ok((prog, parse_diags)) => {
-            options.simplify &= !parse_diags
-                .iter()
-                .any(|diag| diag.severity == crate::Diagnostics::Severity::Error);
+            // The retired callable/result arrow shapes preserve the function
+            // body AST, so simplify may still run and canonicalize them. A
+            // recovered control-body diagnostic does not: its AST is only a
+            // recovery scaffold, and simplify must remain a no-op there.
+            if options.simplify
+                && parse_diags.iter().any(|diag| {
+                    diag.severity != crate::Diagnostics::Severity::Lint
+                        && !matches!(diag.code.as_str(), "E0068" | "E0070")
+                })
+            {
+                options.simplify = false;
+            }
             prog
         }
         Err(_) => {

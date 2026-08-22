@@ -1,3 +1,11 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/comptime_panic.jet:1:21
+    |
+  1 | fn validate(n: Int) => Int {
+    |                     ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0956]: `require/panic stop` isn't supported by the current evaluator yet
   --> tests/ui/comptime_panic.jet:2:5
     |

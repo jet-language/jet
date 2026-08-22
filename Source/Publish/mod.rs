@@ -28,6 +28,7 @@ pub mod Index;
 mod Registry;
 mod Resolve;
 mod SBOM;
+pub mod Tier;
 mod Tuf;
 pub mod SemVer;
 // c146 (D-PKGSIGN1): Ed25519 author signing via the hidden crypto bridge helper.
@@ -44,6 +45,7 @@ pub use Vendor::*;
 pub use API::*;
 pub use SBOM::*;
 pub use Tuf::*;
+pub use Tier::*;
 
 // ──────────────────────────────────────────────
 // Unit tests

@@ -1088,14 +1088,14 @@ impl<'a> EvalCtx<'a> {
                         gate.enabled,
                         &gate.file,
                         gate.line,
-                        "",
+                        &gate.reason,
                     )
                 } else {
                     jet_foundation::MemSentry::jet_sentry_scope(
                         gate.enabled,
                         &gate.file,
                         gate.line,
-                        "",
+                        &gate.reason,
                     )
                 };
                 self.exec_stmts(body, scope)

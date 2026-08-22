@@ -1,3 +1,11 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/comptime_impure.jet:1:12
+    |
+  1 | fn build() => Int {
+    |            ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E3401]: `print` is not allowed in comptime code
   --> tests/ui/comptime_impure.jet:2:5
     |

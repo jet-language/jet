@@ -18,6 +18,45 @@ enum ImagePushDestination {
     Registry(String),
 }
 
+fn record_omitted_secret_integration_projection(
+    projection: &mut Image::ProjectionReport,
+    integration: &ModuleEval::EnvironmentIntegration,
+) {
+    let prefix = format!("integration:{}", integration.kind.as_str());
+    projection.omitted.push(format!("{prefix}:activation"));
+    for task in &integration.tasks {
+        projection.omitted.push(format!("{prefix}:task:{task}"));
+    }
+    for provider in &integration.providers {
+        projection.omitted.push(format!("{prefix}:provider:{provider}"));
+    }
+    for grant in &integration.grants {
+        projection.omitted.push(format!("{prefix}:grant:{grant}"));
+    }
+    for host_check in &integration.host_checks {
+        projection
+            .omitted
+            .push(format!("{prefix}:host-check:{host_check}"));
+    }
+    if !integration.options.is_empty() {
+        let option_keys = integration
+            .options
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",");
+        projection
+            .omitted
+            .push(format!("{prefix}:option-keys={option_keys}"));
+    }
+    if !integration.secrets.is_empty() {
+        projection.omitted.push(format!(
+            "{prefix}:secret-refs={}",
+            integration.secrets.len()
+        ));
+    }
+}
+
 /// `jetpack add <ref>` — edit the project env file. `jetpack add <Component>`
 /// (an exact, case-sensitive match against the starter component catalog —
 /// Button/Label/Input/Container) is a distinct behavior checked first: it
@@ -583,6 +622,14 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         if !plan.integrations.is_empty() {
             projection.omitted.push("environment.integrations".to_string());
+        }
+        for integration in &plan.integrations {
+            if matches!(
+                integration.kind,
+                ModuleEval::IntegrationKind::CloudCredentials | ModuleEval::IntegrationKind::Vault
+            ) {
+                record_omitted_secret_integration_projection(&mut projection, integration);
+            }
         }
         for language in &plan.language_projections {
             let prefix = format!("language:{}", language.selection.name);

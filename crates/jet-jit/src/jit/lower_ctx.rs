@@ -3320,7 +3320,24 @@ impl LowerCtx<'_, '_> {
 
     fn restore_scope_vars(&mut self, outer_names: &HashSet<String>) {
         self.vars.retain(|name, _| outer_names.contains(name));
-        self.var_tys.retain(|name, _| outer_names.contains(name));
+        // A Range has no single SSA value: its three field values live under
+        // synthetic keys while its nominal type lives under the owner key.
+        // Keep that owner metadata whenever the enclosing scope keeps one of
+        // the synthetic fields, or a later assignment loses Range dispatch.
+        let mut outer_type_names = outer_names.clone();
+        for name in outer_names {
+            for suffix in [
+                ".__range_start",
+                ".__range_end",
+                ".__range_exclusive",
+            ] {
+                if let Some(owner) = name.strip_suffix(suffix) {
+                    outer_type_names.insert(owner.to_string());
+                }
+            }
+        }
+        self.var_tys
+            .retain(|name, _| outer_type_names.contains(name));
     }
 
     fn adopt_compute_resource(&mut self, value: Value, owner: Value) {
@@ -4571,6 +4588,7 @@ impl LowerCtx<'_, '_> {
         self.var_tys.insert(loop_key.clone(), Type::Int);
         let current = self.b.use_var(target_var);
         let next = self.lower_direct_int_add(current, element);
+        self.emit_trap_check()?;
         self.b.def_var(target_var, next);
         self.loop_stack.pop();
         self.b.ins().jump(step_block, &[]);
@@ -9638,6 +9656,9 @@ impl LowerCtx<'_, '_> {
             Type::Named(name) if name == "Path" => {
                 Ok(self.call_host(self.host.core.path_to_string, &[value]))
             }
+            Type::Named(name) if name == jet_foundation::Syntax::TYPE_DECIMAL => {
+                Ok(self.call_host(self.host.num.decimal_to_string, &[value]))
+            }
             Type::Named(name) if name == jet_foundation::Syntax::TYPE_COMPLEX => {
                 Ok(self.call_host(self.host.num.complex_to_string, &[value]))
             }
@@ -10515,6 +10536,23 @@ impl LowerCtx<'_, '_> {
                 }
                 BinOp::Shl => return Ok(self.call_host(self.host.num.int_shl, &[current, rhs])),
                 BinOp::Shr => return Ok(self.call_host(self.host.num.int_shr, &[current, rhs])),
+                _ => {}
+            }
+        }
+        if matches!(
+            rhs_ty,
+            Type::Named(ref name) if name == jet_foundation::Syntax::TYPE_DECIMAL
+        ) {
+            match op {
+                BinOp::Add => {
+                    return Ok(self.call_host(self.host.num.decimal_add, &[current, rhs]));
+                }
+                BinOp::Sub => {
+                    return Ok(self.call_host(self.host.num.decimal_sub, &[current, rhs]));
+                }
+                BinOp::Mul => {
+                    return Ok(self.call_host(self.host.num.decimal_mul, &[current, rhs]));
+                }
                 _ => {}
             }
         }
@@ -28685,16 +28723,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(values)
             }
-            _ => {
-                if std::env::var_os("JET_DEBUG_RANGE").is_some() {
-                    eprintln!(
-                        "[range-debug] unsupported ty={:?} kind={:?}",
-                        expr.ty,
-                        std::mem::discriminant(&expr.kind)
-                    );
-                }
-                Err("jit Range expression unsupported".to_string())
-            }
+            _ => Err("jit Range expression unsupported".to_string()),
         }
     }
 

@@ -154,6 +154,148 @@ mod tests {
     }
 
     #[test]
+    fn abi_universe_isolation_keeps_native_closures_hangar_only() {
+        fn fixture(
+            roots: &Roots,
+            name: &str,
+            provider: &str,
+            references: Vec<String>,
+            with_rlib: bool,
+        ) -> crate::Provider::Realized {
+            let out = roots.hangar_dir().join(format!("abi-{name}"));
+            fs::create_dir_all(out.join("lib")).unwrap();
+            fs::write(out.join("lib").join(format!("lib{name}.so")), name).unwrap();
+            let rlib = if with_rlib {
+                let path = out.join(format!("lib{name}.rlib"));
+                fs::write(&path, format!("{name}-rlib")).unwrap();
+                path.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            };
+            let reference = if provider == "nix" {
+                format!("{name}@nixpkgs")
+            } else {
+                format!("{name}@core")
+            };
+            let output = out.to_string_lossy().into_owned();
+            let facts = if provider == "nix" {
+                BTreeMap::from([("nix.output.out".into(), output.clone())])
+            } else {
+                BTreeMap::new()
+            };
+            seal_node(&out).unwrap();
+            let encoded = canonical_producer(
+                provider,
+                &format!("abi:{name}"),
+                &format!("source:{name}"),
+                &test_identity(),
+                facts,
+            )
+            .unwrap();
+            crate::Provider::Realized {
+                name: name.to_string(),
+                version: "1".to_string(),
+                reference,
+                out: output.clone(),
+                bin: String::new(),
+                rlib,
+                envelope: super::super::super::Envelope::Envelope::for_output(
+                    &output,
+                    &format!("{name}@{provider}"),
+                    provider,
+                ),
+                cache_identity: test_identity(),
+                source_state: if provider == "nix" {
+                    crate::Provider::SourceState::Substituted
+                } else {
+                    crate::Provider::SourceState::Built
+                },
+                named_outputs: BTreeMap::from([("out".to_string(), output)]),
+                references,
+                producer: ProducerRecord::decode(&encoded).unwrap(),
+            }
+        }
+
+        let (roots, _guard) = temp_roots();
+
+        // Stage-1 compat bytes are Hangar-owned, but remain a separate
+        // provider universe.
+        let compat = record_realized_mode(
+            &roots,
+            &fixture(&roots, "compat", "nix", Vec::new(), false),
+        )
+        .unwrap();
+        let compat_digest = compat.envelope.output_hash.clone();
+
+        // A native runtime closure may contain a Hangar-native dependency and
+        // a native library artifact, but no compat-root object.
+        let native_dependency = ingest_fixture(
+            &roots,
+            "abi-native-dependency",
+            &[("out", "native dependency")],
+            Vec::new(),
+        )
+        .entry;
+        let native = record_realized_mode(
+            &roots,
+            &fixture(
+                &roots,
+                "native",
+                "core",
+                vec![native_dependency.envelope.output_hash.clone()],
+                true,
+            ),
+        )
+        .unwrap();
+        assert!(
+            Path::new(&native.rlib).starts_with(roots.hangar_dir().join("objects")),
+            "native library artifact escaped the Hangar object pool: {}",
+            native.rlib
+        );
+
+        let graph = closure_graph(&roots).unwrap();
+        let native_closure = graph.closure(&native.envelope.output_hash);
+        assert!(
+            native_closure.iter().all(|digest| graph
+                .objects
+                .get(digest)
+                .is_some_and(|object| !object.external)),
+            "native closure contains a non-Hangar object: {native_closure:?}"
+        );
+        assert!(
+            graph.transitive_references(&compat_digest).is_empty(),
+            "compat closure borrowed native objects"
+        );
+
+        // Both directions are guarded: removing either the pre-registration
+        // check or the graph check makes one of these registrations succeed.
+        let native_leak = fixture(
+            &roots,
+            "native-leak",
+            "core",
+            vec![compat_digest.clone()],
+            true,
+        );
+        let error = record_realized_mode(&roots, &native_leak).unwrap_err();
+        assert!(error.to_string().contains("ABI universe"), "{error}");
+        assert!(!roots
+            .hangar_dir()
+            .join("objects")
+            .join(&native_leak.envelope.output_hash)
+            .exists());
+
+        let compat_leak = fixture(
+            &roots,
+            "compat-leak",
+            "nix",
+            vec![native.envelope.output_hash.clone()],
+            false,
+        );
+        let error = record_realized_mode(&roots, &compat_leak).unwrap_err();
+        assert!(error.to_string().contains("ABI universe"), "{error}");
+    }
+
+    #[test]
     fn clean_keeps_fresh_entries() {
         let (roots, _g) = temp_roots();
         for name in ["a", "b"] {

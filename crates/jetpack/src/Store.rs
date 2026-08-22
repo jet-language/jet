@@ -478,6 +478,13 @@ pub(crate) fn record_realized_mode(
 ) -> std::io::Result<StoreEntry> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
+        let graph = Closure::closure_graph_structure_unlocked(roots)?;
+        Closure::validate_universe_references(
+            &realized.producer.provider,
+            &realized.references,
+            &graph,
+        )
+        .map_err(std::io::Error::other)?;
         let (out, bin, rlib) = canonicalize_local_output_unlocked(
             roots,
             &realized.out,

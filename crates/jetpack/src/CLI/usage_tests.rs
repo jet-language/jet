@@ -100,6 +100,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} services down [<name>]         stop them
   {bin} services health [<name>]       one-shot readiness check
   {bin} services logs <name>           print a service's captured stdout/stderr
+  {bin} services wait [<name>]         wait for typed readiness
   {bin} image <name>                   build a declared `.Oci` image into a native OCI layout
   {bin} image <name> --push <ref>      copy locally or publish through OCI Distribution
 
@@ -218,6 +219,20 @@ mod tests {
             RuntimePolicy::verb_policy(Syntax::BROWSER_SUBCOMMAND, &[]).verb,
             Syntax::BROWSER_SUBCOMMAND
         );
+    }
+
+    #[test]
+    fn service_lifecycle_commands_are_in_help() {
+        let help = usage_with_color(false);
+        for command in [
+            "services up",
+            "services down",
+            "services health",
+            "services logs",
+            "services wait",
+        ] {
+            assert!(help.contains(command), "missing {command}");
+        }
     }
 
     #[test]

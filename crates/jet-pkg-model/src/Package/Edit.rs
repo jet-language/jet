@@ -72,7 +72,14 @@ fn insert_or_replace_in_block(raw: &str, key: &str, name: &str, new_line: &str) 
     let lines: Vec<String> = raw.lines().map(str::to_string).collect();
     let mut out = lines.clone();
 
-    if let Some((start, end)) = block_line_range(&lines, key) {
+    if let Some(i) = lines
+        .iter()
+        .position(|line| is_empty_inline_block(line, key))
+    {
+        out[i] = format!("{}{}: .{{", leading_whitespace(&lines[i]), key);
+        out.insert(i + 1, new_line.to_string());
+        out.insert(i + 2, "}".to_string());
+    } else if let Some((start, end)) = block_line_range(&lines, key) {
         let mut existing: Option<usize> = None;
         for i in start..end {
             let trimmed = lines[i].trim_start();
@@ -103,6 +110,24 @@ fn insert_or_replace_in_block(raw: &str, key: &str, name: &str, new_line: &str) 
         result.push('\n');
     }
     result
+}
+
+fn is_empty_inline_block(line: &str, key: &str) -> bool {
+    let trimmed = line.trim_start();
+    let header = format!("{key}:");
+    let Some(rest) = trimmed.strip_prefix(&header) else {
+        return false;
+    };
+    let rest = rest
+        .trim_start()
+        .strip_prefix('.')
+        .unwrap_or(rest.trim_start())
+        .trim();
+    rest == "{}"
+}
+
+fn leading_whitespace(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
 }
 
 /// Remove a `name: …` entry from the `key: { … }` block, preserving comments

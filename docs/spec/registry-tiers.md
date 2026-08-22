@@ -1,0 +1,60 @@
+# Registry tiers
+
+Status: current for D-REGCURATE1=C, owner ratified 2026-08-12.
+
+## Plan of record
+
+No plan of record was stored on card #1911. This implementation derives the
+plan from the card body and its exit criteria:
+
+1. record the tier and gate result in registry metadata and the lock;
+2. show that data on fetch, install, and `jet inspect info`;
+3. enforce the core review receipt at publish;
+4. refuse community publish until every named gate is open.
+
+## Core tier
+
+The core tier contains packages reviewed by a registry maintainer. The review
+receipt is committed to the registry at:
+
+```text
+reviews/<package>/<version>.review
+```
+
+The receipt uses this exact form:
+
+```text
+jet-registry-core-review-v1
+package=<package>
+version=<version>
+reviewer=<maintainer-id>
+decision=approved
+```
+
+`jet registry publish` refuses a core release when the receipt is missing,
+malformed, or does not name the package and version being published.
+
+## Community tier
+
+`JET_REGISTRY_TIER=community` selects the community channel for a publish.
+The channel is closed unless all four machine gates pass:
+
+- #935 live signature chain;
+- #431 advisory audit with an explicit local database and no matches;
+- #1912 package name policy;
+- #1913 maintainer liveness.
+
+The index records each result in `gate_status`. A blocked gate stops publish
+before the artifact or index changes. The current implementation keeps the
+community channel closed while #1912, #1913, #431, or the live #935 chain is
+not available.
+
+The community trust model still needs an owner ballot with worked options and
+ratification. This document does not open the channel or replace that ballot.
+
+## User surfaces
+
+Registry resolution writes `tier` and `gate-status` into the lock. `jet fetch`
+and `jet update` print the tier and gate status for every Jet registry package.
+`jet inspect info` prints the same fields for a package record. JSON discovery
+records carry `tier` and `gate_status` as well.

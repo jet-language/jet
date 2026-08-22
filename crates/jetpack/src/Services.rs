@@ -9,7 +9,7 @@
 //! process it spawned itself — so `down` shells out to the `kill` binary,
 //! the same technique `Shell.rs`/`Provider.rs` already use for `nix`/`git`.
 //!
-//! `jet dev`'s health gate and `jetpack services up/down/health/logs`
+//! `jet dev`'s health gate and `jetpack services up/down/health/logs/wait`
 //! (`Jetpack::CLI::cmd_services`) are the only callers.
 
 use std::collections::{BTreeMap, BTreeSet};

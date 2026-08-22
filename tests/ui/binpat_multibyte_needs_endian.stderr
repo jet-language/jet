@@ -1,23 +1,7 @@
-Error [E0320]: typed collection construction uses `[T]{…}`, not `[T].{…}`
-  --> tests/ui/binpat_multibyte_needs_endian.jet:2:17
-    |
-  2 |     data :: [U8].{ 0, 40 }
-    |                 ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[T]{…}`
-
-Error [E0320]: typed pattern construction uses `[U8]{…}`, not `[U8].{…}`
-  --> tests/ui/binpat_multibyte_needs_endian.jet:4:13
-    |
-  4 |         [U8].{"{len:U16}"} -> { print("len {len}") }
-    |             ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[U8]{…}`
-
 Error [E1008]: `{…:U16}` reads more than one byte, so it needs a byte order
-  --> tests/ui/binpat_multibyte_needs_endian.jet:4:21
+  --> tests/ui/binpat_multibyte_needs_endian.jet:4:20
     |
-  4 |         [U8].{"{len:U16}"} -> { print("len {len}") }
-    |                     ^^^
+  4 |         [U8]{"{len:U16}"} -> { print("len {len}") }
+    |                    ^^^
  Why: a read wider than 8 bits spans multiple bytes; Jet won't guess big- vs little-endian
  Fix: write `U16be` (big-endian / network order) or `U16le` (little-endian)

@@ -1,23 +1,7 @@
-Error [E0320]: typed collection construction uses `[T]{…}`, not `[T].{…}`
-  --> tests/ui/binpat_unaligned_rest.jet:2:17
-    |
-  2 |     data :: [U8].{1}
-    |                 ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[T]{…}`
-
-Error [E0320]: typed pattern construction uses `[U8]{…}`, not `[U8].{…}`
-  --> tests/ui/binpat_unaligned_rest.jet:4:13
-    |
-  4 |         [U8].{"{a:U4}{rest:...}"} -> { print("x") }
-    |             ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[U8]{…}`
-
 Error [E1011]: this part of the binary pattern doesn't start on a byte boundary
-  --> tests/ui/binpat_unaligned_rest.jet:4:23
+  --> tests/ui/binpat_unaligned_rest.jet:4:22
     |
-  4 |         [U8].{"{a:U4}{rest:...}"} -> { print("x") }
-    |                       ^^^^^^^^
+  4 |         [U8]{"{a:U4}{rest:...}"} -> { print("x") }
+    |                      ^^^^^^^^
  Why: fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits
  Fix: pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)

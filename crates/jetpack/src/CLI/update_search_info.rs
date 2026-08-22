@@ -228,6 +228,8 @@ pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
     println!("  platforms: {}", record.platforms.join(", "));
     println!("  source: {}", record.source);
     println!("  provenance: {}", record.provenance);
+    println!("  tier: {}", record.tier);
+    println!("  gate status: {}", record.gate_status);
     if !record.options.is_empty() {
         println!("  service options:");
         for opt in &record.options {
@@ -596,6 +598,9 @@ fn discovery_index(theme: &Theme, parsed: &Parsed) -> Result<Discovery::Index, i
     let roots = Store::resolve();
     let store_entries = Store::list(&roots);
     Discovery::merge_store_entries(&mut index, &store_entries);
+    if let Some(lock) = Lock::load(&project_dir) {
+        Discovery::merge_lock(&mut index, &lock);
+    }
 
     if EnvFile::path_in(&project_dir).exists() {
         let plan = load_project_plan(theme)?;

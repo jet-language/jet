@@ -310,6 +310,11 @@ pub enum LockSource {
         source_hash: String,
         repository: String,
         authority: String,
+        /// `core` or `community` for Jet's package registry. Other registry
+        /// providers use `not-applicable`.
+        tier: String,
+        /// Canonical gate summary recorded by the Jet package registry.
+        gate_status: String,
     },
 }
 
@@ -452,9 +457,9 @@ pub fn write(lock: &LockFile) -> String {
                 "{{ luarocks = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
                 escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
-            LockSource::Registry { registry, reference, output, source_hash, repository, authority } => format!(
-                "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
-                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
+            LockSource::Registry { registry, reference, output, source_hash, repository, authority, tier, gate_status } => format!(
+                "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\", tier = \"{}\", gate-status = \"{}\" }}",
+                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority), escape_str(tier), escape_str(gate_status)
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
@@ -1721,6 +1726,8 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
             authority: kv_field(s, "authority").unwrap_or_default(),
+            tier: kv_field(s, "tier").unwrap_or_else(|| "unknown".to_string()),
+            gate_status: kv_field(s, "gate-status").unwrap_or_else(|| "unknown".to_string()),
         });
     }
     if let Some(url) = kv_field(s, "git") {
@@ -2329,6 +2336,8 @@ pub fn record_registry_realization(
             source_hash: source_hash.to_string(),
             repository: repository.to_string(),
             authority: authority.to_string(),
+            tier: "not-applicable".to_string(),
+            gate_status: "not-applicable".to_string(),
         },
         locked: None,
         fingerprint: source_hash.to_string(),
@@ -2371,6 +2380,7 @@ pub fn registry_realization(
             source_hash,
             repository,
             authority,
+            ..
         } = package.source
         {
             if locked_registry == registry && locked_reference == reference {

@@ -1,3 +1,19 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/cffi_e3203_enum_rejected.jet:7:21
+    |
+  7 |     fn get_status() => Status = "demo_get_status";
+    |                     ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_e3203_enum_rejected.jet:7:21
+    |
+  7 |     fn get_status() => Status = "demo_get_status";
+    |                     ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E3203]: `Status` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_e3203_enum_rejected.jet:7:24
     |

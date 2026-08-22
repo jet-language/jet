@@ -356,6 +356,9 @@ impl<'a> Fmt<'a> {
             Item::Trait(t) => self.fmt_trait(t),
             // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
             Item::Tag(t) => {
+                // `TagDef::span` starts at `tag`; visibility is parsed before
+                // that span and must be reconstructed from the AST fact.
+                self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
                 let text = self.src[t.span.start..t.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -404,6 +407,9 @@ impl<'a> Fmt<'a> {
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {
+                // The marker span begins at `#UnitFamily`, after any `pub`
+                // qualifier consumed by the visibility parser.
+                self.fmt_pub_qualifier(uf.is_pub, uf.is_package_pub);
                 let text = self.src[uf.span.start..uf.span.end].to_string();
                 self.write(&text);
                 self.skip_verbatim_comments(uf.span.end);
@@ -433,6 +439,9 @@ impl<'a> Fmt<'a> {
             }
             // D-STATE-DECL: state-set declarations are emitted verbatim (non-destructive).
             Item::StateDecl(s) => {
+                // `StateDecl::span` starts at `state`, not at the visibility
+                // token that the top-level parser consumed first.
+                self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
                 let text = self.src[s.span.start..s.span.end].to_string();
                 self.write(&text);
                 self.newline();

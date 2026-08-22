@@ -48,6 +48,21 @@ fn prelude_compound_call(
         BinOp::Add if matches!(ty, Type::String) => {
             format!("jet_string_concat(&({place}), &({value}))")
         }
+        BinOp::Add
+            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
+        {
+            format!("{root_prefix}jet_decimal_add(&({place}), &({value}))")
+        }
+        BinOp::Sub
+            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
+        {
+            format!("{root_prefix}jet_decimal_sub(&({place}), &({value}))")
+        }
+        BinOp::Mul
+            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
+        {
+            format!("{root_prefix}jet_decimal_mul(&({place}), &({value}))")
+        }
         BinOp::Add if matches!(ty, Type::Int) => {
             format!("{root_prefix}jet_std::jet_int_add({place}, {value})")
         }

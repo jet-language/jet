@@ -2912,8 +2912,8 @@ fn env_info_json_discloses_selected_preset_and_language_projection() {
         redis: { enable: true, ports: [6379], after: ["database"] }
     }
     languages: [
-        "rust": Lang.{ enable: true, channel: .Stable },
-        "zig": Lang.{ enable: true }
+        "rust": Lang{ enable: true, channel: .Stable },
+        "zig": Lang{ enable: true }
     ]
     packages: [nixpkgs.ripgrep]
 }
@@ -3002,6 +3002,63 @@ module env.full {
 }
 
 #[test]
+fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_processes() {
+    let project = Scratch::new("env-info-facts");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    prompt: $HOME
+    services: {
+        fixture: {
+            enable: false,
+            ports: [8080],
+            run: ["fixture", "--port", "8080"],
+            ready: "fixture --ready",
+            data_dir: "state/fixture",
+            watch: ["src"],
+            after: ["database"],
+            before_start: ["lint"],
+            sockets: ["run/fixture.sock"]
+        }
+    }
+    files: ["config/generated.txt": File{ content: "generated\n", mode: .Copy }]
+}
+"#,
+    )
+    .unwrap();
+    fs::write(project.join("main.jet"), "#Job\nfn lint() {}\n").unwrap();
+
+    let output = jetpack()
+        .args(["enter", "info", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("HOME", "/test/home")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(jetpack::JSON::parse(&stdout).is_ok(), "info JSON must parse: {stdout}");
+    assert!(
+        stdout.contains("\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"name\":\"fixture\",\"enabled\":false"), "stdout: {stdout}");
+    assert!(stdout.contains("\"run\":[\"fixture\",\"--port\",\"8080\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"ready\":\"fixture --ready\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"data_dir\":\"state/fixture\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"watch\":[\"src\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"after\":[\"database\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"before_start\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"sockets\":[\"run/fixture.sock\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"files\":[\"config/generated.txt\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"jobs\":[\"lint\"]"), "stdout: {stdout}");
+    assert!(!project.join(".jet/services").exists(), "info must not start services");
+}
+
+#[test]
 fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
     let project = Scratch::new("env-sync-files");
     let root = Scratch::new("env-sync-files-root");
@@ -3009,10 +3066,10 @@ fn env_sync_applies_typed_files_and_refuses_unmanaged_destinations() {
     fs::write(
         project.join("env.jet"),
         r#"module env.dev {
-    files: {
-        "generated/config.txt": File.{ content: "generated\n", mode: .Copy },
-        "seed/config.txt": File.{ content: "seeded\n", mode: .Seed }
-    }
+    files: [
+        "generated/config.txt": File{ content: "generated\n", mode: .Copy },
+        "seed/config.txt": File{ content: "seeded\n", mode: .Seed }
+    ]
 }
 "#,
     )
@@ -3154,6 +3211,36 @@ fn enter_requires_a_persisted_cloud_integration_grant() {
     assert!(stderr.contains("E1335"), "stderr: {stderr}");
     assert!(stderr.contains("cloud-credentials:credential.read"), "stderr: {stderr}");
     assert!(!stderr.contains("aws_production"), "secret name leaked: {stderr}");
+}
+
+#[test]
+fn enter_requires_a_persisted_vault_integration_grant() {
+    let project = Scratch::new("vault-integration-grant");
+    let root = Scratch::new("vault-integration-grant-root");
+    let home = Scratch::new("vault-integration-grant-home");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.security.vault([database_password])]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "--trust", "--offline", "--no-color", "--", "true"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(stderr.contains("vault:vault.read"), "stderr: {stderr}");
+    assert!(
+        !stderr.contains("database_password"),
+        "secret name leaked: {stderr}"
+    );
 }
 
 #[test]

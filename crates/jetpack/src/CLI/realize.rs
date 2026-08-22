@@ -736,6 +736,7 @@ fn typed_plan(
             active_environment: plan.active_environment,
             active_environment_provenance: plan.active_environment_provenance,
             source_files: plan.source_files,
+            environment_reads: plan.environment_reads,
             dev_services: plan.dev_services,
             lifecycle: plan.lifecycle,
             presets: plan.presets,

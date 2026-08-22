@@ -244,6 +244,79 @@ fn environment_image_uses_realized_package_output() {
 }
 
 #[test]
+fn environment_image_omits_cloud_and_vault_facts_without_secret_names() {
+    let project = Scratch::new("environment-secret-integrations");
+    let root = Scratch::new("environment-secret-integrations-root");
+    fs::write(
+        project.path.join("env.jet"),
+        r#"module env.dev {
+    packages: ["bash@nixpkgs"]
+    imports: [
+        env.cloud.credentials([aws_production]),
+        env.security.vault([database_password])
+    ]
+}
+module image.server { from: env.dev }
+"#,
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "image should project the environment successfully: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report =
+        fs::read_to_string(project.path.join(".jet/images/server/projection.json")).unwrap();
+    assert!(report.contains("integration:cloud-credentials:task:credential-store-check"));
+    assert!(report.contains("integration:vault:task:vault-check"));
+    assert!(report.contains("integration:cloud-credentials:secret-refs=1"));
+    assert!(report.contains("integration:vault:secret-refs=1"));
+    assert!(
+        !report.contains("aws_production"),
+        "secret name leaked: {report}"
+    );
+    assert!(
+        !report.contains("database_password"),
+        "secret name leaked: {report}"
+    );
+}
+
+#[test]
+fn environment_image_rejects_unredactable_cloud_secret() {
+    let project = Scratch::new("environment-cloud-secret-loss");
+    fs::write(
+        project.path.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.cloud.credentials(42)]
+}
+module image.server { from: env.dev }
+"#,
+    )
+    .unwrap();
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(!stderr.contains("42"), "secret input leaked: {stderr}");
+}
+
+#[test]
 fn environment_image_service_projection_is_e1336() {
     let project = Scratch::new("environment-service");
     fs::write(

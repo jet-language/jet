@@ -1773,6 +1773,13 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     for name in &plan.environment.lifecycle.unset {
         add_variable(name, "unset".to_string());
     }
+    // Environment reads are already typed by the evaluator. Keep the `$`
+    // spelling out of the report's variable names, which otherwise use the
+    // shell-visible name (`HOME`, not `$HOME`).
+    for read in &plan.environment.environment_reads {
+        let name = read.name.strip_prefix('$').unwrap_or(&read.name);
+        add_variable(name, "environment".to_string());
+    }
     if parsed.flags.json {
         let quote_list = |values: &[&str]| {
             values
@@ -2000,16 +2007,103 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                     .map(|name| crate::JSON::quote(name))
                     .collect::<Vec<_>>()
                     .join(",");
+                let run = service
+                    .run
+                    .as_ref()
+                    .map(|run| format!("[{}]", quote_strings(run)))
+                    .unwrap_or_else(|| "null".to_string());
+                let shutdown = match service.shutdown.as_ref() {
+                    None => "null".to_string(),
+                    Some(ModuleEval::ShutdownPolicy::Kill) =>
+                        "{\"kind\":\"kill\"}".to_string(),
+                    Some(ModuleEval::ShutdownPolicy::Term { grace_ms }) => {
+                        format!("{{\"kind\":\"term\",\"grace_ms\":{grace_ms}}}")
+                    }
+                };
+                let data_dir = service
+                    .data_dir
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                let ready = service
+                    .ready
+                    .as_deref()
+                    .map(crate::JSON::quote)
+                    .unwrap_or_else(|| "null".to_string());
+                let ready_probe = match service.ready_probe.as_ref() {
+                    None => "null".to_string(),
+                    Some(ModuleEval::ReadyProbe::Exec(command)) => format!(
+                        "{{\"kind\":\"exec\",\"command\":{}}}",
+                        crate::JSON::quote(command)
+                    ),
+                    Some(ModuleEval::ReadyProbe::Http { url, status }) => format!(
+                        "{{\"kind\":\"http\",\"url\":{},\"status\":{}}}",
+                        crate::JSON::quote(url),
+                        status
+                            .as_ref()
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "null".to_string())
+                    ),
+                    Some(ModuleEval::ReadyProbe::Notify { path }) => format!(
+                        "{{\"kind\":\"notify\",\"path\":{}}}",
+                        crate::JSON::quote(path)
+                    ),
+                    Some(ModuleEval::ReadyProbe::Tcp { host, port }) => format!(
+                        "{{\"kind\":\"tcp\",\"host\":{},\"port\":{port}}}",
+                        crate::JSON::quote(host)
+                    ),
+                };
+                let restart = match service.restart.as_ref() {
+                    None => "null".to_string(),
+                    Some(ModuleEval::RestartPolicy::Never) =>
+                        "{\"kind\":\"never\"}".to_string(),
+                    Some(ModuleEval::RestartPolicy::OnFailure {
+                        max,
+                        backoff_ms,
+                        exponential,
+                    }) => format!(
+                        "{{\"kind\":\"on_failure\",\"max\":{max},\"backoff_ms\":{backoff_ms},\"exponential\":{exponential}}}"
+                    ),
+                    Some(ModuleEval::RestartPolicy::Always {
+                        max,
+                        backoff_ms,
+                        exponential,
+                    }) => format!(
+                        "{{\"kind\":\"always\",\"max\":{max},\"backoff_ms\":{backoff_ms},\"exponential\":{exponential}}}"
+                    ),
+                };
+                let extra = service
+                    .extra
+                    .iter()
+                    .map(|(name, value)| {
+                        format!(
+                            "{{\"name\":{},\"value\":{}}}",
+                            crate::JSON::quote(name),
+                            crate::JSON::quote(value),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let readiness = service.ready.is_some()
                     || service.ready_probe.is_some()
                     || !service.ports.is_empty();
                 format!(
-                    "{{\"name\":{},\"enabled\":{},\"ports\":[{}],\"readiness\":{},\"after\":[{}]}}",
+                    "{{\"name\":{},\"enabled\":{},\"ports\":[{}],\"readiness\":{},\"after\":[{}],\"run\":{},\"shutdown\":{},\"data_dir\":{},\"ready\":{},\"ready_probe\":{},\"restart\":{},\"watch\":[{}],\"before_start\":[{}],\"sockets\":[{}],\"extra\":[{}]}}",
                     crate::JSON::quote(&service.name),
                     service.enable,
                     ports,
                     readiness,
                     after,
+                    run,
+                    shutdown,
+                    data_dir,
+                    ready,
+                    ready_probe,
+                    restart,
+                    quote_strings(&service.watch),
+                    quote_strings(&service.before_start),
+                    quote_strings(&service.sockets),
+                    extra,
                 )
             })
             .collect::<Vec<_>>()

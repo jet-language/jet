@@ -151,10 +151,10 @@ module dev {
     fn selects_one_environment_module_and_discloses_its_provenance() {
         let source = r#"
 module dev {
-    env.dev: Env.{ packages: [default.ripgrep], prompt: "dev" }
+    env.dev: Env{ packages: [default.ripgrep], prompt: "dev" }
 }
 module full {
-    env.full: Env.{ packages: [default.fd], prompt: "full" }
+    env.full: Env{ packages: [default.fd], prompt: "full" }
 }
 "#;
         let default_plan = evaluate_env(source, &base_dir()).unwrap();
@@ -173,6 +173,19 @@ module full {
         let error = evaluate_env_with_environment(source, &base_dir(), Some("missing"))
             .expect_err("unknown environment module must not fall through to another module");
         assert_eq!(error.code, "E1337");
+    }
+
+    #[test]
+    fn environment_reads_are_retained_in_the_environment_plan() {
+        let source = "module env.dev { prompt: $HOME }";
+        let plan = evaluate_env(source, &base_dir()).unwrap();
+        assert_eq!(
+            plan.environment_reads,
+            vec![EnvironmentRead {
+                name: "$HOME".to_string(),
+                ty: "String".to_string(),
+            }]
+        );
     }
 
     #[test]
@@ -889,6 +902,44 @@ module mobile {
         assert!(error.what.contains("integration lowering was lossy"));
         assert!(error.why.contains("secret input must be a named reference"));
         assert!(!error.why.contains("42"));
+    }
+
+    #[test]
+    fn cloud_and_vault_fact_contracts_reject_dropped_authority() {
+        let src = r#"
+module secrets {
+    imports: [
+        env.cloud.credentials([aws_production]),
+        env.security.vault([database_password])
+    ]
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        for (kind, expected_grant) in [
+            (IntegrationKind::CloudCredentials, "credential.read"),
+            (IntegrationKind::Vault, "vault.read"),
+        ] {
+            let mut facts = plan.integration_facts.clone();
+            let task = facts
+                .task_facts
+                .iter_mut()
+                .find(|task| task.integration == kind)
+                .expect("typed integration task fact");
+            task.grants.clear();
+            let error = facts.validate().unwrap_err();
+            assert!(error.contains(expected_grant), "{error}");
+        }
+    }
+
+    #[test]
+    fn cloud_and_vault_secret_values_fail_without_echoing_input() {
+        for import in ["env.cloud.credentials(42)", "env.security.vault(42)"] {
+            let src = format!("module secrets {{ imports: [{import}] }}");
+            let error = evaluate_env(&src, &base_dir()).unwrap_err();
+            assert_eq!(error.code, "E1335");
+            assert!(error.why.contains("secret input must be a named reference"));
+            assert!(!error.why.contains("42"));
+        }
     }
 
     #[test]

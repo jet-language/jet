@@ -180,6 +180,46 @@ fn bare_registry(dir: &Path) -> String {
     format!("file://{}", dir.to_str().unwrap())
 }
 
+/// Seed the maintainer-owned receipt required for a core-tier publish.
+fn seed_core_review(dir: &Path, package: &str, version: &str) {
+    let work = dir.with_extension(format!("review-{}", std::process::id()));
+    let url = format!("file://{}", dir.to_str().unwrap());
+    Command::new("git")
+        .args(["--git-dir", dir.to_str().unwrap(), "symbolic-ref", "HEAD", "refs/heads/main"])
+        .status()
+        .unwrap();
+    Command::new("git")
+        .args(["clone", url.as_str(), work.to_str().unwrap()])
+        .status()
+        .unwrap();
+    let review = work
+        .join("reviews")
+        .join(package)
+        .join(format!("{version}.review"));
+    fs::create_dir_all(review.parent().unwrap()).unwrap();
+    fs::write(
+        &review,
+        format!(
+            "jet-registry-core-review-v1\npackage={package}\nversion={version}\nreviewer=test-maintainer\ndecision=approved\n"
+        ),
+    )
+    .unwrap();
+    for args in [
+        vec!["config", "user.email", "test@jet.test"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["add", "."],
+        vec!["commit", "-m", "approve core package"],
+        vec!["push", "origin", "HEAD:main"],
+    ] {
+        Command::new("git")
+            .args(&args)
+            .current_dir(&work)
+            .status()
+            .unwrap();
+    }
+    fs::remove_dir_all(work).unwrap();
+}
+
 /// Read `index/<name>/<name>.jsonl` out of a bare registry via `git show`.
 fn read_index_file(bare: &Path, name: &str) -> Option<String> {
     let spec = format!("HEAD:index/{name}/{name}.jsonl");
@@ -1924,6 +1964,25 @@ fn manifest_add_dep_creates_table_when_absent() {
 }
 
 #[test]
+fn manifest_add_dep_expands_inline_empty_table() {
+    let raw = min_manifest("root", "0.1.0") + "\ndeps: .{}\n";
+    let updated = jet::Manifest::add_dependency(
+        &raw,
+        "helpers",
+        &jet::Manifest::DepSpec::Path {
+            path: "../helpers".to_string(),
+        },
+    );
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated)
+        .expect("inline empty deps table should stay parseable");
+    assert!(matches!(
+        mf.dependencies.get("helpers"),
+        Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
+    ));
+    assert!(updated.contains("deps: .{\n    helpers: ../helpers,\n}\n"));
+}
+
+#[test]
 fn manifest_remove_dep_removes_correct_entry() {
     let raw = min_manifest("root", "0.1.0")
         + "\ndeps: {\n    helpers: ../helpers,\n    other: ../other,\n}\n";
@@ -2986,6 +3045,132 @@ fn cli_end_to_end_new_then_add_path() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn cli_add_path_into_inline_empty_deps_table() {
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_add_path_into_inline_empty_deps_table (run `cargo build` first)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("cli_add_inline_deps");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(
+        &tmp,
+        "package.jet",
+        &(min_manifest("app", "0.1.0") + "\ndeps: .{}\n"),
+    );
+    let lib = tmp.join("mylib");
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
+    write(&lib, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
+
+    let out = jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store);
+    assert!(
+        out.status.success(),
+        "jet add --path failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let raw = fs::read_to_string(tmp.join("package.jet")).unwrap();
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw)
+        .expect("jet add must leave an inline deps table parseable");
+    assert!(manifest.dependencies.contains_key("mylib"));
+    assert!(raw.contains("deps: .{\n    mylib: ./mylib,\n}\n"));
+
+    let fetch = jet_cmd(&["fetch"], &tmp, &store);
+    assert!(
+        fetch.status.success(),
+        "fetch after add failed:\n{}",
+        String::from_utf8_lossy(&fetch.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_remove_absent_dependency_is_an_error() {
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_remove_absent_dependency_is_an_error (run `cargo build` first)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("cli_remove_absent");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let manifest_path = tmp.join("package.jet");
+    let before = min_manifest("app", "0.1.0");
+    write(&tmp, "package.jet", &before);
+
+    let out = jet_cmd(&["remove", "json"], &tmp, &store);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "absent dependency removal must fail");
+    assert!(
+        stderr.contains("json") && stderr.contains("not present"),
+        "missing absent-dep diagnostic:\n{stderr}"
+    );
+    assert!(
+        !stdout.contains("removed") && !stdout.contains("fetched"),
+        "false success output:\n{stdout}"
+    );
+    assert_eq!(fs::read_to_string(manifest_path).unwrap(), before);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_corrupt_manifest_has_one_diagnostic_across_package_commands() {
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_corrupt_manifest_has_one_diagnostic_across_package_commands (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("cli_corrupt_manifest");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(
+        &tmp,
+        "package.jet",
+        &(min_manifest("app", "0.1.0") + "\ndeps: .{\n}\nunknown: ../broken,\n"),
+    );
+    write(&tmp, "run.jet", "fn run() { print(\"hi\"); }\n");
+    let lib = tmp.join("mylib");
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
+
+    let outputs = [
+        jet_cmd(&["fetch"], &tmp, &store),
+        jet_cmd(&["build", "run.jet"], &tmp, &store),
+        jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store),
+    ];
+    let lines: Vec<String> = outputs
+        .iter()
+        .map(|out| {
+            assert!(
+                !out.status.success(),
+                "corrupt manifest command unexpectedly succeeded"
+            );
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .find(|line| line.starts_with("Error [E1206]:"))
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    assert!(
+        lines.iter().all(|line| !line.is_empty()),
+        "missing E1206 diagnosis: {lines:?}"
+    );
+    assert!(
+        lines.windows(2).all(|pair| pair[0] == pair[1]),
+        "inconsistent diagnostics: {lines:?}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 // ─────────────────────────────────────────────
 // E2-M8: SemVer + supply-chain tests
 // ─────────────────────────────────────────────
@@ -3862,6 +4047,7 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     fs::create_dir_all(&store).unwrap();
     let keys = tmp.join("keys");
     init_clean_project(&proj, "textkit", "1.2.0");
+    seed_core_review(&bare, "textkit", "1.2.0");
 
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
@@ -3939,6 +4125,7 @@ fn cli_yank_flips_index_entry() {
     fs::create_dir_all(&store).unwrap();
     let keys = tmp.join("keys");
     init_clean_project(&proj, "mypkg", "2.0.0");
+    seed_core_review(&bare, "mypkg", "2.0.0");
 
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
@@ -4228,6 +4415,8 @@ fn signed_entry(
         content_hash: content_hash.to_string(),
         fingerprint: "sha256-fp".to_string(),
         yanked: false,
+        tier: jet::Publish::RegistryTier::Core,
+        gate_status: jet::Publish::GateStatus::core_reviewed(),
         public_key: public_key.to_string(),
         signature: signature.to_string(),
     }
@@ -4252,6 +4441,7 @@ fn cli_publish_signs_index_and_auto_keygens() {
     fs::create_dir_all(&store).unwrap();
     let keys = tmp.join("keys");
     init_clean_project(&proj, "signedkit", "1.0.0");
+    seed_core_review(&bare, "signedkit", "1.0.0");
 
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
@@ -4396,6 +4586,7 @@ fn cli_publish_existing_key_bypasses_entropy_keygen() {
     fs::create_dir_all(&keys).unwrap();
     install_closed_status_crypto_helper(&home);
     init_clean_project(&project, "existingkey", "1.0.0");
+    seed_core_review(&bare, "existingkey", "1.0.0");
     let seed = vec![0x5au8; 32];
     fs::write(keys.join("jet.ed25519"), &seed).unwrap();
     fs::write(keys.join("jet.ed25519.pub"), "00".repeat(32)).unwrap();
@@ -4441,6 +4632,7 @@ fn cli_publish_no_sign_leaves_signature_empty() {
     fs::create_dir_all(&store).unwrap();
     let keys = tmp.join("keys");
     init_clean_project(&proj, "plainkit", "1.0.0");
+    seed_core_review(&bare, "plainkit", "1.0.0");
 
     let envs = &[
         ("JET_REGISTRY_URL", url.as_str()),
@@ -4468,6 +4660,44 @@ fn cli_publish_no_sign_leaves_signature_empty() {
     );
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_community_publish_refuses_until_all_named_gates_pass() {
+    if !jet_bin().is_file() || !have_git() {
+        eprintln!("note: skipping community gate refusal (need built binary and git)");
+        return;
+    }
+
+    let tmp = tmp_dir("pub_community_closed");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    let cache = tmp.join("cache");
+    let store = tmp.join("store");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(&store).unwrap();
+    init_clean_project(&proj, "communitykit", "1.0.0");
+
+    let out = jet_cmd_env(
+        &["registry", "publish", "--no-sign"],
+        &proj,
+        &[
+            ("JET_REGISTRY_URL", url.as_str()),
+            ("JET_REGISTRY_TIER", "community"),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+        ],
+    );
+    assert!(!out.status.success(), "community publish must stay closed");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for gate in ["#935", "#431", "#1912", "#1913"] {
+        assert!(stderr.contains(gate), "missing {gate} in refusal:\n{stderr}");
+    }
+    assert!(read_index_file(&bare, "communitykit").is_none());
+    fs::remove_dir_all(tmp).unwrap();
 }
 
 #[test]

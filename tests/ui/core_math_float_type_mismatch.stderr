@@ -30,10 +30,10 @@ Error [E0112]: `pow` needs Float or F32, not `Decimal`
  Why: pow operates on floating-point numbers
  Fix: pass a Float or F32 base
 
-Error [E0112]: `hypot` needs Float or F32, not `Decimal`
-  --> tests/ui/core_math_float_type_mismatch.jet:8:16
+Error [E0112]: `hypot` needs all arguments to have the same float type
+  --> tests/ui/core_math_float_type_mismatch.jet:8:25
     |
   8 |     math.hypot(2.0, F32.from_float(2.0) ?? F32.from_int(0))
-    |                ^^^
- Why: this math function operates on floating-point numbers
- Fix: pass Float or F32 values
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: D-FLOATW1: mixing float widths is not allowed
+ Fix: convert the arguments to the same float width

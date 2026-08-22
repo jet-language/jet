@@ -1,7 +1,31 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_generated_collision/main.jet:4:27
+    |
+  4 | fn build(b: BuildContext) => BuildPlan ! {
+    |                           ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_generated_collision/main.jet:6:28
+    |
+  6 |         pub fn collision() => String :: "generated";
+    |                            ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/build_generated_collision/main.jet:6:38
     |
   6 |         pub fn collision() => String :: "generated";
     |                                      ^^
- Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_generated_collision/main.jet:1:20
+    |
+  1 | // @programmable_build
+    |                    ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`

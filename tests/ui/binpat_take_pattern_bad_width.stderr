@@ -1,23 +1,7 @@
-Error [E0320]: typed collection construction uses `[T]{…}`, not `[T].{…}`
-  --> tests/ui/binpat_take_pattern_bad_width.jet:5:19
-    |
-  5 |     packet :: [U8].{ 1, 2, 3 }
-    |                   ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[T]{…}`
-
-Error [E0320]: typed pattern construction uses `[U8]{…}`, not `[U8].{…}`
-  --> tests/ui/binpat_take_pattern_bad_width.jet:7:35
-    |
-  7 |     matched :: r.take_pattern([U8].{"{x:U99}"}) ?? panic("bad header")
-    |                                   ^
- Why: D-LIT-DOT1 drops the constructor dot from every literal head
- Fix: write `[U8]{…}`
-
 Error [E1007]: `U99` isn't a valid bit width in a binary pattern
-  --> tests/ui/binpat_take_pattern_bad_width.jet:7:41
+  --> tests/ui/binpat_take_pattern_bad_width.jet:7:40
     |
-  7 |     matched :: r.take_pattern([U8].{"{x:U99}"}) ?? panic("bad header")
-    |                                         ^^^
+  7 |     matched :: r.take_pattern([U8]{"{x:U99}"}) ?? panic("bad header")
+    |                                        ^^^
  Why: a bit field is `U` followed by a width of 1 to 64 bits, optionally with a `be`/`le` byte order
  Fix: write e.g. `U4`, `U8`, `U16be`, or `U32le`

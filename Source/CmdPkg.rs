@@ -62,6 +62,13 @@ pub(crate) fn run_add(raw_args: &[String]) {
         crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
+    jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
     let updated = jet::Manifest::add_dependency(&raw, dep_name, &spec);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
@@ -82,6 +89,21 @@ pub(crate) fn run_remove(dep_name: &str) {
         crate::cli_error!("E2105", "couldn't read {}: {}", pack_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
+    let manifest = jet::Manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    if !manifest.dependencies.contains_key(dep_name) {
+        crate::cli_error!(
+            @fix "E2104",
+            format!("dependency `{dep_name}` is not present in {}", jet::Syntax::PACKAGE_FILE),
+            format!("remove a dependency listed in {}, or add `{dep_name}` first", jet::Syntax::PACKAGE_FILE)
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
     let updated = jet::Manifest::remove_dependency(&raw, dep_name);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", pack_path.display(), e);
@@ -125,7 +147,8 @@ pub(crate) fn run_update(dep: Option<&str>) {
         update_dep: dep.map(str::to_string),
     };
     match jet::Fetch::fetch(&root, &mf, existing_lock.as_ref(), &opts) {
-        Ok(_) => {
+        Ok((lock, _)) => {
+            print_registry_tiers(&lock);
             if let Some(d) = dep {
                 println!("updated `{}`", d);
             } else {
@@ -233,7 +256,8 @@ fn do_fetch(root: &Path, locked: bool) {
         update_dep: None,
     };
     match jet::Fetch::fetch(root, &mf, existing_lock.as_ref(), &opts) {
-        Ok(_) => {
+        Ok((lock, _)) => {
+            print_registry_tiers(&lock);
             if locked {
                 println!("lock verified");
             } else {
@@ -247,5 +271,22 @@ fn do_fetch(root: &Path, locked: bool) {
             );
             exit(ExitCodes::USER_ERROR);
         }
+    }
+}
+
+fn print_registry_tiers(lock: &jet::Lock::LockFile) {
+    for package in &lock.packages {
+        let jet::Lock::LockSource::Registry {
+            registry,
+            tier,
+            gate_status,
+            ..
+        } = &package.source else {
+            continue;
+        };
+        println!(
+            "resolved `{}` {} from registry `{}` (tier: {}; gate status: {})",
+            package.name, package.version, registry, tier, gate_status
+        );
     }
 }

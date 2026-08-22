@@ -7,6 +7,7 @@ use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
 use super::Tuf::verify_registry_package;
+use super::Tier::{RegistryTier, community_gate_error};
 use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,8 @@ pub struct RegistryConfig {
     pub mirror: bool,
     /// If true, require signed metadata from this registry.
     pub require_signed: bool,
+    /// The curated core or machine-gated community channel.
+    pub tier: RegistryTier,
 }
 
 impl RegistryConfig {
@@ -37,6 +40,7 @@ impl RegistryConfig {
             url: "https://github.com/jet-lang/registry".to_string(),
             mirror: false,
             require_signed: false,
+            tier: RegistryTier::Core,
         }
     }
 
@@ -47,6 +51,7 @@ impl RegistryConfig {
             url: url.to_string(),
             mirror,
             require_signed: false,
+            tier: RegistryTier::Core,
         }
     }
 }
@@ -87,9 +92,16 @@ pub fn resolve_publish_registry() -> RegistryConfig {
         Ok(url) if !url.is_empty() => {
             let mut r = RegistryConfig::public_default();
             r.url = url;
+            r.tier = RegistryTier::from_environment();
+            r.require_signed = r.tier == RegistryTier::Community;
             r
         }
-        _ => RegistryConfig::public_default(),
+        _ => {
+            let mut registry = RegistryConfig::public_default();
+            registry.tier = RegistryTier::from_environment();
+            registry.require_signed = registry.tier == RegistryTier::Community;
+            registry
+        }
     }
 }
 
@@ -798,8 +810,11 @@ pub fn resolve_from_index(
     name: &str,
 ) -> Result<Vec<IndexEntry>, Diagnostic> {
     let repo = ensure_index_clone(registry)?;
-    verify_registry_package(&repo, &registry.name, name)
-        .map(|entries| entries.into_iter().filter(|entry| !entry.yanked).collect())
+    let entries = verify_registry_package(&repo, &registry.name, name)?;
+    for entry in &entries {
+        verify_entry_tier(entry)?;
+    }
+    Ok(entries.into_iter().filter(|entry| !entry.yanked).collect())
 }
 
 /// Registry source artifact convention. The git index and the source tree are
@@ -1044,14 +1059,26 @@ pub fn resolve_and_verify(
     let live: Vec<IndexEntry> = all.iter().filter(|e| !e.yanked).cloned().collect();
     let mut warnings = Vec::new();
     for e in &live {
+        verify_entry_tier(e)?;
         warnings.extend(verify_index_entry(
             &all,
             e,
-            registry.require_signed,
+            registry.require_signed || e.tier == RegistryTier::Community,
             &registry.name,
         )?);
     }
     Ok((live, warnings))
+}
+
+pub fn verify_entry_tier(entry: &IndexEntry) -> Result<(), Diagnostic> {
+    if entry.tier == RegistryTier::Community && !entry.gate_status.community_open() {
+        return Err(community_gate_error(
+            &entry.name,
+            &entry.version,
+            &entry.gate_status,
+        ));
+    }
+    Ok(())
 }
 
 /// E1246 — a package signature does not verify against its pinned public key.

@@ -1,3 +1,11 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/bare_return_needs_value.jet:1:17
+    |
+  1 | fn g(xs: [Int]) => Int {
+    |                 ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0405]: `?? return` here needs a value
   --> tests/ui/bare_return_needs_value.jet:2:24
     |

@@ -2047,7 +2047,7 @@ fn main() {
             ));
         }
         "services" => {
-            // U12 (card c9jetpackgates): `jet services up/down/health/logs`
+            // U12 (card c9jetpackgates): `jet services up/down/health/logs/wait`
             // supervises the project's dev `services:` processes. D-JPK-
             // DISPATCH1=B: dispatched to the jetpack engine exactly like
             // `push`/`bridge`/`config`, never linked in-process.
@@ -3872,11 +3872,21 @@ pub(crate) fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> 
 /// message's body for
 /// commands that genuinely have no manifest at all.
 pub(crate) fn require_manifest_root(cwd: &Path, fallback_hint: &str) -> PathBuf {
-    jet::Loader::find_manifest_root(cwd).unwrap_or_else(|| {
-        match jet::Loader::stale_manifest_name_message(cwd) {
-            Some(msg) => eprint!("{}", msg),
-            None => eprintln!("{}", fallback_hint),
+    match jet::Loader::find_manifest_root_checked(cwd) {
+        Ok(Some(root)) => root,
+        Ok(None) => {
+            match jet::Loader::stale_manifest_name_message(cwd) {
+                Some(msg) => eprint!("{}", msg),
+                None => eprintln!("{}", fallback_hint),
+            }
+            exit(ExitCodes::USER_ERROR);
         }
-        exit(ExitCodes::USER_ERROR);
-    })
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 }

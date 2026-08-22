@@ -190,6 +190,59 @@ impl IntegrationFactProjection {
         }) {
             Err("integration task facts contain an empty executable field".to_string())
         } else {
+            for task in &self.task_facts {
+                let contract = match task.integration {
+                    IntegrationKind::CloudCredentials => Some((
+                        "credential-store-check",
+                        "credential-store",
+                        "credential.read",
+                    )),
+                    IntegrationKind::Vault => Some(("vault-check", "vault", "vault.read")),
+                    _ => None,
+                };
+                let Some((expected_task, expected_provider, expected_grant)) = contract else {
+                    continue;
+                };
+                if task.name != expected_task {
+                    return Err(format!(
+                        "{} integration task must be `{expected_task}`",
+                        task.integration.as_str()
+                    ));
+                }
+                if !self.tasks.iter().any(|name| name == expected_task) {
+                    return Err(format!(
+                        "integration task `{expected_task}` is not disclosed by its fact projection"
+                    ));
+                }
+                if !task
+                    .providers
+                    .iter()
+                    .any(|provider| provider == expected_provider)
+                    || !self
+                        .providers
+                        .iter()
+                        .any(|provider| provider == expected_provider)
+                {
+                    return Err(format!(
+                        "{} integration task is missing provider `{expected_provider}`",
+                        task.integration.as_str()
+                    ));
+                }
+                if !task.grants.iter().any(|grant| grant == expected_grant)
+                    || !self.grants.iter().any(|grant| grant == expected_grant)
+                {
+                    return Err(format!(
+                        "{} integration task is missing grant `{expected_grant}`",
+                        task.integration.as_str()
+                    ));
+                }
+                if task.secrets.is_empty() {
+                    return Err(format!(
+                        "{} integration task needs at least one named secret reference",
+                        task.integration.as_str()
+                    ));
+                }
+            }
             Ok(())
         }
     }
@@ -374,7 +427,7 @@ impl std::fmt::Display for ManagedFileError {
 
 impl std::error::Error for ManagedFileError {}
 
-/// Convert the closed `files: { destination: value }` fact into deterministic
+/// Convert the closed `files: [destination: value]` fact into deterministic
 /// managed-file records. The evaluator owns shape and path validation; the
 /// runtime only resolves path-backed bytes and applies these facts.
 pub fn files_from_value(value: &CtValue) -> Result<Vec<ManagedFile>, ManagedFileError> {

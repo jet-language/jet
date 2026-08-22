@@ -11,6 +11,7 @@ use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;
 use super::JSON::{self, JSONValue};
+use crate::Lock::{LockFile, LockSource};
 use crate::Syntax;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,8 @@ pub struct PackageRecord {
     pub platforms: Vec<String>,
     pub docs: String,
     pub provenance: String,
+    pub tier: String,
+    pub gate_status: String,
     pub options: Vec<OptionField>,
 }
 
@@ -48,6 +51,10 @@ impl PackageRecord {
         }
         if self.provenance == "declared" && other.provenance != "declared" {
             self.provenance = other.provenance;
+        }
+        if self.tier == "not-registry" && other.tier != "not-registry" {
+            self.tier = other.tier;
+            self.gate_status = other.gate_status;
         }
         if self.docs.is_empty() && !other.docs.is_empty() {
             self.docs = other.docs;
@@ -235,6 +242,8 @@ pub fn merge_store_entries(index: &mut Index, store_entries: &[StoreEntry]) {
             platforms: platform_strings(),
             docs: format!("{} from hangar metadata", entry.reference),
             provenance: format!("hangar:{}", entry.id),
+            tier: "not-registry".to_string(),
+            gate_status: "not-applicable".to_string(),
             options: service_option_fields(),
         });
     }
@@ -250,6 +259,8 @@ pub fn merge_adapters(index: &mut Index, adapters: &[AdapterPlan]) {
             platforms: platform_strings(),
             docs: format!("adapter package from {}", adapter.source),
             provenance: "env:Pkg.adapt".to_string(),
+            tier: "not-registry".to_string(),
+            gate_status: "not-applicable".to_string(),
             options: service_option_fields(),
         });
     }
@@ -299,7 +310,39 @@ fn record_for_ref(spec: &RefSpec, version: String, provenance: String) -> Packag
         platforms: platform_strings(),
         docs: format!("{} from local Jetpack metadata", spec.raw),
         provenance,
+        tier: "not-registry".to_string(),
+        gate_status: "not-applicable".to_string(),
         options: service_option_fields(),
+    }
+}
+
+/// Add registry package records from the project lock. The lock is the
+/// resolver's source of truth, so `inspect info` does not infer a tier from a
+/// provider label or a stale discovery record.
+pub fn merge_lock(index: &mut Index, lock: &LockFile) {
+    for package in &lock.packages {
+        let LockSource::Registry {
+            registry,
+            reference,
+            authority,
+            tier,
+            gate_status,
+            ..
+        } = &package.source else {
+            continue;
+        };
+        index.add_package(PackageRecord {
+            source: registry.clone(),
+            name: package.name.clone(),
+            reference: reference.clone(),
+            version: package.version.clone(),
+            platforms: platform_strings(),
+            docs: "package resolved from the Jet registry".to_string(),
+            provenance: format!("registry:{authority}"),
+            tier: tier.clone(),
+            gate_status: gate_status.clone(),
+            options: service_option_fields(),
+        });
     }
 }
 
@@ -421,7 +464,7 @@ fn record_to_json(record: &PackageRecord) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"source\":{},\"name\":{},\"reference\":{},\"version\":{},\"platforms\":{},\"docs\":{},\"provenance\":{},\"options\":[{}]}}",
+        "{{\"source\":{},\"name\":{},\"reference\":{},\"version\":{},\"platforms\":{},\"docs\":{},\"provenance\":{},\"tier\":{},\"gate_status\":{},\"options\":[{}]}}",
         JSON::quote(&record.source),
         JSON::quote(&record.name),
         JSON::quote(&record.reference),
@@ -429,6 +472,8 @@ fn record_to_json(record: &PackageRecord) -> String {
         platforms,
         JSON::quote(&record.docs),
         JSON::quote(&record.provenance),
+        JSON::quote(&record.tier),
+        JSON::quote(&record.gate_status),
         options
     )
 }
@@ -461,6 +506,12 @@ fn record_from_json(json: &JSONValue) -> Result<PackageRecord, String> {
         platforms: string_array(obj.get("platforms")),
         docs: required_str(obj, "docs").unwrap_or("").to_string(),
         provenance: required_str(obj, "provenance").unwrap_or("").to_string(),
+        tier: required_str(obj, "tier")
+            .unwrap_or("not-registry")
+            .to_string(),
+        gate_status: required_str(obj, "gate_status")
+            .unwrap_or("not-applicable")
+            .to_string(),
         options: option_array(obj.get("options")),
     })
 }
@@ -523,8 +574,29 @@ mod tests {
         let json = record_to_json(&index.packages[0]);
         let parsed = record_from_json(&JSON::parse(&json).unwrap()).unwrap();
         assert_eq!(parsed.name, "ripgrep");
+        assert_eq!(parsed.tier, "not-registry");
+        assert_eq!(parsed.gate_status, "not-applicable");
         assert_eq!(index.search("rip")[0].display_ref(), "default.ripgrep");
         assert_eq!(index.info("default.ripgrep").unwrap().version, "14.1.0");
+    }
+
+    #[test]
+    fn registry_lock_records_tier_and_gate_status_for_info() {
+        let lock = crate::Lock::parse(
+            "version = 1\n\n[[package]]\nname = \"textkit\"\nversion = \"1.2.0\"\nsource = { registry = \"jet\", reference = \"textkit@jet\", output = \"out\", source-hash = \"sha256-tree\", repository = \"https://registry\", authority = \"jet-registry-index\", tier = \"community\", gate-status = \"signature=passed;audit=passed;name=passed;liveness=passed;review=not-required\" }\nfingerprint = \"fp\"\ndependencies = []\n",
+        )
+        .expect("registry lock parses");
+        let mut index = Index::default();
+        merge_lock(&mut index, &lock);
+        let record = index.info("jet.textkit").expect("registry record is indexed");
+        assert_eq!(record.tier, "community");
+        assert_eq!(
+            record.gate_status,
+            "signature=passed;audit=passed;name=passed;liveness=passed;review=not-required"
+        );
+        let json = info_json(record);
+        assert!(json.contains("\"tier\":\"community\""));
+        assert!(json.contains("\"gate_status\":\"signature=passed;"));
     }
 
     #[test]
@@ -539,6 +611,8 @@ mod tests {
                 platforms: platform_strings(),
                 docs: String::new(),
                 provenance: "declared".to_string(),
+                tier: "not-registry".to_string(),
+                gate_status: "not-applicable".to_string(),
                 options: service_option_fields(),
             });
         }

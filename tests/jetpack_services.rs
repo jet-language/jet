@@ -1,7 +1,7 @@
 //! U12: supervised dev services (card c9jetpackgates).
 //!
 //! Covers:
-//!   * `jetpack services up/health/logs/down` round-trips a fixture daemon;
+//!   * `jetpack services up/health/logs/wait/down` round-trips a fixture daemon;
 //!   * `jetpack dev`'s health gate blocks until a service is healthy, and
 //!     reports a clean E1261 (not a hang) when it never becomes so;
 //!   * a `services:` entry with a field jetpack's dev-runtime tier doesn't
@@ -156,7 +156,7 @@ fn write_project(dir: &std::path::Path, services_body: &str, main_src: &str) {
         format!("module env.dev {{ services: {{ {services_body} }} }}\n"),
     )
     .unwrap();
-    fs::write(dir.join("main.jet"), main_src).unwrap();
+    fs::write(dir.join("run.jet"), main_src).unwrap();
 }
 
 /// `jetpack services up` starts a fixture "daemon" (a `sleep`), `health`
@@ -199,6 +199,23 @@ fn services_up_health_logs_down_roundtrip() {
         health.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&health.stderr)
+    );
+
+    let wait = jetpack()
+        .args(["services", "wait", "fixture", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(
+        wait.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&wait.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&wait.stderr).contains("service `fixture` is ready"),
+        "stderr: {}",
+        String::from_utf8_lossy(&wait.stderr)
     );
 
     let logs = jetpack()
@@ -274,6 +291,30 @@ fn services_from_nested_project_directory_use_the_project_state_root() {
         .output()
         .unwrap();
     assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+}
+
+#[test]
+fn services_wait_reports_readiness_timeout() {
+    let proj = Scratch::new("wait-timeout");
+    let root = Scratch::new("wait-timeout-root");
+    let home = Scratch::new("wait-timeout-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sleep", "30"], ready: "false" }"#,
+        "fn run() {}\n",
+    );
+    let out = jetpack()
+        .args(["services", "wait", "fixture", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1261"), "stderr: {stderr}");
+    assert!(stderr.contains("service `fixture` is not ready"), "stderr: {stderr}");
 }
 
 /// `jetpack dev` health-gates on its declared services (U19's `jetpack dev`
@@ -459,7 +500,7 @@ fn services_restart_exhaustion_cleans_state() {
     let home = Scratch::new("restart-exhaustion-home");
     write_project(
         &proj.path,
-        r#"fixture: { run: ["sh", "-c", "exit 7"], restart: .OnFailure.{ max: 1, backoff_ms: 1 } }"#,
+        r#"fixture: { run: ["sh", "-c", "exit 7"], restart: .OnFailure{ max: 1, backoff_ms: 1 } }"#,
         "fn run() {}\n",
     );
     let env = [

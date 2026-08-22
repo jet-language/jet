@@ -403,7 +403,7 @@ fn selected_service_order(
         .collect())
 }
 
-/// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
+/// `jetpack services up|down|health|logs|wait [<name>]` (U12). With no `<name>`,
 /// every declared dev service is targeted; `logs` requires exactly one name.
 pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {

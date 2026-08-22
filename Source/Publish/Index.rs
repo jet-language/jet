@@ -4,12 +4,12 @@
 //! The registry is an ordinary git repo. Each package gets one append-only
 //! `index/<name>/<name>.jsonl` file, one JSON line per published version —
 //! the same sparse-index shape cargo/crates.io proved. No serde (I6): the
-//! line is a fixed seven-field object parsed by Jet's shared std-only JSON
-//! parser; the two signing fields may be absent on legacy lines.
+//! line is a fixed nine-field object parsed by Jet's shared std-only JSON
+//! parser. Tier and gate status are part of the signed package identity.
 //!
 //! ```text
 //! <registry>/index/<name>/<name>.jsonl
-//! {"name":"textkit","version":"1.2.0","content_hash":"sha256-…","fingerprint":"sha256-…","yanked":false}
+//! {"name":"textkit","version":"1.2.0","content_hash":"sha256-…","fingerprint":"sha256-…","yanked":false,"tier":"core","gate_status":"signature=not-required;audit=not-required;name=not-required;liveness=not-required;review=passed","public_key":"","signature":""}
 //! ```
 //!
 //! `content_hash` / `fingerprint` are the exact fields already on
@@ -18,6 +18,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+
+use super::Tier::{GateStatus, RegistryTier};
 
 /// One published-version line in the sparse index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +33,11 @@ pub struct IndexEntry {
     /// D-VERSION1=A: a yanked version stays in the index (never deleted) but is
     /// hidden from new resolution.
     pub yanked: bool,
+    /// D-REGCURATE1=C: the human-reviewed core or machine-gated community
+    /// channel that accepted this package.
+    pub tier: RegistryTier,
+    /// D-REGCURATE1=C: the gate result recorded with the package version.
+    pub gate_status: GateStatus,
     /// c146 (D-PKGSIGN1) TOFU pin: the publisher's hex Ed25519 public key.
     /// Written **once**, on the first published version of a package; empty on
     /// later versions (which are checked against the pin). A later version that
@@ -42,26 +49,25 @@ pub struct IndexEntry {
 }
 
 impl IndexEntry {
-    /// Serialize to a single canonical JSON line (no trailing newline). The
-    /// c146 `public_key`/`signature` fields are always present (empty string
-    /// when absent) so the line shape stays fixed and parsers never guess.
+    /// Serialize to a single canonical JSON line (no trailing newline).
     pub fn to_jsonl(&self) -> String {
         format!(
-            "{{\"name\":{},\"version\":{},\"content_hash\":{},\"fingerprint\":{},\"yanked\":{},\"public_key\":{},\"signature\":{}}}",
+            "{{\"name\":{},\"version\":{},\"content_hash\":{},\"fingerprint\":{},\"yanked\":{},\"tier\":{},\"gate_status\":{},\"public_key\":{},\"signature\":{}}}",
             json_str(&self.name),
             json_str(&self.version),
             json_str(&self.content_hash),
             json_str(&self.fingerprint),
             if self.yanked { "true" } else { "false" },
+            json_str(self.tier.label()),
+            json_str(&self.gate_status.summary()),
             json_str(&self.public_key),
             json_str(&self.signature),
         )
     }
 
     /// Parse one index line. Returns `None` for malformed JSON, wrong field
-    /// types, duplicate keys, or a line missing `name`/`version`.
-    /// `public_key`/`signature` default to empty (backward-compatible with
-    /// index lines written before c146).
+    /// types, duplicate keys, unknown fields, or a line missing required
+    /// package identity and trust fields.
     pub fn parse_line(line: &str) -> Option<IndexEntry> {
         let JSONValue::Object(fields) = parse_json(line).ok()? else {
             return None;
@@ -72,6 +78,8 @@ impl IndexEntry {
             "content_hash",
             "fingerprint",
             "yanked",
+            "tier",
+            "gate_status",
             "public_key",
             "signature",
         ];
@@ -84,6 +92,8 @@ impl IndexEntry {
             content_hash: optional_string(&fields, "content_hash")?,
             fingerprint: optional_string(&fields, "fingerprint")?,
             yanked: optional_bool(&fields, "yanked")?,
+            tier: RegistryTier::parse(&required_string(&fields, "tier")?)?,
+            gate_status: GateStatus::parse(&required_string(&fields, "gate_status")?)?,
             public_key: optional_string(&fields, "public_key")?,
             signature: optional_string(&fields, "signature")?,
         })
@@ -401,6 +411,8 @@ mod tests {
             content_hash: "sha256-tree".to_string(),
             fingerprint: "sha256-fp".to_string(),
             yanked,
+            tier: RegistryTier::Core,
+            gate_status: GateStatus::core_reviewed(),
             public_key: String::new(),
             signature: String::new(),
         }
@@ -423,6 +435,8 @@ mod tests {
         let line = e.to_jsonl();
         assert!(line.contains("\"name\":\"textkit\""));
         assert!(line.contains("\"yanked\":false"));
+        assert!(line.contains("\"tier\":\"core\""));
+        assert!(line.contains("\"gate_status\":\"signature=not-required;"));
         assert_eq!(IndexEntry::parse_line(&line), Some(e));
     }
 

@@ -268,6 +268,73 @@ pub struct ClosureGraph {
     pub deleted_records: BTreeSet<String>,
 }
 
+/// Validate that a provider's closure edges stay inside its artifact universe.
+/// `nix` is the compatibility universe; every other provider is native. The
+/// path check catches a native edge to an external compatibility object, while
+/// the owner check catches a compat-root object that happens to live under
+/// Hangar.
+pub(super) fn validate_universe_references<'a>(
+    provider: &str,
+    references: impl IntoIterator<Item = &'a String>,
+    graph: &ClosureGraph,
+) -> Result<(), String> {
+    let provider_is_compat = provider == "nix";
+    for digest in references {
+        let Some(object) = graph.objects.get(digest) else {
+            // The normal graph validator reports missing objects. Keep this
+            // helper focused on the universe boundary for pre-registration
+            // checks, where the candidate has not entered the graph yet.
+            continue;
+        };
+        if !provider_is_compat && object.external {
+            return Err(format!(
+                "native provider `{provider}` crosses the ABI universe via external compatibility object `{digest}` at `{}`",
+                object.path
+            ));
+        }
+        for owner in graph
+            .records
+            .values()
+            .filter(|record| record.outputs.values().any(|output| output == digest))
+        {
+            let owner_provider = match ProducerRecord::decode(&owner.producer_record) {
+                Ok(producer) => producer.provider,
+                Err(_) if owner.producer_record.is_empty() => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "closure record `{}` has invalid producer record: {error}",
+                        owner.id
+                    ));
+                }
+            };
+            if (owner_provider == "nix") != provider_is_compat {
+                return Err(format!(
+                    "provider `{provider}` crosses the ABI universe at object `{digest}` owned by `{owner_provider}`"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_universe_isolation(graph: &ClosureGraph, allow_legacy: bool) -> Result<(), String> {
+    for record in graph.records.values() {
+        if allow_legacy && record.producer_record.is_empty() {
+            continue;
+        }
+        let provider = ProducerRecord::decode(&record.producer_record)
+            .map_err(|error| {
+                format!(
+                    "closure record `{}` has invalid producer record: {error}",
+                    record.id
+                )
+            })?
+            .provider;
+        validate_universe_references(&provider, &record.references, graph)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CanonicalActionRecord {
     outputs: BTreeMap<String, String>,
@@ -1314,6 +1381,7 @@ fn validate_graph_structure_mode(
             actions.insert(record.action_key.as_str(), projection);
         }
     }
+    validate_universe_isolation(graph, allow_legacy)?;
     Ok(())
 }
 

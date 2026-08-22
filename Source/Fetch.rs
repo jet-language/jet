@@ -634,6 +634,8 @@ impl<'a> Resolver<'a> {
                             source_hash: content_hash.clone(),
                             repository: registry.url,
                             authority: "jet-registry-index".to_string(),
+                            tier: selected.tier.label().to_string(),
+                            gate_status: selected.gate_status.summary(),
                         },
                         locked: None,
                         fingerprint: fp,
@@ -801,6 +803,8 @@ fn build_dep_dirs_from_lock(
                     reference,
                     repository,
                     source_hash,
+                    tier,
+                    gate_status,
                     ..
                 } = &locked.source else {
                     unreachable!("registry package predicate guarantees registry source")
@@ -810,6 +814,8 @@ fn build_dep_dirs_from_lock(
                     url: repository.clone(),
                     mirror: false,
                     require_signed: false,
+                    tier: crate::Publish::RegistryTier::parse(tier)
+                        .unwrap_or(crate::Publish::RegistryTier::Core),
                 };
                 let repo = crate::Publish::index_repo_path(&config);
                 let entry = crate::Publish::Index::find_entry(&repo, dep_name, &locked.version)
@@ -849,12 +855,21 @@ fn build_dep_dirs_from_lock(
                         "refresh the lock from a trusted registry checkpoint",
                     )]);
                 }
+                if entry.tier.label() != tier || entry.gate_status.summary() != *gate_status {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry tier or gate status disagrees with the live index",
+                        "regenerate the lock from the trusted registry checkpoint",
+                    )]);
+                }
                 let all_entries = crate::Publish::verify_registry_package(
                     &repo,
                     &config.name,
                     dep_name,
                 )
                 .map_err(|diagnostic| vec![diagnostic])?;
+                crate::Publish::verify_entry_tier(&entry)
+                    .map_err(|diagnostic| vec![diagnostic])?;
                 crate::Publish::verify_index_entry(
                     &all_entries,
                     &entry,

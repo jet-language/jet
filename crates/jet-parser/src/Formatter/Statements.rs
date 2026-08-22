@@ -567,7 +567,7 @@ impl<'a> Fmt<'a> {
                         self.fmt_guard_dispatch(arms, else_body.as_deref());
                     }
                 } else {
-                    self.fmt_dispatch(subject, arms, else_body.as_deref());
+                    self.fmt_dispatch(subject, arms, else_body.as_deref(), false);
                 }
             }
             Stmt::Break(_) => self.write("break"),
@@ -754,7 +754,7 @@ impl<'a> Fmt<'a> {
                 ..
             } => {
                 self.write(&format!("{}{} ", Syntax::COMPTIME_MARK, Syntax::KW_IF));
-                self.fmt_dispatch(subject, arms, else_body.as_deref());
+                self.fmt_dispatch(subject, arms, else_body.as_deref(), true);
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
             Stmt::ContextBlock { body, .. } => {
@@ -881,7 +881,13 @@ impl<'a> Fmt<'a> {
     /// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
     /// `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
     /// `@if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
-    fn fmt_dispatch(&mut self, subject: &Expr, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
+    fn fmt_dispatch(
+        &mut self,
+        subject: &Expr,
+        arms: &[SwitchArm],
+        else_body: Option<&[Stmt]>,
+        force_arm_blocks: bool,
+    ) {
         let table_op = self
             .dispatch_op_from_source(subject)
             .unwrap_or_else(|| self.dispatch_op(subject, arms));
@@ -901,7 +907,12 @@ impl<'a> Fmt<'a> {
                 let next_starts_with_dot = arms
                     .get(index + 1)
                     .is_some_and(|next| Self::arm_head_starts_with_dot(&next.cond));
-                f.fmt_switch_arm(subject, table_op, arm, next_starts_with_dot);
+                f.fmt_switch_arm(
+                    subject,
+                    table_op,
+                    arm,
+                    force_arm_blocks || next_starts_with_dot,
+                );
                 f.emit_trailing(arm.span.end);
             }
             if let Some(else_b) = else_body {
@@ -918,7 +929,7 @@ impl<'a> Fmt<'a> {
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
                 f.write(Syntax::OP_UNIFIED_ARROW);
-                f.fmt_arm_body(else_b, false);
+                f.fmt_arm_body(else_b, force_arm_blocks);
             }
         });
         self.end_block();

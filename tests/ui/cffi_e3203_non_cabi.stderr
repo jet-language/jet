@@ -1,3 +1,19 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/cffi_e3203_non_cabi.jet:3:22
+    |
+  3 |     fn return_list() => [Int] = "DemoReturnList";
+    |                      ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_e3203_non_cabi.jet:3:22
+    |
+  3 |     fn return_list() => [Int] = "DemoReturnList";
+    |                      ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E3203]: `[Int]` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_e3203_non_cabi.jet:2:22
     |

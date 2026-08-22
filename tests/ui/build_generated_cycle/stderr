@@ -1,7 +1,7 @@
-Error [E3511]: generation rounds form a cycle: module `alpha` is generated twice
-  --> tests/ui/build_generated_cycle/main.jet:3:4
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_generated_cycle/main.jet:3:27
     |
   3 | fn build(b: BuildContext) => BuildPlan ! {
-    |    ^^^^^
- Why: generated source must reach a bounded deterministic order, not loop until quiescent
- Fix: break the dependency between these generators or give each generated module one owner
+    |                           ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`

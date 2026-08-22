@@ -465,6 +465,17 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     };
     let repo = checkout.path();
 
+    let existing_entries = match jet::Publish::Index::read_entries(repo, name) {
+        Ok(entries) => entries,
+        Err(error) => fail_publish_checkout(&checkout, || {
+            let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
+        }),
+    };
+
     // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
     // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
     // still applies unconditionally). The public key is TOFU-pinned into the
@@ -493,17 +504,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             }),
         };
         // TOFU: record the public key only if this package has none pinned yet.
-        let entries = match jet::Publish::Index::read_entries(repo, name) {
-            Ok(entries) => entries,
-            Err(error) => fail_publish_checkout(&checkout, || {
-                let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
-                eprint!(
-                    "{}",
-                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
-                );
-            }),
-        };
-        let already_pinned = jet::Publish::Index::pinned_public_key(&entries).is_some();
+        let already_pinned = jet::Publish::Index::pinned_public_key(&existing_entries).is_some();
         let pub_field = if already_pinned {
             String::new()
         } else {
@@ -511,6 +512,50 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         };
         status!("  signing: signed content hash with the `{}` key.", reg);
         (pub_field, sig)
+    };
+
+    let gate_status = match registry.tier {
+        jet::Publish::RegistryTier::Core => {
+            if let Err(diagnostic) = jet::Publish::require_core_review(repo, name, version) {
+                fail_publish_checkout(&checkout, || {
+                    eprint!(
+                        "{}",
+                        jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+                    );
+                });
+            }
+            jet::Publish::GateStatus::core_reviewed()
+        }
+        jet::Publish::RegistryTier::Community => {
+            let candidate = jet::Publish::IndexEntry {
+                name: name.clone(),
+                version: version.clone(),
+                content_hash: content_hash.clone(),
+                fingerprint: fingerprint.clone(),
+                yanked: false,
+                tier: jet::Publish::RegistryTier::Community,
+                gate_status: jet::Publish::GateStatus::core_reviewed(),
+                public_key: public_key.clone(),
+                signature: signature.clone(),
+            };
+            let status = jet::Publish::community_gate_status(
+                &root,
+                &existing_entries,
+                &candidate,
+                &registry.name,
+                registry_has_metadata_chain(repo),
+            );
+            if !status.community_open() {
+                fail_publish_checkout(&checkout, || {
+                    let diagnostic = jet::Publish::community_gate_error(name, version, &status);
+                    eprint!(
+                        "{}",
+                        jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+                    );
+                });
+            }
+            status
+        }
     };
 
     let artifact = jet::Publish::artifact_path(repo, name, version)
@@ -548,6 +593,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         content_hash,
         fingerprint,
         yanked: false,
+        tier: registry.tier,
+        gate_status,
         public_key,
         signature,
     };

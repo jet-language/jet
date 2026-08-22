@@ -1806,6 +1806,8 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
         platforms: vec!["linux".to_string()],
         docs: "Postgres fixture from local discovery index".to_string(),
         provenance: "test".to_string(),
+        tier: "not-registry".to_string(),
+        gate_status: "not-applicable".to_string(),
         options: vec![
             jetpack::Discovery::OptionField {
                 name: "ready".to_string(),

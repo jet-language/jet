@@ -1,10 +1,18 @@
-Error [E0320]: struct construction uses `Record{…}`, not `Record.{…}`
-  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:15:20
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:10:42
     |
- 15 |     slot := Record.{id: 0}
-    |                    ^
- Why: literal heads place no dot before their brace (D-LIT-DOT1)
- Fix: write `Record{…}`
+ 10 |     fn store_load(id: U64, out: *Record) => I32 = "store_load"
+    |                                          ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:10:42
+    |
+ 10 |     fn store_load(id: U64, out: *Record) => I32 = "store_load"
+    |                                          ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E3103]: `invoke` is an `#Unsafe` function
   --> tests/ui/cffi_out_pointer_requires_unsafe.jet:20:12

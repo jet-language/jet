@@ -602,6 +602,32 @@ fn canonicalize_external_methods(tokens: Vec<Token>) -> Vec<Token> {
                     index = body_close + 1;
                     continue;
                 }
+            } else if let Some(method_end) = tokens[index + 4..]
+                .iter()
+                .position(|token| matches!(token.kind, TokKind::Semi | TokKind::Eof))
+                .map(|offset| index + 4 + offset)
+            {
+                // The canonical one-line body (`Type -> value`) has no brace
+                // for the old sugar normalizer to anchor on. Wrap that exact
+                // method span in the same synthetic impl shape.
+                out.push(Token {
+                    kind: TokKind::KwImpl,
+                    span: tokens[index].span,
+                });
+                out.push(tokens[index + 1].clone());
+                out.push(Token {
+                    kind: TokKind::LBrace,
+                    span: tokens[index].span,
+                });
+                out.push(tokens[index].clone());
+                out.push(tokens[index + 3].clone());
+                out.extend(tokens[index + 4..method_end].iter().cloned());
+                out.push(Token {
+                    kind: TokKind::RBrace,
+                    span: tokens[method_end.saturating_sub(1)].span,
+                });
+                index = method_end;
+                continue;
             }
         }
         out.push(tokens[index].clone());
@@ -833,6 +859,10 @@ fn ordered_token_diff(
             formatted_i = next_formatted;
             continue;
         }
+        if retired_result_arrow_removal(original, original_i, formatted, formatted_i) {
+            original_i += 1;
+            continue;
+        }
         if let Some((next_original, next_formatted)) =
             canonical_arrow_rewrite(original, original_i, formatted, formatted_i)
         {
@@ -924,6 +954,55 @@ fn ordered_token_diff(
         ));
     }
     Ok(())
+}
+
+fn retired_result_arrow_removal(
+    original: &[Token],
+    original_i: usize,
+    formatted: &[Token],
+    formatted_i: usize,
+) -> bool {
+    if !matches!(
+        original.get(original_i).map(|token| &token.kind),
+        Some(TokKind::Arrow | TokKind::LambdaArrow)
+    ) || !matches!(
+        original
+            .get(original_i.checked_sub(1).unwrap_or_default())
+            .map(|token| &token.kind),
+        Some(TokKind::RParen)
+    ) {
+        return false;
+    }
+    let Some(next_original) = original.get(original_i + 1) else {
+        return false;
+    };
+    let Some(next_formatted) = formatted.get(formatted_i) else {
+        return false;
+    };
+    if !token_kinds_equal(&next_original.kind, &next_formatted.kind)
+        || !function_signature_before(original, original_i)
+    {
+        return false;
+    }
+    original[original_i + 1..]
+        .iter()
+        .take_while(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
+        .any(|token| matches!(token.kind, TokKind::LBrace))
+}
+
+fn function_signature_before(tokens: &[Token], arrow: usize) -> bool {
+    let mut braces = 0usize;
+    for token in tokens[..arrow].iter().rev() {
+        match token.kind {
+            TokKind::RBrace => braces += 1,
+            TokKind::LBrace if braces > 0 => braces -= 1,
+            TokKind::LBrace => return false,
+            TokKind::KwFn if braces == 0 => return true,
+            TokKind::Semi if braces == 0 => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn reordered_simple_union_type(
@@ -1440,14 +1519,20 @@ fn run_supported_source_corpus() {
             continue;
         }
         let src = fs::read_to_string(path).unwrap();
-        let parsed = jet::Compiler::parse_source(&src);
         let relative = path
             .strip_prefix(&root)
             .unwrap()
             .to_string_lossy()
             .replace('\\', "/");
         let expected_invalid = UI_PARSE_INVALID.binary_search(&relative.as_str()).is_ok();
-        let actual_is_invalid = !parsed.diagnostics.is_empty();
+        // `parse_for_check` returns recovered AST items alongside teaching
+        // diagnostics for retired spellings. Ask that parser directly so a
+        // recoverable diagnostic is not mistaken for a hard parse failure;
+        // `Compiler::parse_source` intentionally flattens both outcomes into
+        // a public syntax-tree view.
+        let (tokens, lex_diags) = jet::Lexer::lex(&src);
+        let actual_is_invalid = !lex_diags.is_empty()
+            || jet::Parser::parse_for_check(&tokens).is_err();
         if actual_is_invalid != expected_invalid {
             mismatches.push(format!(
                 "UI parser-validity changed for {relative}; update the pinned manifest only after review (expected_invalid={expected_invalid}, actual_is_invalid={actual_is_invalid})"
@@ -1578,6 +1663,11 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "arrow unification",
             "fn run() { if x == { .A :> print(1) } }\n",
             "fn run() { if x == { .A -> print(1) } }\n",
+        ),
+        (
+            "retired result arrow on braced function",
+            "fn parse_age() => Int { return 42 }\n",
+            "fn parse_age() Int { return 42 }\n",
         ),
         (
             "dispatch arm block",

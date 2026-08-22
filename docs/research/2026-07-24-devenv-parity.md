@@ -122,7 +122,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Job DAG / before/after / modes | `#Every` / schedule; limited DAG | **gap** | #787 |
 | Job status skip / execIfModified | — | **gap** | #787 |
 | Job I/O JSON / exports | — | **gap** | #787 |
-| Generated `files.` (json/toml/sh) | no env.files | **gap** | #787 — symlink/seed/copy + `jet env sync` |
+| Generated `files.` (json/toml/sh) | typed `files:` facts + `jet env sync` | **shipped** | #1084 — symlink/seed/copy + `jet env sync` |
 | `git-hooks` / pre-commit catalog | D-ECO6 `git_hooks_path` mention | **gap** | #787 |
 | `treefmt` / formatter integrations | D-ECO12 formatter passthrough | **partial** | #787 |
 
@@ -130,7 +130,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 
 | Feature | Jet today | Status | Follow-up |
 |---|---|---|---|
-| Declarative processes + `up`/`down` | D-JPK-SERVICE1 / `jet services` | **partial** | #785 slices |
+| Declarative processes + `up`/`down`/`health`/`logs`/`wait` | D-JPK-SERVICE1 / `jet services` | **partial** | #785 slices |
 | Ready probes (exec/http/notify/TCP) | ready/ports (E1261) | **partial** | #785 |
 | Restart policies | — | **gap** | #785 |
 | File watch → restart | #439 watch; not process-tied | **gap** | #785 |
@@ -220,7 +220,7 @@ Small-scope slices measure progress; **TRACKER** cards close only when their sli
 | **#784** | Env lifecycle | **#800** trust prompt+allowlist · **#801** hot-reload (devenv 2.1) · **#802** enterShell Tasks · **#803** dotenv · **#804** unsetEnvVars · **#805** `jet env test` · **#806** prompt polish |
 | **#785** | Process supervisor depth | **#807** ready probes · **#808** restart · **#809** watch→restart · **#810** port alloc · **#811** socket activation · **#812** process↔task DAG |
 | **#786** | Service catalog (no 7-cap) | **#813** preset framework · **#814** postgres · **#815** redis · **#816** mysql/mariadb · **#817** nginx · **#818** minio · **#819** expansion toward full set |
-| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#822** files. symlink/seed/copy + `jet env sync` · **#823** git-hooks · **#824** treefmt |
+| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#1084** files. symlink/seed/copy + `jet env sync` · **#823** git-hooks · **#824** treefmt |
 | **#788** | Env containers | **#825** shell OCI · **#826** processes OCI · **#827** copyToRoot · **#828** run/copy/registry · **#829** devcontainer P2 |
 | **#789** | Discoverability | **#830** info cockpit · **#831** search · **#832** env LSP · **#833** doctor |
 | **#790** | **D-ENV-PROFILE1=C** | **#834** named+extends · **#835** hostname/user auto + info disclosure |

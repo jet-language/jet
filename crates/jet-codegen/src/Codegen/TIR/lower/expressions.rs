@@ -5495,9 +5495,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             value, fallback, ..
         } => lower_or_fallback(value, fallback, cx, env),
         // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
-        // (from sema): true → `.and_then`, false → `.map`. The result type is `T?`;
-        // resolving the inner field type here is not load-bearing (emit only formats
-        // the combinator + member access), so carry the base's optional type.
+        // (from sema): true → `.and_then`, false → `.map`. Resolve the projected
+        // optional type in canonical TIR so every backend sees the same carrier.
         Expr::OptField {
             base,
             member,
@@ -5506,8 +5505,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         } => {
             in_own_frame(|| {
                 let base_t = lower_expr(base, cx, env);
+                let ty = match &base_t.ty {
+                    Type::Option(payload_ty) => struct_field_type(cx, payload_ty, member)
+                        .map(|field_ty| {
+                            if *flatten {
+                                match field_ty {
+                                    Type::Option(inner) => Type::Option(inner),
+                                    other => Type::Option(Box::new(other)),
+                                }
+                            } else {
+                                Type::Option(Box::new(field_ty))
+                            }
+                        })
+                        .unwrap_or_else(|| base_t.ty.clone()),
+                    _ => base_t.ty.clone(),
+                };
                 TExpr {
-                    ty: base_t.ty.clone(),
+                    ty,
                     kind: TExprKind::OptField {
                         base: Box::new(base_t),
                         member: member.to_string(),

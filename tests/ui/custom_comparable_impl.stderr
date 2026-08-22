@@ -1,15 +1,7 @@
-Error [E0320]: struct construction uses `Score{…}`, not `Score.{…}`
-  --> tests/ui/custom_comparable_impl.jet:14:17
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/custom_comparable_impl.jet:6:36
     |
- 14 |     print(Score.{points: 1} < Score.{points: 2})
-    |                 ^
- Why: literal heads place no dot before their brace (D-LIT-DOT1)
- Fix: write `Score{…}`
-
-Error [E0320]: struct construction uses `Score{…}`, not `Score.{…}`
-  --> tests/ui/custom_comparable_impl.jet:14:37
-    |
- 14 |     print(Score.{points: 1} < Score.{points: 2})
-    |                                     ^
- Why: literal heads place no dot before their brace (D-LIT-DOT1)
- Fix: write `Score{…}`
+  6 |     fn compare(self, other: Score) => Ordering {
+    |                                    ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`

@@ -1,7 +1,7 @@
-Error [E3502]: `fn build` returned an error: action name `same` is registered twice
-  --> tests/ui/build_plan_invalid.jet:2:4
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/build_plan_invalid.jet:2:27
     |
   2 | fn build(b: BuildContext) => BuildPlan ! {
-    |    ^^^^^
- Why: the selected root build entry must finish graph construction before any action runs
- Fix: fix the failing build operation; use `jet inspect explain-build` to inspect completed graph nodes
+    |                           ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`

@@ -226,9 +226,9 @@ module env.dev {
     on_enter: [prepare]
     checks: [smoke]
     reload: .Watch.{ paths: ["env.jet"], debounce_ms: 250 }
-    files: {
-        "config/generated.txt": File.{ content: "generated\n", mode: .Copy }
-    }
+    files: [
+        "config/generated.txt": File{ content: "generated\n", mode: .Copy }
+    ]
 }
 ```
 
@@ -260,6 +260,20 @@ secrets or secret-bearing environment variables fail closed; use
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
+
+## Environment discovery
+
+`jet env info` reads the typed environment plan. It shows the selected
+environment, packages, services, `jobs`, `checks`, variables, managed file
+destinations, and integration facts. `jet env info --json` emits the same
+facts for tools.
+
+The report does not realize packages, start services, run jobs, or apply
+managed files. A variable read from the environment appears by name with the
+source `environment`; Jet does not print its value. Service records retain
+their typed command, readiness, shutdown, restart, watch, dependency,
+pre-start, socket, and unknown-field facts. Integration task facts remain
+under `integrations`; the report does not restore the retired `tasks` key.
 
 ## Hangar path
 
@@ -399,7 +413,7 @@ module env.dev {
             run: ["./bin/api", "--port", "8080"],
             ready: .http("http://127.0.0.1:8080/health", 200),
             ports: [8080],
-            restart: .OnFailure.{ max: 3, backoff_ms: 250 },
+            restart: .OnFailure{ max: 3, backoff_ms: 250 },
             after: ["database"]
         }
     }
@@ -419,6 +433,10 @@ stops dependent services before their dependencies. Each service directory also
 persists the authority backend, generation, phase, containment, dependency
 list, and recovery reason in `lifecycle`; a post-Ready crash records its
 recovery generation before restart.
+
+Use `jetpack services up [name]` to start selected services and wait for
+readiness. Use `down` to stop them, `health` for one check, `logs name` for
+captured output, and `wait [name]` to wait for an already supervised service.
 
 ## Flake-class graph
 
@@ -538,4 +556,7 @@ enter the ordinary environment secret check. Provider facts are checked against
 the closed preset mapping, and sensitive integration grants are separate
 persisted trust records: for example,
 `jet trust grant integration:certificates:certificate.read --scope user`.
-The one-shot `--trust` flag does not manufacture an integration authority.
+The one-shot `--trust` flag does not manufacture an integration authority. An
+environment image never activates cloud or vault integrations; its projection
+ledger records their omitted task, provider, grant, and secret-reference facts
+without recording secret names or values.

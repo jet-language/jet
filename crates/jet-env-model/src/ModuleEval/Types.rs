@@ -436,6 +436,9 @@ pub struct EnvironmentFacts {
     pub active_environment: Option<String>,
     pub active_environment_provenance: Vec<String>,
     pub source_files: Vec<String>,
+    /// Every typed environment read retained for discovery and reporting.
+    /// Consumers must use this projection instead of lexing `env.jet` again.
+    pub environment_reads: Vec<EnvironmentRead>,
     pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,
     pub presets: Vec<PresetSpec>,
