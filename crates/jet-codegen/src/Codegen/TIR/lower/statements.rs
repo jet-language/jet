@@ -2439,12 +2439,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     let mut init =
                         moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
                     // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
-                    // even though the source surface names only `T ! AllocError`.
+                    // even though the source surface names only `T AllocError!`.
                     // Keep that internal carrier through TIR so every tier returns and
                     // binds the same reference, rather than materializing a copy.
                     let allocator_carrier = init.ty.is_allocator_view() || init.ty.is_allocator_result();
                     // D-CONC-SPAWN1: a fallible task body's closure returns the
-                    // internal carrier `Task<T ! E>` (`spawn_body_result_ty`),
+                    // internal carrier `Task<T E!>` (`spawn_body_result_ty`),
                     // while sema's surface binding type stays `Task<T>`. Keep
                     // the carrier through TIR — bind and annotate with the
                     // lowered spawn type so the Rust `let` matches its init —
@@ -3202,7 +3202,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     );
                 });
             }
-            // c109 Phase 5: collection iteration `loop x; coll` / `loop k, v; map`.
+            // c109 Phase 5: collection iteration `loop x in coll` / `loop (k, v) in map`.
             // The collection string is resolved once. The loop var(s) bind in the body
             // scope with an *unresolved* type (`None`) — matching the AST slot's
             // `jet_ty: None`, so they never enable the overflow trap (parity).
@@ -3266,7 +3266,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             err: Box::new(Type::Named("HTTPError".to_string())),
                         }),
                         Type::Named(name) => encoding_reader_item_type(name),
-                        // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
+                        // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
                         Type::Apply { name, args }
                             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
                                 && args.len() == 1 => {
@@ -3530,6 +3530,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let synthetic = crate::AST::Lambda {
                     take_names: Vec::new(),
                     params: Vec::new(),
+                    result_type: None,
+                    error_type: None,
+                    effects: None,
                     body: crate::AST::LambdaBody::Block(body.clone()),
                     span: *span,
                     meta: {

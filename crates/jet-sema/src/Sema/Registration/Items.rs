@@ -1104,7 +1104,7 @@ pub(crate) fn register_struct(
     // entirely (so it's never required/allowed in a struct literal, E0339)
     // and resolved for reads through this side table instead.
     let mut computed_fields: HashMap<String, (Span, Type)> = HashMap::new();
-    // D-FIELDDEF1=C: stored fields with `=` defaults for omitted construction.
+    // D-DEFAULT-SHAPE1=B: stored fields with `{}` defaults for omitted construction.
     let mut field_defaults: HashMap<String, crate::AST::Expr> = HashMap::new();
     for f in &s.fields {
         if !field_names.insert(f.name.clone()) {

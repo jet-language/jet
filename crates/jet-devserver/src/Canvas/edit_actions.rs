@@ -60,7 +60,7 @@ pub(super) fn apply_create_function(
     let ret = if ret_type == "Void" {
         String::new()
     } else {
-        format!(" => {ret_type}")
+        format!(" {ret_type}")
     };
     let function = format!("fn {name}({params}){ret} {{\n{body}}}\n\n");
     let changed = FixEngine::apply_edits(src, &[edit(SourceSpan { start: 0, end: 0 }, &function)])
@@ -940,7 +940,7 @@ pub(super) fn extract_inline_candidate(
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>()
         .join(", ");
-    let helper = format!("fn {function}({signature}) => {ret_type} {{\n    return {expr}\n}}\n\n");
+    let helper = format!("fn {function}({signature}) {ret_type} {{\n    return {expr}\n}}\n\n");
     let replacement = format!("{function}({args})");
     FixEngine::apply_edits(
         src,

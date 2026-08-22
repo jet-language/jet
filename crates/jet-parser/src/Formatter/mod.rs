@@ -1204,6 +1204,15 @@ impl<'a> Fmt<'a> {
 
     fn loop_clause_separator(&mut self, next_start: usize, wrap: bool) {
         self.write(",");
+        self.loop_separator_tail(next_start, wrap);
+    }
+
+    fn loop_source_separator(&mut self, next_start: usize, wrap: bool) {
+        self.write(" in");
+        self.loop_separator_tail(next_start, wrap);
+    }
+
+    fn loop_separator_tail(&mut self, next_start: usize, wrap: bool) {
         let mut broke = false;
         while self.comment_i < self.comments.len()
             && self.comments[self.comment_i].span.start < next_start
@@ -1825,7 +1834,7 @@ pub fn format_source_with_options(
     // turn a syntactically broken user file into a compiler-bug report.
     // `parse_for_check` is the entry that reports the diagnostics
     // `parse_for_fmt` drops; a source it rejects outright is recovered too.
-    let prog = match crate::Parser::parse_for_check(&toks) {
+    let prog = match crate::Parser::parse_for_check_with_source(&toks, &migrated) {
         Ok((prog, parse_diags)) => {
             // The retired callable/result arrow shapes preserve the function
             // body AST, so simplify may still run and canonicalize them. A
@@ -1834,7 +1843,7 @@ pub fn format_source_with_options(
             if options.simplify
                 && parse_diags.iter().any(|diag| {
                     diag.severity != crate::Diagnostics::Severity::Lint
-                        && !matches!(diag.code.as_str(), "E0068" | "E0070")
+                        && !matches!(diag.code.as_str(), "E0068" | "E0070" | "E0080")
                 })
             {
                 options.simplify = false;

@@ -1,4 +1,4 @@
-// Card #131 / D-FIELDDEF1=C — a non-primitive `=` default fills a missing field with the
+// Card #131 / D-DEFAULT-SHAPE1=B — a non-primitive `{}` default fills a missing field with the
 // EXACT value it names, on both the compiled binary and `jet run` (I9). The
 // argument is evaluated once at compile time; a list/struct/enum default no
 // longer silently degrades to an empty/zero value.
@@ -7,11 +7,11 @@ use core.encoding.json as json
 // D-META-AUTO1=A — structurally eligible structs are Codable by default.
 struct Config {
     name: String
-    ports: [Int] = [80, 443]
-    env: String = "prod"
+    ports: [Int]{[80, 443]}
+    env: String{"prod"}
 }
 
-fn run() ! [FieldError] {
+fn run() [FieldError]! {
     // `ports` and `env` are absent on the wire → both defaults apply.
     c :: json.decode<Config>("{{\"name\":\"web\"}}")?
     // No derive marker is needed for the generated Codable body.

@@ -12,7 +12,7 @@ fn xml_name(local: String) DataTree {
     ])
 }
 
-fn write_catalog(path: Path) Bool ! EncodingError | IOError {
+fn write_catalog(path: Path) Bool (EncodingError | IOError)! {
     output :: files.create(path)?
     writer :: xml.writer(^output, encoding.EncodingLimits.safe())?
     writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])]))?
@@ -42,7 +42,7 @@ fn write_catalog(path: Path) Bool ! EncodingError | IOError {
     return Ok(true)
 }
 
-fn run() ! EncodingError | IOError {
+fn run() (EncodingError | IOError)! {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
     scratch :: files.temp_dir("jet-encoding-xml")?
@@ -50,6 +50,6 @@ fn run() ! EncodingError | IOError {
     write_catalog(path)?
     input :: files.open(path)?
     reader :: xml.reader(^input)?
-    loop event, reader -> print("event")
+    loop event in reader -> print("event")
     print("eof")
 }

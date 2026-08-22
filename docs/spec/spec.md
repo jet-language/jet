@@ -30,11 +30,11 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
   stripped from every line (Swift-style). An unterminated `"""` is E0002.
 - Typed head bodies (D-BOUND-RAW1=A) are the raw boundary: in
-  `Type.{"…"}` and inferred `.{"…"}` bodies, backslashes stay
+  `Type{"…"}` and inferred `.{"…"}` bodies, backslashes stay
   literal for the head's grammar. Quote, brace, closing-delimiter, and hole
   rules stay unchanged. Plain strings keep the four-entry escape table.
-- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1, D-UNIFYLIT1=A): `SQL.{"…"}`,
-  `HTML.{"…"}`, and `Sh.{"…"}` use one checked interpolation engine. For `Sh`,
+- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1, D-UNIFYLIT1=A): `SQL{"…"}`,
+  `HTML{"…"}`, and `Sh{"…"}` use one checked interpolation engine. For `Sh`,
   literal words become argv items and each `{hole}` becomes exactly one argv
   item; neither word splitting, glob expansion, nor shell parsing touches a
   hole. Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited
@@ -72,7 +72,7 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   `quarter_of_year`, `days_in_month`, `is_leap_year`, and `replace(y, m, d)`.
   `DateTime` adds sub-second accessors (`millisecond` / `microsecond` /
   `nanosecond`), `floor` / `ceil` beside `truncate` / `round`, `replace(...)`,
-  and `difference(other) => Duration`. `ZonedDateTime` adds `is_dst()`.
+  and `difference(other) -> Duration`. `ZonedDateTime` adds `is_dst()`.
   `core.time(...)`, `core.time.time(...)` / `local_time(...)`,
   `days_in_month(y, m)`, and `is_leap_year(y)` construct or query the same
   values. `Instant.elapsed()` returns a `Duration`.
@@ -86,9 +86,8 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 
 ```
 program  = { func | struct | const } ;
-func     = [ "pub" ] "fn" ident "(" [ params ] ")"
-           [ "=>" [ type ] | "=[" [ effect-row ] "]=>" type ]
-           ( block | "=" expr NL ) ;
+func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ type ]
+           ( "->" expr | "-[" [ effect-row ] "]>" block | block | "=" expr NL ) ;
 params   = param { "," param } ;
 param    = ident ":" [ "^" | "&" ] type ;
 effect-row = effect { "," effect } | ".." ident ;
@@ -104,7 +103,7 @@ stmt     = binding | assign | if | loop | fenced-stmt
 binding  = [ "#Track" ] ( ident "::" expr     // immutable
          | ident ":=" expr ) NL               // mutable
          | destructure ( "::" | ":=" ) expr NL ;
-// Types ride the value (D-DOTCTOR3 `Type.{ … }`) or live on signatures/fields.
+// Types ride the value (D-DOTCTOR3 `Type{ … }`) or live on signatures/fields.
 // Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
@@ -159,7 +158,7 @@ expr     = precedence climbing over:
 ### Semantics
 
 - Types: `Int`, `Float`, `Bool`, `String`. Local inference: types ride the
-  value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
+  value (`Type{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
   `fn run() !` for top-level error propagation, or a single typed CLI
@@ -168,7 +167,7 @@ expr     = precedence climbing over:
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
-  Types never annotate the binding name — use `Type.{ … }` or a signature/field.
+  Types never annotate the binding name — use `Type{ … }` or a signature/field.
 - `@[ a, b ]@` expands one complete binding or expression statement per entry.
   Multiple fences advance in lock-step. `@[ task1..task8 ]@` generates or
   reuses the ascending numbered names. An expression fence also expands an
@@ -179,7 +178,7 @@ expr     = precedence climbing over:
   D-FENCE-RANGE1).
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
-  `value.origin() => String`; untracked Floats return `"untracked"`.
+  `value.origin() -> String`; untracked Floats return `"untracked"`.
 - Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
   numeric widening law permits it; `% & | ^ << >>` remain integer-only.
   `+` on `String` is a teaching error pointing at interpolation. Compound
@@ -209,8 +208,8 @@ keep code readable from top to bottom. See
   arm, including an arm yielding `()`. Value branches require `else` unless a closed
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
-  conditional, source (`loop x, source [, stride]`), map-pair
-  (`loop (key, value), source`), and explicit-state
+  conditional, source (`loop x in source [, stride]`), map-pair
+  (`loop (key, value) in source`), and explicit-state
   (`loop i := init, cond [, afterthought]`) headers. `a..b` and `a..<b`
   construct one `Range` value over `Int`; the first includes `b` and the second
   excludes it. A Range may be stored, passed, returned, and used as a loop
@@ -292,13 +291,13 @@ keep code readable from top to bottom. See
   (D-VERDICT-1321-1). `term.print`/`term.eprint` accept the same variadic
   form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
-  stdin, strips the trailing newline, and returns `String ! IOError`.
+  stdin, strips the trailing newline, and returns `String IOError!`.
   Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path
   (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
 - **Named args and defaults (S61, D-NARG1):** parameters may carry a
-  default value (`fn f(x: Int =  0)`). A call-site label binds by NAME, so a
+  default value (`fn f(x: Int{0})`). A call-site label binds by NAME, so a
   call may skip a default and write its labelled arguments in any order
   (`f(x: 1)`). `/` closes the positional-only zone and `*` opens the
   label-only zone; `timeout seconds: Int` publishes `timeout` while the body
@@ -350,7 +349,7 @@ parameter's sigil:
 
 ```jet
 fn bump(n: &Int) { n += 1 }
-fn archive(name: ^String) => String { return name }
+fn archive(name: ^String) String { return name }
 
 fn run() {
     score: Int := 41
@@ -365,7 +364,7 @@ site:
 
 ```jet
 impl Player {
-    fn show(self) => Int { return self.hp }                     // read receiver
+    fn show(self) Int { return self.hp }                        // read receiver
     fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
 }
 ```
@@ -420,7 +419,7 @@ its value:
 struct Span { text: String, meta: String }
 
 fn describe(source: String, kind: String) {
-    s: Span :: Span.{text: source, meta: kind}   // fields own their data
+    s: Span :: Span{text: source, meta: kind}   // fields own their data
     print(s.text)
 }
 ```
@@ -595,13 +594,13 @@ D-SHAREDGUARD2=A):
 ```jet
 space_ready :: Condition.new()
 guard :: queue.guard_edit()
-guard.wait(space_ready, q => q.jobs.len() < q.capacity) ?? panic("wait failed")
+guard.wait(space_ready, q -> q.jobs.len() < q.capacity) ?? panic("wait failed")
 guard.value.jobs.push(job)
 space_ready.notify_one()
 ```
 
 `guard_read()` and `guard_edit()` return an owned `SharedGuard<T>`. The guard
-releases on every exit. `.map(value => value.field)` narrows one guard to a
+releases on every exit. `.map(value -> value.field)` narrows one guard to a
 field. `.split(first, second)` creates two guards only when sema proves the
 field paths are disjoint; both guards retain the original lock and provenance.
 Guards are task-local and cannot be copied or sent.
@@ -690,7 +689,7 @@ copyable, comparable index+generation data, never touching `T` itself:
 
 ```jet
 world := Pool<Player>.new()
-kai :: world.add(Player.{ name: "Kai", hp: 100, attack: 15, target: None })
+kai :: world.add(Player{ name: "Kai", hp: 100, attack: 15, target: None })
 world[kai].target = Val(rem)          // nested write through a real place
 fallen :: world.remove(kai)           // T?, mirrors Map.remove
 ```
@@ -713,7 +712,7 @@ open-world dispatch must have a sealed target set or a signed dependency
 summary; otherwise the strict fact is unprovable and rejected.
 
 ```jet
-fn integrate(e: &Entity, dt: Float) :[!Mem.Alloc]> {
+fn integrate(e: &Entity, dt: Float) -[!Mem.Alloc]> {
     e.pos += e.vel * dt
 }
 ```
@@ -797,7 +796,7 @@ Access markers use sigils only: bare `T` (read), `&T` (write), `^T`
 ## M3 — data & methods (done)
 
 Structs and enums carry fields; methods attach behavior (S27). Ratified
-surface (Group 2): struct literals **`Type.{f: v}`** (S29; flush, S29-FLUSH; dot-prefixed by D-DOTCTOR2); enums with
+surface (Group 2): struct literals **`Type{f: v}`** (S29; flush, S29-FLUSH); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
 **`T?`** with **`Val(v)`** / **`None`** (S32); generic args
 **`Type<Args>`** (S33). `None` is only legal for `T?`, never plain `T`.
@@ -813,14 +812,14 @@ answer; otherwise write `Type<Args>.new(…)` explicitly.
 struct Circle {
     radius: Float;
 
-    fn area(self) => Float {
+    fn area(self) Float {
         return 3.14159 * radius * radius;
     }
 }
 
 impl Circle {
-    fn unit() => Circle {
-        return Circle.{ radius: 1.0 };
+    fn unit() Circle {
+        return Circle{ radius: 1.0 };
     }
 }
 ```
@@ -828,7 +827,7 @@ impl Circle {
 - **`self`** is the receiver; prefix the type sigil (`^self`, `&self`) like any parameter (D-MEM1) — bare `self` is read.
 - **Self-mutation (D-MUTSELF1):** inside a **`&self`** method the receiver may be
   changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `&`
+  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `&`
   parameter is already a valid assignment LHS). The same write in a non-`&self`
   method (a read receiver) is **E0205**, pointed at the assignment with a "write
   the receiver as `&self`" fix. Calling a `&self` method needs a changeable
@@ -843,7 +842,7 @@ impl Circle {
   `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
   a teaching message pointing at constructor naming.
 - Enum `if subject == { … }` arms must be exhaustive; missing cases are a compile error.
-- **Traits (S28, M9):** `trait Name { fn sig(self) => T; … }` — signatures
+- **Traits (S28, M9):** `trait Name { fn sig(self) T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
@@ -856,8 +855,8 @@ impl Circle {
   `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
   D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;
   `#Encode` and `#Decode` request one direction.
-- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
-  and `Decode.decode(tree: DataTree) => Self ! [FieldError]` are ordinary Jet
+- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
+  and `Decode.decode(tree: DataTree) -> Self [FieldError]!` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
   Built-in derives build typed Jet items beside the marked type and check them
@@ -882,20 +881,20 @@ impl Circle {
   statement be exactly this shape (E0353), `at:` to name a real field
   (E0354), and purity-checks the whole synthesized function (S60/E3401) —
   a rule may reference only sibling fields and pure calls. `Type.validate(value)`
-  runs the block standalone, returning `value ! [FieldError]`. Derived struct
+  runs the block standalone, returning `value [FieldError]!`. Derived struct
   decoders now pass a successfully shaped value through that validator, so
   shape and rule failures share one list. Hand-written codecs still opt into
   validation explicitly. `Validate.over(s)` starts the outside-context
   builder; chained `check(cond, at: field, "msg")` rules use the same field
   vocabulary and accumulate into `[FieldError]`, and `finish()` returns
-  `T ! [FieldError]`. The contract ruling is recorded as
+  `T [FieldError]!`. The contract ruling is recorded as
   `D-VALIDATE-DECODE1=B`.
-- **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T => expr` is an
+- **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T -> expr` is an
   unmarked read-time formula over sibling fields. Put `#Memo` immediately
   before the field when the result should be retained after its first read;
   writes to stored siblings in the formula dependency graph invalidate it.
   A memoized field is still not a writable field and is not supplied in a
-  `Type.{ … }` literal. A bare `#Memo` is the field spelling; arguments are
+  `Type{ … }` literal. A bare `#Memo` is the field spelling; arguments are
   rejected with E0382. See `examples/features/memory/computed_field.jet`.
 - **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
   erased dataflow fact and its policy. `deny` is required and nonempty; `from`
@@ -907,7 +906,7 @@ impl Circle {
   (D-CASING1). Prelude declares `Input`, `PII`, `Secret`, and `Credential`.
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. An explicit empty effect row is `=[]=>`;
+  arguments when arguments exist. An explicit empty effect row is `-[]>`;
   compile-time demand is the prefix marker `@` (D-ONCE-AT1=D supersedes the
   former `$` spelling).
 - **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
@@ -934,13 +933,13 @@ impl Circle {
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
 - **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside an `@` binding,
-  **`embed_file("path") => String`** bakes a file's UTF-8 text into the binary
-  and **`embed_bytes("path") => [U8]`** bakes its raw bytes (binary-safe, no
-  UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
+  **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
+  and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
+  UTF-8 requirement — images, fonts, any blob). **`find("glob") -> [String]`**
   returns sorted relative file paths for a std-only glob (`*`, `**`, `?`,
   `{a,b}`, `[a-z]`). These are the *only* sanctioned build-time I/O; comptime is
   otherwise pure (**E3401** — D-META-EFFECT1 c3: one call-graph purity walk
-  shared with the run-time `=[]=>` check; retires the former E0951). Paths/globs must be string literals resolved
+  shared with the run-time `-[]>` check; retires the former E0951). Paths/globs must be string literals resolved
   relative to the embedding file's directory, never absolute and never escaping
   the project via `..` (**E0957**). A missing or unreadable embedded file is
   **E0955**; for `embed_file`, a non-UTF-8 file is also **E0955**, with a fix
@@ -955,16 +954,16 @@ impl Circle {
 
   ```jet
   migration UserRecord {
-      rename name => display_name              // D-MIGRATE1: field renamed (same type)
+      rename name -> display_name              // D-MIGRATE1: field renamed (same type)
       remove legacy_id                         // D-MIGRATE2D: field deleted
       add verified: Bool =  false               // D-MIGRATE2A: new field + default for old data
-      change price: Int => Usd via { c => Usd.from_int(c) } // D-MIGRATE2E: type change + converter
+      change price: Int -> Usd via { c -> Usd.from_int(c) } // D-MIGRATE2E: type change + converter
   }
   ```
 
   - `rename` must target an existing field with the same type.
-  - `change f: Old => New` resolves its converter in order (D-MIGRATE2B): the inline
-    `via { … }`, else an `impl Old => New` in scope (the D-ERR-CONV surface), else
+  - `change f: Old -> New` resolves its converter in order (D-MIGRATE2B): the inline
+    `via { … }`, else an `impl Old -> New` in scope (the D-ERR-CONV surface), else
     E0910 asking for one. The `via` body is single- or multi-line and reuses the
     callable arrow and lambda grammar.
   - `add f: T =  default` supplies the value old records (written before the field
@@ -1004,7 +1003,7 @@ impl Circle {
   the historical shapes are `v1` (oldest) … `vK`, and the current struct is
   `v(K+1)`; each historical shape's field set is derived at compile time by
   inverting the ops (`add` ⇒ absent before, `remove` ⇒ present before,
-  `rename a => b` means `a` before, while `change` means no field-set difference). At decode
+  `rename a -> b` means `a` before, while `change` means no field-set difference). At decode
   time:
 
   1. **Current shape first** — the ordinary decode is tried as-is. Success is
@@ -1019,7 +1018,7 @@ impl Circle {
      oldest-matching → current: `rename` moves a key, `remove` drops one,
      `add` evaluates its default expression and fills the field, `change`
      decodes the old field type, runs the `via { … }` converter (or the
-     `impl Old => New` conversion, D-MIGRATE2B), and re-encodes the result.
+     `impl Old -> New` conversion, D-MIGRATE2B), and re-encodes the result.
      Converter bodies and `add` defaults are ordinary Jet expressions,
      type-checked and lowered through the normal pipeline. The rewritten data
      then decodes as the current shape.
@@ -1079,13 +1078,13 @@ runtime path.
 
 ## M4 — errors as values (done)
 
-Failure-returning functions return **`T ! E`** (S34): `T` is the success payload,
+Failure-returning functions return **`T E!`** (S34): `T` is the success payload,
 `E` is any enum, struct, `String`, or the default **`Err`** type. Omitting
-the error side in a function return — **`T !`** — means **`T ! Err`**.
+the error side in a function return — **`T !`** — means **`T Err!`**.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
-`impl Source => Target { … }` converts a `Source` error into `Target`, including
+`impl Source -> Target { … }` converts a `Source` error into `Target`, including
 the default `Err` target; `?` applies it automatically. A conversion into
 `Err` may name a foreign source type, while typed targets keep the orphan rule
 (S28). D-FAIL-CONV2=A ships that conversion for the standard library's own
@@ -1098,9 +1097,11 @@ violations.
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
   `?` propagates `None` when the function returns an optional.
-- Return types follow **D-ERRSIGIL1** like every other type position: tight
-  **`T?`** is Optional; fallible types use **`T !`** or **`T ! E`**.
-  Parentheses (`=> (T?)`) remain legal grouping, not required.
+- Return types follow **D-ERRSUFFIX1=B** like every other type position: the
+  failure surface is **`[Success?] [ErrorUnion!]`**. Write **`T? E!`** for an
+  optional success, **`T (E1 | E2)!`** for an explicit error union, and
+  **`E!`** for a unit-fallible result. Bare **`!`** keeps the default `Err`
+  error. Parentheses (`(T?)`) remain legal grouping, not required.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
@@ -1115,7 +1116,7 @@ violations.
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** is fallible by default: `?` works inside it with no annotation.
   An unhandled entry error prints its full report and exits 1. An expert may
-  pin the family with **`fn run() ! StoreErr`**.
+  pin the family with **`fn run() StoreErr!`**.
 
 At an explicit process stop, active `defer close(^resource)` actions run in
 reverse declaration order, `scope.guard` closures run in reverse registration
@@ -1284,7 +1285,7 @@ C, C++, and JS are active namespace binders. C uses the namespace surface
 C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
-`T ! CppError`, pure named callbacks keep their checked C ABI, and template
+`T CppError!`, pure named callbacks keep their checked C ABI, and template
 instantiations are requested on demand. `jet inspect bind cpp` requires the
 selected target and absolute clang/archiver paths; include/library search paths
 and link libraries are audited in binding provenance and reused at final link.
@@ -1316,7 +1317,7 @@ function. **`extern rust "std" { … }`** works for Rust standard-library items 
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `[T]`/`[K:V]`/`T?`/`T ! E` built from allowed types, and
+`Char`, `[T]`/`[K:V]`/`T?`/`T E!` built from allowed types, and
 structs/enums whose fields are allowed. No borrowed parameters or returns, no
 callbacks (**E0702**).
 
@@ -1547,7 +1548,7 @@ Example: `examples/interop/lua/`.
 `jet inspect bind ada <package.ads> --pkg <lib>` reads exported functions from
 an Ada package spec, compiles its sibling body with Nix-provisioned GNAT, and
 writes a typed `ada.<lib>` binding cache. Supported exports use `Export`,
-`Convention => C`, and `External_Name`; inputs and results are
+`Convention -> C`, and `External_Name`; inputs and results are
 `Interfaces.C.long_long`/`Long_Long_Integer` or
 `Interfaces.C.double`/`Long_Float`. Unsupported ABI shapes fail binding rather
 than being guessed.
@@ -1833,9 +1834,9 @@ needs outside the retained `core.ui` paint surface:
 
 - `web.on(selector, event, handler)` binds a DOM event listener. The handler gets
   a `WebEvent` value; handlers that do not need the event may ignore it.
-- `web.value(selector) => String` reads an input value or element text.
-- `web.storage.local.get(key) => String?` and
-  `web.storage.session.get(key) => String?` read browser storage. Missing keys
+- `web.value(selector) -> String` reads an input value or element text.
+- `web.storage.local.get(key) -> String?` and
+  `web.storage.session.get(key) -> String?` read browser storage. Missing keys
   compose with the normal `??` fallback: `web.storage.local.get("tasks") ?? "[]"`.
 - `set(key, value)`, `remove(key)`, and `clear()` mutate local/session storage.
 
@@ -1849,20 +1850,20 @@ becomes the browser API checker.
 `use core.event as event` exposes the first compiler-known event family as
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
-- `event.new<T>() => Event<T>` creates a typed many-subscriber event source.
-- `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ! String`
+- `event.new<T>() -> Event<T>` creates a typed many-subscriber event source.
+- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> String!`
   creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
   for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
   queue, running, blocked, failure, cancellation, deadline, close, and overflow
   outcomes are explicit.
-- `event.hook<T, R>(fallback) => Hook<T, R>` creates an ordered intervention
+- `event.hook<T, R>(fallback) -> Hook<T, R>` creates an ordered intervention
   point. `.run(payload, fallback)` returns the last active handler result, or
   the call-site fallback when no handler is active.
 - `event.decision_hook<T, E>(HookPolicy.FirstCancelElseTransform)` creates a
   typed fold. Handlers return `HookDecision.Continue`, `.Transform(value)`,
   `.Cancel`, or `.Fail(error)`; `run` returns `HookOutcome.Continue(final)`,
   `.Cancel`, or `.Fail(error)`.
-- `event.scope() => EventScope` owns subscriptions. `scope.cancel()` unsubscribes
+- `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
   all owned subscriptions and permanently closes that owner. Cancellation is
   idempotent; a later subscription attempt through the cancelled scope returns
   an inactive `Subscription` and installs no listener. `scope.active_count()`
@@ -1895,8 +1896,8 @@ fn run() {
     scope :: event.scope()
     clicked :: event.new<Int>()
 
-    sub :: clicked.on(scope, (n) => { print("clicked {n}") })
-    clicked.once(scope, (n) => { print("once {n}") })
+    sub :: clicked.on(scope, (n) -> { print("clicked {n}") })
+    clicked.once(scope, (n) -> { print("once {n}") })
 
     print(clicked.emit(1).summary())
     sub.unsubscribe()
@@ -2097,7 +2098,7 @@ values. Instantiating it produces a specialized ordinary module.
 
 ```jet
 module cache<K>(capacity: Int) {
-    pub fn key_of(k: K) => String { … }
+    pub fn key_of(k: K) String { … }
 }
 ```
 
@@ -2175,17 +2176,26 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 ## M8 — Functions as values (closures, done)
 
-**Lambdas (S46):** `(params) => expr` or `(params) => { … }`. A single
-assignment or void call after `=>` needs no braces (`a => a.n += 1`,
-`() => work()`). Parameter types
+**Lambdas (S46):** `(params) -> expr` or `(params) -> { … }`. A single
+assignment or void call after `->` needs no braces (`a -> a.n += 1`,
+`() -> work()`). Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
-The lambda arrow is **`=>`**. **`->`** selects dispatch-arm values and finite-loop
-items.
+The one callable and control arrow is **`->`**; it also selects dispatch-arm
+values and finite-loop items.
 
-**Function types (S47):** `fn(T1, T2) => R` (no parameter names; the result may be
-omitted for `()` callbacks). Their unmarked parameters always have plain
-read access (D-MEM-PARAM1). Named `fn`s coerce to function values when referenced
-without a call only if every parameter also has plain read access. Functions with
+**Named callable bodies (D-CALLABLE-ONE1=A):** a plain `->` is present before
+a braced body exactly when the declared success result is non-unit. Unit
+functions and unit-fallible functions keep bare braces; effect ceilings carry
+their own arrow (`-[Effect]>` or `-[]>`). One-expression callable bodies keep
+their existing `->` form. An arrowless braced value body reports E0080; `jet
+fmt` recovers it and writes the canonical arrow.
+
+**Function types (S47):** `fn(T1, T2) R` (no parameter names; the result may be
+omitted for `()` callbacks). An explicit effect bound sits outside the callable
+arrow, as `-[E]>`; `-[]>` means a pure callback. Their unmarked parameters
+always have plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
+values when referenced without a call only if every parameter also has plain read
+access. Functions with
 write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
 those requirements.
 
@@ -2231,7 +2241,7 @@ zero-based pick, yielding `T?`; an index past the end returns `None`. This is
 the only positional-pick path; `nth` is not part of the API.
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
-parse errors. Current lambda syntax is `(x) => …`. D-SHAPE-PIPE1=C assigns a
+parse errors. Current lambda syntax is `(x) -> …`. D-SHAPE-PIPE1=C assigns a
 single bar only to pattern and choice alternatives; it has no lambda or flow
 alias.
 
@@ -2250,7 +2260,7 @@ generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, exact default and fixed-width numeric types, and
 unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
 one `DataTree` value, plus `#Codable` derive). Every fallible call returns
-`T ! E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
+`T E!`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
@@ -2299,7 +2309,7 @@ Jet ships:
 - whole-number helpers: `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`,
   `digits`, `leading_ones`, `trailing_ones`, plus checked/saturating/wrapping
   integer families
-- exact ratios: `fraction(n, d) => Fraction?` with `.numerator()`,
+- exact ratios: `fraction(n, d) -> Fraction?` with `.numerator()`,
   `.denominator()`, `.to_string()`, `.to_float()`, `.is_zero()`, and arithmetic
 
 Examples: `examples/features/math/math_audit.jet`,
@@ -2407,7 +2417,7 @@ Example and golden: `examples/features/concurrency/freeze_capture.jet` and
 `tests/ui/frozen_capture_use_after_move.jet` and
 `tests/ui/freeze_shared_source.jet`.
 
-`handle.join() => T ! TaskFailure` waits for the task and consumes its handle.
+`handle.join() -> T TaskFailure!` waits for the task and consumes its handle.
 Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a bound
 `Task` without joining, using its result, or detaching it is a compile error
 (**L1101**, D-CONC-JOIN1) because the program may end before the task finishes.
@@ -2428,7 +2438,7 @@ data. Two detach-site diagnostics guard unsound cases:
 D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
 task handles instead of new `coroutine` syntax. `handle.pause()`, `handle.resume()`, and `handle.cancel()` set
 control-plane state on the handle. `tasks.yield_now()` cooperatively yields at
-a wait point; `tasks.current_task() => String` returns the running task's
+a wait point; `tasks.current_task() -> String` returns the running task's
 control trace (idle defaults outside a task). `sender.close()` /
 `receiver.close()` close a channel end explicitly. Pause holds a running task
 at its next wait point until `resume()`; these are enforced by the M:N
@@ -2462,13 +2472,13 @@ lands on the outcome the in-flight unwind reports, and a failure already on its
 way out is never replaced by it. A generator's completion notification is
 therefore still delivered while its producer is being cancelled.
 
-`channel<T>() => (Sender<T>, Receiver<T>)` (D-CONC-CHAN1) creates a
+`channel<T>() -> (Sender<T>, Receiver<T>)` (D-CONC-CHAN1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) ::
 channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
-`receiver.receive() => T ! Closed` blocks until a value arrives or all senders
-are gone. Close the sender, then `loop value, receiver :> ...` drains until
+`receiver.receive() -> T Closed!` blocks until a value arrives or all senders
+are gone. Close the sender, then `loop value in receiver -> ...` drains until
 the channel closes. Channel payloads
 must be sendable (**E1102**).
 
@@ -2493,7 +2503,7 @@ overflow knob here. See [D-EVENT2=A](syntax-decisions.md) and
 
 Both queue APIs use `capacity` for the numeric bound:
 `channel<T>(capacity: N)` and
-`AsyncPolicy.{ capacity: N, overflow: ... }`. Channel capacity applies
+`AsyncPolicy{ capacity: N, overflow: ... }`. Channel capacity applies
 backpressure only; channels have no drop policy.
 
 | Primitive | Full behavior | Buffering law |
@@ -2616,7 +2626,7 @@ struct Crawler {
 fn run() {
     task.group workers(limit: 4) {
         add_work(workers, 41)
-        crawler :: Crawler.{step: 1}
+        crawler :: Crawler{step: 1}
         crawler.add_stepped(workers, 41)
     }
 }
@@ -2628,7 +2638,7 @@ refused, and a lambda may not capture the handle — so no child outlives the
 scope that joins it. `self` holds the receiver, never the group, so a method
 opens no new escape. A spawn through a parameter group still owns its captures.
 
-`join()` is fallible: `Task<T>.join() => T ! TaskFailure`. The failure values
+`join()` is fallible: `Task<T>.join() -> T TaskFailure!`. The failure values
 are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
 `TaskStatus`, `.trace()`, and `.exception()` are retired; cancellation and
 deadline behavior use the one failure rail.
@@ -2662,9 +2672,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { a(), b() }` | Returns `[T] ! TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
-| `task.race { a(), b() }` | Returns `T ! TaskFailure`; the first successful result wins and cancels the losers. |
-| `task.any { a(), b() }` | Returns `T ! TaskFailure`; the first completed result wins and cancels the remaining children. |
+| `task.all { a(), b() }` | Returns `[T] TaskFailure!`; waits for every child and fail-fast cancels the remaining children. |
+| `task.race { a(), b() }` | Returns `T TaskFailure!`; the first successful result wins and cancels the losers. |
+| `task.any { a(), b() }` | Returns `T TaskFailure!`; the first completed result wins and cancels the remaining children. |
 | `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
 
 - Waiting on several sources at once — a select — is a subjectless `if` table
@@ -2677,9 +2687,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 ```jet
 if {
-    job, jobs    :> handle(job)
-    msg, control :> obey(msg)
-    after 100ms  :> retry()
+    job, jobs    -> handle(job)
+    msg, control -> obey(msg)
+    after 100ms  -> retry()
 }
 ```
 
@@ -2754,9 +2764,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `system` → `System` (jetos host), and `image` → `Image` (OCI container image
   or jetos installer input).
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
-  struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
+  struct literal (`Env{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar. `prompt: "name"` is the beginner shorthand. For
-  prompt depth, write `prompt: Prompt.{ label: "name", path: .Short, strip: .On }`
+  prompt depth, write `prompt: Prompt{ label: "name", path: .Short, strip: .On }`
   (`path: .Full` and `strip: .Off` are the other modes). `jet env` renders that
   as one hybrid prompt: label plus path by default, `Ctrl-G` status glance on
   demand, and the optional strip showing the same status words.
@@ -3123,7 +3133,7 @@ body exercises — touching the network, the filesystem, the clock, and so on.
 The set is **inferred**, never declared by default, **propagated along calls**
 (a caller's set includes every callee's set), and **fully erased in codegen**
 (I3) — effects are a compile-time proof, with no runtime value, handler, or
-monad. A `fn … =[]=>` is exactly the function whose inferred set is empty.
+monad. A `fn … -[]>` is exactly the function whose inferred set is empty.
 
 ### The effect vocabulary
 
@@ -3231,7 +3241,7 @@ the library is absent, it degrades to the same headless path.
 
 `core.game` is the flagship engine name (D-GAME2=A). Its public beginner API is
 scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game
-data, while `scene.on_frame((frame) => { ... })` attaches per-frame logic.
+data, while `scene.on_frame((frame) -> { ... })` attaches per-frame logic.
 The current Core floor is headless and deterministic: `game.Scene.new`,
 `scene.assets.image`/`sound`, `scene.input.bind`, `scene.component<T>()`,
 `scene.query<T...>()`,
@@ -3239,22 +3249,22 @@ The current Core floor is headless and deterministic: `game.Scene.new`,
 `game.run(scene, replay: replay)` produce a stable transcript without renderer,
 audio, editor, or file-backend dependencies.
 
-### Declaring a boundary — effects inside the arrow
+### Declaring a boundary — effects in the callable head
 
 A function may omit an effect row. Sema still infers its complete transitive
-row. Ordinary `=>` defines the callable result and never claims purity. Public API
+row. Ordinary `->` introduces a concise callable body and never claims purity. Public API
 metadata stores that normalized inferred row, so publishing rejects effect drift.
 
 A function may pin an **upper bound** on its effects by writing
-`=[E1, E2, …]=>` between its parameter list and return type:
+`-[E1, E2, …]>` after the optional return type:
 
 ```ebnf
-fn_effects = "fn" ident "(" params ")"
-             [ ( "=[" [ effect { "," effect } ] "]=>" | "=>" ) [ type ] ] block ;
+fn_effects = "fn" ident "(" params ")" [ type ]
+             ( "-[" [ effect { "," effect } ] "]>" block | block ) ;
 ```
 
 ```jet
-fn load(path: String) =[FS]=> String {
+fn load(path: String) String -[FS]> {
     core.files.read(path)?     // OK: FS ⊆ {FS}
 }
 ```
@@ -3265,15 +3275,15 @@ naming the effect, the call that introduced it, and the declared set. The row is
 an assertion the author makes a contract — the inferred set may be *smaller*
 than the bound (the bound is a ceiling, not an exact set), but never larger.
 
-`=[]=>` is the same contract with an empty bound: any effect at all is a
+`-[]>` is the same contract with an empty bound: any effect at all is a
 purity violation (reported as **E3401**, the established purity diagnostic).
 
-Effects are erased: `=[FS]=>`, `=[]=>`, and an unannotated function with the same
+Effects are erased: `-[FS]>`, `-[]>`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
 ### Restricting a region — `#Abilities(…) { … }`
 
-Where `=[…]=>` bounds a whole function, `#Abilities(…) { … }` restricts a **block**.
+Where `-[…]>` bounds a whole function, `#Abilities(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0712**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
@@ -3304,9 +3314,9 @@ at the *call site*, not buried inside the higher-order callee. This is the
 zero-syntax default:
 
 ```jet
-fn apply(f: fn(Int) => Int, x: Int) => Int { return f(x); }
+fn apply(f: fn(Int) Int, x: Int) Int { return f(x); }
 
-fn run() =[IO]=> {
+fn run() -[IO]> {
     apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {IO}
 }
 ```
@@ -3319,16 +3329,16 @@ fn run() =[IO]=> {
   call, so it defaults to the **maximal** effect set — sound, conservative.
 
 Two expert levers refine this (ratified D-EFF2, additive to the default above):
-`fn(…) =[]=>` / `fn(…) =[Net]=>` **parameter types** demand/bound a callback
-(passing one with effects outside the bound is **E0747**), and `=[via f]=>` on a
+`fn(…) -[]>` / `fn(…) -[Net]>` **parameter types** demand/bound a callback
+(passing one with effects outside the bound is **E0747**), and `-[via f]>` on a
 signature publishes a tight pass-through that holds even when the value escapes.
 The conservative default is correct without them; they trade syntax for
 precision.
 
 ### Effects on trait methods (D-EFF3)
 
-A trait method may declare an effect upper bound — `fn hash(self) =[]=>` (the
-empty set) or `fn render(self) =[GPU]=>`. The bound is two things at once:
+A trait method may declare an effect upper bound — `fn hash(self) -[]>` (the
+empty set) or `fn render(self) -[GPU]>`. The bound is two things at once:
 
 - **The impl obligation.** Every implementation's inferred effects must fit
   inside the bound, or it is **E0742**. So a trait can promise "all `hash`
@@ -3339,10 +3349,10 @@ empty set) or `fn render(self) =[GPU]=>`. The bound is two things at once:
 
 ```jet
 trait Shape {
-    fn area(self) =[]=> Int;   // every impl must be pure
+    fn area(self) Int -[]>;     // every impl must be pure
 }
 impl Square.Shape {
-    fn area(self) => Int { return self.side * self.side; }   // OK — pure
+    fn area(self) Int { return self.side * self.side; }      // OK — pure
 }
 ```
 
@@ -3366,7 +3376,7 @@ use core.term as term
 }
 ```
 
-`use core.term as term` is required for `term.read_key() => Key`. The `live`
+`use core.term as term` is required for `term.read_key() -> Key`. The `live`
 keyword itself does not require the import — the block's syntactic gate is
 sufficient.
 
@@ -3396,7 +3406,7 @@ if k == F(n)    { print("F{n}") }
 Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 
 **Restrictions:**
-- E3401: `live { … }` is impure — rejected in a `fn … =[]=>`.
+- E3401: `live { … }` is impure — rejected in a `fn … -[]>`.
 - E3301: rejected in `--freestanding` builds (no OS terminal device).
 - REPL: rejected in interactive mode.
 
@@ -3632,7 +3642,7 @@ entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 ```jet
 #CLI
 struct ServeArgs {
-    #[Doc("port to listen on"), Env("PORT")] port: Int = 3000
+    #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
     #Short("v") verbose: Bool
     config: String?
 }
@@ -3672,9 +3682,9 @@ editor-navigation rules; it is never a string lookup and `.jet/lock` cannot
 rescue a stale source reference.
 
 ```jet
-cli: Output :: .Executable.{ name: "todo", entry: launch };
-api: Output :: .Service.{ name: "todo-api", entry: serve };
-release: Output :: .Check.{ name: "release", entry: verify_release };
+cli: Output :: .Executable{ name: "todo", entry: launch };
+api: Output :: .Service{ name: "todo-api", entry: serve };
+release: Output :: .Check{ name: "release", entry: verify_release };
 
 fn launch() {}
 fn serve() ! {}
@@ -3685,7 +3695,7 @@ fn verify_release() ! {}
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
 An Executable takes zero or one `#CLI`-derived parameter; Service and Check
-take none. All three return `()` or `() !`. Sema resolves and validates the
+take none. All three return `()` or `!`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
 
@@ -3701,14 +3711,14 @@ D-CLI-POS1=A adds positional filling for required value fields:
 |---|---|---|---|
 | `Bool` | `--name` (boolean flag) | — | `false` |
 | `T?` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
-| scalar with `= expr` | `--name VALUE` (optional) | — | `expr` |
+| scalar with `{expr}` | `--name VALUE` (optional) | — | `expr` |
 | required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int` (including `Int(lo..hi)`), `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K:V]`, a closure, a `[T]`, a nested struct that isn't itself
 `#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults use
-the existing inline `= expr` field form (D-FIELDDEF1), the same absence-default
+the existing inline `{expr}` field form (D-DEFAULT-SHAPE1), the same absence-default
 mechanism used by the checked field schema. Field name
 `snake_case` → flag `--snake-case` (underscores become dashes); no
 casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
@@ -4149,7 +4159,7 @@ version: "0.1.0"
 
 ```jet
 // main.jet — the sandbox's own source, no `fn run()` (it's loaded, not run)
-pub fn scale(a: Float, b: Float) => Float {
+pub fn scale(a: Float, b: Float) Float {
     return a * b
 }
 ```
@@ -4173,9 +4183,9 @@ fn run() {
 }
 ```
 
-`Plugin.load(path) => Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) => Float ! String` and
-`.call_int(name, [Int]) => Int ! String` are the only instance methods (v1
+`Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
+`open`/`open_memory`); `.call(name, [Float]) -> Float String!` and
+`.call_int(name, [Int]) -> Int String!` are the only instance methods (v1
 scope — every parameter and the return type must be all-`Int` or all-`Float`,
 E1260; Bool is a trivial follow-on, Text needs the Component Model's
 memory-based string ABI, a real future increment). The wasmtime host embedded
@@ -4204,7 +4214,7 @@ shape) — see docs/spec/diagnostics.md.
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
 `jet build` checks the root program, then runs one optional package-local
-`fn build(b: BuildContext) => BuildPlan !` through the same interpreter used by
+`fn build(b: BuildContext) BuildPlan !` through the same interpreter used by
 comptime. The compiler discovers it in any source file in the package, or in
 the package's `package.jet`; two candidates name both sites and fail. An
 Output-level `entry:` remains an explicit override for rare layouts. For a
@@ -4226,7 +4236,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ! {
+fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?

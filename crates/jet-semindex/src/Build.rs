@@ -425,7 +425,7 @@ fn fn_signature(
         let default = param_defaults
             .get(parameter_index)
             .and_then(Option::as_ref)
-            .map_or_else(String::new, |value| format!(" = {value}"));
+            .map_or_else(String::new, |value| format!("{{{value}}}"));
         *part = format!("{access}{part}{default}");
         parameter_index += 1;
     }
@@ -451,11 +451,11 @@ fn fn_signature(
         .unwrap_or_default();
     let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
     let ceiling = if let Some((param, _)) = effect_via {
-        format!(" :[via {param}]>")
+        format!(" -[via {param}]>")
     } else if shown.is_empty() {
         String::new()
     } else {
-        format!(" :[{}]>", shown.join(", "))
+        format!(" -[{}]>", shown.join(", "))
     };
     let mut signature = format!("fn {name}({params}){result}{ceiling}");
     if let Some(map) = view_provenance {
@@ -2082,7 +2082,7 @@ fn hover_for_fn(f: &AST::Func) -> String {
             }
         };
         let default = match &p.default {
-            Some(_) => " = …",
+            Some(_) => "{…}",
             None => "",
         };
         let rest = if p.variadic { "..." } else { "" };
@@ -2100,11 +2100,11 @@ fn hover_for_fn(f: &AST::Func) -> String {
         }
     }
     let arrow = if let Some((param, _)) = &f.effect_via {
-        format!(" =[via {param}]=>")
+        format!(" -[via {param}]>")
     } else {
         f.declared_effects.as_ref().map_or_else(
-            || f.return_type.as_ref().map(|_| " =>".to_string()).unwrap_or_default(),
-            |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+            || String::new(),
+            |row| format!(" -[{}]>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
         )
     };
     let ret = f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default();
@@ -2120,8 +2120,8 @@ fn hover_for_fn(f: &AST::Func) -> String {
         "fn {}({}){}{}{}",
         f.name,
         params.join(", "),
-        arrow,
         ret,
+        arrow,
         policies
     )
 }

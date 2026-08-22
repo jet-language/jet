@@ -99,7 +99,7 @@ fn numeric_destination_conversions_and_parse_are_cataloged() {
         .lookup_qualified("F32.from_float")
         .expect("F32 narrowing catalog entry");
     assert!(
-        narrow.signature.ends_with("-> F32 ! String"),
+        narrow.signature.ends_with("-> F32 String!"),
         "{}",
         narrow.signature
     );
@@ -683,10 +683,10 @@ fn run() {}
 #[test]
 fn semindex_unified_loop_slots_and_state_scope_are_structural() {
     let src = r#"fn run() {
-    loop item, [1, 2, 3], 2 {
+    loop item in [1, 2, 3], 2 {
         print(item)
     }
-    loop cursor, 0..<1 {
+    loop cursor in 0..<1 {
         print(cursor)
     }
 }
@@ -714,7 +714,7 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
 
     let out_of_scope = jet::check_document(
         "state_scope.jet",
-        "fn run() {\n    loop cursor, 0..<1 {}\n    print(cursor)\n}\n",
+        "fn run() {\n    loop cursor in 0..<1 {}\n    print(cursor)\n}\n",
     );
     assert!(
         out_of_scope.iter().any(|diagnostic| {
@@ -966,7 +966,7 @@ struct Client {
 }
 
 impl Client {
-    fn connect(self, host: String, /, timeout seconds: Int = 30, *, tls enabled: Bool = true, rest: ...String) => String {
+    fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) => String {
         return host
     }
 }

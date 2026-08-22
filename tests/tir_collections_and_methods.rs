@@ -19,12 +19,12 @@ fn run() {
     i :: 9
     xs := [value, v]
     xs[1] = value
-    loop (list_index, list_item), xs {
+    loop (list_index, list_item) in xs {
         print("{list_index}:{list_item}")
     }
     counts := [String:Int]{}
     counts[k] = value
-    loop (map_key, map_value), counts {
+    loop (map_key, map_value) in counts {
         print("{map_key}={map_value}")
     }
 }
@@ -42,7 +42,7 @@ fn run() {
 }
 
 // c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
-// and `loop x, coll` / `loop (k, v), map` iteration. The `IndexKind` (List/Map)
+// and `loop x in coll` / `loop (k, v) in map` iteration. The `IndexKind` (List/Map)
 // is carried as a total fact from sema and dispatched at lowering (never
 // re-inferred). All asserts prove rustc accepts the output (I2) and runs correctly.
 
@@ -56,7 +56,7 @@ fn list_literal_index_slice_and_iteration() {
     let src = "\
 fn total(xs: [Int]) Int -[]> {
     sum := 0
-    loop x, xs {
+    loop x in xs {
         sum = (sum + x)
     }
     return sum
@@ -82,19 +82,19 @@ fn list_two_binding_and_indexes() {
     let src = "\
 fn run() {
     xs := [10, 20, 30]
-    loop (i, v), xs {
+    loop (i, v) in xs {
         print(\"{i}:{v}\")
     }
-    loop i, xs.indexes() {
+    loop i in xs.indexes() {
         print(i)
     }
     empty := [Int]{}
     count := 0
-    loop i, empty.indexes() {
+    loop i in empty.indexes() {
         count = (count + 1)
     }
     print(count)
-    loop pair, xs.indexed() {
+    loop pair in xs.indexed() {
         print(\"{pair.idx}:{pair.item}\")
     }
 }
@@ -128,7 +128,7 @@ fn run() {
 }
 
 /// A map literal (`[]`), map indexing, map insert (`m[k] = v`), and two-binding
-/// `loop (k, v), map` iteration — the map-specific helpers and the `.iter()` clone
+/// `loop (k, v) in map` iteration — the map-specific helpers and the `.iter()` clone
 /// form. BTreeMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_literal_index_insert_and_iteration() {
@@ -141,10 +141,10 @@ fn run() {
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
-    loop (k, v), counts {
+    loop (k, v) in counts {
         print(\"{k}={v}\")
     }
-    loop entry, counts {
+    loop entry in counts {
         print(\"{entry.key}:{entry.value}\")
     }
 }
@@ -475,7 +475,7 @@ fn run() {
 
 // c109 Phase 8: fallible + optional.
 
-/// A fallible `T ! E` function with `ok`/`err` constructors and `?` propagation
+/// A fallible `T E!` function with `ok`/`err` constructors and `?` propagation
 /// across a covered scalar-payload error enum, consumed with `??` value fallback.
 /// `parse_age`, `load`, and `main` all route through the TIR.
 #[test]
@@ -488,7 +488,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) Int ! ParseError -[]> {
+fn parse_age(raw: Int) Int ParseError! -[]> {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -497,7 +497,7 @@ fn parse_age(raw: Int) Int ! ParseError -[]> {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) Int ! ParseError -[]> {
+fn load(raw: Int) Int ParseError! -[]> {
     n :: parse_age(raw)?
     return Ok((n + 1))
 }
@@ -515,14 +515,14 @@ fn run() {
     assert_eq!(stdout, "43\n99\n");
 }
 
-/// The `??` fallback in its early-`return` form (a `T ! E` value), plus `ok`/`err`.
+/// The `??` fallback in its early-`return` form (a `T E!` value), plus `ok`/`err`.
 #[test]
 fn or_fallback_return_form() {
     if !have_rustc() {
         return;
     }
     let src = "\
-fn checked(x: Int) Int ! Err -[]> {
+fn checked(x: Int) Int Err! -[]> {
     if x == 0 {
         return Err(\"zero\")
     }
@@ -550,7 +550,7 @@ fn optional_val_none_and_fallback() {
     }
     let src = "\
 fn first_even(limit: Int) (Int?) -[]> {
-    loop i, 1..limit {
+    loop i in 1..limit {
         if (i % 2) == 0 {
             return Val(i)
         }
@@ -1002,6 +1002,45 @@ fn bare_member_shorthand_forced_interpreter() {
     }
 }
 
+/// D-SUBJECT-COHERE1=A: method-head subject shorthand is the same unary
+/// callable shape as a member head, including in a call slot.
+#[test]
+fn bare_method_head_shorthand_in_callable_slot() {
+    let source = r#"
+fn run() {
+    words := ["a", "bb"]
+    lengths :: words.map(.len())
+    print(lengths)
+}
+"#;
+    assert_tiers_agree("tir_subject_method_head", source, "[1, 2]\n");
+}
+
+/// D-SUBJECT-COHERE1=A: nested shorthand gets a named lint, while a statement
+/// marker suppresses only the lints raised by that statement.
+#[test]
+fn subject_shorthand_nesting_lint_and_allow() {
+    let source = r#"
+fn run() {
+    words := [["a", "bb"]]
+    print(words.map(.map(.len())))
+    #allow(subject_shorthand_nesting) print(words.map(.map(.len())))
+}
+"#;
+    let compiled = jet::compile(source).expect("nested subject shorthand should remain legal");
+    let lints: Vec<_> = compiled
+        .lints
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "L0512")
+        .collect();
+    let lint_count = lints.len();
+    assert_eq!(
+        lint_count,
+        1,
+        "local #allow should suppress one nested lint; got {lint_count}"
+    );
+}
+
 /// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.
 #[test]
 fn list_join_with_separator() {
@@ -1066,7 +1105,7 @@ fn fallible_when_match() {
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) Int ! ClassifyError -[]> {
+fn classify(x: Int) Int ClassifyError! -[]> {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }

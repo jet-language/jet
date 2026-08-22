@@ -239,7 +239,7 @@ fn default_param_values() {
         return;
     }
     let src = "\
-fn box_dims(w: Int, h: Int = w, d: Int = h) String {
+fn box_dims(w: Int, h: Int{w}, d: Int{h}) String {
     return \"{w}x{h}x{d}\"
 }
 fn run() {
@@ -264,10 +264,10 @@ fn named_args() {
 fn area(width: Int, height: Int) Int {
     return (width * height)
 }
-fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String {
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String {
     return \"{host} t={seconds} tls={tls}\"
 }
-fn identity<T>(value: T, *, note: String = \"unused\") T {
+fn identity<T>(value: T, *, note: String{\"unused\"}) T {
     return value
 }
 fn force(*, force: Bool) Int -> 1
@@ -394,8 +394,8 @@ UserId :: distinct Int;
 Label :: distinct String;
 #UnitFamily(Currency) { usd }
 
-fn checked_user(value: U64) UserId ! String { return UserId.from_u64(value) }
-fn pass_user(value: UserId ! String) UserId ! String { return ~value }
+fn checked_user(value: U64) UserId String! { return UserId.from_u64(value) }
+fn pass_user(value: UserId String!) UserId String! { return ~value }
 
 fn run() {
     fallback :: UserId.from_int(0)
@@ -443,11 +443,11 @@ fn range_type_runtime_try_and_spelled_arithmetic_gate() {
     let src = "\
 #Numeric Severity :: distinct Int(0..10);
 
-fn checked(raw: Int) Severity ! String {
+fn checked(raw: Int) Severity String! {
     return Ok(Severity.from_int(raw)?)
 }
 
-fn pass_checked(value: Severity ! String) Severity ! String { return ~value }
+fn pass_checked(value: Severity String!) Severity String! { return ~value }
 fn direct() Severity { return Severity.from_u8(8) }
 
 fn run() {
@@ -999,11 +999,11 @@ fn http_router_dispatch() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle_root(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn handle_root(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"welcome\"))
 }
 
-fn handle_user(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn handle_user(req: HTTPRequest) HTTPResponse HTTPError! {
     id :: req.param(\"id\") ?? \"unknown\"
     return Ok(server.response(200, \"user={id}\"))
 }
@@ -1049,7 +1049,7 @@ fn http_router_duplicate_route_is_jet_runtime_error() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn handle(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {
@@ -1083,22 +1083,22 @@ fn http_router_named_catchall_and_encoded_marker_literals() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn asset(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn asset(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, req.param(\"path\") ?? \"missing\"))
 }
-fn literal(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn literal(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"literal\"))
 }
-fn catch(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn catch(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"catch\"))
 }
-fn param_catch(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn param_catch(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"param-catch\"))
 }
-fn param_first(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn param_first(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"param-first\"))
 }
-fn static_first(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn static_first(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"static-first\"))
 }
 fn run() {
@@ -1133,7 +1133,7 @@ fn http_router_retired_bare_catchall_is_jet_runtime_error() {
 use core.http as http
 use core.http.server as server
 use core.sys as env
-fn handle(req: HTTPRequest) HTTPResponse ! HTTPError {
+fn handle(req: HTTPRequest) HTTPResponse HTTPError! {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {

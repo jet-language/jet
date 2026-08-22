@@ -237,22 +237,22 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
     for (method, callback, call) in [
         (
             "map",
-            "fn callback(n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } assert(false, \"map-low\") }\n    if n == 65 { assert(false, \"map-high\") }\n    return n\n}\n",
+            "fn callback(n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"map-low\") }\n    if n == 65 { assert(false, \"map-high\") }\n    return n\n}\n",
             "ignored :: values.para_map(callback)",
         ),
         (
             "filter",
-            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } assert(false, \"filter-low\") }\n    if n == 65 { assert(false, \"filter-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"filter-low\") }\n    if n == 65 { assert(false, \"filter-high\") }\n    return true\n}\n",
             "ignored :: values.para_filter(callback)",
         ),
         (
             "partition",
-            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } assert(false, \"partition-low\") }\n    if n == 65 { assert(false, \"partition-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"partition-low\") }\n    if n == 65 { assert(false, \"partition-high\") }\n    return true\n}\n",
             "ignored :: values.para_partition(callback)",
         ),
         (
             "fold",
-            "fn step(acc: Int, n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i, 0..200000 { ignored :: i } assert(false, \"fold-low\") }\n    if n == 65 { assert(false, \"fold-high\") }\n    return acc + n\n}\n",
+            "fn step(acc: Int, n: Int) Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i in 0..200000 { ignored :: i } assert(false, \"fold-low\") }\n    if n == 65 { assert(false, \"fold-high\") }\n    return acc + n\n}\n",
             "ignored :: values.para_fold(() -> 0, step, (left: Int, right: Int) -> left + right)",
         ),
     ] {
@@ -403,6 +403,25 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
+/// Stable partition and sort keep equal-key values in source order on every
+/// execution tier. This guards the contract used by gather-style compositions.
+#[test]
+fn stable_partition_and_sort_keep_ties_in_order() {
+    let src = "\
+fn run() {
+    values := [1, 3, 2, 4]
+    sorted := [1, 3, 2, 4]
+    sorted.sort_by((n: Int) -> n % 2)
+    split := values.partition((n: Int) -> n % 2 == 0)
+    print(\"{sorted}|{split.false_}|{split.true_}\")
+}
+";
+    tir_support::assert_tiers_agree(
+        "tir_stable_partition_sort",
+        src,
+        "[2, 4, 1, 3]|[1, 3]|[2, 4]\n",
+    );
+}
 
 /// A call whose callee has a Fn-typed parameter (`apply(f, x)`) now routes
 /// through the TIR with the required fn-value coercion. The test proves that
@@ -482,7 +501,7 @@ fn to_real(x: Int) Float {
 fn truncate(x: Float) U8 {
     return U8.from_float(x) ?? 255
 }
-fn narrow_float(x: Float) F32 ! String {
+fn narrow_float(x: Float) F32 String! {
     return F32.from_float(x)
 }
 fn run() {

@@ -17,11 +17,11 @@ fn hi_band(n: Int) Int {
     }
 }
 
-// D-IFDIST1: `|` unions distributed atoms; `&&` combines Bools without parens.
+// D-IFDIST1 / D-ARMHEAD-PAREN1: group distributed atoms before `&&`.
 fn hex_nibble(n: Int) String {
     return if n == {
         0 -> "0"
-        10 | 11 && true -> "a"
+        (10 | 11) && true -> "a"
         else -> "f"
     }
 }

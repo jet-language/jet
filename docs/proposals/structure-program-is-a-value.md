@@ -194,7 +194,7 @@ pub #UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Ti
 // proposed: the same family, the prefix table said once
 pub #UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Time / Current / Current, base: ohm) {
     ohm
-    @loop p, si.prefixes { unit("{p.name}ohm", scale: p.scale) }
+    @loop p in si.prefixes { unit("{p.name}ohm", scale: p.scale) }
 }
 ```
 
@@ -202,13 +202,13 @@ Family-specific rows (`inch`/`foot`, `celsius`, `hectare`, `psi`, `electronvolt`
 
 ```jet
 // proposed: Errors.jet's 13 identical conversions, said once over a written list
-@loop E, [BrowserError, DBError, NetError, /* the 13 written names */] {
+@loop E in [BrowserError, DBError, NetError, /* the 13 written names */] {
     impl E => Err { return Err("{self}") }
 }
 
 // proposed: the real 4×3 bench matrix, both subjects, today's exact expected values
 cases :: [.{n: 64, c: 1, expect: 66496}, .{n: 64, c: 32, expect: 31573635}, /* ...10 more rows from today's file */]
-@loop case, cases {
+@loop case in cases {
     #Test("map n{case.n} c{case.c}") {
         .measure { assert_eq(map_case(case.n, case.c), case.expect) }
     }

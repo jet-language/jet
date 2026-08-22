@@ -435,7 +435,7 @@ any tool, file, network, cache, or unsafe access.
 Every function graph carries source-backed metadata:
 
 ```json
-{"function":{"name":"on_start","signature":"pub fn on_start(limit: Int = <default@31-32>) => Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
+{"function":{"name":"on_start","signature":"pub fn on_start(limit: Int{<default@31-32>}) => Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
 ```
 
 `#Meta(category: "...", tunable)` projects as `meta: {"category": <string|null>,
@@ -445,7 +445,7 @@ items use `meta: null`. The field is source-backed and read-only in v1.
 Function edits are ordinary source transactions:
 
 ```json
-{"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet::on_start@25-33","signature":"pub fn on_start(limit: Int = 1) => Int"}
+{"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet::on_start@25-33","signature":"pub fn on_start(limit: Int{1}) => Int"}
 {"schema_version":1,"op":"rename_function","revision":"sha256-...","from":"on_start","to":"on_begin"}
 {"schema_version":1,"op":"create_function","revision":"sha256-...","name":"helper","params":"value: Int","ret_type":"Int"}
 ```

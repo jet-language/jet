@@ -292,7 +292,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ! E;`
+        /// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T E!;`
         pub(super) fn type_alias_def(
             &mut self,
             is_pub: bool,

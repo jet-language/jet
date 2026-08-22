@@ -636,7 +636,7 @@ fn debit(account: &Account, amount: Int) { ... }
 
 fn settle(batch: [Transfer]) ? Err {               // proposed: no arrow, no unit
     #Transact(t) {
-        loop tr, batch {
+        loop tr in batch {
             debit(&accounts[tr.from], tr.amount)   // proven when amount: Int(1..)
             credit(&accounts[tr.to], tr.amount)
         }

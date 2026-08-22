@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::Diagnostics::TextEdit;
 
 impl<'a> Parser<'a> {
     /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
@@ -619,7 +620,8 @@ impl<'a> Parser<'a> {
     /// - A pattern head (`.Active(id)`, `A(x) | B(x)`) becomes a `PatternTest`
     ///   (`==` marker only).
     /// - Values use the D-MATCHARM1 grammar: `|` unions distributed atoms,
-    ///   `&&`/`||` combine booleans, parens group.
+    ///   `&&`/`||` combine booleans, and parens make a distributed group
+    ///   explicit when it is next to a Boolean operator.
     /// - A leftover redundant `subject ==` prefix emits E0994 and recovers.
     pub(super) fn if_arm_head(
         &mut self,
@@ -764,17 +766,38 @@ impl<'a> Parser<'a> {
         )
     }
 
+    fn distributed_atom_group_diag(&self, span: Span) -> Diagnostic {
+        let mut diagnostic = Diagnostic::from_row("E0386", &[], Some(span));
+        if let Some(source) = self
+            .source
+            .as_deref()
+            .and_then(|source| source.get(span.start..span.end))
+        {
+            diagnostic = diagnostic.with_edit(TextEdit {
+                span,
+                new_text: format!("({source})"),
+            });
+        }
+        diagnostic
+    }
+
     // ── D-MATCHARM1 arm-head grammar ─────────────────────────────────────────
 
     /// `arm_and_expr = arm_alternates ("&&" arm_bool_operand)*`
     /// D-IFDIST1: after `&&`, a single Ident/field/call is a Bool predicate
-    /// (not `subject OP ident`); `|` unions still distribute.
+    /// (not `subject OP ident`); a distributed `|` group next to a Boolean
+    /// operator must be parenthesized.
     pub(super) fn parse_arm_and_cond(
         &mut self,
         subject: &Expr,
         op: BinOp,
     ) -> Result<Expr, Diagnostic> {
-        let (lhs_cond, _) = self.parse_arm_alternates_cond(subject, op, false)?;
+        let (lhs_cond, alternate_count, alternate_span) =
+            self.parse_arm_alternates_cond(subject, op, false)?;
+        if alternate_count > 1 && matches!(self.peek().kind, TokKind::AndAnd | TokKind::OrOr) {
+            let diagnostic = self.distributed_atom_group_diag(alternate_span);
+            self.diags.push(diagnostic);
+        }
         if !matches!(self.peek().kind, TokKind::AndAnd) {
             return Ok(lhs_cond);
         }
@@ -829,20 +852,27 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the arm head group")?;
             return Ok(inner);
         }
-        let (cond, _) = self.parse_arm_alternates_cond(subject, op, true)?;
+        let (cond, alternate_count, alternate_span) =
+            self.parse_arm_alternates_cond(subject, op, true)?;
+        if alternate_count > 1 {
+            let diagnostic = self.distributed_atom_group_diag(alternate_span);
+            self.diags.push(diagnostic);
+        }
         Ok(cond)
     }
 
     /// `arm_alternates = arm_atom ("|" arm_atom)*`
-    /// Returns `(condition_expr, alternate_count)`.
+    /// Returns `(condition_expr, alternate_count, source_span)`.
     /// `prefer_predicate` is true for a single atom after `&&`/`||`.
     pub(super) fn parse_arm_alternates_cond(
         &mut self,
         subject: &Expr,
         op: BinOp,
         prefer_predicate: bool,
-    ) -> Result<(Expr, usize), Diagnostic> {
+    ) -> Result<(Expr, usize, Span), Diagnostic> {
+        let group_start = self.peek().span.start;
         let first = self.parse_arm_atom_cond(subject, op, prefer_predicate)?;
+        let mut group_end = self.toks[self.pos.saturating_sub(1)].span.end;
         let mut alts = vec![first];
         // Consume single `|` but not `||` (peek at the token after `|`).
         while matches!(self.peek().kind, TokKind::Pipe)
@@ -854,10 +884,15 @@ impl<'a> Parser<'a> {
             self.bump(); // consume `|`
             // Values in a `|` union always distribute.
             alts.push(self.parse_arm_atom_cond(subject, op, false)?);
+            group_end = self.toks[self.pos.saturating_sub(1)].span.end;
         }
         let n = alts.len();
         if n == 1 {
-            return Ok((alts.into_iter().next().unwrap(), 1));
+            return Ok((
+                alts.into_iter().next().unwrap(),
+                1,
+                Span::new(group_start, group_end),
+            ));
         }
         let combined = alts
             .into_iter()
@@ -866,7 +901,7 @@ impl<'a> Parser<'a> {
                 Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
             })
             .unwrap();
-        Ok((combined, n))
+        Ok((combined, n, Span::new(group_start, group_end)))
     }
 
     /// `arm_atom = "(" arm_bool_expr ")" | single_value`

@@ -532,7 +532,7 @@ fn run() {
     fs.write("/tmp/jet_1271.csv", "alpha,1\n") ?? panic("write failed")
     text :: fs.read("/tmp/jet_1271.csv") ?? ""
     rows := [Row]{}
-    loop line, text.split("\n") {
+    loop line in text.split("\n") {
         parts :: line.split(",")
         rows.push(Row{ name: parts.get(0), count: missing })
     }

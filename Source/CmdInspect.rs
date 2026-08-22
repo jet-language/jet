@@ -272,9 +272,9 @@ fn llm_digest() -> String {
         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
         "Functions: `fn name(parameter: Type) Return -[]> { ... }`; expression bodies use `-> expression`.",
         "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
-        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T ! E`.",
-        "Errors: handle `T?` or `T ! E` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
-        "Control: `if condition { ... } else { ... }`; collecting loops use `loop name, source { ... }`; exit with `break` and advance with `next`.",
+        "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T E!`.",
+        "Errors: handle `T?` or `T E!` with `?? fallback`, `?`, or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
+        "Control: `if condition { ... } else { ... }`; collecting loops use `loop name in source { ... }`; exit with `break` and advance with `next`.",
         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
         "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
@@ -370,7 +370,7 @@ fn digest_marker_declaration(rule: &AppliedRule) -> String {
         .map(|param| {
             let default = param
                 .default
-                .map_or(String::new(), |value| format!(" = {value}"));
+                .map_or(String::new(), |value| format!("{{{value}}}"));
             format!("{}: {}{default}", param.name, param.source_type)
         })
         .collect::<Vec<_>>();

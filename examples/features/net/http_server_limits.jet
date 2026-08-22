@@ -3,7 +3,7 @@ use core.http.server as http_server
 use core.net as net
 use core.tasks as tasks
 
-fn run() ! HTTPError | NetError | TaskFailure {
+fn run() (HTTPError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()
@@ -14,9 +14,9 @@ fn run() ! HTTPError | NetError | TaskFailure {
     }
     smuggling :: net.tcp_connect(addr)?
     smuggling_request := "".bytes()
-    loop line,
+    loop line in
         ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
-        loop byte, line.bytes() -> smuggling_request.push(byte)
+        loop byte in line.bytes() -> smuggling_request.push(byte)
         smuggling_request.push(13)
         smuggling_request.push(10)
     }
@@ -26,8 +26,8 @@ fn run() ! HTTPError | NetError | TaskFailure {
     print(smuggling_response.contains("handler ran"))
     oversized :: net.tcp_connect(addr)?
     oversized_request := "".bytes()
-    loop line, ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
-        loop byte, line.bytes() -> oversized_request.push(byte)
+    loop line in ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
+        loop byte in line.bytes() -> oversized_request.push(byte)
         oversized_request.push(13)
         oversized_request.push(10)
     }

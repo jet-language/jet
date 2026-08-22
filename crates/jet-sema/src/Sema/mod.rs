@@ -70,7 +70,7 @@ pub(crate) struct MethodSig {
     type_params: Vec<crate::AST::TypeParam>,
     is_static: bool,
     self_conv: Option<AccessConvention>,
-    /// D-NARG1 (S61): parameter names and default-value presence, parallel to
+    /// D-NARG1 / D-DEFAULT-SHAPE1: parameter names and default-value presence, parallel to
     /// `params`. Excludes `self` (index 0 of params is self when self_conv is
     /// Some; param_info starts from the first non-self param).
     pub(crate) param_info: Vec<(String, bool)>,
@@ -82,7 +82,7 @@ pub(crate) struct MethodSig {
     /// unbound; without it a labelled call to a variadic method reports a
     /// missing argument that is not missing.
     pub(crate) param_variadic: Vec<bool>,
-    /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
+    /// D-DEFAULT-SHAPE1=B: default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
     /// D-MUSTUSE1 (c18iwxqx): `#MustUse` method — return cannot be silently ignored (E0419).
@@ -259,7 +259,7 @@ pub(crate) struct TypeRegistry {
     /// literal — E0339); this side table is the only place sema resolves its
     /// type for a *read* (`field_type`).
     computed_fields: HashMap<String, HashMap<String, (Span, Type)>>,
-    /// D-FIELDDEF1=C: struct name → field name → default expression for omitted
+    /// D-DEFAULT-SHAPE1=B: struct name → field name → default expression for omitted
     /// `Type.{ … }` construction and wire/CLI absence.
     field_defaults: HashMap<String, HashMap<String, crate::AST::Expr>>,
 }
@@ -356,7 +356,7 @@ impl TypeRegistry {
         self.computed_fields.get(name)
     }
 
-    /// D-FIELDDEF1=C: default expressions for omitted struct-literal fields.
+    /// D-DEFAULT-SHAPE1=B: default expressions for omitted struct-literal fields.
     pub(crate) fn field_defaults(
         &self,
         name: &str,
@@ -1489,6 +1489,9 @@ pub(crate) struct Checker<'a> {
     current_function_span: Span,
     name_ledger: &'a mut jet_foundation::Names::NameLedger,
     diags: Vec<Diagnostic>,
+    /// D-SUBJECT-COHERE1=A: statement-local `#allow(lint)` facts collected
+    /// while checking the following expression statement.
+    statement_lint_allows: Vec<String>,
     /// D-LINT-UNUSED1: source declarations whose successful body check found
     /// no read or write. The declaration identity is the sema `def_span`, so
     /// shadowed names never share a liveness fact.
@@ -1505,6 +1508,8 @@ pub(crate) struct Checker<'a> {
     loop_depth: usize,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
     implicit_loop_subject_depth: usize,
+    /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.
+    subject_shorthand_depth: usize,
     source_nesting: usize,
     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,

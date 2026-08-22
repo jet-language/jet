@@ -100,10 +100,10 @@ fn run() {
     tree := ui.box([ui.text("Title"), ui.button("Save")])
     null := ui.null_backend()
     ui.mount(null, tree)
-    loop command, null.commands() { print(command) }
+    loop command in null.commands() { print(command) }
     print("---")
     ui.mount(null, tree)
-    loop command, null.commands() { print(command) }
+    loop command in null.commands() { print(command) }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "ui_mount_twice", src);
@@ -145,13 +145,13 @@ fn run() {
     print(null.focused_label())
     null.on_event(ui.key_event("Tab"))
     print(null.focused_label())
-    loop command, null.commands() { print(command) }
+    loop command in null.commands() { print(command) }
 
     tui := ui.tui_backend()
     tui.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     tui.paint(tree)
     print(tui.focused_label())
-    loop line, tui.frame_lines() { print(line) }
+    loop line in tui.frame_lines() { print(line) }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "ui_typed_tree", src);

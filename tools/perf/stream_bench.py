@@ -48,7 +48,7 @@ def jet_source(case: str, size: int) -> str:
     if case == "creation":
         producer = """fn empty() => Stream<Int> {
 }"""
-        body = """loop value, empty() {
+        body = """loop value in empty() {
             break
         }"""
         expected = expected_stdout(case, size)
@@ -56,7 +56,7 @@ def jet_source(case: str, size: int) -> str:
         producer = """fn one() => Stream<Int> {
     yield 1
 }"""
-        body = """loop value, one() {
+        body = """loop value in one() {
             total += value
         }"""
         expected = expected_stdout(case, size)
@@ -65,7 +65,7 @@ def jet_source(case: str, size: int) -> str:
     yield 1
     yield 2
 }"""
-        body = """loop value, many() {
+        body = """loop value in many() {
             break
         }"""
         expected = expected_stdout(case, size)

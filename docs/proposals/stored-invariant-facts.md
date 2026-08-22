@@ -1,7 +1,8 @@
-# Stored invariant facts
+# Stored invariant facts — card #2140
 
-Status: design note for card #2140. The ballots below are drafts. No syntax or
-semantic choice is ratified by this file. This card adds no compiler code.
+Status: design note for card #2140. This note adds no compiler code, no ratified
+syntax, and no selected semantic spelling. The ballots below are draft owner
+choices.
 
 ## Result
 
@@ -26,6 +27,17 @@ The missing middle is a registered predicate plane:
 
 This makes state syntax and distinct wrappers possible surfaces over one
 mechanism. It does not make either surface the mechanism.
+
+These source layers have different jobs. `crates/jet-foundation/src/Facts.rs`
+provides `FactRegistry` declarations and the shared `fact_covers` hook. It does
+not store facts for local values. `crates/jet-sema/src/Sema/FlowFacts.rs`
+provides the per-binding `Facts<P>` stores and owns branch and loop joins.
+`crates/jet-foundation/src/AST/types.rs` provides `KnowledgeFact`,
+`KnowledgeVector`, path composition, identity projection, and erasure.
+`crates/jet-sema/src/Sema/State.rs` keeps typestate in `StateTable` metadata and
+the `FlowFacts::states` row. `crates/jet-foundation/src/Registry.rs` reads the
+registered rows from `crates/jet-codegen/src/Prelude/Facts.jet` and supplies
+their reflection shape. The proposal adds no second store to any of them.
 
 ## What exists
 
@@ -93,21 +105,42 @@ existing `KnowledgeVector`; it does not keep a second nominal-fact cache.
 
 The ordinary composition law then gives these results:
 
-- a field typed as the fact-bearing nominal type carries the fact when read;
-- `[FactType]`, `[K: FactType]`, `FactType?`, `FactType ! E`, tuples, fixed
-  lists, and generic arguments carry it at their existing structural paths;
+- a field whose declared type is the fact-bearing nominal reads with the fact;
+- list elements, map keys and values, options, results, tuples, fixed lists,
+  and generic arguments carry it at their existing structural paths;
+- a branch keeps the fact only when every reachable result has the fact. A
+  plain or unproven carrier on one path gives the join no predicate fact;
+- a loop applies the same conservative zero-turn/one-turn rule to its carried
+  value. A fact-bearing declared type stays fact-bearing only when every loop
+  write meets that type;
+- a generic value gives its fact to generic code through its type argument or
+  bound. Generic code cannot mint a fact by method name alone;
+- a function return type carries the fact to its caller. Every successful
+  return must satisfy the declared fact, and a fallible constructor carries it
+  only on its success result;
 - inserting or assigning an unproven carrier into a fact-bearing slot fails at
-  the existing type/proof seam;
-- a branch or loop can retain a stored fact because the fact is in the type,
-  while flow facts still join conservatively for values whose type is plain;
-- generic code receives only facts present in its type arguments. It cannot
-  mint a predicate by calling a method whose registry row lacks a proof.
+  the existing type/proof seam.
+
+The branch and loop rules above use type knowledge for stored facts. They do
+not turn `FlowFacts::states` into a storage mechanism. Plain values still
+follow the existing flow joins, and no join invents a registered predicate.
 
 A required call fact is satisfied by a supplied fact through the plane's
 subsumption relation. A `#Pre` condition is discharged only when its condition
 is the same registered predicate or a registered implication. Arbitrary
 Boolean `#Pre` conditions remain runtime contracts. This preserves the
 distinction between a proof and a test.
+
+The same registry row supplies reflection. A reflected type reports the
+predicate identity and member through the registered plane; an unregistered
+constructor claim has no reflection row and cannot discharge a call.
+
+Negative proof cases are mandatory. `cross(Unit, Unit) -> Unit` is not a valid
+producer claim: the cross-product magnitude is `sin(theta)`, so two unit inputs
+do not prove a unit output. A constructor that lacks the canonical checked
+producer, or that only repeats a postcondition message, also returns an
+unproven carrier. The plane may add an implication only when its registered
+proof covers the actual inputs and result.
 
 Nominal identity remains nominal. This proposal does not restore implicit
 `distinct`-to-base conversion. Whether a fact-bearing value may satisfy a
@@ -121,9 +154,11 @@ The predicate plane follows D-TYPE2-FOUND1 and D-TYPE2-PLANE1. It contributes
 to type identity where the row says it does, is readable through the existing
 typed fact/reflection path, and disappears through `Type::erased_carrier` at
 the typed-IR seam. If validation runs at construction, its meaning lives in
-one Prelude validator symbol; every execution tier calls that symbol through
-its normal adapter. No engine may reimplement predicate policy or error
-meaning.
+one Prelude validator symbol. A complete implementation must prove parity in
+AOT, default `jet run`/Cranelift, the interpreter, and web when applicable.
+Every tier calls that symbol through its normal adapter. No engine may
+reimplement predicate policy or error meaning, and no `tests/jit_gaps.txt`
+entry may park the work.
 
 ## Draft ballot slate
 
@@ -211,7 +246,8 @@ test that a future spelling must pass.
 - `#Pre` discharge tests for exact fact, registered implication, and arbitrary
   Boolean conditions;
 - reflection tests from the same registry row;
-- proof that the typed-IR carrier and all applicable execution tiers contain
-  no predicate storage or engine-local predicate policy;
+- proof that the typed-IR carrier contains no predicate storage and that AOT,
+  default `jet run`, the interpreter, and web when applicable use the same
+  Prelude semantics, with no engine-local predicate policy;
 - registered diagnostics and `tests/ui/` snapshots for every new rejection;
 - no `jit_gaps` entry and no AOT-only exception.

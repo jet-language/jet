@@ -5,13 +5,13 @@ fn run() {
     items :: [String]{"one", "two", "three"}
     lazy_items :: items.lazy()
     progressed :: io.progress(lazy_items, "work", "{{description}} {{percent}}% {{count}}/{{total}}")
-    loop item, progressed -> print(item)
+    loop item in progressed -> print(item)
 
     stepped :: io.progress(items.lazy(), "step", "{{description}} {{count}}/{{total}}")
-    loop item, stepped, 2 -> print("step {item}")
+    loop item in stepped, 2 -> print("step {item}")
 
     stopped :: io.progress(items.lazy(), "break", "{{description}} {{count}}/{{total}}")
-    loop item, stopped {
+    loop item in stopped {
         print("break {item}")
         break
     }
@@ -33,7 +33,7 @@ fn run() {
     print("unknown {unknown_values.len()}")
 
     mapped :: io.progress(items.lazy(), "map", "{{description}} {{count}}/{{total}}").map(item -> item)
-    loop item, mapped -> print("map {item}")
+    loop item in mapped -> print("map {item}")
 
     dupes :: [String]{"one", "one", "two", "two", "three"}
     deduped :: io.progress(dupes.lazy(), "dedup", "{{description}} {{count}}/{{total}}").dedup().to_list()

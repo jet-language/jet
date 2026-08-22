@@ -531,7 +531,7 @@ loop ready poll()
 
 loop item; items audit(item)
 
-loop key, value; scores print("{key}: {value}")
+loop (key, value) in scores print("{key}: {value}")
 
 loop i; 0..<limit; 2 inspect(i)
 

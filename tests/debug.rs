@@ -34,7 +34,7 @@ const LOOPS: &str = "\
 fn run() {
     n := 3
     total := 0
-    loop i, 1..n {
+    loop i in 1..n {
         total += i
     }
     print(\"total is {total}\")
@@ -270,7 +270,7 @@ fn loop_next_edges_are_step_visible_and_line_mapped() {
     let src = "\
 fn run() {
     hits := 0
-    loop i, 0..<3 {
+    loop i in 0..<3 {
         if i == 1 {
             next
         }
@@ -278,8 +278,8 @@ fn run() {
     }
     outer_hits := 0
     inner_hits := 0
-    outer :: loop i, 0..<3 {
-        loop j, 0..<3 {
+    outer :: loop i in 0..<3 {
+        loop j in 0..<3 {
             if j == 1 {
                 next(outer)
             }
@@ -298,7 +298,7 @@ fn run() {
     );
     let next_stop = plain.find("5 |             next        <- here").expect("plain next stop");
     let step_stop = plain[next_stop..]
-        .find("3 |     loop i, 0..<3 {        <- here")
+        .find("3 |     loop i in 0..<3 {        <- here")
         .map(|offset| next_stop + offset)
         .expect("plain next must stop on the loop afterthought");
     assert!(
@@ -316,11 +316,11 @@ fn run() {
         .find("14 |                 next(outer)        <- here")
         .expect("labeled next stop");
     let outer_step = labeled[next_stop..]
-        .find("11 |     outer :: loop i, 0..<3 {        <- here")
+        .find("11 |     outer :: loop i in 0..<3 {        <- here")
         .map(|offset| next_stop + offset)
         .expect("labeled next must target the outer afterthought");
     assert!(
-        !labeled[next_stop..outer_step].contains("12 |         loop j, 0..<3 {        <- here"),
+        !labeled[next_stop..outer_step].contains("12 |         loop j in 0..<3 {        <- here"),
         "labeled next stepped through the inner loop edge first:\n{labeled}"
     );
     assert!(labeled.contains("i = 1"), "outer afterthought did not advance i:\n{labeled}");

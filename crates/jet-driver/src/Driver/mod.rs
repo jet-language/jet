@@ -1364,6 +1364,12 @@ fn build_stamp_for_facts(
     })
 }
 
+fn set_bundle_target(bundle: &mut crate::AST::ProgramBundle, cross_target: Option<&str>) {
+    bundle.build_facts.target_triple = cross_target
+        .map(str::to_owned)
+        .unwrap_or_else(jet_foundation::Layout::TargetLayout::host_triple);
+}
+
 fn seed_build_facts_from_stamp(
     bundle: &mut crate::AST::ProgramBundle,
     profile: &str,
@@ -1371,6 +1377,11 @@ fn seed_build_facts_from_stamp(
     computed_contributions: &[jet_foundation::Policy::FactContribution],
     stamp: &jet_foundation::Facts::BuildStamp,
 ) -> Result<(), Vec<Diagnostic>> {
+    let target_triple = if bundle.build_facts.target_triple.is_empty() {
+        jet_foundation::Layout::TargetLayout::host_triple()
+    } else {
+        bundle.build_facts.target_triple.clone()
+    };
     let manifest = match crate::Package::PackageFacts::load(&bundle.project_root) {
         None => None,
         Some(Ok(facts)) => Some(facts),
@@ -1651,6 +1662,7 @@ fn seed_build_facts_from_stamp(
         package_name,
         package_version,
         os: bundle.active_os,
+        target_triple,
         profile: resolved_profile,
         stamp: stamp.clone(),
         contributions,
@@ -2544,6 +2556,7 @@ fn prepare_build_front_end_on_compiler_stack(
         crate::Sema::CompileMode::Run
     };
     bundle.active_os = active_os;
+    set_bundle_target(&mut bundle, inputs.cross_target.as_deref());
     // Capture the provenance input once for this package build. Every build
     // entry, generated-source check, and final runtime bundle receives this
     // exact snapshot; only the lock boundary may probe the host.
@@ -2608,6 +2621,7 @@ fn prepare_build_front_end_on_compiler_stack(
                 false,
             )?;
             bundle.active_os = active_os;
+            set_bundle_target(&mut bundle, inputs.cross_target.as_deref());
             seed_build_facts_from_stamp(
                 &mut bundle,
                 &inputs.profile,
@@ -3210,6 +3224,7 @@ fn compile_build_from_front_end(
         });
         bundle = planned_bundle;
         bundle.active_os = active_os;
+        set_bundle_target(&mut bundle, options.cross_target.as_deref());
         let build_run = build_run
             .as_ref()
             .expect("selected build entry produces a build run");
@@ -4896,6 +4911,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;
+    set_bundle_target(&mut bundle, cross_target);
     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     if web_target {
         bundle.web_partition_enforced = true;

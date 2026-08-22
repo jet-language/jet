@@ -1205,7 +1205,7 @@ fn sum_while(n: Int) Int -[]> {
 #Target(JS)
 fn sum_counted(n: Int) Int -[]> {
     total := 0
-    loop i, 0..<n { total += i }
+    loop i in 0..<n { total += i }
     return total
 }
 #Target(JS)
@@ -1239,7 +1239,7 @@ fn wasm_sum_while(n: Int) Int -[]> {
 #WasmExport
 fn wasm_sum_counted(n: Int) Int -[]> {
     total := 0
-    loop i, 0..<n { total += i }
+    loop i in 0..<n { total += i }
     return total
 }
 #WasmExport
@@ -1305,7 +1305,7 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) Int ! String -[]> {
+fn make_result(flag: Bool) Int String! -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
@@ -1342,7 +1342,7 @@ fn js_matches_and(flag: Bool) Int -[]> {
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) Int ! String -[]> {
+fn wasm_make_result(flag: Bool) Int String! -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
@@ -1425,7 +1425,7 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int ! StoreErr -[]> {
+fn read_store() Int StoreErr! -[]> {
     return Err(StoreErr.Missing)
 }
 
@@ -2608,7 +2608,7 @@ enum Choice { Stop Keep }
 #Target(JS)
 fn count(choice: Choice) Int -[]> {
     hits := 0
-    loop i, 0..<3 {
+    loop i in 0..<3 {
         if choice == {
             .Stop -> { break }
             .Keep -> {}
@@ -2645,7 +2645,7 @@ fn web_for_in_preflight_rejects_unimplemented_iteration_fields() {
 #Target(JS)
 fn sum() Int -[]> {
     total := 0
-    loop value, [1, 2, 3], 2 { total += value }
+    loop value in [1, 2, 3], 2 { total += value }
     return total
 }
 fn run() {}
@@ -2658,7 +2658,7 @@ fn run() {}
 #Target(JS)
 fn count_chars() Int -[]> {
     total := 0
-    loop ch, "abc".chars() { total += 1 }
+    loop ch in "abc".chars() { total += 1 }
     return total
 }
 fn run() {}
@@ -3535,7 +3535,7 @@ fn web_showcase_dashboard_roundtrip() {
 #[test]
 fn web_wasm_range_loop_bridge_roundtrip() {
     // D-WEBBACKEND1 / criterion #1: Wasm compute must lower inclusive
-    // `loop i, start..end` from checked TIR (JS already could). Live
+    // `loop i in start..end` from checked TIR (JS already could). Live
     // rustc+node proof — not emit-shape only.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build wasm range (need rustc + node)");
@@ -3561,7 +3561,7 @@ fn web_wasm_range_loop_bridge_roundtrip() {
 #[test]
 fn web_wasm_for_in_bridge_roundtrip() {
     // D-WEBBACKEND1 / criterion #1: Wasm compute must lower plain
-    // `loop x, xs` ForIn from checked TIR (JS already could). Live
+    // `loop x in xs` ForIn from checked TIR (JS already could). Live
     // rustc+node proof — not emit-shape only. Reuses [Int] ABI; does not
     // reopen String/[Int] packing.
     if !have_tool("rustc") || !have_tool("node") {

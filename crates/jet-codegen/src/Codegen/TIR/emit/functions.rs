@@ -697,7 +697,7 @@ pub(crate) fn emit_tir_trait_method(
 ///   `fn encode(self) => Data`; bare `self` already lowers to `&self` and `Data` to
 ///   `jet_std::DataTree`, so only the method NAME is bridged.
 /// - `Decode`: `fn jet_decode(<tree>: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>`.
-///   The user wrote a STATIC `fn decode(tree: Data) => T ! [FieldError]`; the by-value
+///   The user wrote a STATIC `fn decode(tree: Data) => T [FieldError]!`; the by-value
 ///   `Data` param becomes a borrow with an owned clone re-bound at the head (`let <tree> =
 ///   <tree>.clone();`), so the body reads an owned `Data` local exactly as written.
 pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out: &mut String) {

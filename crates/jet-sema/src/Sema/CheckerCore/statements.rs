@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, Expr, ForKind, IndexKind, LValue, Stmt, StrPart, Type};
-use crate::Diagnostics::{Diagnostic, TextEdit};
+use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
 use crate::Sema::CheckerCoreLib::{is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps, SwizzleParse};
 use crate::Sema::CheckerTaskGroup::{TaskGroupCtx, TaskGroupOrigin};
 use crate::Sema::Diagnostics::{
@@ -369,7 +369,20 @@ impl<'a> Checker<'a> {
                 return;
             }
             let before = self.flow.clone();
+            let diagnostics_start = self.diags.len();
+            let allows_start = self.statement_lint_allows.len();
             self.check_stmt_inner(stmt);
+            let allows = self.statement_lint_allows.split_off(allows_start);
+            if !allows.is_empty() {
+                let retained = self.diags.split_off(diagnostics_start);
+                self.diags.extend(retained.into_iter().filter(|diagnostic| {
+                    diagnostic.severity != Severity::Lint
+                        || allows.iter().all(|name| {
+                            jet_foundation::LintPolicy::name_for_code(&diagnostic.code)
+                                != Some(name.as_str())
+                        })
+                }));
+            }
             if !before.reachable {
                 // Unreachable source is still checked for diagnostics, but it
                 // is not a path that may contribute facts to a later join.
@@ -390,7 +403,22 @@ impl<'a> Checker<'a> {
                 return;
             }
             if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
+                let allow_names = if marker.name == Syntax::MARKER_ALLOW {
+                    marker
+                        .args
+                        .iter()
+                        .filter_map(|argument| match argument {
+                            Expr::Ident(name, _) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 if let Some(arguments) = self.validate_rule_signature(&mut marker) {
+                    if marker.name == Syntax::MARKER_ALLOW {
+                        self.statement_lint_allows.extend(allow_names);
+                    }
                     let text = match arguments.constant_for_source(0) {
                         Some(crate::Comptime::CtValue::Str(value)) => Some(value.clone()),
                         _ => None,
@@ -1138,7 +1166,7 @@ impl<'a> Checker<'a> {
                                     "E0503",
                                     "strings aren't indexed with `[ ]`".to_string(),
                                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                                    "e.g. `loop c, s.chars() { }` or `s.slice(0..2)`".to_string(),
+                                    "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
                                     Some(*span),
                                 ));
                             }
@@ -1441,7 +1469,7 @@ impl<'a> Checker<'a> {
                                 "L0508",
                                 "this arrow loop body computes a value and drops it".to_string(),
                                 "a statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source".to_string(),
-                                "bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` so it takes write access (&) for items".to_string(),
+                                "bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items".to_string(),
                                 Some(expr.span()),
                             ));
                         }
@@ -1740,7 +1768,7 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         (None, Some(rt)) => {
-                            // D-FAIL-EXIT1: implicit `fn run` is `Unit ! Err`.
+                            // D-FAIL-EXIT1: implicit `fn run` is `Unit Err!`.
                             // A bare `return` is successful exit, same as falling off
                             // the end of the body.
                             let fallible_void = matches!(
@@ -1962,7 +1990,7 @@ impl<'a> Checker<'a> {
                                         ),
                                         "the stride is how far to count each turn, so it must be a whole number"
                                             .to_string(),
-                                        "use an Int stride, like `loop i, 0..10, 2 { ... }`".to_string(),
+                                        "use an Int stride, like `loop i in 0..10, 2 { ... }`".to_string(),
                                         Some(step.span()),
                                     ));
                                     }
@@ -1974,7 +2002,7 @@ impl<'a> Checker<'a> {
                                             format!("a range loop stride must be positive, not {}", n),
                                             "a zero or negative stride would never reach the end"
                                                 .to_string(),
-                                            "use a stride of 1 or more, like `loop i, 0..10, 2 { ... }`".to_string(),
+                                            "use a stride of 1 or more, like `loop i in 0..10, 2 { ... }`".to_string(),
                                             Some(*sp),
                                         ));
                                     }
@@ -2026,7 +2054,7 @@ impl<'a> Checker<'a> {
                                                 "`{root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{root}`"
                                             ),
                                             format!(
-                                                "write `loop (i, item), {root}` — or `loop i, {root}.indexes` — or `0..<{root}.len()`"
+                                                "write `loop (i, item) in {root}` — or `loop i in {root}.indexes` — or `0..<{root}.len()`"
                                             ),
                                             Some(end_span),
                                         ));
@@ -2118,7 +2146,7 @@ impl<'a> Checker<'a> {
                                                 .to_string(),
                                             "each step pulls from the source itself, so the loop must take a whole value this scope owns"
                                                 .to_string(),
-                                            "bind it into a local this scope owns first (`src := …`), then write `loop x, src { … }`"
+                                            "bind it into a local this scope owns first (`src := …`), then write `loop x in src { … }`"
                                                 .to_string(),
                                             Some(collection.span()),
                                         ));
@@ -2174,15 +2202,15 @@ impl<'a> Checker<'a> {
                                         self.declare_loop_var(var.clone(), *var_span, &entry);
                                     }
                                 }
-                                // E2-M7: `loop line; handle.lines()` — streaming line iterator.
+                                // E2-M7: `loop line in handle.lines()` — streaming line iterator.
                                 Some(Type::Named(n)) if n == "FileLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                // D-STDIN1=A: `loop line; io.stdin().lines()` — streaming stdin iterator.
+                                // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
                                 Some(Type::Named(n)) if n == "StdinLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                // `loop line; child.stdout.lines()` /
+                                // `loop line in child.stdout.lines()` /
                                 // `child.stderr.lines()` — streaming subprocess output.
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
@@ -2251,7 +2279,7 @@ impl<'a> Checker<'a> {
                                         self.declare_loop_var(var.clone(), *var_span, &item_ty);
                                     }
                                 }
-                                // D-STREAMYIELD1: `loop x; a_stream { }` — pull one value
+                                // D-STREAMYIELD1: `loop x in a_stream { }` — pull one value
                                 // at a time from a generator's `Stream<T>`, blocking until
                                 // the producer yields (or ends the stream by returning).
                                 Some(Type::Apply { name, args })
@@ -2266,7 +2294,7 @@ impl<'a> Checker<'a> {
                                 {
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
-                                // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x; window` — View iterates
+                                // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x in window` — View iterates
                                 // elements; two bindings are index then item.
                                 Some(Type::Apply { name, args })
                                     if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
@@ -2294,7 +2322,7 @@ impl<'a> Checker<'a> {
                                                 "`for x in` needs a list or map, not {}",
                                                 other.show()
                                             ),
-                                            "walk items with `loop item, items { }` or characters with `loop c, s.chars() { }`".to_string(),
+                                            "walk items with `loop item in items { }` or characters with `loop c in s.chars() { }`".to_string(),
                                             "use a `List`, `Map`, or `s.chars()`".to_string(),
                                             Some(collection.span()),
                                         ));

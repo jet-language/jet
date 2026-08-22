@@ -128,8 +128,8 @@ fn liveness_fix_renames_to_existing_underscore_form() {
         &path,
         "use core.files as files\n\n\
          pub(package) fn package_export() {}\n\n\
-         fn unused_private(value: Int) {}\n\n\
-         fn run() {\n    unused_binding :: 1\n}\n",
+         fn unused_private(value: Int) { print(value) }\n\n\
+         fn run() {\n    unused_binding :: print(\"side\")\n}\n",
     )
     .unwrap();
 
@@ -149,7 +149,60 @@ fn liveness_fix_renames_to_existing_underscore_form() {
         fs::read_to_string(&path).unwrap(),
         "use core.files as _files\n\n\
          pub(package) fn _package_export() {}\n\n\
-         fn _unused_private(_value: Int) {}\n\n\
-         fn run() {\n    _unused_binding :: 1\n}\n"
+         fn _unused_private(value: Int) { print(value) }\n\n\
+         fn run() {\n    _unused_binding :: print(\"side\")\n}\n"
     );
+}
+
+#[test]
+fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
+    let scratch = Scratch::new("liveness_fix_removal");
+    let path = scratch.join("liveness.jet");
+    let original = "fn empty_private() {}\n\n\
+                    fn run() {\n    pure_local :: 42\n    effectful :: print(\"side\")\n    print(\"done\")\n}\n";
+    fs::write(&path, original).unwrap();
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap(), "--dry-run"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        dry_run.status.code(),
+        Some(0),
+        "dry-run failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+    let fixed = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap()])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        fixed.status.code(),
+        Some(0),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(!source.contains("empty_private"));
+    assert!(!source.contains("pure_local"));
+    assert!(source.contains("_effectful :: print(\"side\")"));
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", path.to_str().unwrap()])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "fixed source does not check: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&checked.stderr).contains("L0101"));
 }

@@ -41,7 +41,7 @@ fn is_cli_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::Named(n) if n == "Path")
 }
 
-/// D-FIELDDEF1: does `f` carry the declaration-owned `= expr` field default?
+/// D-DEFAULT-SHAPE1: does `f` carry the declaration-owned `{expr}` field default?
 /// The retired `#Default` marker remains visible only to the diagnostic path.
 fn has_default_marker(f: &Field) -> bool {
     f.default.is_some()
@@ -78,7 +78,7 @@ pub(crate) enum CLIFieldKind {
     Flag,
     /// `T?` field (T a supported scalar) -> optional `.option(...)`, default `null`.
     OptionalOption,
-    /// A supported scalar field with an inline `= expr` -> optional `.option(...)`,
+    /// A supported scalar field with an inline `{expr}` -> optional `.option(...)`,
     /// default = the declaration's expression.
     DefaultedOption,
     /// A supported scalar field, no `Option`/`Default` -> required value; absent
@@ -142,9 +142,9 @@ fn e1309(field_name: &str, span: Span) -> Diagnostic {
             field_name
         ),
         "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields \
-         (`T?`), and fields with a `= expr` default already stay flag-only."
+         (`T?`), and fields with a `{expr}` default already stay flag-only."
             .to_string(),
-        "remove `#[Flag]`, or make the field a required scalar without a `= expr` default"
+        "remove `#[Flag]`, or make the field a required scalar without a `{expr}` default"
             .to_string(),
         Some(span),
     )

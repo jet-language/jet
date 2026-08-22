@@ -182,7 +182,7 @@ temporary files were removed after the binaries and measurements were made.
 fn churn(seed: Int) :> Int {
     values := [String]{}
     total := 0
-    loop index, 0..<2000 {
+    loop index in 0..<2000 {
         value :: "jet-{seed}-{index}-allocator"
         total += value.len()
         values.push(value)
@@ -192,7 +192,7 @@ fn churn(seed: Int) :> Int {
 
 fn run() {
     total := 0
-    loop batch, 0..<100 :> total += churn(batch)
+    loop batch in 0..<100 :> total += churn(batch)
     print(total)
 }
 ```
@@ -202,19 +202,19 @@ fn run() {
 ```jet
 fn churn(seed: Int) :> Int {
     counts := [String:Int]{}
-    loop index, 0..<3000 {
+    loop index in 0..<3000 {
         key :: "k-{index % 257}"
         counts[key] = (counts.get(key) ?? 0) + seed + index
     }
     total := 0
-    loop (key, value), counts :> total += value
-    loop index, 0..<257 :> total += counts.pop("k-{index}") ?? 0
+    loop (key, value) in counts :> total += value
+    loop index in 0..<257 :> total += counts.pop("k-{index}") ?? 0
     return total
 }
 
 fn run() {
     total := 0
-    loop batch, 0..<50 :> total += churn(batch)
+    loop batch in 0..<50 :> total += churn(batch)
     print(total)
 }
 ```
@@ -241,7 +241,7 @@ struct Person {
 fn run() ? [FieldError] {
     raw :: "{{\"name\":\"Ada\",\"address\":{{\"city\":\"Reno\",\"zip\":\"89501\"}},\"tags\":[\"math\",\"code\",\"poetry\"],\"age\":36}}"
     total := 0
-    loop index, 0..<5000 {
+    loop index in 0..<5000 {
         person :: json.decode<Person>(raw)?
         wire :: json.to_string(person)
         total += wire.len() + person.tags.len() + index

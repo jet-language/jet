@@ -96,7 +96,7 @@ fn run() {
 
 const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) Int {
     total := 0
-    loop i, 0..<limit {
+    loop i in 0..<limit {
         if i == 2 {
             next
         }
@@ -225,7 +225,7 @@ fn run() {
 "#;
 
 const CANVAS_FUNCTION_EVENT_FIXTURE: &str = r#"/// Starts the scene.
-pub fn on_start(limit: Int = 1) Int {
+pub fn on_start(limit: Int{1}) Int {
     total := limit + 1
     return total
 }
@@ -279,11 +279,11 @@ const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() ! {
 
 const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
 
-fn maybe() Int ! String {
+fn maybe() Int String! {
     return Ok(1)
 }
 
-fn checked() Int ! String {
+fn checked() Int String! {
     n :: maybe()?
     return Ok(n)
 }
@@ -2023,7 +2023,7 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
     for field in [
         "\"title\":\"on_start\"",
         "\"function\":{\"name\":\"on_start\"",
-        "\"signature\":\"pub fn on_start(limit: Int = 1) Int\"",
+        "\"signature\":\"pub fn on_start(limit: Int{1}) Int\"",
         "\"visibility\":\"public\"",
         "\"docs\":\"Starts the scene.\"",
         "\"returns\":\"Int\"",
@@ -2086,13 +2086,13 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     let revision = jet::Canvas::source_revision(&src);
 
     let edit_signature = format!(
-        "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"signature\":\"fn square(n: Int = 1) Int\"}}",
+        "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"signature\":\"fn square(n: Int{1}) Int\"}}",
         revision, square_graph_id
     );
     jet::Canvas::apply_transaction_json(&path, &edit_signature).expect("edit signature");
     let after_signature = fs::read_to_string(&path).unwrap();
     assert!(
-        after_signature.contains("fn square(n: Int = 1) Int"),
+        after_signature.contains("fn square(n: Int{1}) Int"),
         "{after_signature}"
     );
 
@@ -2104,7 +2104,7 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     jet::Canvas::apply_transaction_json(&path, &rename).expect("rename function");
     let after_rename = fs::read_to_string(&path).unwrap();
     assert!(
-        after_rename.contains("fn area(n: Int = 1) Int"),
+        after_rename.contains("fn area(n: Int{1}) Int"),
         "{after_rename}"
     );
     assert!(
@@ -3621,17 +3621,17 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         "unified_loop_canvas",
         r#"fn run() {
     total := 0
-    loop item, [1, 2, 3], 2 {
+    loop item in [1, 2, 3], 2 {
         total += item
     }
-    loop i, 0..3, 2 {
+    loop i in 0..3, 2 {
         total += i
     }
     counts := [String:Int]{ "one": 1 }
-    loop entry, counts {
+    loop entry in counts {
         total += entry.value
     }
-    loop (key, value), counts {
+    loop (key, value) in counts {
         total += value
     }
     loop cursor := 0, cursor < 1 {
@@ -3671,7 +3671,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     jet::Canvas::apply_transaction_json(&path, &append)
         .expect("edit list source nested in loop header");
     let after = fs::read_to_string(&path).unwrap();
-    assert!(after.contains("loop item, [1, 2, 3, 4], 2"), "{after}");
+    assert!(after.contains("loop item in [1, 2, 3, 4], 2"), "{after}");
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before header edits");
     let initializer_id = field_before(

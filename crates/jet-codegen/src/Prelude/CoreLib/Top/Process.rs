@@ -659,7 +659,7 @@ fn jet_process_child_signal(
 }
 // `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
-// `loop line; child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
+// `loop line in child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
 // — sema restricts the field access + `.lines()` result to that position, E2502).
 #[cfg(unix)]
 fn jet_process_stdin_write(

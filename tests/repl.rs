@@ -498,7 +498,7 @@ fn values() Stream<Int> -[]> {
 }
 
 fn run() {
-    loop value, values() {
+    loop value in values() {
         print("value: {value}")
         break
     }
@@ -1247,7 +1247,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "counts[\"jet\"]",
             "maybe: Int? :: Val(7)",
             "maybe ?? 0",
-            "result: Int ! String :: Ok(9)",
+            "result: Int String! :: Ok(9)",
             "result ?? 0",
             "state :: State.Ready(11)",
             "state_value(state)",
@@ -1900,7 +1900,7 @@ fn repl_immut_binding_rejects_reassign() {
 // exercised here (no real pty in the test harness — see
 // `crates/jet-repl/src/Term.rs` for the raw-mode guard/key-decoder unit tests
 // instead). What IS tested here, against the same `pub` API the interactive
-// loop calls, is every decision that shapes the interactive UX: the turn
+// loop calls: every decision shapes the interactive UX: the turn
 // gutter, the auto-fold threshold, the pin rail, `?name` docs, and the
 // rerun replay plan (D-FE-REPL-RERUN1=A) — plus the bare `?name` transcript
 // path (D-FE-REPL-DOCS1=B), which runs in every mode including this one.
@@ -1956,7 +1956,7 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
     let session = Session::new();
     let doc = Docs::lookup(&session, "List.filter").expect("List.filter has builtin docs");
     assert!(
-        doc.starts_with("List.filter(f: fn(T) => Bool) => List<T>"),
+        doc.starts_with("List.filter(f: fn(T) Bool) -> List<T>"),
         "got: {doc:?}"
     );
     assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");
@@ -1970,7 +1970,7 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
     assert_eq!(symbol.module, "core.collections");
     assert_eq!(symbol.owner, Some("List"));
     assert_eq!(symbol.member, "filter");
-    assert!(symbol.signature.contains("fn(T) => Bool"));
+    assert!(symbol.signature.contains("fn(T) Bool"));
     assert!(!symbol.summary.is_empty());
     assert!(!symbol.example.is_empty());
     assert_eq!(symbol.provenance, "builtin");
@@ -1979,11 +1979,11 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
 #[test]
 fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
     let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
-    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ! ParseError");
+    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ParseError!");
     let narrow = jet::SemanticSymbols::lookup("F32.from_float")
         .expect("F32.from_float symbol");
     assert_eq!(narrow.module, "core.numeric");
-    assert!(narrow.signature.ends_with("-> F32 ! String"));
+    assert!(narrow.signature.ends_with("-> F32 String!"));
     assert!(jet::SemanticSymbols::lookup("I64.from_f32").is_some());
     assert!(jet::SemanticSymbols::lookup("F64.from_u32").is_some());
 }

@@ -26,7 +26,7 @@ already ships. Two findings carry that point:
 
 - Optional chaining (`?.`) works in the compiler and is ratified as S71/S35. **Zero examples use
   it.** In TypeScript, `?.` is 30% of all absence-handling sites and appears in 95% of projects.
-- The loop-yield comprehension (`loop n, xs -> …`) is the cheapest Jet form for transforming a
+- The loop-yield comprehension (`loop n in xs -> …`) is the cheapest Jet form for transforming a
   collection, at 26 tokens against 33 for the method chain. **Two example files use it.** The
   comprehension is the most used transform surface in the corpus by site count, at 3,774 sites: it
   is 47% of Python transform sites and 45% of Python iterate sites.
@@ -229,7 +229,7 @@ the most used transform surface in the corpus by site count, at 3,774 sites: 47%
 sites and 45% of Python iterate sites, at 1.00 project prevalence. Rust reaches the same place
 through iterator chains at 50% of iterate sites.
 
-**Jet-specific inference.** Jet has the form. On the measured task, `loop n, xs -> { … }` costs 26
+**Jet-specific inference.** Jet has the form. On the measured task, `loop n in xs -> { … }` costs 26
 tokens and Jet's own method chain `xs.filter(…).map(…)` costs 33, which is 27% more. A Python
 comprehension costs 18. Two example files use the yield arrow, while 155 use `??`. The cheapest Jet
 form is the least visible one.

@@ -2,10 +2,10 @@
 use core.encoding.csv as csv
 
 // D-FAIL-CONV1: csv.parse fails as String; name the rail instead of a default Err.
-fn run() ! String {
+fn run() String! {
     raw :: "name,score,grade\nAlice,95,A\nBob,\"82\",B\nCarol,71,C"
     rows :: csv.parse(raw)?
-    loop row, rows {
+    loop row in rows {
         name :: row[0]
         score :: row[1]
         print("{name}: {score}")

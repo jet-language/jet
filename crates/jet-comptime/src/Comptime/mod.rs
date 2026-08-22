@@ -269,7 +269,8 @@ pub use Reflect::{
     build_struct_type_info_with_path_and_vocabulary_and_engine,
     build_struct_type_info_with_states, build_track_origin_info,
     build_unit_scale_provenance_info, build_view_provenance_info, reflected_fact_field,
-    program_reflection_identity, reflect_type_value, registered_fact_value, ProgramSemanticFacts,
+    program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
+    registered_fact_value, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 
@@ -1763,7 +1764,7 @@ fn expand_derive_items(
     Ok(())
 }
 
-/// D-STRUCT-ONCE1=A amendment: written type names are a closed loop source,
+/// D-STRUCT-ONCE1=A amendment: written type names are a closed loop source;
 /// even though they are not runtime/comptime values that the value interpreter
 /// can evaluate. They become text bindings only; sema still checks every
 /// generated declaration against the ordinary type registry.

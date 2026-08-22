@@ -288,7 +288,7 @@ pub fn benchmark_budget_project(tag: &str) -> PathBuf {
 }
 #Test("parse") { .measure {
     total := 0
-    loop value, 0..100 { total = total + value }
+    loop value in 0..100 { total = total + value }
     assert_eq(total, 5050)
 } }
 fn run() {}

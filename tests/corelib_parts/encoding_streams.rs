@@ -2176,7 +2176,7 @@ fn run() {{
     output :: files.create("{success}") ?? panic("create")
     writer := cbor.writer(^output, roomy) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
-    loop _, 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
+    loop _ in 0..7 {{ writer.write(encoding.DataEvent.Null) ?? panic("null") }}
     close_array(&writer)
     writer.finish() ?? panic("finish")
 
@@ -2185,7 +2185,7 @@ fn run() {{
     rejected_output :: files.create("{rejected}") ?? panic("create rejected")
     rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
     rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
-    loop _, 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
+    loop _ in 0..6 {{ rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }}
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         .Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
@@ -2515,7 +2515,7 @@ use core.encoding.cbor as cbor
 
 fn wire(values: [Int]) [U8] {
     bytes := [U8]{}
-    loop value, values {
+    loop value in values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes

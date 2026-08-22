@@ -192,7 +192,7 @@ pub struct FuncSig {
     /// must) write it. It is projected as a callable obligation; the local
     /// names in `param_info` are not. Empty alongside `param_info`.
     pub param_call: Vec<(String, ParamZone)>,
-    /// S61: default expressions for parameters that have them, parallel to `params`.
+    /// D-DEFAULT-SHAPE1=B: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
     /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
     pub param_variadic: Vec<bool>,
@@ -598,7 +598,7 @@ pub enum CtValue {
         args: Vec<(Option<String>, CtValue)>,
     },
     /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `T?`
-    /// and `T ! E` are two views of this carrier, so a present payload has one
+    /// and `T E!` are two views of this carrier, so a present payload has one
     /// spelling, not one per view. Mirrors the prelude's `Ok` on
     /// `JetOutcome<T, E>`.
     Present(Box<CtValue>),
@@ -668,10 +668,10 @@ impl PartialEq for CtValue {
 
 /// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
 ///
-/// `T?` and `T ! E` stop the same way; they differ only in what the report has
+/// `T?` and `T E!` stop the same way; they differ only in what the report has
 /// to say. A clean report says nothing but the payload it lacks, and is the
 /// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
-/// error value on `T ! E`'s stop side.
+/// error value on `T E!`'s stop side.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CtReport {
     /// The clean report: an absence, which is not a failure.
@@ -687,7 +687,7 @@ impl CtValue {
         CtValue::Failed(CtReport::Clean(ty.into()))
     }
 
-    /// Stop with a told report: the `T ! E` view of the carrier.
+    /// Stop with a told report: the `T E!` view of the carrier.
     pub fn failed(report: Box<CtValue>) -> CtValue {
         CtValue::Failed(CtReport::Told(report))
     }

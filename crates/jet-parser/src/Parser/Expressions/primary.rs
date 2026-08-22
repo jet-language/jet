@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0026",
                         format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                        "a function that can fail returns `T ! E` and signals failure with `Err(...)`"
+                        "a function that can fail returns `T E!` and signals failure with `Err(...)`"
                             .to_string(),
                         format!("return `Err(...)` instead of `{}`", foreign),
                         Some(t.span),
@@ -350,7 +350,7 @@ impl<'a> Parser<'a> {
                 //
                 // Not inside a control header. `allow_struct_lit` is false
                 // exactly where a trailing arrow introduces a BODY —
-                // `loop x, xs -> f(x)`, `if cond -> stmt`, an arm head. Once
+                // `loop x in xs -> f(x)`, `if cond -> stmt`, an arm head. Once
                 // D-ARROW-UNIFY1 made one arrow serve both roles, a bare
                 // `xs -> f(x)` there read as a lambda and swallowed the body,
                 // so the header reported "this loop has no body". A lambda in
@@ -769,6 +769,9 @@ impl<'a> Parser<'a> {
                         let lambda = Lambda {
                             take_names: Vec::new(),
                             params: Vec::new(),
+                            result_type: None,
+                            error_type: None,
+                            effects: None,
                             body,
                             span: body_span,
                             meta: LambdaMeta::default(),
@@ -877,6 +880,9 @@ impl<'a> Parser<'a> {
             let lambda = Lambda {
                 take_names,
                 params: Vec::new(),
+                result_type: None,
+                error_type: None,
+                effects: None,
                 body,
                 span: body_span,
                 meta: LambdaMeta::default(),
@@ -916,6 +922,7 @@ impl<'a> Parser<'a> {
                     StrTokPart::Interp(toks) => {
                         let mut sub = Parser {
                             toks: &toks,
+                            source: None,
                             pos: 0,
                             diags: Vec::new(),
                             pending_type_gt: false,

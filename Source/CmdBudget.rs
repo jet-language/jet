@@ -277,6 +277,17 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
     let providers=ordered.iter().map(|located|provider(provider_kind(&located.spec.provider),provider_identity(&located.spec.provider),root,&entry,profile,located.spec.compile_workload.as_ref())).collect::<Result<Vec<_>,_>>()?;
     let mut bases=Vec::new();
     for (located,provider) in ordered.iter().zip(&providers) { bases.push(measurement_base_truthful(root,bundle,located,&context_subject,&tool,provider,target,profile)?); }
+    let owned_dev_evidence = if dev_evidence.is_none()
+        && ordered.iter().any(|located| provider_kind(&located.spec.provider) == "ServiceProbe")
+    {
+        Some(DevEvidence {
+            service: crate::CmdDevTools::collect_service_evidence(root, specs),
+            scene: Vec::new(),
+        })
+    } else {
+        None
+    };
+    let dev_evidence = dev_evidence.or(owned_dev_evidence.as_ref());
     let mut groups=std::collections::BTreeMap::<String,Vec<usize>>::new();
     for (index,located) in ordered.iter().enumerate(){groups.entry(located.spec.provider.clone()).or_default().push(index);}
     let mut registry=ProviderRegistry::with_builtins();

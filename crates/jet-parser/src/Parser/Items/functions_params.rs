@@ -258,6 +258,15 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
+            if body_marker_span.is_none()
+                && return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::return_type_has_value(ty))
+                && matches!(self.peek().kind, TokKind::LBrace)
+            {
+                self.diags
+                    .push(Self::missing_callable_body_arrow(self.peek().span));
+            }
             self.expect(TokKind::LBrace, "to open the function body")?;
             let previous_tail_depth = self.callable_tail_block_depth;
             if return_type
@@ -555,7 +564,7 @@ impl<'a> Parser<'a> {
         /// `-[via f]>` pass-through. Returns
         /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
         /// the cursor is not at `-[` or one of the retired effect forms.
-        pub(super) fn parse_opt_func_effects(
+        pub(in crate::Parser) fn parse_opt_func_effects(
             &mut self,
         ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
             let canonical = matches!(self.peek().kind, TokKind::Minus)
@@ -720,6 +729,15 @@ impl<'a> Parser<'a> {
                     .to_string(),
                 format!("Replace `{marker}` with `->`; `jet fmt` applies this fix."),
                 Some(span),
+            )
+        }
+
+        pub(in crate::Parser) fn missing_callable_body_arrow(span: Span) -> Diagnostic {
+            Diagnostic::from_row("E0080", &[], Some(span)).with_edit(
+                crate::Diagnostics::TextEdit {
+                    span: Span::new(span.start, span.start),
+                    new_text: format!("{} ", Syntax::OP_UNIFIED_ARROW),
+                },
             )
         }
     
@@ -935,10 +953,20 @@ impl<'a> Parser<'a> {
                 };
             // D-MEMPROVENANCE3=A: optional `from src (| src)*` after the parameter type.
             let declared_view_from_names = self.parse_opt_param_view_from_names();
-            // S61: optional trailing `= expr` default value.
-            let default = if matches!(self.peek().kind, TokKind::Eq) {
+            // D-DEFAULT-SHAPE1=B: declaration defaults ride the type as
+            // `name: Type{expr}`. Keep the retired `= expr` parse for one
+            // recovery diagnostic so a bad declaration teaches its replacement
+            // without cascading into unrelated errors.
+            let default = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
-                Some(Box::new(self.expr_no_struct_lit()?))
+                let default = Box::new(self.expr()?);
+                self.expect(TokKind::RBrace, "after a parameter default")?;
+                Some(default)
+            } else if matches!(self.peek().kind, TokKind::Eq) {
+                let eq = self.bump().span;
+                self.diags
+                    .push(Diagnostic::from_row("E0385", &[], Some(eq)));
+                Some(Box::new(self.expr()?))
             } else {
                 None
             };
@@ -948,7 +976,7 @@ impl<'a> Parser<'a> {
                     format!("variadic parameter `{}` can't have a default value", name),
                     "a `...` rest parameter collects trailing arguments — it can't also be optional"
                         .to_string(),
-                    "remove the `= …` default from the variadic parameter".to_string(),
+                    "remove the `{…}` default from the variadic parameter".to_string(),
                     Some(name_span),
                 ));
             }

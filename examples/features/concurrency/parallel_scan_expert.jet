@@ -32,7 +32,7 @@ fn gather_paths() [String] {
 fn scan_parallel(paths: [String]) [String] {
     (sender, ch) :: channel<String>()
     workers := [Task<()>]{}
-    loop file_path, paths {
+    loop file_path in paths {
         tx :: ~sender
         file :: ~file_path
         workers.push(task {
@@ -45,7 +45,7 @@ fn scan_parallel(paths: [String]) [String] {
     }
     sender.close()
     results := [String]{}
-    loop value, ch -> results.push(value)
+    loop value in ch -> results.push(value)
     results.sort()
     return results
 }
@@ -59,7 +59,7 @@ fn run() {
     print("scanning {paths.len()} files...")
     print("")
     parallel :: scan_parallel(paths)
-    loop line, parallel -> print(line)
+    loop line in parallel -> print(line)
     print("")
     print("done — {paths.len()} files scanned in parallel")
 }

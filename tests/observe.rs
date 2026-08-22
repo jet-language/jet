@@ -295,7 +295,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "counted_loop",
-            "loop i, 0..<1 { counted_only :: 7; print(counted_only) }",
+            "loop i in 0..<1 { counted_only :: 7; print(counted_only) }",
             &["i", "counted_only"],
         ),
         (
@@ -455,21 +455,21 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) Int ! ParseError -[]> {
+fn parse_age(raw: String) Int ParseError! -[]> {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) Int ! ParseError -[]> {
+fn load(raw: String) Int ParseError! -[]> {
     n :: parse_age(raw)? "loading age"
     return Ok((n * 2))
 }
-fn double(raw: String) Int ! ParseError -[]> {
+fn double(raw: String) Int ParseError! -[]> {
     n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
-fn run() ! ParseError {
+fn run() ParseError! {
     n :: double("")?
     print(n)
 }

@@ -31,7 +31,7 @@ impl PhpPool.Close {
 
 pub fn close(pool: ^PhpPool) { abi.close(pool.value) }
 
-pub fn open() PhpPool ! PhpError {
+pub fn open() PhpPool PhpError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PhpError.NotRunning)
     return Ok(PhpPool{value: handle})
@@ -39,7 +39,7 @@ pub fn open() PhpPool ! PhpError {
 
 pub fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
 
-pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! PhpError {
+pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree PhpError! {
     raw :: abi.transform(pool.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(PhpError.NotRunning)
@@ -53,7 +53,7 @@ pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! Ph
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! PhpError {
+pub fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree PhpError! {
     raw :: abi.fail_call(pool.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(PhpError.NotRunning)
@@ -67,7 +67,7 @@ pub fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! Ph
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! PhpError {
+pub fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree PhpError! {
     raw :: abi.sleep_call(pool.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(PhpError.NotRunning)
@@ -81,7 +81,7 @@ pub fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! P
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
-pub fn pooled_sleep(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree ! PhpError {
+pub fn pooled_sleep(pool: PhpPool, input: DataTree, deadline_ms: Int) DataTree PhpError! {
     raw :: abi.pooled_sleep(pool.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(PhpError.NotRunning)

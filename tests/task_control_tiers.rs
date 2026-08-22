@@ -208,7 +208,7 @@ fn shielded_tail() Stream<Int> {
 }
 
 fn run() {
-    loop x, shielded_tail() {
+    loop x in shielded_tail() {
         print("consumer: {x}")
         break
     }

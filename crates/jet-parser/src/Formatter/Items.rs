@@ -493,8 +493,9 @@ impl<'a> Fmt<'a> {
                 }
                 self.fmt_type(ty);
                 if let Some(default) = &param.value {
-                    self.write(" = ");
+                    self.write("{");
                     self.fmt_expr(default, Prec::OrFallback);
+                    self.write("}");
                 }
             } else if let Some(value) = &param.value {
                 self.fmt_expr(value, Prec::OrFallback);
@@ -577,7 +578,7 @@ impl<'a> Fmt<'a> {
     fn fmt_item_template_loop(&mut self, loop_item: &crate::AST::ItemTemplateLoop) {
         self.write("@loop ");
         self.write(&loop_item.var);
-        self.write(", ");
+        self.write(" in ");
         self.fmt_expr(&loop_item.source, Prec::OrFallback);
         self.write(" {");
         self.newline();
@@ -604,7 +605,7 @@ impl<'a> Fmt<'a> {
                 } => {
                     self.write("@loop ");
                     self.write(var);
-                    self.write(", ");
+                    self.write(" in ");
                     self.fmt_expr(source, Prec::OrFallback);
                     self.write(" {");
                     self.newline();
@@ -926,7 +927,17 @@ impl<'a> Fmt<'a> {
                 }
                 // D-LIB2: a trait method may carry a default body.
                 if let Some(body) = &m.default_body {
-                    f.write(" {");
+                    if m
+                        .return_type
+                        .as_ref()
+                        .is_some_and(Self::return_type_has_value)
+                        && m.declared_effects.is_none()
+                        && !m.is_pure
+                    {
+                        f.write(" -> {");
+                    } else {
+                        f.write(" {");
+                    }
                     f.newline();
                     f.with_indent(|f| f.fmt_block_stmts(body));
                     f.end_block();
@@ -1306,6 +1317,13 @@ impl<'a> Fmt<'a> {
             self.write(param);
             self.write(Syntax::EFFECT_ARROW_CLOSE);
         }
+        let value_body_arrow = f
+            .return_type
+            .as_ref()
+            .is_some_and(Self::return_type_has_value)
+            && f.declared_effects.is_none()
+            && f.effect_via.is_none()
+            && !f.is_pure;
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
         // D-SIG-SHAPE1=B: preserve the canonical concise callable body.
@@ -1396,7 +1414,7 @@ impl<'a> Fmt<'a> {
         // ordinary string formatter so the triple-quoted shape round-trips
         // exactly (via `self.src` + span), then close the block on its own line.
         if let Some(inl) = &f.inline_foreign {
-            self.write(" {");
+            self.write(if value_body_arrow { " -> {" } else { " {" });
             self.indent += 1;
             self.newline();
             self.write("\"\"\"");
@@ -1408,7 +1426,7 @@ impl<'a> Fmt<'a> {
             self.expected_return_type = saved_return_type;
             return;
         }
-        self.write(" {");
+        self.write(if value_body_arrow { " -> {" } else { " {" });
         if f.body.is_empty()
             && self
                 .src
@@ -1539,10 +1557,11 @@ impl<'a> Fmt<'a> {
                 }
             }
         }
-        // S61: a trailing parameter may carry a `= default` value.
+        // D-DEFAULT-SHAPE1=B: a trailing parameter may carry a `{default}` value.
         if let Some(default) = &p.default {
-            self.write(" = ");
+            self.write("{");
             self.fmt_expr(default, Prec::OrFallback);
+            self.write("}");
         }
     }
 
@@ -2093,10 +2112,11 @@ impl<'a> Fmt<'a> {
             self.write(" ");
             self.fmt_expr(expr, Prec::OrFallback.add_rhs());
         }
-        // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
+        // D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence / construction default.
         if let Some(expr) = &field.default {
-            self.write(" = ");
+            self.write("{");
             self.fmt_expr(expr, Prec::OrFallback.add_rhs());
+            self.write("}");
         }
         let end = field
             .default

@@ -32,7 +32,7 @@ fn run() {
     deleted := 0
     modified := 0
     rows := [String]{}
-    loop line, output.split("\n") {
+    loop line in output.split("\n") {
         if line != "" {
             fields :: line.split("\t").to_list()
             if fields.len() != 2 -> panic("bad git name-status row: {line}")
@@ -41,7 +41,7 @@ fn run() {
             pieces := [String]{}
             root_name := ""
             index := 0
-            loop piece, raw_path.split("/") {
+            loop piece in raw_path.split("/") {
                 if index == 0 -> root_name = piece else -> pieces.push(piece)
                 index += 1
             }
@@ -69,6 +69,6 @@ fn run() {
         }
     }
     rows.sort()
-    loop row, rows -> print(row)
+    loop row in rows -> print(row)
     print("summary|added={added}|modified={modified}|deleted={deleted}")
 }

@@ -630,7 +630,7 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
         r#"#CLI
 struct RunArgs {
     #Doc("person to greet") name: String
-    retries: Int = 2
+    retries: Int{2}
     verbose: Bool
 }
 
@@ -752,7 +752,7 @@ fn typed_cli_field_markers_add_short_and_env_inputs_with_pinned_precedence() {
         r#"#CLI
 struct RunArgs {
     #[Doc("print extra detail"), Short("v")] verbose: Bool
-    #[Doc("port to listen on"), Short("p"), Env("JET_TYPED_PORT")] port: Int = 3000
+    #[Doc("port to listen on"), Short("p"), Env("JET_TYPED_PORT")] port: Int{3000}
 }
 
 fn run(args: RunArgs) {
@@ -824,7 +824,7 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
         r#"#CLI
 pub struct RunArgs {
     #Doc("person to greet") pub name: String
-    pub retries: Int = 2
+    pub retries: Int{2}
     pub verbose: Bool
 }
 "#,

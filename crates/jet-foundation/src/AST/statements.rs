@@ -181,7 +181,7 @@ pub enum Stmt {
         /// D-LOOPLABEL3: optional compile-time loop name (`outer :: loop { }`).
         label: Option<(String, Span)>,
     },
-    /// D-LOOP-HEADER2=A: `loop name[: Type] := init; cond [; afterthought] { body }`.
+    /// D-LOOP-HEADER2=A: `loop name[: Type] := init, cond [, afterthought] { body }`.
     CountedLoop {
         init: Binding,
         cond: Expr,

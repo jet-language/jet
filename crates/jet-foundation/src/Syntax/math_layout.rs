@@ -270,6 +270,9 @@ pub const TYPE_CONDITION: &str = "Condition";
 /// ordered subjectless statement/value guard tables.
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
+/// D-LOOP-IN1=A (ratified 2026-08-21, card #2153): source-loop binding/source
+/// separator. Expression-position `in` is not a membership operator.
+pub const KW_IN: &str = "in";
 
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
 pub const OP_RANGE: &str = "..";
@@ -617,7 +620,7 @@ pub const LIT_ERR: &str = "Err";
 
 /// S35 (ratified M4; spelling updated by S71/D-SG6; D-ERR-DECON1=A): the
 /// fallback operator supplies a value or route (`return`, `next`, `break`, or
-/// `panic`) when a `T?` is absent or a `T ! E` failed. A block route may run
+/// `panic`) when a `T?` is absent or a `T E!` failed. A block route may run
 /// ordinary statements before its final value or diverging tail. Spelled `??`
 /// since the 2026-06-15 rename (was the word `or`).
 pub const OP_FALLBACK: &str = "??";

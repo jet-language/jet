@@ -7,7 +7,7 @@ fn run() ! {
     _ :: fs.write(log_path, "INFO boot\nERROR disk full\nWARN retry\nERROR timeout\nINFO done\n")
     handle :: files.open(~log_path) ?? return Err("open log")
     errors := 0
-    loop line, handle.lines() {
+    loop line in handle.lines() {
         if line.starts_with("ERROR") {
             errors += 1
             print(line)

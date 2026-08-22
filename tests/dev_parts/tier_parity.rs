@@ -169,7 +169,7 @@ fn stream_producer_failure_matches_interpreter_jit_and_aot() {
 }
 
 fn run() {
-    loop value, failing() {
+    loop value in failing() {
         print("value: {value}")
     }
 }

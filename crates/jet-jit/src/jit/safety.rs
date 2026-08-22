@@ -642,7 +642,7 @@ mod gate_follows_lowering {
     /// `iconst(I64, 0)` — so the gate may not answer for one and refuse the
     /// other. It refused `Unit`, which fell into `resident_safe_expr_recursive`'s
     /// `_ => false`, and that refused every fallible-void `fn run` spelling an
-    /// early bare `return`: D-FAIL-EXIT1 makes such a `run` return `Unit ! Err`,
+    /// early bare `return`: D-FAIL-EXIT1 makes such a `run` return `!`,
     /// and TIR lowers the bare `return` to `Return(Some(Ok(Unit)))`
     /// (`lower/statements.rs`). `examples/features/io/watcher.jet:15` was the
     /// corpus case.
@@ -4846,7 +4846,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && step.as_ref().is_none_or(|step| resident_safe_stmt(step, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        // D-RANGE-VALUE1=A: `source` is `Some` for `loop n, <Range value>`.
+        // D-RANGE-VALUE1=A: `source` is `Some` for `loop n in <Range value>`.
         // TIR fills `start`/`end` with `IntLit(0)` PLACEHOLDERS in that form
         // (`lower/statements.rs`, the `Type::Named(Range)` collection branch),
         // and the resident lowering reads the real bounds out of `source`

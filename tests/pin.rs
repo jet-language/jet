@@ -399,7 +399,7 @@ fn a_pin_taken_each_iteration_is_a_fresh_loan() {
         r#"{NODE}
 fn run() {{
     node := Node{{payload: 0, hops: 0}}
-    loop i, 0..2 {{
+    loop i in 0..2 {{
         pinned :: mem.pin(&node)
         pinned.hops += 1
     }}

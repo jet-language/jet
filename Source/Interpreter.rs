@@ -16,6 +16,20 @@ use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 // using `jet::Interpreter::RunOutcome` still work unchanged.
 pub use jet_foundation::JitBackend::RunOutcome;
 
+/// The run result plus the non-denied diagnostics produced by the same sema
+/// check. Runtime output stays in `RunOutcome`; command front ends render these
+/// diagnostics separately so warnings can never enter a program's streams.
+#[derive(Debug)]
+pub struct RunWithLints {
+    pub outcome: RunOutcome,
+    pub lints: Vec<Diagnostic>,
+}
+
+struct CheckedBundle {
+    bundle: ProgramBundle,
+    lints: Vec<Diagnostic>,
+}
+
 /// c77 (D-DEVMODE1=A): how `jet dev` should react to a save.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevMode {
@@ -514,7 +528,7 @@ fn checked_bundle(
     file: &str,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<ProgramBundle, Vec<Diagnostic>> {
+) -> Result<CheckedBundle, Vec<Diagnostic>> {
     checked_bundle_with_entry(file, gates, None, "dev", setting_overrides)
 }
 
@@ -524,7 +538,7 @@ fn checked_bundle_with_entry(
     entry_fn: Option<&str>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Result<ProgramBundle, Vec<Diagnostic>> {
+) -> Result<CheckedBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
@@ -576,13 +590,13 @@ fn checked_bundle_with_entry(
                     &diags,
                 );
                 let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-                let _lints = crate::Driver::gate_diagnostics(
+                let lints = crate::Driver::gate_diagnostics(
                     &bundle,
                     parse_teaching,
                     diags,
                     extension_diags,
                 )?;
-                Ok(bundle)
+                Ok(CheckedBundle { bundle, lints })
             }
             Err(diags) => Err(diags),
         }
@@ -644,7 +658,7 @@ fn job_specs(bundle: &ProgramBundle) -> Vec<(&str, jet_jit::Job::JetJobScope)> {
 /// tier flags plus trace rows a caller reads after the run. Everything else a
 /// run touches — resident module, JIT runtime, memory sentries, journey
 /// frames, `#Persist` seeding — is established and consumed inside `work`.
-fn on_compiler_stack(work: impl FnOnce() -> RunOutcome + Send) -> RunOutcome {
+fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     let trace_tiers = jet_jit::trace_tiers_enabled();
     let argv = crate::Comptime::runtime_argv();
     let (outcome, flags, rows) = jet_driver::run_compiler_work(move || {
@@ -728,7 +742,23 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings(
     // front end, the JIT run, and the tier-artifact store that reads what the
     // run just published all share the same thread-local run state.
     on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides)
+        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides, false)
+    })
+    .outcome
+}
+
+/// Run through the strict Cranelift tier and return the non-denied diagnostics
+/// from the same front-end check. CLI command paths use this to render lints
+/// without putting them into the program-owned output streams.
+pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunWithLints {
+    on_compiler_stack(|| {
+        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides, true)
     })
 }
 
@@ -738,24 +768,35 @@ fn run_jit_once_on_compiler_stack(
     json: bool,
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
-) -> RunOutcome {
+    surface_lints: bool,
+) -> RunWithLints {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
     let entry = std::path::Path::new(file);
-    if let Some(outcome) = job_help_if_requested(file, program_args, gates, setting_overrides) {
-        return outcome;
+    if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
+        return result;
     }
     let requested = requested_job(program_args);
     // A cached tier-1 module has the ordinary `run` entry. A named job must
     // pass through entry selection first, so never let a warm artifact skip
     // the shared job selector.
-    if requested.is_none() && setting_overrides.is_empty() {
+    if !surface_lints && requested.is_none() && setting_overrides.is_empty() {
         if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
-            return outcome;
+            return RunWithLints {
+                outcome,
+                lints: Vec::new(),
+            };
         }
     }
     match checked_bundle_with_entry(file, gates, requested, "dev", setting_overrides) {
-        Ok(bundle) => {
+        Ok(checked) => {
+            let lints = checked.lints;
+            let bundle = checked.bundle;
+            if surface_lints && requested.is_none() && setting_overrides.is_empty() {
+                if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+                    return RunWithLints { outcome, lints };
+                }
+            }
             crate::RunCache::note_lower();
             crate::RunCache::note_codegen();
             let selected = selected_job(&bundle, requested);
@@ -778,8 +819,13 @@ fn run_jit_once_on_compiler_stack(
                         "dev",
                         setting_overrides,
                     ) {
-                        Ok(job_bundle) => job_bundle,
-                        Err(diags) => return RunOutcome::Problems(diags),
+                        Ok(job_bundle) => job_bundle.bundle,
+                        Err(diags) => {
+                            return RunWithLints {
+                                outcome: RunOutcome::Problems(diags),
+                                lints,
+                            }
+                        }
                     };
                     let job_args = vec![format!("{file} {name}")];
                     let job_outcome = jet_jit::with_program_args(&job_args, || {
@@ -796,14 +842,22 @@ fn run_jit_once_on_compiler_stack(
                             scheduled_stdout.push_str(&stdout);
                             scheduled_stderr.push_str(&stderr);
                             if exit_code != 0 {
-                                return RunOutcome::Ran {
-                                    stdout: scheduled_stdout,
-                                    stderr: scheduled_stderr,
-                                    exit_code,
+                                return RunWithLints {
+                                    outcome: RunOutcome::Ran {
+                                        stdout: scheduled_stdout,
+                                        stderr: scheduled_stderr,
+                                        exit_code,
+                                    },
+                                    lints,
                                 };
                             }
                         }
-                        RunOutcome::Problems(diags) => return RunOutcome::Problems(diags),
+                        RunOutcome::Problems(diags) => {
+                            return RunWithLints {
+                                outcome: RunOutcome::Problems(diags),
+                                lints,
+                            }
+                        }
                     }
                 }
             }
@@ -833,9 +887,12 @@ fn run_jit_once_on_compiler_stack(
             if !json {
                 crate::RunCache::maybe_signpost(started, crate::RunCache::stderr_is_tty());
             }
-            outcome
+            RunWithLints { outcome, lints }
         }
-        Err(diags) => RunOutcome::Problems(diags),
+        Err(diags) => RunWithLints {
+            outcome: RunOutcome::Problems(diags),
+            lints: Vec::new(),
+        },
     }
 }
 
@@ -901,9 +958,26 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunOutcome {
+    run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
+        file,
+        program_args,
+        gates,
+        profile,
+        setting_overrides,
+    )
+    .outcome
+}
+
+pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunWithLints {
     crate::RunCache::reset_phases();
-    if let Some(outcome) = job_help_if_requested(file, program_args, gates, setting_overrides) {
-        return outcome;
+    if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
+        return result;
     }
     on_compiler_stack(|| {
         let requested = requested_job(program_args);
@@ -914,7 +988,9 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
             profile,
             setting_overrides,
         ) {
-            Ok(bundle) => {
+            Ok(checked) => {
+                let lints = checked.lints;
+                let bundle = checked.bundle;
                 let selected = selected_job(&bundle, requested);
                 let runtime_args = if selected.is_some() {
                     &program_args[1..]
@@ -924,9 +1000,15 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings(
                 let mut args = Vec::with_capacity(runtime_args.len() + 1);
                 args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
                 args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-                jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true))
+                RunWithLints {
+                    outcome: jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true)),
+                    lints,
+                }
             }
-            Err(diags) => RunOutcome::Problems(diags),
+            Err(diags) => RunWithLints {
+                outcome: RunOutcome::Problems(diags),
+                lints: Vec::new(),
+            },
         }
     })
 }
@@ -998,6 +1080,25 @@ pub fn dev_iteration_with_gates_profile_and_settings(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunOutcome {
+    dev_iteration_with_gates_profile_and_settings_with_lints(
+        file,
+        try_anyway,
+        use_interpreter,
+        gates,
+        profile,
+        setting_overrides,
+    )
+    .outcome
+}
+
+pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
+    file: &str,
+    try_anyway: bool,
+    use_interpreter: bool,
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> RunWithLints {
     on_compiler_stack(|| {
         match checked_bundle_with_entry(
             file,
@@ -1006,8 +1107,14 @@ pub fn dev_iteration_with_gates_profile_and_settings(
             profile,
             setting_overrides,
         ) {
-            Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
-            Err(diags) => RunOutcome::Problems(diags),
+            Ok(checked) => RunWithLints {
+                outcome: dev_run_bundle(&checked.bundle, try_anyway, use_interpreter),
+                lints: checked.lints,
+            },
+            Err(diags) => RunWithLints {
+                outcome: RunOutcome::Problems(diags),
+                lints: Vec::new(),
+            },
         }
     })
 }
@@ -1017,12 +1124,14 @@ fn job_help_if_requested(
     program_args: &[&str],
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<RunOutcome> {
+) -> Option<RunWithLints> {
     if program_args.first().copied() != Some("--help") {
         return None;
     }
     match checked_bundle(file, gates, setting_overrides) {
-        Ok(bundle) => {
+        Ok(checked) => {
+            let lints = checked.lints;
+            let bundle = checked.bundle;
             let specs = job_specs(&bundle);
             if !jet_jit::Job::jet_job_has_visible(&specs) {
                 return None;
@@ -1032,16 +1141,22 @@ fn job_help_if_requested(
                 jet_jit::Job::jet_job_select(&argv, &specs),
                 jet_jit::Job::JetJobSelection::Help
             ) {
-                Some(RunOutcome::Ran {
-                    stdout: jet_jit::Job::jet_job_help_text(&argv, &specs),
-                    stderr: String::new(),
-                    exit_code: 0,
+                Some(RunWithLints {
+                    outcome: RunOutcome::Ran {
+                        stdout: jet_jit::Job::jet_job_help_text(&argv, &specs),
+                        stderr: String::new(),
+                        exit_code: 0,
+                    },
+                    lints,
                 })
             } else {
                 None
             }
         }
-        Err(diags) => Some(RunOutcome::Problems(diags)),
+        Err(diags) => Some(RunWithLints {
+            outcome: RunOutcome::Problems(diags),
+            lints: Vec::new(),
+        }),
     }
 }
 

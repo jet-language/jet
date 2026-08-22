@@ -32,6 +32,96 @@ use std::collections::HashSet;
                 ),
                 _ => (None, None, None, None),
             };
+            let (expected_result, expected_error) =
+                lambda_return_slots(exp_ret.map(|ret| ret.as_ref()));
+            let result_annotation_ok = match (expected_result, lam.result_type.as_ref()) {
+                (_, None) => true,
+                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+                (None, Some(actual)) => is_unit_type(actual),
+            };
+            let error_annotation_ok = match (expected_error, lam.error_type.as_ref()) {
+                (_, None) => true,
+                (Some(expected), Some(actual)) => lambda_slot_matches(expected, actual),
+                (None, Some(_)) => false,
+            };
+            if let Some(ty) = &lam.result_type {
+                self.check_declared_type(ty, lam.span);
+            }
+            if let Some(ty) = &lam.error_type {
+                self.check_declared_type(ty, lam.span);
+            }
+            if !result_annotation_ok {
+                if let (Some(expected), Some(actual)) = (expected_result, lam.result_type.as_ref()) {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!(
+                            "this lambda should return {}, not {}",
+                            expected.show(),
+                            actual.show()
+                        ),
+                        "the lambda's return type must match what's expected here".to_string(),
+                        type_fix_hint(expected, actual),
+                        Some(lam.span),
+                    ));
+                } else if let Some(actual) = lam.result_type.as_ref() {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!("this lambda should return Unit, not {}", actual.show()),
+                        "the lambda's return type must match what's expected here".to_string(),
+                        "remove the result annotation or change the expected function type".to_string(),
+                        Some(lam.span),
+                    ));
+                }
+            }
+            if !error_annotation_ok {
+                if let (Some(expected), Some(actual)) = (expected_error, lam.error_type.as_ref()) {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!(
+                            "this lambda should fail with {}, not {}",
+                            expected.show(),
+                            actual.show()
+                        ),
+                        "the lambda's error type must match what's expected here".to_string(),
+                        type_fix_hint(expected, actual),
+                        Some(lam.span),
+                    ));
+                } else if let Some(actual) = lam.error_type.as_ref() {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!("this lambda declares an unexpected error type {}", actual.show()),
+                        "the lambda's error type must match what's expected here".to_string(),
+                        "remove the error annotation or change the expected function type".to_string(),
+                        Some(lam.span),
+                    ));
+                }
+            }
+            let effective_ret = if lam.result_type.is_some() || lam.error_type.is_some() {
+                let result = if result_annotation_ok {
+                    lam.result_type
+                        .clone()
+                        .or_else(|| expected_result.cloned())
+                        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+                } else {
+                    expected_result
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+                };
+                let error = if error_annotation_ok {
+                    lam.error_type.clone().or_else(|| expected_error.cloned())
+                } else {
+                    expected_error.cloned()
+                };
+                match error {
+                    Some(error) => Some(Type::Result {
+                        ok: Box::new(result),
+                        err: Box::new(error),
+                    }),
+                    None => Some(result),
+                }
+            } else {
+                exp_ret.map(|ret| (**ret).clone())
+            };
     
             if let Some(ep) = exp_params {
                 if lam.params.len() != ep.len() {
@@ -548,14 +638,21 @@ use std::collections::HashSet;
                 self.txn_depth = 0;
                 self.txn_wall_depth = 0;
             }
+            let lambda_effect_snapshot = lam.effects.as_ref().map(|_| {
+                (
+                    self.fx_direct.clone(),
+                    self.fx_edges.clone(),
+                    self.fx_maximal,
+                )
+            });
             let saved_expected = self.expected_type.clone();
-            self.expected_type = exp_ret.map(|ret| (**ret).clone());
+            self.expected_type = effective_ret.clone();
             // A block-bodied lambda's `return` belongs to the lambda, not to the
             // enclosing named function. Give statement checking the expected
             // callback result while the lambda body is active.
             let saved_ret = self.ret.clone();
-            if let Some(ret) = exp_ret {
-                self.ret = Some((**ret).clone());
+            if let Some(ret) = &effective_ret {
+                self.ret = Some(ret.clone());
             }
             let saved_in_lambda_body = self.in_lambda_body;
             let saved_inferred_mut_captures =
@@ -567,7 +664,7 @@ use std::collections::HashSet;
                 std::mem::replace(&mut self.task_body_propagates, false);
             self.in_lambda_body = true;
             if matches!(
-                exp_ret.map(|ret| ret.as_ref()),
+                effective_ret.as_ref(),
                 Some(Type::Apply { name, .. }) if name == "View"
             ) {
                 if let LambdaBody::Expr(expr) = &mut lam.body {
@@ -608,9 +705,9 @@ use std::collections::HashSet;
                     }
                     // S46 one-line bodies: `() => transfer(...)` is the brace-free
                     // form of `() => { transfer(...) }`. When no value is expected
-                    // (() / () ! E callback, or inferred spawn body), treat the
+                    // (() / () E! callback, or inferred spawn body), treat the
                     // call as a statement so void functions do not trip E0116.
-                    let needs_value = match exp_ret.map(|r| r.as_ref()) {
+                    let needs_value = match effective_ret.as_ref() {
                         Some(Type::Named(name)) if name == "Unit" => false,
                         Some(Type::Result { ok, .. })
                             if matches!(ok.as_ref(), Type::Named(name) if name == "Unit") =>
@@ -759,9 +856,21 @@ use std::collections::HashSet;
                 }
             }
     
-            let ret_ty = if let Some(er) = exp_ret {
+            if let (Some((before_direct, before_edges, before_maximal)), Some(bound)) =
+                (lambda_effect_snapshot, lam.effects.as_ref())
+            {
+                self.record_callback_obligation(
+                    bound,
+                    &before_direct,
+                    &before_edges,
+                    before_maximal,
+                    lam.span,
+                );
+            }
+
+            let ret_ty = if let Some(er) = &effective_ret {
                 if let Some(br) = &body_ret {
-                    if br != er.as_ref() {
+                    if !lambda_body_matches_return(er, br) {
                         self.diags.push(Diagnostic::error(
                             "E0113",
                             format!("this lambda should return {}, not {}", er.show(), br.show()),
@@ -771,7 +880,7 @@ use std::collections::HashSet;
                         ));
                     }
                 }
-                Some((**er).clone())
+                Some(er.clone())
             } else {
                 body_ret
             };
@@ -795,13 +904,37 @@ use std::collections::HashSet;
                 // A body sema proves effect-free publishes the empty bound so it
                 // satisfies `=[]=>` positions; anything else stays unbounded and
                 // the call-site D-EFF2 obligation solver decides.
-                effect_bound: crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new),
+                effect_bound: lam
+                    .effects
+                    .clone()
+                    .or_else(|| crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new)),
                 param_contract: exp_contract.cloned(),
                 call_metadata: exp_metadata.cloned(),
                 return_view_provenance: lambda_return_view_provenance,
             })
         }
     
+}
+
+fn lambda_return_slots(ret: Option<&Type>) -> (Option<&Type>, Option<&Type>) {
+    match ret {
+        Some(Type::Result { ok, err }) => (Some(ok.as_ref()), Some(err.as_ref())),
+        Some(ret) => (Some(ret), None),
+        None => (None, None),
+    }
+}
+
+fn is_unit_type(ty: &Type) -> bool {
+    matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+}
+
+fn lambda_slot_matches(expected: &Type, actual: &Type) -> bool {
+    expected == actual || (is_unit_type(expected) && is_unit_type(actual))
+}
+
+fn lambda_body_matches_return(expected: &Type, actual: &Type) -> bool {
+    expected == actual
+        || matches!(expected, Type::Result { ok, .. } if lambda_slot_matches(ok, actual))
 }
 
 fn install_inline_loop_label(

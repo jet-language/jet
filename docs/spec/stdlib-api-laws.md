@@ -9,7 +9,7 @@ effect row plus signature tell the complete story? Does its body stay at one
 level of abstraction—if it zooms into character codes or hand-rolls a search,
 that work belongs in a named brick? These are review prompts, not new
 mechanisms; I8 is unchanged. The [2026-08-21 function-design canon mining
-report](../reference/prior-art.md#videos-talks--podcasts) records the Logan
+report](../reference/prior-art.md#function-design-canon) records the Logan
 Smith video and its three linked sources.
 
 ---
@@ -53,7 +53,7 @@ or source-qualified spelling for the same conversion.
 
 ## Law 2 — Fallibility
 
-- A function that can legitimately fail returns `T ! E`; never panics on expected failure.
+- A function that can legitimately fail returns `T E!`; never panics on expected failure.
 - Panics are reserved for programmer error (index out of bounds on a known-size slice).
 - The error type must carry enough context to write a helpful error message without
   inspecting source code (no opaque integer codes).
@@ -72,8 +72,8 @@ or source-qualified spelling for the same conversion.
 
 ## Law 4 — Effects
 
-- I/O effects are declared with the right effect row (`:[FS]>`, `:[Net]>`,
-  `:[Exec]>`, etc.).
+- I/O effects are declared with the right effect row (`-[FS]>`, `-[Net]>`,
+  `-[Exec]>`, etc.).
 - Pure functions carry no effect markers; the compiler enforces this.
 - A function that performs multiple effects lists all of them; no hidden IO.
 - Comptime eligibility follows the shared effect fact: an empty effect set is
@@ -170,7 +170,7 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `D2` Every magic default has one row here and an explicit override.
 - [ ] `D3` Defaulted labeled options replace option-only overloads.
 - [ ] `D4` Every policy option is a dedicated enum; no Boolean or bare-string flag remains.
-- [ ] `F1` Expected failure is `T ! E`, and propagation is one `?`.
+- [ ] `F1` Expected failure is `T E!`, and propagation is one `?`.
 - [ ] `F2` Every lookup returns `T?`; no sentinel, empty-status, or follow-up status check remains.
 - [ ] `F3` Every failure says what happened, why, and how to fix it.
 - [ ] `T1` Domain values use domain types while obvious beginner literals work at the boundary.
@@ -284,7 +284,7 @@ and examples.
 | D2 | Every magic default appears in the defaults table and has an explicit override. |
 | D3 | Defaulted options replace overload families. |
 | D4 | Options use dedicated enums; Core does not use boolean or bare-string policy flags. |
-| F1 | Expected failure is `T ! E`; propagation costs `?`. |
+| F1 | Expected failure is `T E!`; propagation costs `?`. |
 | F2 | A lookup returns `T?`; sentinel values are not an API contract. |
 | F3 | Every failure message states what happened, why, and how to fix it. |
 | T1 | Domain values use domain types while beginner literals remain accepted at the boundary. |

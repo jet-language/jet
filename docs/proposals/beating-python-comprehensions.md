@@ -22,7 +22,7 @@ The audit scored Jet's comprehension at 26 tokens against Python's 18. That
 snippet did not use the header guard. The guard form ships today and runs:
 
 ```jet
-names :: loop u, users if u.active -> u.name        // 14 tokens — compiles and runs today
+names :: loop u in users if u.active -> u.name        // 14 tokens — compiles and runs today
 ```
 
 The same task, counted with the same counter:
@@ -38,7 +38,7 @@ The same task, counted with the same counter:
 **Jet already beats Python.** Nobody can see it. Two defects hide the win:
 
 1. **The natural spelling misparses.** D-LOOP-COMMA1 says commas separate
-   header clauses, so users will write `loop u, users, if u.active -> …`. The
+   header clauses, so users will write `loop u in users, if u.active -> …`. The
    parser eats `, if …` as a *stride* expression, then fails with an unrelated
    value-`if` error (E0003 "both branches must produce one"). Only the
    undocumented comma-less `users if u.active` parses. One clause disobeys the
@@ -55,7 +55,7 @@ option keeps the method-chain plane and `.lazy()` untouched.
 
 ### A — Document what ships (zero code change)
 
-Keep `loop u, users if u.active -> u.name` as canonical. Add examples, spec
+Keep `loop u in users if u.active -> u.name` as canonical. Add examples, spec
 spelling, and a real diagnostic for the comma spelling. 14 tokens; beats
 Python by 1.
 
@@ -64,7 +64,7 @@ Python by 1.
 
 ### B — Make the guard obey the comma law
 
-`loop u, users, if u.active -> u.name` becomes the canonical spelling; the
+`loop u in users, if u.active -> u.name` becomes the canonical spelling; the
 parser treats `, if` as a guard clause, never a stride; fmt rewrites the
 comma-less form. 15 tokens; ties Python.
 
@@ -72,7 +72,7 @@ comma-less form. 15 tokens; ties Python.
   parentheses. Real strides are numbers; the loss is theoretical.
 
 ```jet
-evens :: loop n, nums, if n % 2 == 0 -> n * n
+evens :: loop n in nums, if n % 2 == 0 -> n * n
 ```
 
 ### C — Implicit subject in bindingless loops (B plus one rule)
@@ -112,7 +112,7 @@ oldest :: users.max_by(.age)
 The chain plane drops from 33 to 15 — cheaper than TypeScript's 22 and level
 with Python, while staying eager and typed. Swift ships this as `\.keyPath`;
 Kotlin as `it`; Jet's spelling reuses the bare-member atom it already has.
-One rule, three homes: dispatch arms (ratified), loop heads, callable
+One rule, three homes: dispatch arms (ratified), loop heads in callable
 arguments. That is a generalization of an existing mechanism, not a new one
 (I8).
 

@@ -546,7 +546,7 @@ impl<'a> Parser<'a> {
             Ok(body)
         }
 
-        /// D-META-BODY1=A: `@loop field, T.@fields { fn … }` expands item
+        /// D-META-BODY1=A: `@loop field in T.@fields { fn … }` expands item
         /// templates, not runtime statements. This deliberately shares the
         /// ordinary loop source expression grammar; sema evaluates the source
         /// through the comptime interpreter during expansion.
@@ -554,7 +554,7 @@ impl<'a> Parser<'a> {
             let start = self.bump().span.start; // `@`
             self.expect(TokKind::KwLoop, "after `@` in a derive loop")?;
             let (var, var_span) = self.expect_ident("for the derive loop binding")?;
-            self.expect(TokKind::Comma, "after the derive loop binding")?;
+            self.expect_loop_source_separator()?;
             let source = self.expr_no_struct_lit()?;
             self.expect(TokKind::LBrace, "to open the derive loop body")?;
             let body = self.derive_body_items()?;
@@ -750,8 +750,9 @@ impl<'a> Parser<'a> {
             })
         }
 
-        /// D-META-FORM1=A: the rule's own arguments read `name: Type [=
-        /// default]`, the same shape as an ordinary function parameter. A
+        /// D-META-FORM1=A / D-DEFAULT-SHAPE1=B: the rule's own arguments read
+        /// `name: Type{default}`, the same shape as an ordinary function
+        /// parameter. A
         /// fact about the rule reads `@name: value` instead — it is a fixed
         /// property of the declaration, not something a use site supplies,
         /// so it carries a value directly rather than a type.
@@ -789,8 +790,14 @@ impl<'a> Parser<'a> {
                             variadic = true;
                         }
                         let (ty, _ty_span) = self.type_()?;
-                        let default = if matches!(self.peek().kind, TokKind::Eq) {
+                        let default = if matches!(self.peek().kind, TokKind::LBrace) {
                             self.bump();
+                            let default = Box::new(self.expr_no_struct_lit()?);
+                            self.expect(TokKind::RBrace, "after a marker parameter default")?;
+                            Some(default)
+                        } else if matches!(self.peek().kind, TokKind::Eq) {
+                            let eq = self.bump().span;
+                            self.diags.push(Diagnostic::from_row("E0385", &[], Some(eq)));
                             Some(Box::new(self.expr_no_struct_lit()?))
                         } else {
                             None

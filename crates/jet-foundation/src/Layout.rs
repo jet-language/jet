@@ -513,6 +513,13 @@ mod tests {
                         bits: 64,
                     },
                 ),
+                field(
+                    "tail",
+                    Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    },
+                ),
             ],
         );
         let engine = TargetLayoutEngine::new(
@@ -530,6 +537,7 @@ mod tests {
         );
         assert_eq!(facts.fields[0].offset, Some(0));
         assert_eq!(facts.fields[1].offset, Some(8));
+        assert_eq!(facts.fields[2].offset, Some(16));
     }
 
     #[test]

@@ -435,7 +435,7 @@ fn documentation_consistency_sweep_stays_current() {
 
     assert!(!spec.contains("[ \"~\" | \"^\" | \"&\" ]"));
     assert!(!spec.contains("Result(String, IOError)"));
-    assert!(spec.contains("String ! IOError"));
+    assert!(spec.contains("String IOError!"));
     assert!(roadmap.contains("Self-hosting → **Epoch 9** (Bootstrapping)"));
     for current_path in [
         "crates/jet-pkg-model/src/Manifest.rs",

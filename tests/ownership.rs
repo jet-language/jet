@@ -2304,7 +2304,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn inspect_all(items: ...[Inspect, Edit]) {
-    loop item, items {
+    loop item in items {
         call(() -> { item.touch() })
     }
 }
@@ -2322,7 +2322,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn edit_all(items: ...[Edit, Inspect]) {
-    loop item, items {
+    loop item in items {
         call(() -> { item.touch() })
     }
 }
@@ -3177,7 +3177,7 @@ fn place_write_window_is_scoped_per_loop_iteration() {
     let src = r#"
 fn run() {
     xs := [1, 2]
-    loop i, 0..1 {
+    loop i in 0..1 {
         edit :: &xs[0]
         edit = edit + 1
     }
@@ -4083,7 +4083,7 @@ fn run() {
 /// The wrappers are spelled `JetOutcome<…>` now, not `Option`/`Result`.
 /// D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06,
 /// crates/jet-foundation/src/Outcome.rs:1-22) make one carrier serve both
-/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T ! E` is
+/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T E!` is
 /// `JetOutcome<T, E>`. A raw `Option` here would be the second optional
 /// representation that decision exists to remove. The leaf-not-wrapper
 /// property is untouched by the rename, so the negative guards move to the
@@ -4101,7 +4101,7 @@ fn maybe(values: [Int]) (Window?) -[]> {
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) Window ! String -[]> {
+fn result(values: [Int]) Window String! -[]> {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
@@ -4404,7 +4404,7 @@ fn run() {
 
     indexed_values := [5, 6, 7, 8]
     edits :: indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
-    loop edit, edits {
+    loop edit in edits {
         edit[0] = edit[0] + 45
     }
     print(indexed_values)
@@ -4474,7 +4474,7 @@ fn run() {
     }) ?? panic("edit failed")
 
     selected :: values.get_disjoint_write([1, 3]) ?? panic("selection failed")
-    loop edit, selected {
+    loop edit in selected {
         edit[0] = edit[0] + 5
     }
     print(values)
@@ -4549,7 +4549,7 @@ fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     saved := [ViewMut<Int>]{}
-    loop edit, selected {
+    loop edit in selected {
         saved.push(edit)
     }
 }
@@ -4590,7 +4590,7 @@ fn lending_disjoint_views_reject_every_retaining_boundary() {
 fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    loop edit, selected { held :: [edit] }
+    loop edit in selected { held :: [edit] }
 }
 "#,
         ),
@@ -4601,7 +4601,7 @@ fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     held := [ViewMut<Int>]{}
-    loop edit, selected { held = [edit] }
+    loop edit in selected { held = [edit] }
 }
 "#,
         ),
@@ -4612,7 +4612,7 @@ fn retain(view: ViewMut<Int>) {}
 fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    loop edit, selected { retain(edit) }
+    loop edit in selected { retain(edit) }
 }
 "#,
         ),
@@ -4621,7 +4621,7 @@ fn run() {
             r#"
 fn leak(values: &[Int]) ViewMut<Int> -[]> {
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    loop edit, selected { return edit }
+    loop edit in selected { return edit }
     panic("unreachable")
 }
 fn run() {
@@ -5786,7 +5786,7 @@ fn two_binding_loop_over_owned_task_list_compiles() {
 fn run() {
     handles :: [task 1, task 2]
     total := 0
-    loop (i, h), handles { total += (h.join() ?? 0) + i }
+    loop (i, h) in handles { total += (h.join() ?? 0) + i }
     print(total)
 }
 "#;
@@ -5799,7 +5799,7 @@ fn nested_task_list_loop_compiles() {
 fn run() {
     groups :: [[task 1], [task 2]]
     n := 0
-    loop g, groups { n += g.len() }
+    loop g in groups { n += g.len() }
     print(n)
 }
 "#;
@@ -5844,7 +5844,7 @@ fn moved_task_list_parameter_loop_compiles() {
     let src = r#"
 fn drain(hs: ^[Task<Int>]) Int -[]> {
     total := 0
-    loop h, hs { total += h.join() ?? 0 }
+    loop h in hs { total += h.join() ?? 0 }
     total
 }
 fn run() {
@@ -5860,7 +5860,7 @@ fn two_binding_borrowed_task_list_reports_e0120() {
     let src = r#"
 fn drain(hs: [Task<Int>]) Int -[]> {
     total := 0
-    loop (i, h), hs { total += (h.join() ?? 0) + i }
+    loop (i, h) in hs { total += (h.join() ?? 0) + i }
     total
 }
 fn run() {
@@ -5878,7 +5878,7 @@ fn task_list_index_loop_reports_e0120() {
 fn run() {
     groups :: [[task 1]]
     total := 0
-    loop h, groups[0] { total += h.join() ?? 0 }
+    loop h in groups[0] { total += h.join() ?? 0 }
     print(total)
 }
 "#;
@@ -5906,8 +5906,8 @@ fn count(n: Int) Stream<Int> -[]> {
 }
 fn run() {
     s :: count(3)
-    loop x, s { print("{x}") }
-    loop x, s { print("{x}") }
+    loop x in s { print("{x}") }
+    loop x in s { print("{x}") }
 }
 "#;
     let diags = jet::compile(src).expect_err("Stream is consumed by the first loop");

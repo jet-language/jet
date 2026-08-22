@@ -309,7 +309,7 @@ it, with the same `@` from S1:
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
-        @loop f, T.@fields {
+        @loop f in T.@fields {
             parts.add("{f.@name}={self.@f}")
         }
         return parts.join(", ")
@@ -617,7 +617,7 @@ fn charge(card: Card, amount: Money, timeout: Duration) => Receipt ? { … }
 derive T.Describe {
     fn describe(self) => String {
         parts := [String].{}
-        @loop f, T.@fields {
+        @loop f in T.@fields {
             parts.add("{f.@name}={self.@f}")
         }
         return parts.join(", ")
@@ -634,13 +634,13 @@ fn build(b: BuildContext) =[FS]=> BuildPlan ? {
 
     b.generate("db_client") {
         module db_client {
-            @loop table, parse_tables(schema) {
+            @loop table in parse_tables(schema) {
                 pub fn @table.name(id: Int) => @table.row_type { … }
             }
         }
     }?
 
-    loop f, b.program.functions() {
+    loop f in b.program.functions() {
         if f.effects.has("Net") and not f.params.has("timeout") {
             b.error(f.span, code: "ORG_NET01",
                 what: "network function has no timeout",

@@ -162,13 +162,21 @@ fn collect_unused_private_functions(
         let Some(module) = bundle.modules.get(declaration.module) else {
             continue;
         };
+        let name = display_name(declaration);
+        let edit = find_function_by_name_span(&module.items, declaration.span)
+            .filter(|function| removable_private_function(function))
+            .map(|function| crate::Diagnostics::TextEdit {
+                span: function.span,
+                new_text: String::new(),
+            })
+            .unwrap_or_else(|| rename_edit(declaration.span, &name));
         candidates.push(LivenessCandidate {
             code: "L0104",
-            name: display_name(declaration),
+            name,
             source: module.display.clone(),
             span: declaration.span,
             detail: "private function is never reached",
-            edit: rename_edit(declaration.span, &display_name(declaration)),
+            edit,
         });
     }
 }
@@ -252,6 +260,27 @@ fn rename_edit(span: Span, name: &str) -> crate::Diagnostics::TextEdit {
         span,
         new_text: format!("_{name}"),
     }
+}
+
+fn removable_private_function(function: &Func) -> bool {
+    function.body.is_empty()
+        && function.meta.is_none()
+        && function.markers.is_empty()
+        && function.external_type.is_none()
+        && function.inline_foreign.is_none()
+        && function.undo.is_none()
+        && function.web_marker.is_none()
+        && function.pre.is_empty()
+        && function.post.is_empty()
+        && !function.compiler_generated
+        && !function.is_unsafe
+        && !function.is_pure
+        && !function.is_reactive
+        && !function.is_replayable
+        && !function.is_job
+        && function.every.is_none()
+        && !function.is_must_use
+        && function.kernel.is_none()
 }
 
 /// Import aliases have two parser-owned spans: the source path and, for the
@@ -478,6 +507,49 @@ fn find_function_by_name_span(items: &[Item], span: Span) -> Option<&Func> {
     for item in items {
         match item {
             Item::Func(function) if function.name_span == span => return Some(function),
+            Item::Struct(definition) => {
+                if let Some(function) = definition
+                    .methods
+                    .iter()
+                    .find(|function| function.name_span == span)
+                {
+                    return Some(function);
+                }
+                if let Some(function) = definition
+                    .trait_impls
+                    .iter()
+                    .flat_map(|implementation| implementation.methods.iter())
+                    .find(|function| function.name_span == span)
+                {
+                    return Some(function);
+                }
+            }
+            Item::Enum(definition) => {
+                if let Some(function) = definition
+                    .methods
+                    .iter()
+                    .find(|function| function.name_span == span)
+                {
+                    return Some(function);
+                }
+                if let Some(function) = definition
+                    .trait_impls
+                    .iter()
+                    .flat_map(|implementation| implementation.methods.iter())
+                    .find(|function| function.name_span == span)
+                {
+                    return Some(function);
+                }
+            }
+            Item::Impl(implementation) => {
+                if let Some(function) = implementation
+                    .methods
+                    .iter()
+                    .find(|function| function.name_span == span)
+                {
+                    return Some(function);
+                }
+            }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     if let Some(function) = find_function_by_name_span(body, span) {

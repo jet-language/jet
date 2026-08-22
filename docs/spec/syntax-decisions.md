@@ -169,7 +169,7 @@ type.
 
 **S12 — Entry point** *(amended by D-FAIL-EXIT1/D-FAIL-UNIT1)*: `fn run()`;
 no `pub` required; it is fallible by default. An expert may pin
-`fn run() ! E`. **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() E!`. **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
@@ -209,7 +209,7 @@ stable across reorders. Help lists positionals before flags. Marker constant:
 for a one-letter alias and `#Env("PORT")` for an environment fallback. Both
 rules use the existing field marker list and lower to the existing `core.args`
 builder. Explicit command input wins over the environment, and the environment
-wins over the field `= expr` default. Help shows the short name, fallback, default, and
+wins over the field `{expr}` default. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
 Typed-CLI markers with no builder mapping are E1319. Marker constants:
 `MARKER_SHORT` (`Short`) and `MARKER_ENV` (`Env`).
@@ -231,7 +231,7 @@ Their precedence is command input > `#Env` > field default. Callable members
 are commands: a method receives read-only `self`, and a member binding
 `name = function` binds an existing function. A bound function may receive
 the program struct as its first read-only parameter; remaining command
-parameters use the existing scalar CLI shapes and `= expr` defaults.
+parameters use the existing scalar CLI shapes and `{expr}` defaults.
 Command words are lowercased member names and `#Doc` supplies summaries.
 `#CLI(Standard)` adds `--verbose/-v`, `--quiet/-q`,
 `--color=auto|always|never`, and `--version`; bare `#CLI` adds only
@@ -316,7 +316,7 @@ constructors, generic calls, variadics, and function values all bind through
 the one binder. fmt never adds nor strips labels.
 
 ```jet
-fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => Client ! ConnectError
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) => Client ConnectError!
 client :: connect("db.internal", tls: true, timeout: 5)?
 ```
 
@@ -377,7 +377,7 @@ No top type; general `Any` rejected.
 
 **D-UNIONTYPE1=A — Anonymous union types** *(ratified 2026-07-24, card #744)*:
 `A | B` is closed structural enum sugar. Nested unions flatten, duplicates
-disappear, and identity is order-insensitive. `T ! E1 | E2` places the union on
+disappear, and identity is order-insensitive. `T (E1 | E2)!` places the union on
 the error side. Members widen into the union only at binding, argument, return,
 Codable field, and `?` error boundaries. Match arms name member types; Codable
 decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
@@ -423,11 +423,11 @@ D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, ratified
 ```jet
 loop { … }                        // infinite
 loop n > 0 { tick() }              // conditional effect loop (no `while`)
-loop i, 1..5 { print(i) }          // source effect loop (no `for`)
-loop (key, value), map { audit(key) } // map-pair effect loop
-loop i, 0..10, 2 { audit(i) }      // positive source stride
+loop i in 1..5 { print(i) }          // source effect loop (no `for`)
+loop (key, value) in map { audit(key) } // map-pair effect loop
+loop i in 0..10, 2 { audit(i) }      // positive source stride
 loop i := 0, i < n { draw(i); i += 1 } // mutable state (two-slot)
-values :: loop item, items -> item.value
+values :: loop item in items -> item.value
 ```
 
 `while`/`for` are not keywords. A source and optional stride evaluate once,
@@ -435,14 +435,14 @@ left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 Commas separate loop header clauses. Semicolons remain statement boundaries only.
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
-is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range step rule.
+is retired with teaching diagnostic E0376; prefer `loop i in 0..<n` or a range step rule.
 
 A finite source loop in value position may use `-> expression` or `-> { ... }`.
 Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items.
 
 ```jet
-names :: loop u, users if u.active -> u.name
+names :: loop u in users if u.active -> u.name
 names :: loop users if .active -> .name   // bindingless subject, D-LOOP-SUBJECT1
 ```
 
@@ -455,9 +455,9 @@ Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
-optional third clause (`loop i, 0..10, 2`); `step` has no loop role.
+optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
 **D-RANGE-EXCL1=C**: `0..<n` is half-open (stops before `n`, empty when
-`a >= b`). Prefer `loop i, item; xs` or `loop i; xs.indexes` for index loops;
+`a >= b`). Prefer `loop (i, item) in xs` or `loop i in xs.indexes()` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
 D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
 **D-RANGE-VALUE1=A** *(ratified 2026-07-28, card #1298)*: both spellings
@@ -474,7 +474,7 @@ must outlive or detach from the owner.
 
 **D-RANGE-EXCL1=C — Exclusive range + index idioms**: half-open `a..<b` runs
 `a` through `b-1` and is empty when `a >= b`. Inclusive `..` (S22) is unchanged.
-Sequence two-binding `loop i, item; xs` yields index then item; one binding stays
+Sequence two-binding `loop (i, item) in xs` yields index then item; one binding stays
 item-only. `xs.indexes` yields every valid `Int` index. An inclusive loop ending
 at `xs.len()` that indexes that same `xs` is E0364 (teach two-binding, `indexes`,
 then `0..<xs.len()`). D-ITER1's pipeline adapter is `indexed()` (same named tuple).
@@ -494,7 +494,7 @@ the accumulated List, and its `next` omits the current item. Payload breaks
 are rejected in collecting loops because their result is already `[T]`.
 **D-CHOOSE-FIND1=A**: a finite source loop in value position uses a braced
 body with `break value` exits and must be followed by a written exhaustion
-route: `loop item, source { if found(item) { break item } } ?? fallback`.
+route: `loop item in source { if found(item) { break item } } ?? fallback`.
 The route is part of the expression. `?? next` and `?? break` immediately
 after that closing brace are rejected; use the labeled loop form when the
 exhaustion path must steer another loop. An explicit target,
@@ -547,23 +547,26 @@ if code == {
 
 return if n < {
     16 -> 0
-    48 | 45 && ready -> 2            // `((n < 48 || n < 45) && ready)`
+    (48 | 45) && ready -> 2      // `((n < 48 || n < 45) && ready)`
     else -> 15
 }
 ```
 
 Arms: bare values (compared with the table's `OP`), leading-dot enum patterns
-(only with `==`), and any `Bool` expression evaluated as written. `|` binds
-tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
-D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
-are allowed. Exhaustive pattern arms may omit `else`.
+(only with `==`), and any `Bool` expression evaluated as written. `|` groups
+distributed atoms; that group must be parenthesized before it is a direct
+operand of `&&` or `||` (D-ARMHEAD-PAREN1=A). Catch-all is `else ->`.
+Braceless single-expression bodies are allowed. Exhaustive pattern arms may
+omit `else`.
 
 **D-IFDIST1=A — distributed compare markers + ()-or-value tables** *(ratified
 2026-07-28, card #1305)*: amends D-IF3 / D-MATCHARM2 / S68. The dispatch marker
 is any comparison operator. Each bare atom desugars to `subject OP atom`; `|`
 is OR of those atoms (including for `!=`); `&&`/`||` combine further Bool
-heads. Pattern heads remain `==`-only. Statement and expression position share
-one table spelling; expression tables unify arm values or yield `()`.
+heads. A distributed atom group next to `&&` or `||` is parenthesized by
+D-ARMHEAD-PAREN1=A. Pattern heads remain `==`-only. Statement and expression
+position share one table spelling; expression tables unify arm values or yield
+`()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
@@ -678,7 +681,7 @@ of `<`/`<=`/`>`/`>=` only; mixed direction is a compile error (E0333);
 **S71 / S35 — Optional chaining & fallback**: `?.` chains fields and methods
 (`user?.address?.city`, `user?.display_name()`) yielding `T?`,
 short-circuiting on None; non-optional left side E0047. `??` is the single
-fallback for both `T?` and `T ! E`: `x ?? default`, `x ?? return`,
+fallback for both `T?` and `T E!`: `x ?? default`, `x ?? return`,
 `x ?? panic("…")`. `or` is not an operator.
 
 **S75 — Fan-out: REMOVED** (D-VERDICT-1324-1, owner ruling 2026-07-30).
@@ -705,7 +708,7 @@ linalg types; user structs use methods.
 F64` for experts/FFI. `Int` uses a machine-word fast path and spills only when
 the value needs it.
 Conversions are destination-owned named methods only (`Float.from_int(n)`,
-`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ! ParseError`);
+`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ParseError!`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain arithmetic on a fixed-width integer **traps on
 overflow**; exact default `Int` arithmetic does not overflow. Fixed-width
@@ -754,12 +757,12 @@ parsed :: Int.parse(text) ?? return
 
 **S32 / D-OPT-SPELL1 / D-SHAPE3b — Optional and Result variants** *(D-SHAPE3b
 ratified 2026-07-14 with owner substitution `Val`, not `Some`)*: `T?` uses
-`Val(expr)` / `None`; `T ! E` uses `Ok(expr)` / `Err(expr)`. When the wrapper
+`Val(expr)` / `None`; `T E!` uses `Ok(expr)` / `Err(expr)`. When the wrapper
 type is known, `.Val` / `.None` / `.Ok` / `.Err` are the contextual forms,
 including patterns. `Some` is never a spelling or alias. Old lowercase result
 forms and foreign optional spellings receive ordinary current name/parse
 errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
-always means Optional; fallible is `T ! E` / `T !` (S34, D-ERRSIGIL1).
+always means Optional; fallible is `T E!` / `T !` (S34, D-ERRSIGIL1).
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. Calls infer type arguments by
@@ -1103,8 +1106,8 @@ value; bare `[]` keeps working wherever context already supplies the type.
 **S64 / D-MAPSPACE1=A — Map shorthand & entry iteration**: `[K:V]` is the
 canonical map-type
 spelling. One-binding map iteration yields `.key`/`.value` entries;
-two-binding `loop name, amount; fruits` also supported.
-**D-RANGE-EXCL1=C** extends two-binding to sequences: `loop i, item; xs` yields
+two-binding `loop (name, amount) in fruits` also supported.
+**D-RANGE-EXCL1=C** extends two-binding to sequences: `loop (i, item) in xs` yields
 index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 `Int` index.
 
@@ -1169,7 +1172,7 @@ D-ONCE-HASH1=B).
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
-counts Unicode scalars; `loop c; s.chars()`; no `s[i]` (E0503).
+counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
 Grapheme clusters + NFC/NFD live in opt-in `core.text.unicode` (D-GRAPHEME1).
 
 **D-STR-AFTER1 — `String.after`/`.before`** *(ratified/implemented
@@ -1290,7 +1293,7 @@ Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
 position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
 `take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
-fallible (`T ! String`) — a bounds miss is an ordinary error value.
+fallible (`T String!`) — a bounds miss is an ordinary error value.
 **D-BINREAD-LEN1=A** narrowly extends the `take` length slot to accept
 `U8`/`U16`/`U32`, which widen internally to `Int`; `U64` remains an explicit
 conversion, and S42 sized-int separation is unchanged everywhere else.
@@ -1307,21 +1310,21 @@ user type of the same name shadows the core surface entirely.
 
 **S7 — Propagation**: postfix `?` on a fallible call.
 
-**S34 — Failure-returning return**: `T ! E`; bare `T !` means `T ! Err`. A `! E`
-clause after a parameter list is a full unit-fallible return annotation per
-D-FAIL-UNIT1; value-returning signatures keep `=> T ! E`. Lowers to Rust
-`Result` (not surface syntax).
+**S34 — Failure-returning return**: `T E!`; bare `T !` means `T Err!`. A
+unit-fallible declaration writes its error suffix alone (`fn save(path:
+String) IOError!`); value-returning signatures use `fn load() Config E!`.
+Lowers to Rust `Result` (not surface syntax).
 
 **S80 — Default error value** *(D-ERR2, D-S80-RUN1 and D-FAIL-ERROR1=A,
 amended by D-FAIL-EXIT1, 2026-08-06, card #1528)*: `Err` is both the default
 error type and its constructor. `Err("msg")`, `Err("msg", code: "CFG404")`, and
 `Err("msg", cause: e)` build one Prelude-owned value with readable `message`,
 `code`, and `cause` fields. `Error` is deleted, not aliased. Bare `T !` means
-`T ! Err`; `T ! Err` is the explicit form. An `Err(e)` in a result-arm context
+`T Err!`; `T Err!` is the explicit form. An `Err(e)` in a result-arm context
 still wraps the typed error value `e`. Argument shape distinguishes the two
-readings. `fn run()` is fallible by default; an expert may pin `fn run() ! E`.
+readings. `fn run()` is fallible by default; an expert may pin `fn run() E!`.
 Returned default errors print one report frame and exit non-zero. Cross-type
-`?` conversion uses declared `impl Source => Target`; the retired
+`?` conversion uses declared `impl Source -> Target`; the retired
 default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
 
 **D-ERRCTX1 — Error context** *(amended by D-FAIL-CTX1)*: a postfix `?` may
@@ -1342,7 +1345,7 @@ value route. I2 and exit 101 remain substrate attribution. S36 owns the
 process-edge conversion. D-VALIDATE1's three layers are the attribution split.
 
 **D-FAIL-CARRIER1=A — one outcome carrier** *(ratified 2026-08-06, card
-card #1527)*: `T?` and `T ! E` are two views of one carrier, not two types. The
+card #1527)*: `T?` and `T E!` are two views of one carrier, not two types. The
 two type spellings are unchanged (D-RESULT-OPTION-CANON1 stands). An outcome
 has three facts: a payload, a verdict, and the reports it collected. Three
 methods reach those facts, and no new grammar is added.
@@ -1382,7 +1385,7 @@ and deletes `Error` as a type name, not an alias.
 
 **D-FAIL-CONV1=A — one conversion rail** *(ratified 2026-08-06, card #1529)*:
 the retired default-conversion trait, helper, and compiler arm are deleted.
-Error conversion uses the declared `impl Source => Target` form, including a
+Error conversion uses the declared `impl Source -> Target` form, including a
 conversion into the default error. The default-error target may name a foreign
 source type; typed targets keep E2406's orphan rule. This amends D-ERR2 and
 D-LIB3. E2402 and E2406 teach the one rail and their registered UI snapshots
@@ -1390,17 +1393,17 @@ follow it.
 
 **D-FAIL-CONV2=A — the standard library declares the conversion for its own
 error family** *(ratified 2026-08-17, card #2018)*: the standard library ships
-one `impl <CoreError> => Err` for each member of its own error family, on
+one `impl <CoreError> -> Err` for each member of its own error family, on
 D-FAIL-CONV1's single rail. A program can write `fn run() !` and pass a
 library failure up with `?` and declare nothing. `Prelude/Errors.jet` holds the
 declarations; sema injects only the conversions a module's `?` operators
 actually exercise, so unused members never enter the module. Family membership
 is derived: the Prelude registers the type printable, a Core signature returns
-it in the error position of a `T ! E` result, and showing it is not prohibited.
+it in the error position of a `T E!` result, and showing it is not prohibited.
 `CryptoError` and `TaskFailure` are outside the family. This amends
 D-FAIL-CONV1 for the library's own types only; a program's own error type still
 needs its own declaration, and naming the failure
-(`fn run() ! JSONError`) stays correct. The accepted cost is that one conversion
+(`fn run() JSONError!`) stays correct. The accepted cost is that one conversion
 is invisible in the program text.
 
 **D-FAIL-CTX1=A — notes ride `?` and the journey is automatic** *(ratified
@@ -1434,11 +1437,10 @@ allow-list, and updates S36, the architecture exit table's producer column,
 and E3001's entry text.
 
 **D-FAIL-UNIT1=A — unit-fallible signatures omit arrow and unit** *(ratified
-2026-08-06, card #1534)*: `fn save(path: String) ? IOError` has no arrow and no
-unit. Bare `fn sync() ?` means the default error. A value-returning signature
-keeps the arrow: `fn load() => Config ? E`. This retires S80's arrow-and-unit
-form and extends S34 so a `?` clause after the parameter list is a full
-return annotation.
+2026-08-06, card #1534; spelling amended by D-ERRSUFFIX1=B)*:
+`fn save(path: String) IOError!` has no body arrow or unit. Bare
+`fn sync() !` means the default error. A value-returning signature uses the
+suffix zone: `fn load() Config E!`. This retires S80's arrow-and-unit form.
 
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
 2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
@@ -1718,7 +1720,7 @@ auto-derived; `{value:Debug}` selects it; `#Redact` on a field renders
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
 `.each`/`.to_list()` and `.get`/`.set`; experts implement
-`Iterable`+`Iterator` for `loop x; mytype` and `Index`/`IndexMut` for
+`Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) =>
@@ -2316,7 +2318,7 @@ separate shutdown law.
 
 **D-CONC-CHAN1=A — builtin channels and arm-table draining** *(ratified
 2026-08-06, card #1505; its wait spelling is amended by D-CONC-CHAN2=D)*:
-`channel<T>()` is builtin and needs no import. `loop value, receiver` drains
+`channel<T>()` is builtin and needs no import. `loop value in receiver` drains
 until close. `Receiver<T>` and `Sender<T>` are nameable in signatures. The
 wait works on plain endpoints in any task. The fluent builder, dead `Channel`
 entry, and silently dropped `.read` arm are deleted. `after` takes a duration
@@ -2348,7 +2350,7 @@ spelling for the spawn surface.
 
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
-`join()` returns `T ! TaskFailure`. `TaskFailure` is a normal enum with
+`join()` returns `T TaskFailure!`. `TaskFailure` is a normal enum with
 `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` returns
 its tuple on the same rail. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
@@ -2452,7 +2454,7 @@ used through dynamic dispatch keeps its declared upper-bound contract.
 fn twice(n: Int) Int -> n * 2
 // inferred []: pure
 
-pub fn load(path: String) String { core.files.read(path)? }
+pub fn load(path: String) String -> { core.files.read(path)? }
 // API snapshot: load -[FS.Read]> String
 
 pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path)? }
@@ -2542,7 +2544,7 @@ malformed block E1221.
 **D-STREAMYIELD1 — Generators** *(amended by D-CONC-STREAM1=A)*:
 `fn f() => Stream<T>` uses `yield expr` to hand a value to the consumer and
 suspend until the next pull; falling off the end (or a bare `return;`) ends the
-stream; `return value;` is E0806. Consumers are ordinary `loop x; f() { }`
+stream; `return value;` is E0806. Consumers are ordinary `loop x in f() { }`
 loops — one keyword, one type, no async/await coloring. Lifecycle,
 cancellation, and cleanup are the task law in D-CANCELMODEL1=C as applied by
 D-CONC-STREAM1=A; this decision adds no independent generator shutdown law.
@@ -2813,7 +2815,7 @@ task/join boundary, and `reset()` is rejected while any allocation view lives.
 `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
 `Map.try_insert`, `String.try_push`, and
 `mem.Arena.try_alloc`/`mem.Bump.try_alloc`/`mem.Pool.try_alloc`/
-`mem.Fixed.try_alloc` return `T ! AllocError`. `AllocError` is a Core value
+`mem.Fixed.try_alloc` return `T AllocError!`. `AllocError` is a Core value
 with `requested_bytes: Int` and `allocator: String`; a failed allocation is
 an ordinary error value and never calls the hosted abort hook. One Prelude
 implementation owns the fallible allocation semantics for AOT, JIT, and
@@ -3037,7 +3039,7 @@ functions on top — beginners meet only the named functions.
 `cpp.*` binds at full depth via a clang-based binder emitting a generated,
 cached C shim archive per library. Classes become opaque `#SingleUse` owned
 handles with consuming cleanup (S63); methods become ordinary Jet methods;
-exceptions are caught at the shim and surface as `T ! CppError` (fallible
+exceptions are caught at the shim and surface as `T CppError!` (fallible
 at every call site); templates instantiate on demand (`cpp.vector<Int>`);
 overloads collapse to argument labels (S61); operator overloads become
 named methods. The overlay tier corrects wrong guesses. Internal staging
@@ -3056,7 +3058,7 @@ the D-FFI-PY1 precedent):**
 - **D-FFI-JVM1=A**: `java.*` (Kotlin/Scala ride the same bytecode
   surface) — embedded JVM via the JNI invocation API, created lazily on
   first `java.*` call; classes are opaque handles; checked exceptions
-  surface as `T ! JavaError`; JVM provisioned by jetpack (I6). Its effect
+  surface as `T JavaError!`; JVM provisioned by jetpack (I6). Its effect
   clause is `:[FFI.Java]>`.
 - **D-FFI-DOTNET1=A**: `cs.*` (C#/F#) — hostfxr/hostpolicy embed; .NET
   Tasks bridge to Jet's concurrency runtime at the boundary; NuGet as jetpack
@@ -3335,7 +3337,7 @@ binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
-`#Rename("x")`, `#Skip`, `#Default`/`#Default(expr)`, `#Flatten`,
+`#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`,
 `#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
 externally tagged default, single-value variants bare; `#Discriminant("type")`
 internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
@@ -3359,7 +3361,7 @@ previously referenced entry-file-local paths).
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
 #131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
 spelling becomes a teaching error pointing at `DataTree` (no alias,
-I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ! [FieldError]`
+I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T [FieldError]!`
 everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
@@ -3404,8 +3406,8 @@ index, not a substitute for that law.
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
 - **D-ENV-MUTATE1=A**: `core.env` uses one process-global, raw-preserving
-  logical environment. `unset(name) => Bool ! EnvError` removes a key and
-  `vars() => [String] ! EnvError` returns a deterministic, owned names-only
+  logical environment. `unset(name) => Bool EnvError!` removes a key and
+  `vars() => [String] EnvError!` returns a deterministic, owned names-only
   snapshot. Unix identity and ordering use exact bytes; Windows identity uses
   `CompareStringOrdinal` ignoring case while preserving the last spelling and
   exact UTF-16 value. `get`, `home_dir`, mutations, and child launches share
@@ -3414,7 +3416,7 @@ index, not a substitute for that law.
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
   any non-Unicode entry. Existing editions keep `set => ()` and report
-  invalid input through E3001; its fallible `() ! EnvError` signature waits
+  invalid input through E3001; its fallible ` EnvError!` signature waits
   for a major release plus edition opt-in.
 - **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
   `core.process` mechanism. `ProcessSpec.terminal()` is an explicit opt-in;
@@ -3717,7 +3719,7 @@ index, not a substitute for that law.
 - **D-TASKRUNTIME1=A** *(amended by D-CONC-SPAWN1=D,
   D-CONC-CHAN1=A, and D-CONC-CHAN2=D)*: structured task scopes remain the
   lifetime boundary. The current surface is the nested `task` family,
-  builtin `channel<T>()`, `loop value, receiver`, and a subjectless `if`
+  builtin `channel<T>()`, `loop value in receiver`, and a subjectless `if`
   readiness table on plain endpoints. Timers, deadlines, cancellation, and
   readiness waits use typed values and the shared scheduler laws. Bounded
   channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
@@ -3846,8 +3848,8 @@ static-call path; there is no constructor registry or global search.
 
 **D-SUBJECT-CALL1=A — bare member shorthand for unary callable arguments**
 *(ratified by owner, card #1418)*: at a call argument whose expected type is a
-known one-parameter callable `fn(T) => R`, a bare lower-case
-`.member[.method(args)]*` chain means `(subject: T) :> subject.member…`. Sema
+known one-parameter callable `fn(T) R`, a bare lower-case
+`.member[.method(args)]*` chain means `(subject: T) -> subject.member…`. Sema
 rewrites it to the ordinary lambda AST, so all execution tiers use the existing
 closure path. The shorthand is not valid for operators, literals, unknown or
 non-callable expected types, or callables with more than one parameter; write
@@ -3859,7 +3861,7 @@ or `Float` becomes a duration only through the type-owned closed family
 `Duration.milliseconds/seconds/minutes/hours(value)?`. Scaling rejects overflow
 and non-finite floats; fractional milliseconds truncate toward zero. Whole-unit
 reads use only `duration.in(.Milliseconds/.Seconds/.Minutes/.Hours)?`, return
-`Int ! RangeError`, and truncate toward zero. The former `core.time` free
+`Int RangeError!`, and truncate toward zero. The former `core.time` free
 constructors and per-unit readers leave the surface without aliases. D-TYPE2-TIME1
 amends the static literal rule: `ns`, `us`, `ms`, `s`, `min`, `h`, and `d` resolve
 through the canonical `core.units::Time` family and produce the checked
@@ -3899,7 +3901,7 @@ meaning is retired, and every in-repo caller uses `.Slot` where positional
 removal is intended. `RemoveBy.{Val, Slot}` is the closed selector type; no
 parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
-**D-FIELDDEF1=C — field defaults use `=`** *(ratified 2026-07-31, card #1367)*: `field: T = expr` covers wire/CLI absence and omitted `Type.{ … }` construction fields (same spelling as parameter defaults, S61). `#Default(expr)` is retired (E0375); defaults must be compile-time constants (E2414). Required fields are those without `=`.
+**D-FIELDDEF1=C — field defaults ride the type (amended by D-DEFAULT-SHAPE1=B)** *(ratified 2026-07-31, card #1367)*: the field-default mechanism covers wire/CLI absence and omitted `Type{ … }` construction fields. The current spelling is `field: T{expr}`, shared with parameter defaults; `#Default(expr)` is retired (E0375), defaults must be compile-time constants (E2414), and required fields are those without `{…}`.
 
 **D-FMTCOLLAPSE1=B — collapse every fitting braced block** *(ratified 2026-07-31, card #1368)*: any `{ … }` whose contents fit the width budget becomes one line — control bodies, arms, function bodies, and marker regions. Comments or over-width contents stay multiline. Amends S44 / #1335.
 
@@ -6229,7 +6231,7 @@ proof-free. Implemented on card #746.
 **2026-07-25 — D-UNIONTYPE1=A**: `A | B` is closed structural enum sugar, not a
 second sum mechanism. Nested unions flatten, duplicates drop, and identity is
 order-insensitive with a deterministic canonical spelling and codegen enum.
-`T ! E1 | E2` parses as `T ! (E1 | E2)`. A member widens into its union only at
+`T (E1 | E2)!` parses as `T (E1 | E2)!`. A member widens into its union only at
 binding, argument, return, Codable field, and `?` error-propagation boundaries.
 Match arms name member types (`.Int(n)`, `.String(s)`). Codable decode dispatches
 by primary wire shape and rejects ambiguous shapes (E2415). Named enums stay the
@@ -7168,7 +7170,7 @@ refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
-**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `Group` parameters reuse the caller's lexical group. `join()` is the fallible `T ! TaskFailure` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
+**2026-08-06 — D-CONC-SPAWN1 = D / D-CONC-FAIL1 = A / D-CONC-JOIN1** *(card #1685)*. The spawn surface has one reserved word: `task`. A plain `task f()` or `task { … }` starts one child. Nested selectors stay free identifiers: `task.all { … }` waits for every branch and fail-fast cancels siblings, `task.race { … }` returns the first successful branch and cancels losers, and `task.any { … }` returns the first completed branch and cancels the rest. `task.group g { … }` owns a lexical scope; `task.group g(limit: n) { … }` bounds active children and the group joins at close. `Group` parameters reuse the caller's lexical group. `join()` is the fallible `T TaskFailure!` rail with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`, `trace()`, and `exception()` are retired. The old `taskgroup`, `g.task =>`, `g.all([…])`, `g.race([…])`, `g.any([…])`, `tasks.spawn`, `tasks.spawn_group`, `tasks.join_all`, and `tasks.wait_any` spellings have no compatibility path.
 **2026-08-08 — D-LIB-EXPORT1=C / D-LIB-DYNTRUST1=A / D-LIB-NAME1=A /
 D-LIB-CALLGRANT1=A** *(card #1421)*: `Library` keeps one output kind. Its
 `loadable: true` field requests a `.jetlib` artifact. `Mod.load(path,
@@ -7330,24 +7332,24 @@ finite-source finding form above. This section records the other outcomes.
   table-sugar choice.
 - **D-CHOOSE-FNBODY1=A** — a one-line function body uses `::`. Defining a
   named thing uses `::`; filling a slot inside a definition uses `=`.
-  Reassignment, parameter defaults, field defaults, and enum discriminants
-  keep `=`.
+  Reassignment, extern slot fills, and enum discriminants keep `=`;
+  parameter and field declaration defaults use `{…}`.
 
 **D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
 #1454; reconciles D-CHOOSE-FNBODY1=A)*: ordinary and multi-head function
 one-liners put `::` after the return type. Callable heads use `:>`. An
-effect-only `if` or `loop` may put `:>` before one adjacent statement; braces
+effect-only `if` or `loop` may put `->` before one adjacent statement; braces
 are required for multiple statements and scoped marker blocks. Function-body
 `=` retires with a teaching fix to `::`; `=` remains for slot-filling forms
-such as extern bindings, defaults, reassignment, field defaults, and enum
-discriminants. Marker-scoped blocks retain their own braces.
+such as extern bindings, reassignment, and enum discriminants. Declaration
+defaults ride the type as `{…}`. Marker-scoped blocks retain their own braces.
 
 **D-LOOP-STMT-ARROW1=C — arrow loop bodies in statement position** *(ratified
 2026-08-13, card #1453; arrow spelling amended by D-ARROW-UNIFY1=B)*: every statement-position loop header — finite source,
 condition-only, bare infinite, and mutable state — accepts `:> statement`. The
 statement runs for its effect and its value is discarded. A non-unit value gets
-a lint that names the value form `name :: loop … :> value` for collection, or
-the write-capability form `loop item, &values :> item *= 2` for in-place edits.
+a lint that names the value form `name :: loop … -> value` for collection, or
+the write-capability form `loop item in &values -> item *= 2` for in-place edits.
 Value-position finite loops keep their collection arrow semantics. The
 formatter chooses the arrow when one simple body fits and braces otherwise.
 
@@ -7360,7 +7362,7 @@ the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 row. A function or package may deny it with `:[!Panic]>` or
 `effects: { deny: [Panic] }`; the existing prohibition and manifest-budget
 machinery enforce the denial across the whole reachable dependency graph.
-Expected failure returns `T ! E`. A programmer-error stop is admissible only
+Expected failure returns `T E!`. A programmer-error stop is admissible only
 when callers carry a `#Pre` or refinement fact that proves the stop unreachable.
 The diagnostic names the panic site and gives the three exits: return a
 fallible result, add facts, or stay undenied. The row is compile-time only and
@@ -7600,15 +7602,15 @@ dotless spelling. The dotted form is retired: E0320's class teaches the dotless
 direction, and the reflex that E0320 punished is now the correct spelling.
 
 **2026-08-20 — D-LOOP-GUARD1=A** *(card #1416)*: a yielding-loop guard keeps
-the comma-less header form: `loop u, users if u.active :> u.name`. A comma
+the comma-less header form: `loop u in users if u.active -> u.name`. A comma
 before `if` is E0379, not a stride; genuine strides remain numeric third
-clauses such as `loop i, 0..10, 2`. This adds no token or second loop mechanism.
+clauses such as `loop i in 0..10, 2`. This adds no token or second loop mechanism.
 
 **2026-08-20 — D-LOOP-SUBJECT1=A** *(card #1417)*: a one-source loop may omit
 its binding when the source is a collection. The source item is the implicit
 subject, represented by `Syntax::KW_IT`; bare `.member` in the guard or body
 reads that subject. The guard keeps the comma-less form, for example
-`loop users if .active :> .name`. Scalar sources still require `name, source`,
+`loop users if .active -> .name`. Scalar sources still require `name in source`,
 and `(key, value)` sources always keep both names. Nested bindingless loops
 teach named bindings. Subject-member resolution runs before D-SHAPE3a's
 expected-type static shorthand. This adds no token or second loop mechanism.
@@ -7778,11 +7780,11 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
-**2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21)*: `?` has
-one meaning: `T?` means a value might be absent, while a fallible type uses
-`T ! E` (or `T !` for the default `Err`); call-site `?` propagation and `??`
-keep their current meanings. Option B's `!!` operator and the overloaded `T ? E`
-spelling are rejected.
+**2026-08-21 — D-ERRSIGIL1=A** *(card #2127; ratified 2026-08-21; amended by
+D-ERRSUFFIX1=B)*: `?` has one meaning: `T?` means a value might be absent,
+while a fallible type uses the suffix zone `T E!` (or `T !` for the default
+`Err`); call-site `?` propagation and `??` keep their current meanings. The
+infix `T ! E` and `T ? E` spellings are retired and teach the suffix form.
 
 ## The reading-first slate (ratified 2026-08-21, card #2144)
 

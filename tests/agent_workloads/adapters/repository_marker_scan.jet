@@ -7,11 +7,11 @@ fn run() {
     root :: args.get(1) ?? panic("missing input root")
     paths :: fs.walk(~root) ?? panic("cannot walk input root")
     rows := [String]{}
-    loop file, paths {
+    loop file in paths {
         if !file.is_dir {
             text :: fs.read(~file.path) ?? panic("cannot read input")
             count := 0
-            loop line, text.split("\n") {
+            loop line in text.split("\n") {
                 if line.contains("agent_workload:") -> count += 1
             }
             if count > 0 {
@@ -21,5 +21,5 @@ fn run() {
         }
     }
     rows.sort()
-    loop row, rows -> print(row)
+    loop row in rows -> print(row)
 }

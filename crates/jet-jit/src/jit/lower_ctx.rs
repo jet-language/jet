@@ -1549,7 +1549,7 @@ impl LowerCtx<'_, '_> {
                     Some(Type::Int)
                 }
                 // D-TEXTWIDTH1=B: the policy overload can reject a control
-                // character, so its return type is `Int ! TextError`. The
+        // character, so its return type is `Int TextError!`. The
                 // DECLARING table is sema's `is_polymorphic_core_special` +
                 // `infer_core_call`, which now stamps that type onto the node,
                 // so `??`/`?` read it off `value.ty` and never reach here. This
@@ -4518,7 +4518,7 @@ impl LowerCtx<'_, '_> {
         self.b.block_params(merge)[0]
     }
 
-    /// Native lowering for `loop x, xs { total += x }` over `[Int]`.
+    /// Native lowering for `loop x in xs { total += x }` over `[Int]`.
     fn lower_direct_int_list_sum(
         &mut self,
         label: &Option<String>,
@@ -12834,10 +12834,10 @@ impl LowerCtx<'_, '_> {
                 Ok(handle)
             }
             // D-FAIL-CARRIER1=A: one `Present` carries both the `T?` present
-            // side and the `T ! E` ok side, so the value alone cannot say which
+    // side and the `T E!` ok side, so the value alone cannot say which
             // physical carrier its reader will use. The slot says it: `T?` is the
             // packed carrier (`pack_option_payload`; absent is the zero word
-            // below), and `T ! E` is the result arena (`lower_ct_result`, the
+    // below), and `T E!` is the result arena (`lower_ct_result`, the
             // same `result_new_*` handle the runtime `Ok`/`Err` path builds).
             //
             // This used to be two arms, and the second — the result one — sat
@@ -12896,7 +12896,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// Build the `T ! E` result-arena carrier for one comptime outcome side.
+    /// Build the `T E!` result-arena carrier for one comptime outcome side.
     ///
     /// `payload_slot` is the declared side type when the caller knows it (the
     /// `ok` type for `Present`, the `err` type for `Failed(Told)`); the payload's

@@ -478,7 +478,7 @@ impl<'a> Fmt<'a> {
                 self.write("loop ");
                 // D-LOOP-SUBJECT1: the bindingless form writes its subject
                 // bare. The parser records the implicit binding as `it`, so
-                // printing the name back produces `loop it, words`, which is
+                // printing the name back produces `loop it in words`, which is
                 // not a spelling the parser accepts — `it` is a keyword, not a
                 // name. Round-tripping the corpus depends on eliding it here.
                 let bindingless = var2.is_none() && var == Syntax::KW_IT;
@@ -514,7 +514,7 @@ impl<'a> Fmt<'a> {
                 if bindingless {
                     self.maybe_wrap_loop_clause(wrap);
                 } else {
-                    self.loop_clause_separator(first_clause_start, wrap);
+                    self.loop_source_separator(first_clause_start, wrap);
                 }
                 match kind {
                     ForKind::Range { start, end, step, exclusive } => {
@@ -599,7 +599,7 @@ impl<'a> Fmt<'a> {
                 self.write(Syntax::KW_NEXT)
             }
             Stmt::ContinueLabel(name, _) => self.write(&format!("next({})", name)),
-            // D-LOOP-COMMA1=A: `loop init, cond, step { body }`.
+            // D-LOOP-HEADER2=A: `loop name := value, condition [, afterthought]`.
             Stmt::CountedLoop {
                 init,
                 cond,

@@ -1,14 +1,14 @@
 # One callable, one arrow — reading first
 
-**Status:** proposal. Every not-yet-ratified spelling below is marked *proposed*. Nothing here is law until its ballot is ratified.
+**Status:** historical proposal; the eight reading-first ballots were ratified on 2026-08-21. The operative callable rule is D-CALLABLE-ONE1=A in `docs/spec/syntax-decisions.md`; examples below retain audit context where they compare the pre-ratification surface.
 
 ## Executive summary
 
 The owner set a new priority order for Jet's surface: the ability to **reason** about code comes first, the ability to **read** it comes second, and the ability to **write** it comes third. This audit swept the lambda, function, and control-flow surface against that order, probed the running binary, and swept the rest of the surface for the same trade. The finding: Jet's *choice* surface (arm tables, one-line guards, loops) already serves reading well — the owner's instinct to collapse `else if` chains into tables is confirmed by the evidence and stays. The damage is concentrated in the **callable** surface and in the **arrow glyph** itself.
 
-One idea unifies the fixes: **the arrow means "yields", and every callable is one shape.** A function is a named lambda. Its interface — name, inputs, output, error, effects — sits complete and visible before the arrow. The body sits after the arrow and carries no interface facts. Today that one shape is split into seven costumes: a braced function has no arrow, a one-line function has one, a function with an effect row hides the arrow inside `:[IO]>`, a lambda always has one, a function type has none, a code argument has one, and a task block has none. A reader must learn seven rules for one concept. The proposal collapses them to one rule with one exception a beginner never meets.
+One idea unifies the fixes: **the arrow means "yields", and every callable is one shape.** A function is a named lambda. Its interface — name, inputs, output, error, effects — sits complete and visible before the arrow. The body sits after the arrow and carries no interface facts. The pre-ratification surface split that one shape into seven costumes; the ratified slate collapses it to one rule with one stated boundary a beginner never meets.
 
-The glyph itself is on the table. `:>` was picked for typing comfort; on the page it reads as noise, and the ratified ballot that unified it admitted losing the at-a-glance result cue. The slate offers `->` (lighter, standard) and `=>` (the `=` carries "outputs/binds") as full respells, worked side by side so the choice is visual. Both respell every arrow position, including the conversion rail (`impl StoreErr :> Err`) and the migration verbs — the review pass confirmed the whole live surface is already on `:>`, and the spec prose still showing `impl Source => Target` is drift, not law. The effect row unfuses from the arrow under its own ballot: `:[IO]` becomes a standalone interface fact, which also fixes the false arrow that today dangles in type position (`f: fn(Int) Int :[]>`).
+The glyph itself was on the ballot. The ratified choice is `->` in every arrow position. The effect row stays fused and splits the new glyph: `-[IO]>` and pure `-[]>`; standalone `:[IO]` is retired, as is a dangling body arrow in function type position.
 
 Three smaller reasoning hazards ride along, each probed live in the binary: a dispatch arm head that mixes distributed atoms with a guard (`48 | 45 && ready`) desugars invisibly and silently routes values to `else`; the subject shorthand accepts method-head chains in loops but rejects them in call slots (`.map(.len())` is two errors while `loop words if .len() > 1` runs); and parameter defaults use a shape (`name: Type = value`) that never appears in local bindings. The first two get tightening ballots. The third turns out to be lawful under the already-ratified "`::` defines, `=` fills" rule — the proposal teaches it and offers the respell anyway so the owner decides with the full picture.
 
@@ -16,13 +16,13 @@ What the ballots ask: pick the arrow glyph (D-ARROW-RESPELL1), adopt the one-cal
 
 ## The problem, briefly
 
-Jet says "a callable" once in its semantics and seven times in its syntax. The same concept wears a different costume depending on body form, effect row, and position. Each row below is real, current, running syntax.
+Jet says "a callable" once in its semantics and seven times in its syntax. The same concept wore a different costume depending on body form, effect row, and position. The table below records the pre-ratification audit surface; the ratified forms are shown where the implementation has landed.
 
 | # | The same concept | Today's spelling | Where | Arrow? | Defect |
 |---|---|---|---|---|---|
-| 1 | Function, one-expression body | `fn double(n: Int) Int :> n * 2` | `examples/features/basics/signature_shape.jet:2` | yes | — (baseline) |
-| 2 | Function, braced body | `fn scale(self, factor: Float, clamp: Bool = false) Rect { … }` | `examples/features/basics/named_args.jet:15` | **no** | arrow vanishes when braces appear |
-| 3 | Function, braced body + effects | `fn bump(n: Int) Int :[IO]> { … }` | `examples/features/basics/signature_shape.jet:4` | **fused** | arrow returns, but hidden inside the effect row |
+| 1 | Function, one-expression body | `fn double(n: Int) Int -> n * 2` | `examples/features/basics/signature_shape.jet:2` | yes | — (baseline) |
+| 2 | Function, braced body | `fn scale(self, factor: Float, clamp: Bool{false}) Rect -> { … }` | `examples/features/basics/named_args.jet:15` | **yes** | one callable shape keeps the result cue |
+| 3 | Function, braced body + effects | `fn bump(n: Int) Int -[IO]> { … }` | `examples/features/basics/signature_shape.jet:4` | **yes, effect-decorated** | effect row carries the body arrow |
 | 4 | Lambda, expression body | `n :> n * 2` | `examples/features/functions/lambda_inference.jet:7` | yes | cannot state a return type at all (AST has no slot: `crates/jet-foundation/src/AST/expressions.rs:256-336`) |
 | 5 | Code argument | `twice(() :> { print("HI") })` | `examples/features/syntax/trailing_block.jet:8` | yes | — |
 | 6 | Function type | `f: fn(Int) Int :[]>` | `examples/features/effects/effect_levers.jet:13` | **dangling** | a body arrow in type position, where no body can follow |
@@ -30,7 +30,7 @@ Jet says "a callable" once in its semantics and seven times in its syntax. The s
 
 Seven costumes, three arrow states (present, absent, fused), and one capability hole (row 4). The reader pays the bill: the arrow's presence tells them nothing reliable about the construct, so they re-derive the rule at every site.
 
-The glyph compounds it. `:>` sits in a four-member colon family — `::` (define), `:=` (mutable define), `:>` (body), `:[IO]>` (body with effects) — plus `:` for types, labels, and interpolation selectors. The brevity sweep rated this colon rail the densest context-switch cluster on the surface. The ratified arrow ballot (`c0ma0xb6`, D-ARROW-UNIFY1=B) chose one arrow and accepted "loses the at-a-glance result cue" as a cost; the owner now reports the glyph also reads as sloppy. Both costs are real and both are fixable by a pure respell — the unification itself was right and stays.
+The old glyph compounded a four-member colon family — `::` (define), `:=` (mutable define), `:>` (body), `:[IO]>` (body with effects) — plus `:` for types, labels, and interpolation selectors. The ratified slate removes the body spellings from that family: `->` owns plain body arrows and `-[IO]>` owns effect ceilings.
 
 Three adjacent hazards, each verified against the running binary today:
 
@@ -66,13 +66,12 @@ fn connect(host: String, /, *, timeout seconds: Int = 30) String { … }
 
 One test governs every element below: **all facts a reader needs to reason about a call sit visibly at the interface, before the arrow; the arrow always means "yields"; the body never smuggles interface facts.** Reason first, read second, write third. Where a short form survives, it survives because it *aids* reasoning (one responsibility per line, no zoom-in/zoom-out), never because it saves keystrokes.
 
-### One callable shape *(proposed — D-CALLABLE-ONE1)*
+### One callable shape *(ratified — D-CALLABLE-ONE1=A)*
 
 One production covers every callable. Square brackets mark what each rung may omit:
 
 ```
-[fn name] ( params ) [Return] [! Error] [:[Effects]] -> body
-   (if D-ERRSUFFIX1 adopts suffixes, the return zone reads [Success?] [Error!]* instead of [Return] [! Error])
+[fn name] ( params ) [Success?] [Error!]* [-[Effects]>|->] body
 arrow rule: present exactly when a non-unit success Return is declared, or the callable is a lambda
 body = expression | { statements … trailing-value }
 ```
@@ -86,27 +85,20 @@ fn greet() {
 }
 
 // Rung 0b — unit-fallible stays arrowless (D-FAIL-UNIT1=A, unchanged).
-fn save(path: String) ! IOError {
+fn save(path: String) IOError! {
     write(path)? "saving"
 }
 
-// Rung 1 — a result appears, so the arrow appears. One-liners: today vs proposed.
-fn double(n: Int) Int :> n * 2        // today
-fn double(n: Int) Int -> n * 2        // proposed
+// Rung 1 — a result appears, so the arrow appears.
+fn double(n: Int) Int -> n * 2
 
-// Rung 2 — braced body with a result. Today the arrow vanishes; proposed it stays.
-fn scale(r: Rect, f: Float) Rect {    // today: `Rect {` — type? literal? the space decides
-    Rect{width: r.width * f, height: r.height * f}
-}
-fn scale(r: Rect, f: Float) Rect -> { // proposed: the arrow ends the interface, then the body
+// Rung 2 — braced body with a result keeps the arrow.
+fn scale(r: Rect, f: Float) Rect -> { // the arrow ends the interface, then the body
     Rect{width: r.width * f, height: r.height * f}
 }
 
 // Rung 3 — full interface stack: result, error, effects, in one fixed order.
-fn poll(url: String) Response ! NetError :[IO] -> {   // proposed
-    fetch(url)? "polling {url}"
-}
-fn poll(url: String) Response ! NetError :[IO]> {     // today: effects swallow the arrow
+fn poll(url: String) Response NetError! -[IO]> {
     fetch(url)? "polling {url}"
 }
 ```
@@ -132,7 +124,7 @@ Why this beats today: the reader gets one invariant — *see an arrow, a success
 
 Expert exits: `jet fmt` performs the whole migration mechanically (arrow insertion is syntax-directed, zero judgment); `jet explain E0068` teaches the shape at the exact error site; no project switch is offered because two callable grammars is precisely the state this ballot deletes (I8).
 
-One current wrinkle the story below the ballot names precisely: the parser today *accepts* `fn describe(age: Int) String :> { … }` and the formatter then strips the marker back to the bare-brace canonical form. The defect is canonical-shape instability — the marker is legal ink that fmt erases — not a parse rejection.
+Implementation note: an arrowless braced body with a declared non-unit success result now reports E0080 and offers an insertion fix. The formatter recovers this teaching input and writes the canonical `-> {` form, so formatting no longer erases a legal marker or oscillates between shapes. Unit and unit-fallible braced bodies remain arrowless, and `task { … }` remains outside this callable grammar.
 
 ### The arrow itself *(proposed — D-ARROW-RESPELL1, amends D-ARROW-UNIFY1=B spelling)*
 
@@ -147,7 +139,7 @@ fn label(n: Int) String -> {
         else -> "many"
     }
 }
-names :: loop u, users if u.active -> u.name
+names :: loop u in users if u.active -> u.name
 m :: if a > b -> a else -> b
 if ready -> run() else -> wait()
 ```
@@ -161,7 +153,7 @@ fn label(n: Int) String => {
         else => "many"
     }
 }
-names :: loop u, users if u.active => u.name
+names :: loop u in users if u.active => u.name
 m :: if a > b => a else => b
 if ready => run() else => wait()
 ```
@@ -175,7 +167,7 @@ fn label(n: Int) String :> {
         else :> "many"
     }
 }
-names :: loop u, users if u.active :> u.name
+names :: loop u in users if u.active :> u.name
 m :: if a > b :> a else :> b
 if ready :> run() else :> wait()
 ```
@@ -310,9 +302,9 @@ fn describe(age: Int) String {         // canonical today: bare braces, no arrow
 }
 
 fn audit(users: [User]) :[IO]> {
-    names :: loop u, users if u.active :> u.name
+    names :: loop u in users if u.active :> u.name
     labels :: names.map(n :> n.to_upper())
-    loop label, labels :> print(label)
+    loop label in labels :> print(label)
 }
 
 fn run() {
@@ -335,9 +327,9 @@ fn describe(age: Int) String -> {
 }
 
 fn audit(users: [User]) :[IO] {
-    names :: loop u, users if u.active -> u.name
+    names :: loop u in users if u.active -> u.name
     labels :: names.map(.to_upper())        // subject shorthand, now one rule
-    loop label, labels -> print(label)
+    loop label in labels -> print(label)
 }
 
 fn run() {

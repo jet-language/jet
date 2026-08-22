@@ -33,8 +33,52 @@ fn is_bare_member_chain(expr: &Expr) -> bool {
             matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty())
                 || is_bare_member_chain(inner)
         }
-        Expr::MethodCall { receiver, .. } => is_bare_member_chain(receiver),
+        Expr::MethodCall { receiver, .. } => {
+            matches!(receiver.as_ref(), Expr::Ident(name, _) if name.is_empty())
+                || is_bare_member_chain(receiver)
+        }
         _ => false,
+    }
+}
+
+/// D-SUBJECT-COHERE1=A: the parser uses a function-value call node for a
+/// leading `.member(...)`, while ordinary postfix method calls use
+/// `MethodCall`. Normalize that one parser distinction before the shared
+/// subject-chain test so every `.segment[(args)]` chain follows one path.
+fn normalize_bare_method_head(expr: &mut Expr) {
+    match expr {
+        Expr::Field(inner, ..) => normalize_bare_method_head(inner),
+        Expr::MethodCall { receiver, .. } => normalize_bare_method_head(receiver),
+        Expr::CallValue { callee, .. } => {
+            normalize_bare_method_head(callee);
+            let Expr::Field(inner, _, _) = callee.as_ref() else {
+                return;
+            };
+            if !matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty()) {
+                return;
+            }
+            let span = expr.span();
+            let Expr::CallValue { callee, args, .. } = std::mem::replace(expr, Expr::Absent(span))
+            else {
+                unreachable!("matched a bare method-head call value");
+            };
+            let Expr::Field(receiver, method, method_span) = *callee else {
+                unreachable!("matched a bare method-head field");
+            };
+            *expr = Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                owner_type_args: Vec::new(),
+                type_args: Vec::new(),
+                args,
+                recv_type: None,
+                resolved_ret: None,
+                checked_widen: false,
+            };
+        }
+        Expr::Paren(inner, ..) => normalize_bare_method_head(inner),
+        _ => {}
     }
 }
 
@@ -110,6 +154,17 @@ fn reflected_fact_type(base: &Type, read: jet_foundation::Registry::FactRead) ->
 }
 
 impl<'a> Checker<'a> {
+    fn layout_target(&self) -> jet_foundation::Layout::TargetLayout {
+        self.modules
+            .and_then(|modules| modules.get(self.module_idx))
+            .map(|state| {
+                jet_foundation::Layout::TargetLayout::from_triple(
+                    &state.build_facts.target_triple,
+                )
+            })
+            .unwrap_or_else(jet_foundation::Layout::TargetLayout::host)
+    }
+
     /// D-METAREFLECT1=A: fold a static `Type.reflect()` call from the source
     /// items already owned by this module. The returned TypeInfo is a
     /// compile-time value; no engine receives a reflection request.
@@ -143,10 +198,12 @@ impl<'a> Checker<'a> {
             ));
             return Some(None);
         }
-        let Some(value) = crate::Comptime::reflect_type_value(
+        let target = self.layout_target();
+        let Some(value) = crate::Comptime::reflect_type_value_with_target(
             self.items,
             type_name,
             self.module_path,
+            &target,
         ) else {
             return None;
         };
@@ -288,7 +345,13 @@ impl<'a> Checker<'a> {
                 let Expr::Ident(type_name, _) = receiver.as_ref() else {
                     return Some(None);
                 };
-                crate::Comptime::reflect_type_value(self.items, type_name, self.module_path)
+                let target = self.layout_target();
+                crate::Comptime::reflect_type_value_with_target(
+                    self.items,
+                    type_name,
+                    self.module_path,
+                    &target,
+                )
                     .and_then(|value| {
                         crate::Comptime::reflected_fact_field(&value, read)
                             .cloned()
@@ -1742,6 +1805,14 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         self.normalize_contextual_expr(e);
+        if self.implicit_loop_subject_depth > 0
+            || self
+                .expected_type
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, Type::Fn { .. }))
+        {
+            normalize_bare_method_head(e);
+        }
         if self.implicit_loop_subject_depth > 0 {
             // A leading `.method(args)` is parsed as a call through the
             // leading-dot field. In an implicit-subject loop it is the
@@ -1792,6 +1863,19 @@ impl<'a> Checker<'a> {
         if let Some(Type::Fn { params, .. }) = self.expected_type.clone() {
             if is_bare_member_chain(e) && params.len() == 1 {
                 let span = e.span();
+                let chain = bare_member_chain_text(e);
+                if self.subject_shorthand_depth > 0 {
+                    self.diags.push(Diagnostic::lint(
+                        "L0512",
+                        format!(
+                            "subject shorthand `{chain}` is nested inside another subject shorthand"
+                        ),
+                        "implicit subjects become hard to track when shorthand scopes nest"
+                            .to_string(),
+                        format!("rewrite it with a named binding: `(item) -> item{chain}`"),
+                        Some(span),
+                    ));
+                }
                 let mut body = std::mem::replace(e, Expr::Absent(span));
                 replace_bare_member_subject(&mut body);
                 *e = Expr::Lambda(Lambda {
@@ -1802,11 +1886,17 @@ impl<'a> Checker<'a> {
                         ty: Some(params[0].clone()),
                         ty_span: None,
                     }],
+                    result_type: None,
+                    error_type: None,
+                    effects: None,
                     body: LambdaBody::Expr(Box::new(body)),
                     span,
                     meta: LambdaMeta::default(),
                 });
-                return self.infer(e);
+                self.subject_shorthand_depth += 1;
+                let result = self.infer(e);
+                self.subject_shorthand_depth -= 1;
+                return result;
             }
             if is_bare_member_chain(e) {
                 let arity = params.len().to_string();
@@ -4729,7 +4819,7 @@ impl<'a> Checker<'a> {
                     "E0503",
                     "strings aren't indexed with `[ ]`".to_string(),
                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                    "e.g. `loop c, s.chars() { }` or `s.slice(0..2)`".to_string(),
+                    "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
                     Some(*span),
                 ));
                 None

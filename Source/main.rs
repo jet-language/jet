@@ -1383,7 +1383,11 @@ fn main() {
             if a.starts_with("--target=") {
                 continue;
             }
-            if a.as_str() == "-" || !a.starts_with('-') {
+            // The canonical arrow is also a valid `jet explain` query; keep
+            // it as a positional token even though it begins with `-`.
+            let explain_arrow_query = jet_argv.first().is_some_and(|arg| arg == "explain")
+                && a == jet::Syntax::OP_UNIFIED_ARROW;
+            if a.as_str() == "-" || !a.starts_with('-') || explain_arrow_query {
                 out.push(a);
             }
         }

@@ -453,14 +453,15 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings(
+        let run = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
             file,
             &args,
             gates,
             profile.budget_name(),
             setting_overrides,
         );
-        match outcome {
+        crate::CmdDevTools::render_lints(file, mode, &run.lints);
+        match run.outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -508,14 +509,15 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings(
+        let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
             file,
             &args,
             mode.json,
             gates,
             setting_overrides,
         );
-        match outcome {
+        crate::CmdDevTools::render_lints(file, mode, &run.lints);
+        match run.outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -1169,6 +1171,7 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    crate::CmdDevTools::render_lints(file, mode, &out.lints);
     let clinks = match jet::resolve_c_links(file) {
         Ok(args) => args,
         Err(diags) => {
@@ -1700,7 +1703,7 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
 }
 
 /// D-JSONCANON1 migration: is the function enclosing byte offset `at` in
-/// `src` fallible (S34 `-> T ! E` / bare `T ?`)? Walks outward through
+/// `src` fallible (S34 `-> T E!` / bare `!`)? Walks outward through
 /// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
 /// functions — until a scope's header text parses as a `fn` signature, or
 /// there is no enclosing scope (top-level, e.g. a `$` initializer:

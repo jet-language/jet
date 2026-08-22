@@ -449,11 +449,22 @@ impl<'a> Fmt<'a> {
                 self.write("?");
             }
             Type::Result { ok, err } => {
-                self.fmt_type(ok);
-                self.write(" ");
-                self.write(Syntax::TYPE_FALLIBLE_SEP);
-                self.write(" ");
-                self.fmt_type(err);
+                if Self::is_unit_type(ok) {
+                    if Self::is_default_error(err) {
+                        self.write(Syntax::TYPE_FALLIBLE_SEP);
+                    } else {
+                        self.fmt_error_suffix(err);
+                    }
+                } else {
+                    self.fmt_type(ok);
+                    if Self::is_default_error(err) {
+                        self.write(" ");
+                        self.write(Syntax::TYPE_FALLIBLE_SEP);
+                    } else {
+                        self.write(" ");
+                        self.fmt_error_suffix(err);
+                    }
+                }
             }
             Type::Fn {
                 params,
@@ -668,35 +679,51 @@ impl<'a> Fmt<'a> {
         matches!(
             ty,
             Type::Result { ok, .. }
-                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                if Self::is_unit_type(ok)
         )
+    }
+
+    fn is_unit_type(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+    }
+
+    fn is_default_error(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name == Syntax::TYPE_ERR)
+    }
+
+    fn fmt_error_suffix(&mut self, err: &Type) {
+        if matches!(err, Type::Union(_)) {
+            self.write("(");
+            self.fmt_type(err);
+            self.write(")");
+        } else {
+            self.fmt_type(err);
+        }
+        self.write(Syntax::TYPE_FALLIBLE_SEP);
+    }
+
+    pub(super) fn return_type_has_value(ty: &Type) -> bool {
+        !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+            && !Self::is_unit_fallible_type(ty)
     }
 
     pub(super) fn fmt_unit_fallible_return(&mut self, ty: &Type) {
         let Type::Result { err, .. } = ty else {
             unreachable!("unit-fallible return formatter received a non-result type");
         };
-        self.write(" ");
-        self.write(Syntax::TYPE_FALLIBLE_SEP);
-        if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_ERR) {
+        if Self::is_default_error(err) {
             self.write(" ");
-            self.fmt_type(err);
+            self.write(Syntax::TYPE_FALLIBLE_SEP);
+        } else {
+            self.write(" ");
+            self.fmt_error_suffix(err);
         }
     }
 
     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
-        // D-ERRSIGIL1: Optional returns are bare `T?`; fallible is `T !` / `T ! E`.
-        if let Type::Result { ok, err } = ty {
-            self.fmt_type(ok);
-            self.write(" ");
-            self.write(Syntax::TYPE_FALLIBLE_SEP);
-            if !matches!(**err, Type::Named(ref n) if n == Syntax::TYPE_ERR) {
-                self.write(" ");
-                self.fmt_type(err);
-            }
-        } else {
-            self.fmt_type(ty);
-        }
+        // D-ERRSUFFIX1: optional success and error types each carry their own
+        // suffix; a separated bare `!` remains the default-error shorthand.
+        self.fmt_type(ty);
     }
 
     pub(super) fn fmt_expr(&mut self, expr: &Expr, prec: Prec) {
@@ -1614,7 +1641,7 @@ impl<'a> Fmt<'a> {
         // D-LOOP-SUBJECT1: the bindingless form writes its subject bare —
         // `loop words -> .to_upper()`. The parser records the implicit
         // binding as `it`, and `it` is a keyword rather than a name, so
-        // printing it back emits `loop it, words`, which the parser then
+        // printing it back emits `loop it in words`, which the parser then
         // refuses. Eliding it is what makes the corpus round-trip.
         if !(var2.is_none() && var == Syntax::KW_IT) {
             if var2.is_some() {
@@ -1626,7 +1653,7 @@ impl<'a> Fmt<'a> {
                 self.write(name);
                 self.write(")");
             }
-            self.write(", ");
+            self.write(" in ");
         }
         match kind {
             ForKind::Range {

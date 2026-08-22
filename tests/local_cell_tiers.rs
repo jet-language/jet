@@ -134,12 +134,12 @@ impl Box {
     }
 }
 
-fn keep_result(value: ^(Int ! String)) {
+fn keep_result(value: ^(Int String!)) {
     cell :: Cell.new(value)
     print(cell.read(result -> result ?? 0))
 }
 
-fn ok_result() Int ! String {
+fn ok_result() Int String! {
     return Ok(7)
 }
 

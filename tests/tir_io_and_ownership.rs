@@ -91,7 +91,7 @@ fn collect() [String] -[IO]> {
 fn run() {
     got :: collect()
     print(\"count={got.len()}\")
-    loop g, got {
+    loop g in got {
         print(g)
     }
     print(\"done\")

@@ -5294,7 +5294,7 @@ impl<'a> Checker<'a> {
         ));
     }
 
-    /// E0120: `loop h, hs { … }` over a list of handles that cannot be copied
+    /// E0120: `loop h in hs { … }` over a list of handles that cannot be copied
     /// hands out each handle itself, which takes the list. The collection must
     /// be a bare owned local or a temporary — a borrowed name, view, field, or
     /// index cannot give the list away.
@@ -5356,7 +5356,7 @@ impl<'a> Checker<'a> {
                     "E0120",
                     "this loop can't take handles out of a field or index".to_string(),
                     why,
-                    "bind the list into a local this scope owns first (`hs := …`), then write `loop h, hs { … }`"
+                    "bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`"
                         .to_string(),
                     Some(collection.span()),
                 ));

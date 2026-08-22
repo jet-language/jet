@@ -830,7 +830,7 @@ impl<'a> TaintCtx<'a> {
         self.snapshot()
     }
 
-    /// The shared loop rule, stated once in `Facts::after_loop`.
+    /// The shared loop rule is stated once in `Facts::after_loop`.
     fn check_loop_body(&mut self, body: &[Stmt]) {
         let before = self.snapshot();
         self.check_block(body);

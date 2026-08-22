@@ -1410,8 +1410,9 @@ impl RuleSignature {
             .map(|param| {
                 let mut part = format!("{}: {}", param.name, param.source_type);
                 if let Some(default) = param.default {
-                    part.push_str(" = ");
+                    part.push('{');
                     part.push_str(default);
+                    part.push('}');
                 }
                 part
             })

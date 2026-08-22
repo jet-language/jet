@@ -9,7 +9,7 @@ fn run() {
     input :: args.get(1) ?? panic("missing input file")
     text :: fs.read(input) ?? panic("cannot read input")
     line_number := 0
-    loop line, text.split("\n") {
+    loop line in text.split("\n") {
         line_number += 1
         if line_number != 1 && line != "" {
             fields :: line.split("\t").to_list()
@@ -20,7 +20,7 @@ fn run() {
             timeout_ms :: Int.parse(fields[3]) ?? panic("bad timeout")
             timeout :: Duration.milliseconds(timeout_ms) ?? panic("bad timeout")
             argv := [String]{~program}
-            loop argument, arguments.split("|") -> argv.push(argument)
+            loop argument in arguments.split("|") -> argv.push(argument)
             result :: process.cmd(argv)
                 .stdout(.Capture)
                 .stderr(.Capture)

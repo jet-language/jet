@@ -144,8 +144,9 @@ the package import graph. A library `pub` stays exempt. A name beginning with
 `_` is an intentional discard and stays silent. These first three verdicts are
 file-local: another file cannot make an import, binding, or private function
 live. `unreachable_export` uses the package's explicit import graph. A library
-`pub` stays exempt. `jet fix` applies the plain rename to `_name`; deleting the
-unused item remains a valid manual repair. A team may promote any of these rows
+`pub` stays exempt. `jet fix` removes a literal-only unused local binding, an
+empty private function, or a plain unused import. It renames the name when
+removal is not provably side-effect free. A team may promote any of these rows
 with the existing `policy.lints.deny` surface; no unused-code-specific policy
 exists.
 
@@ -259,6 +260,7 @@ renumbered, and no new `W` code may be allocated.
 | E0077 | parse | a scoped grant uses the retired body-binding form (D-ARROW-UNIFY1) |
 | E0078 | sema | a finite value loop is missing its exhaustion route, or uses bare immediate `?? next`/`?? break` (D-CHOOSE-FIND1) |
 | E0079 | sema | effect-only loop uses a result exit (D-LOOPSTATE1) |
+| E0080 | parse | a value-returning braced callable is missing its body arrow (D-CALLABLE-ONE1=A, D-BODY-ARROW1=B) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | callable `->`, `-[Effects]>`, `::`, or `{` split incorrectly from the declaration head (S6-R, D-ONELINE-BODY1=B) |
@@ -284,7 +286,7 @@ renumbered, and no new `W` code may be allocated.
 | E0114 | sema  | a path reaches the end without `return`   |
 | E0115 | sema  | `break`/`next` outside a loop             |
 | E0987 | sema  | `break(name)`/`next(name)` names no enclosing `name :: loop` (D-LOOPLABEL3, D-LOOPSTATE1) |
-| E0988 | parse/sema | retired dot/`@` loop exits, `name := loop`, or runtime use of a loop name (D-LOOPSTATE1) |
+| E0988 | parse/sema | retired dot/`@` loop exits in `name := loop`, or runtime use of a loop name (D-LOOPSTATE1) |
 | E0989 | sema  | `@if` condition is not a comptime expression (D-WHEN1) |
 | E0990 | parse | *retired by D-MARKER-CANON1* (was: `@` marker-prefix teaching) |
 | E0116 | sema  | valueless call used as a value            |
@@ -407,6 +409,8 @@ renumbered, and no new `W` code may be allocated.
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
 | E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
 | E0382 | sema  | `#Memo` requires a bare computed field (D-FIELDMEMO1=A) |
+| E0383 | parse | teaching: source loops join a binding and source with `in`, not a comma (D-LOOP-IN1=A) |
+| E0384 | parse | teaching: expression-position membership uses `.contains(x)`, not `in` (D-LOOP-IN1=A) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0342 | parse | `#Off` / `#DebugOnly` written on an item instead of a statement (D-CANVASSTATE1) |
@@ -434,6 +438,7 @@ renumbered, and no new `W` code may be allocated.
 | E0364 | sema  | inclusive `0..xs.len()` indexes that same `xs` (D-RANGE-EXCL1=C) |
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
+| E0386 | parse | a bare distributed atom group is a direct operand of `&&` or `||` (D-ARMHEAD-PAREN1=A) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
 | E0368 | parse | fence expansion has no entries (D-EACH1=C, D-FENCE-GLYPH1=A) |
 | E0369 | parse | one binding fence repeats a name (D-EACH1=C, D-VERDICT-1320-1) |
@@ -442,13 +447,14 @@ renumbered, and no new `W` code may be allocated.
 | E0372 | parse | teaching: an adjacent effect `if`, `else`, or `loop` body needs braces (D-ONELINE-BODY1=B) |
 | E0373 | parse | teaching: loop header clauses use commas, not semicolons (D-LOOP-COMMA1=A) |
 | E0374 | parse | teaching: retired `comptime`; use implicit folding or `$` (D-VERDICT-1308-1) |
-| E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
+| E0375 | sema  | retired `#Default` on a field; write `field: T{expr}` (D-DEFAULT-SHAPE1=B) |
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
 | E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B, D-ONCE-AT1=D) |
 | E0378 | parse | teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B) |
 | E0379 | parse | teaching: a guard follows its source with no comma (D-LOOP-GUARD1=A) |
 | E0380 | sema | bindingless loop requires a named binding for a scalar source or a nested loop |
 | E0381 | parse | ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
+| E0385 | parse | teaching: retired declaration default `name: Type = value`; write `name: Type{value}` (D-DEFAULT-SHAPE1=B) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -457,7 +463,7 @@ renumbered, and no new `W` code may be allocated.
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `??` fallback type/`return` mismatch or non-diverging test-bind route |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
-| E-ERR-SIGIL | parse | retired `?` fallible type separator; use `!` (D-ERRSIGIL1) |
+| E-ERR-SIGIL | parse | retired infix fallible type spelling; use an error suffix (D-ERRSUFFIX1) |
 | E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
 | E0408 | sema  | `err` used in an optional fallback (D-CHOOSE-TEST1=A) |
 | E0410 | parse | *retired by D-MARK-DISCARD1=A* (was: `#Suppress` unknown argument) |
@@ -502,6 +508,7 @@ renumbered, and no new `W` code may be allocated.
 | L0508 | sema | arrow loop body computes and drops a non-unit value (D-LOOP-STMT-ARROW1=C) |
 | L0509 | jet | reserved auto-derive policy name on the shared deny surface (D-ONCE-AUTODERIVE1) |
 | L0510 | sema | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) |
+| L0512 | sema | nested subject shorthand needs an explicit binding (D-SUBJECT-COHERE1=A) |
 | L0520 | sema  | auto-printable struct used in bare `{value}` without `Display` (migration lint, D-DISPLAY-SHAPE) |
 | L0601 | sema  | outside use of a soft-public `_name`; callable but not a minor-version compatibility promise (D-SHAPE-INTERNAL1=A) |
 | L0619 | jet   | package boundary rule matches no import edge (D-STRUCT-EDGE1) |
@@ -551,9 +558,9 @@ renumbered, and no new `W` code may be allocated.
 | E0736 | sema  | `#Scrub(Tag)` does not consume that tagged type and return an untagged result (D-TAG-SURFACE1) |
 | E0745 | retired | *retired by D-SHAPE8=A* (was: `#Pure fn` combined with a non-empty `#(…)` effect list) |
 | E0746 | sema  | an irreversible effect (Net/FS/Exec/FFI) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2, D-BOUND-UNDO1) |
-| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) :[]>` / `fn(…) :[E]>`) (D-EFF2) |
-| E0748 | sema  | `:[via f]>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
-| E0749 | sema  | a function reaches an effect it prohibits with `:[!E]>` in its own call graph, including a denied `Panic` stop (D-PROP1=A, D-NOPANIC1=D) |
+| E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) -[]>` / `fn(…) -[E]>`) (D-EFF2) |
+| E0748 | sema  | `-[via f]>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
+| E0749 | sema  | a function reaches an effect it prohibits with `-[!E]>` in its own call graph, including a denied `Panic` stop (D-PROP1=A, D-NOPANIC1=D) |
 | E0750 | sema  | an effect declaration lacks a leaf, or a dotted effect under a checked root is not a declared package-view leaf (D-EFFECT-DECL1=A) |
 | E0751 | sema  | Panic is a deny-only effect row (D-PANICROOT1=A) |
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
@@ -633,7 +640,7 @@ renumbered, and no new `W` code may be allocated.
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
-| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) => BuildPlan !` signature (D-BUILDENTRY1) |
+| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) BuildPlan !` signature (D-BUILDENTRY1) |
 | E3502 | build | programmable build evaluation, graph validation, or generated-source materialization failed |
 | E3503 | build | root build authority is undeclared, ungated, or denied by effective policy (D-BUILDPOLICY1) |
 | E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
@@ -716,7 +723,7 @@ renumbered, and no new `W` code may be allocated.
 | E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
 | E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
 | E1313 | sema  | trait-bounded variadic call-site argument doesn't implement the bound trait (D-ANY-JAI1) |
-| E1314 | sema  | trait-bounded variadic parameter used outside a `loop x, name { … }` loop (D-ANY-JAI1) |
+| E1314 | sema  | trait-bounded variadic parameter used outside a `loop x in name { … }` loop (D-ANY-JAI1) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source got irreconcilable refs |
 | E0968 | jetpack | a module `sources:` entry isn't a `target@provider` ref or bare path (D-JPK-REF1/U6/U8) |
@@ -953,8 +960,8 @@ copy:
 
 ## Callable and control syntax diagnostics
 
-These diagnostics cover the body rules ratified by D-BODY-LAST1=B and
-D-SIG-SHAPE1=B, plus the existing control rules in D-ARROW-CONTROL1,
+These diagnostics cover the body rules ratified by D-BODY-LAST1=B,
+D-SIG-SHAPE1=B, and D-CALLABLE-ONE1=A, plus the existing control rules in D-ARROW-CONTROL1,
 D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 
 | Code | What | Why | Fix |
@@ -973,6 +980,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0077 | The `#Grant` scope marker is retired. | `#Abilities` now narrows a block and binds an `Abilities` handle when its head has a name. | Write `#Abilities(abilities: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
+| E0080 | A braced callable with a non-unit success result needs `->` before its body. | The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces. | Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare. |
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `->`, `-[Effects]>`, `::`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
@@ -980,6 +988,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E-CALL-VALUE | A function value is invoked with the retired adjacent-call spelling. | Named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit (D-CALLVALUE1=B). | Write `callee.call(…)`. |
 | E0772 | This call to `{callee}` matches more than one callable body. | The call binds to multiple candidate signatures, so positional mapping cannot choose a body safely. | Name the arguments to choose one candidate: `{callee}({rewrite})`. |
 | E0366 | A pattern arm sits under a non-`==` distributed `if` table. | Structural patterns bind under `if subject == { … }` only. Other markers (`<`, `!=`, …) distribute bare values, not shapes. | Write `if subject == { … }` for pattern arms, or use a Bool head. |
+| E0386 | A bare distributed atom group is a direct operand of `&&` or `||`. | A `|` arm head is one distributed group, so its boundary must stay visible before a Boolean operator applies. | Write `(atom | atom) && guard` or `(atom | atom) || guard`; the compiler can insert these parentheses. |
 
 ## Editions and release policy (E2-M2)
 
@@ -1040,7 +1049,7 @@ the `core.args` runtime-error voice above (no new code for that).
 | E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int` (including inline ranges), `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#CLI` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#CLI` struct. |
 | E1306 | two `#CLI` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
 | E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is a `#CLI`-derived program struct. | Mark the program struct `#CLI`, or use a direct scalar-parameter `fn run` entry. |
-| E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with a `= expr` default are already flag-only. | Remove `#Flag`, or make the field a required scalar without a `= expr` default. |
+| E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with a `{expr}` default are already flag-only. | Remove `#Flag`, or make the field a required scalar without a `{expr}` default. |
 | E1318 | `` `#Short("name")` is not a one-letter option `` or `` `#Short("n")` is used by both `first` and `second` `` | The shared command parser treats a short option as one ASCII letter, and each spelling must select only one `#CLI` field. | Use one letter and give colliding fields different values. |
 | E1319 | `` `#Short` has no CLI mapping for field `name` `` | `#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder's value-option fallback. | Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field. |
 | E1344 | CLI command `{command}` collides with another command or root flag | A program struct has one command namespace and one root flag namespace; a word cannot name both. | Rename the command or root field so every command word is unique. |
@@ -1057,7 +1066,7 @@ names never provide an alternate lookup path.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `() !`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
+| E1321 | the Output kind, payload, entry reference, callable contract, or singular selection is invalid | `Output` has nine closed kinds; runnable entries are checked function references. Executables take zero or one CLI-derived parameter, Services and Checks take none, and all return `()` or `!`. A singular run without `fn run` also needs one unambiguous Executable. | Use a ratified kind and fields, point `entry:` at one visible safe function with the role's exact signature, or select one of the listed Executables explicitly. |
 
 ### Ecosystem and environment composition diagnostics
 
@@ -1114,7 +1123,7 @@ parse error.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0318 | `` `..=` `` is not a Jet operator — Jet's `..` is already inclusive. | In Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` always includes both ends, so there is no `..=`. | Write `lo..hi` — it already means "lo through hi inclusive." |
-| E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | A stride modifies a loop range to skip values (`loop i, 0..10, 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove the stride; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
+| E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | A stride modifies a loop range to skip values (`loop i in 0..10, 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove the stride; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
 
 ## Member spread and fixed-size list diagnostics
 
@@ -1129,11 +1138,11 @@ parse error.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1310 | A `...` rest parameter is not last, or a variadic parameter has a default value. | A variadic parameter collects every trailing argument, so nothing may follow it; a default would contradict that job. | Move `name: ...T` to the end of the parameter list and remove any `= …` default. |
+| E1310 | A `...` rest parameter is not last, or a variadic parameter has a default value. | A variadic parameter collects every trailing argument, so nothing may follow it; a default would contradict that job. | Move `name: ...T` to the end of the parameter list and remove any `{…}` default. |
 | E1311 | A spread operand is not a list. | List spread `[...xs]` and call spread `f(...xs)` expand a list's elements — the operand must be `[T]`. | Spread a list value, or build the list without spread. |
 | E1312 | A call uses spread at a function with no variadic rest parameter. | `f(...xs)` only applies when the callee's final parameter is variadic (`name: ...T`). | Pass arguments individually, or call a function whose last parameter is variadic. |
 | E1313 | `` `{arg}` doesn't implement `{Trait}` `` — a trait-bounded variadic call-site argument fails one of the bound trait(s) (D-ANY-JAI1). | `{param}: ...{Trait}` (or `...[A, B]`) checks every argument against the bound trait(s) — that's how a function like this accepts a mix of types safely, with each argument monomorphized to its own concrete type (zero boxing). | Implement `{Trait}` for the argument's type, or drop the value from this call. |
-| E1314 | `` `{name}` can only be used in a direct source loop here `` — a trait-bounded variadic parameter referenced outside its one supported shape (D-ANY-JAI1). | A trait-bounded variadic's elements can have different concrete types, so there's no single Rust type to give the whole parameter (`.len()`, indexing, passing it on, a second loop, …) outside a loop that visits each argument once. | Iterate it with `loop x, {name} { … }` — that's the only supported use in v1. |
+| E1314 | `` `{name}` can only be used in a direct source loop here `` — a trait-bounded variadic parameter referenced outside its one supported shape (D-ANY-JAI1). | A trait-bounded variadic's elements can have different concrete types, so there's no single Rust type to give the whole parameter (`.len()`, indexing, passing it on, a second loop, …) outside a loop that visits each argument once. | Iterate it with `loop x in {name} { … }` — that's the only supported use in v1. |
 
 ## Module evaluation diagnostics (jetpack)
 
@@ -1195,7 +1204,7 @@ CLI.
 | *retired; duplicate markers use E0003* | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
 | L1101 | A bound `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged by joining it or using its result. | Join it with `.join()`, use its result, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Write `task work()` or use `task.all { work_a(), work_b() }`. |
-| E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Create `channel<T>()`, and use `sender.send`/`loop value, receiver -> ...`. |
+| E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Create `channel<T>()`, and use `sender.send`/`loop value in receiver -> ...`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
 
 ## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
@@ -1238,23 +1247,23 @@ block reserved for M6.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type.Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType.Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
-| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} => Err`. | Add `impl {err} => Err { … }` before this function, or change the return type to `T ! {err}`. |
+| E2402 | `?` can't convert `{err}` into `Err` — no declared conversion exists. | `?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} -> Err`. | Add `impl {err} -> Err { … }` before this function, or change the return type to `T {err}!`. |
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `name :: …;` before the struct literal, or write the long form `Type { field_name: value }`. |
-| E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source => Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} => {Target} { … }` before the function that uses `?`. |
-| E2405 | `impl {Source} => {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … => …` blocks. |
-| E2406 | Can't declare `impl {Source} => {Target}` — neither type is defined in this program. | Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source. | Define one of these types locally, or convert the foreign source into `Err`. |
+| E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
+| E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
+| E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source. | Define one of these types locally, or convert the foreign source into `Err`. |
 | E2407 | `#Rename(...)` needs a string literal. | The wire key a `#Codable` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#Rename("wire_name")`. |
 | E2408 | `#Flatten` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#Codable` struct — not a primitive, list, or map. | Give `{field}` a `#Codable` struct type, or drop `#Flatten`. |
 | E2409 | `#RenameAll({style})` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
-| E2410 | `E2410: missing required field `{field}`` (runtime `FieldError`). | Decoding into a `#Codable`/`#Decode` type found no wire value for a required field and the field has no `#Default` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#Default`/`#Default(value)`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
+| E2410 | `E2410: missing required field `{field}`` (runtime `FieldError`). | Decoding into a `#Codable`/`#Decode` type found no wire value for a required field and the field has no declaration default and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it a `T{expr}` declaration default, or fix the input so the key is present. Compose with `??` to supply a fallback. |
 | E2411 | `{Type}` can't be serialized / decoded, or a union member has no compiler-known wire shape. | Only a structurally qualifying type gets a compiler-generated codec (by default or through `#Codable`/`#Encode`/`#Decode`), unless it supplies a hand-written codec. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one (D-SERDE1, D-UNIONTYPE1). | Add a compiler-derived codec, use a configured tagged enum or `#CodableAsBase` distinct type for a union member, or remove the unsupported type from the encoded value (for example, with `#Skip`). |
 | E2412 | `E2412: unknown field `{field}`` (runtime `FieldError`). | The struct is marked `#DenyUnknownFields` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails instead of silently dropping it. | Remove `#DenyUnknownFields` to ignore extra keys (the lenient default), add the field, or fix the producer. |
 | E2413 | retired (D-SERDE12) — generic `#Codable` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
-| E2414 | A field's `=` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-FIELDDEF1=C). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int = 8080`, `env: String = "prod"`, or `ports: [Int] = [80, 443]`. |
+| E2414 | A field's `{…}` default must be a compile-time constant. | A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, D-DEFAULT-SHAPE1=B). An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). | Use a literal or a `comptime`-evaluable expression, e.g. `port: Int{8080}`, `env: String{"prod"}`, or `ports: [Int]{[80, 443]}`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | E2416 | `env.decode` could not build the typed config; the error names the source environment variable and field path. | Runtime config decoding uses the shared `__jet_Decode` codec, so a bad value, missing field, or unknown field is reported at its typed path while secret values stay redacted (D-CONFIG-ENV1). | Fix the named environment variable or field path, or adjust `prefix:`, `file:`, and `allow:` so the intended source reaches the typed record. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
-| L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output. |
+| L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) String { … } }`, or use `{value:Debug}` for debug output. |
 
 ## Streaming I/O diagnostics (E2-M7, D-IO1..3)
 
@@ -1267,8 +1276,8 @@ is fixed).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
-| E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line, handle.lines() { … }`. |
-| L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line, handle.lines() { … }` to stream line-by-line. Not emitted yet. |
+| E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line in handle.lines() { … }`. |
+| L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
 | E2510 | `.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used. | SIMD reduction takes one typed `ReduceOp` value: `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`. | Pass a listed dot value, or use `v.sum()` / `v.product()` / `v.min()` / `v.max()`. |
 | E2511 | operator `{op}` isn't defined between `{lhs}` and `{rhs}`. | Operator overloading is blessed on the closed built-in math family ONLY (D-SIMD2/D-LINALG1): element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`/`!=` — both sides must be the same lane/vector type (or a matrix and its matching vector). | Match the operand types, or use a named method like `.dot()`/`.cross()`/`.matmul()`. |
 | E3110 | lane `{lane}` isn't valid on `{type}`. | Swizzle members name lanes with `x`/`y`/`z`/`w`; each type exposes only its lane count (`Vec2`: x/y, `Vec3`: x/y/z, …). | Use only the lanes defined for `{type}`. |
@@ -1390,9 +1399,9 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, measured clai
 | E3627 | replay capture refused sensitive data | Safe capture refuses reachable Rand/IO/Net; sensitive capture needs TTY consent. | Use `--capture` for Time-only, or run `--capture-sensitive` interactively. |
 | E3628 | replay capture exceeded its artifact limit | The replay contained no usable authority or exceeded the bounded frame/payload/record budget. | Reduce the captured target or recapture a bounded artifact. |
 | E3629 | replay artifact could not be finalized | Destination path, rename, or durability checks refused the write. | Fix the path and retry; differing existing bytes are never overwritten. |
-| E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() => …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() => … )` or `reactive.effect(() => { … })`. |
-| E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() => { … })`. |
-| E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() => { … })` for a side effect. |
+| E2910 | `reactive.{kind}` needs a lambda, not {type}. | `reactive.derived`/`reactive.effect` build a reactive value from a `() -> …` body so it can re-run when a signal changes (D-REACT1=B). A non-lambda argument has nothing to re-run. | Write `reactive.derived(() -> … )` or `reactive.effect(() -> { … })`. |
+| E2911 | `reactive.{kind}` needs a zero-parameter lambda, got {n} parameter(s). | The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()` (D-REACT1=B). | Drop the parameters: `reactive.{kind}(() -> { … })`. |
+| E2912 | `reactive.derived` must compute and return a value. | A derived value is recomputed from its signals, so its lambda has to return the new value (D-REACT1=B). A body that returns nothing is a side effect, not a value. | Return a value from the body, or use `reactive.effect(() -> { … })` for a side effect. |
 | E2913 | a reactive {kind} can't hold a {type}. | Signals and derived values hold ordinary data so it can be copied to dependents (D-REACT1=B). A function value isn't reactive data — wrap behaviour in an effect instead. | Use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`. |
 | L2901 | This `#Test` block has no assertions. | A test with no `assert`, `assert_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
 
@@ -1633,11 +1642,12 @@ signature.
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
 | L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | L0507 | prefer an ordered arm table for this branch | one ordered arm table is Jet's normal form for multi-line and chained choices | write `if { condition -> body else -> body }` |
-| L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source. | Bind the loop with `::` to collect its values, or write `loop v, &values -> v *= 2` so it takes write access (&) for items. |
+| L0508 | This arrow loop body computes a value and drops it. | A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source. | Bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items. |
 | L0509 | auto-derive refusal is a named package policy entry | `auto_derive` is registered on the shared `policy.lints.deny` surface; the policy itself emits no warning. | write `policy: { lints: { deny: [auto_derive] } }` in `package.jet` |
 | L0510 | declaration replaces a readable Core prelude alias (D-NAME-ALIAS1) | user declarations win over the compiler-opened alias, but the replacement is worth seeing | keep the declaration, or rename it to use the prelude alias |
+| L0512 | nested subject shorthand needs an explicit binding (D-SUBJECT-COHERE1=A) | implicit subjects become hard to track when shorthand scopes nest | rewrite the inner shorthand with a named binding such as `(item) -> item.member` |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
-| E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item), xs` — or `loop i, xs.indexes()` — or `0..<xs.len()`. |
+| E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop (i, item) in xs` — or `loop i in xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 | E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
 | E0368 | This fence is empty. | A fenced statement needs at least one entry to expand. | Write one or more entries between `@[` and `]@`. |
@@ -1647,12 +1657,14 @@ signature.
 | E0372 | This `{body}` body needs braces. | Use `->` for one effect statement; braces make a multi-statement or scoped body's boundary visible to readers, editors, and the compiler. | Write `-> statement` for one statement, or wrap the body in `{ ... }`; `jet fmt` applies this fix. |
 | E0373 | This loop header uses a semicolon. | Commas separate loop clauses; semicolons separate statements. | Replace `;` with `,`; `jet fmt` applies this fix. |
 | E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `@` when failure to compute now must stop the build. |
-| E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
+| E0375 | `#Default` on a field is retired. | Field absence and construction defaults ride the field's type as `field: T{expr}` (D-DEFAULT-SHAPE1=B). | Write `field: T{expr}` instead of `#Default(expr)`. |
 | E0377 | `#Known` is retired. | Compile time has one mark, `@`, and the mark belongs to the name, so it is written at every mention. | Write `@name :: …` for a binding, `@if <condition> { … }` for a compile-time branch, and `@ { … }` for a compile-time block. |
 | E0378 | This alias declaration uses the retired `=` binding. | `::` defines a name; `=` fills a slot inside an existing declaration (D-ALIAS-OP1=B). | Replace `=` with `::`. |
 | E0379 | A guard follows its source with no comma. | The guard self-announces with `if`, so the loop head only uses commas between positional clauses. | Remove the comma before `if`. |
-| E0380 | This loop needs a named source binding. | An implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding. | Write `loop item, source -> ...`; give nested loops named bindings. |
-| E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
+| E0380 | This loop needs a named source binding. | An implicit subject is one collection item; a scalar source or nested loop needs a distinct named binding. | Write `loop item in source -> ...`; give nested loops named bindings. |
+| E0383 | This source loop uses a retired comma between its binding and source. | A source loop uses `in` to mark the binding/source boundary; commas remain for later clauses such as a stride. | Replace the comma after the binding with `in`, for example `loop item in items { … }`. |
+| E0384 | Jet has no membership operator here; `in` only joins a source-loop binding to its source. | Expression `x in xs` has no operator meaning in Jet. Collection membership is a method call. | Write `xs.contains(x)` (the `.contains(x)` method) instead of `x in xs`. |
+| E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i in 0..<n { … }` or `loop i in 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
 | E0381 | A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A). | For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
@@ -1684,7 +1696,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function. |
-| E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, subprocess, or foreign effect leaves external state a rollback can't take back unless the foreign binding declares a compensating undo (D-TXN2, D-BOUND-UNDO1). | Move the call after the block, register it with `<handle>.on_commit(() => { … })`, or declare `#Undo(inverse)` on the foreign binding. |
+| E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, subprocess, or foreign effect leaves external state a rollback can't take back unless the foreign binding declares a compensating undo (D-TXN2, D-BOUND-UNDO1). | Move the call after the block, register it with `<handle>.on_commit(() -> { … })`, or declare `#Undo(inverse)` on the foreign binding. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) -[]>` parameter demands a pure callback, and a `fn(…) -[E]>` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … -[]>` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `-[via {param}]>` on `{fn}` names no such parameter or a parameter that isn't a callback. | `-[via f]>` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `-[via …]>` annotation. |
 | E0750 | `{effect}` is not a declared effect leaf. | This package view has declared leaves under the same root, so dotted effect names must match one of those declarations exactly. | Use the suggested declared leaf, add an `effect {effect}` declaration, or use the bare root. |
@@ -1734,7 +1746,7 @@ An undeclared value tag with a close declared tag (E0733):
 Error [E0733]: there's no tag called `Sanitizd`
   --> tags.jet:3:17
     |
-  3 | fn clean(input: #Sanitizd String) => String :: ~input
+  3 | fn clean(input: #Sanitizd String) String -> ~input
     |                 ^^^^^^^^^^^^^^^^^
  Why: a value tag in type position must name a declared `tag`
  Fix: did you mean `Sanitized`?
@@ -1746,7 +1758,7 @@ A method written in a tag body (E0732):
 Error [E0732]: the tag `Reviewed` declares a method `review`, but tags have no methods
   --> tags.jet:2:8
     |
-  2 |     fn review(self) => Int;
+  2 |     fn review(self) Int;
     |        ^^^^^^
  Why: a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches
  Fix: make `Reviewed` a `trait` if `review` should dispatch, or remove the method to keep `Reviewed` a marker tag
@@ -1998,8 +2010,8 @@ front-end `.jet` diagnostics).
 | E1339 | Library `{name}` declares the `{effect}` effect, which this load site doesn't grant. | A loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped. Compiler identity is verified first, so this check only runs against an artifact already proven to come from this compiler. | Widen the grant at the load site to include `{effect}`, or remove the effect from the library. |
 | E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
-| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.crypto.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
-| E1265 | `core.crypto.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
+| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.crypto.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `-[…]>` row, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `-[Secret]>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
+| E1265 | `core.crypto.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `-[Secret]>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |
 | E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `package.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `package.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` cannot use remote OCI reference `<ref>`. `` | D-JPK-IMAGE1: local OCI layouts are copied only after digest validation; remote registry transport is a separate trust boundary and is never faked. | Use `--push file:///path/to/layout`, or configure a verified registry transport. |
@@ -2041,7 +2053,7 @@ front-end `.jet` diagnostics).
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
 | L0206 | `` `Shared.{method}()` keeps its lock through a long lexical scope ``. | A `SharedGuard` releases at scope exit, so later statements and nested guard acquisitions run while this lock is held. | Move the guarded work into a smaller block. When nesting guards is necessary, acquire them in one stable order. |
-| E0215 | `` `SharedGuard.map` needs a stored field projection ``. | A mapped guard must keep a stable stored place inside the value protected by the original lock. A computed field is a value, not a place. | Use a direct stored-field projection such as `guard.map(value => value.field)`. |
+| E0215 | `` `SharedGuard.map` needs a stored field projection ``. | A mapped guard must keep a stable stored place inside the value protected by the original lock. A computed field is a value, not a place. | Use a direct stored-field projection such as `guard.map(value -> value.field)`. |
 | E0216 | `` `SharedGuard.split` needs two disjoint field projections ``. | Two child guards must preserve non-overlapping provenance under one original lock. Equal, enclosing, nested, or computed projections cannot prove that law. | Project two stored sibling fields, such as `value.left` and `value.right`. |
 | L1401 | `` compiler-extension `{rule}` ({severity}): {message} `` | A configured compiler-extension component (`JET_COMPILER_EXTENSION`) reported this finding after type checking (D-DX5-HOOK1). V1 surfaces findings as lints; wall with `policy.lints.deny`. | Address the finding, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
 | E1402 | `` compiler-extension failed: {message} `` | The configured compiler-extension component could not complete `analyze`, or returned an invalid response (D-DX5-HOOK1). Guests are sandboxed; failures stay Jet-owned (I2). | Fix the component, or unset `JET_COMPILER_EXTENSION` to skip the extension. |
@@ -2051,7 +2063,7 @@ front-end `.jet` diagnostics).
 
 | Code | What | Why | Fix |
 |---|---|---|---|
-| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan !`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) => BuildPlan !`. |
+| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan !`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) BuildPlan !`. |
 | E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`. |
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
 | E3504 | Build action `{action}` asks for ungranted `{right}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
@@ -2157,14 +2169,14 @@ E0910 is the umbrella for every such case; the what/why/fix is case-specific.
 
 | Case | What | Why | Fix |
 |------|------|-----|-----|
-| dropped (D-MIGRATE1) | The published record `{Type}` dropped `{field}` since version `{version}`, with no migration to bridge it. | Old data already written with `{field}` could no longer be read. | Add `migration {Type} { remove {field} }` to delete it, `rename {field} => {new}` if you renamed it, or bump the major version. |
-| type-changed (D-MIGRATE2E) | The published record `{Type}` changed `{field}` from `{Old}` to `{New}`, with no migration to bridge it. | Old data stored at the previous type could no longer be read. | Add `migration {Type} { change {field}: {Old} => {New} via { old => … } }`, or bump the major version. |
-| change with no converter (D-MIGRATE2B) | The `change {field}: {Old} => {New}` migration on `{Type}` has no converter. | A type change needs a way to turn an old value into a new one — old data on disk is read through it. | Add an inline `via { old => … }`, or declare `impl {Old} => {New} { … }` in scope. |
+| dropped (D-MIGRATE1) | The published record `{Type}` dropped `{field}` since version `{version}`, with no migration to bridge it. | Old data already written with `{field}` could no longer be read. | Add `migration {Type} { remove {field} }` to delete it, `rename {field} -> {new}` if you renamed it, or bump the major version. |
+| type-changed (D-MIGRATE2E) | The published record `{Type}` changed `{field}` from `{Old}` to `{New}`, with no migration to bridge it. | Old data stored at the previous type could no longer be read. | Add `migration {Type} { change {field}: {Old} -> {New} via { old -> … } }`, or bump the major version. |
+| change with no converter (D-MIGRATE2B) | The `change {field}: {Old} -> {New}` migration on `{Type}` has no converter. | A type change needs a way to turn an old value into a new one — old data on disk is read through it. | Add an inline `via { old -> … }`, or declare `impl {Old} -> {New} { … }` in scope. |
 | added (D-MIGRATE2A) | The published record `{Type}` added `{field}`, but old data has no value for it. | Records already written without this field can't be read unless there's a default to fill it. | Add `migration {Type} { add {field}: {Type} = {default} }`, or bump the major version. |
 | invalid op | A `remove`/`add`/`change` op contradicts the real shape (removes a field that still exists, adds one that already existed, or names a field in neither shape). | A migration op must reference a real shape difference. | Fix or delete the offending op. |
 
 D-MIGRATE2B converter resolution for `change`: (1) the inline `via { … }`, else
-(2) an `impl Old => New` in scope (the same surface as D-ERR-CONV), else (3) E0910.
+(2) an `impl Old -> New` in scope (the same surface as D-ERR-CONV), else (3) E0910.
 D-MIGRATE2F: reordering fields is keyed by name, never a breaking change — no op,
 no error. E0910 checks intent; the runtime data conversion (reading old records
 through the declared converter/default at decode time) is the D-MIGRATE4 chain
@@ -2189,7 +2201,7 @@ diagnostic.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{type}` has no `Display` implementation ``. | Bare `{value}` interpolation calls `Display` — there is no default for user types. | Add `impl {type}.Display { fn display(self) => String { … } }`, or use `{value:Debug}` for debug output. |
+| `` `{type}` has no `Display` implementation ``. | Bare `{value}` interpolation calls `Display` — there is no default for user types. | Add `impl {type}.Display { fn display(self) String { … } }`, or use `{value:Debug}` for debug output. |
 
 ### E0916 — Debug auto-derive blocked (D-DEBUG-REDACT)
 

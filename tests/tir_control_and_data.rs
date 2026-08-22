@@ -17,11 +17,11 @@ fn make() Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
-fn typed(value: Err) ! Err {
+fn typed(value: Err) Err! {
     return Err(value)
 }
 
-fn run() ! Err {
+fn run() Err! {
     return typed(make())
 }
 "#;
@@ -35,7 +35,7 @@ fn run() ! Err {
 #[test]
 fn default_err_value_runs_on_the_default_jit_edge() {
     let src = r#"
-fn run() ! Err {
+fn run() Err! {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;
@@ -80,11 +80,11 @@ fn run() {
 #[test]
 fn typed_error_union_widening_runs_on_jit_and_interpreter() {
     let src = r#"
-fn narrow() Int ! String {
+fn narrow() Int String! {
     return Err("narrow")
 }
 
-fn widen() Int ! String | Bool {
+fn widen() Int (String | Bool)! {
     return narrow()?
 }
 
@@ -787,7 +787,7 @@ fn run() {
 // --- c109 Phase 2: control-flow loops ---------------------------------------
 
 /// Infinite `loop { … }` with a `break`, plus the `loop cond` while form. Both
-/// loop kinds, plus a compound assign and an if inside, route through the TIR.
+/// loop kinds in plus a compound assign and an if inside, route through the TIR.
 #[test]
 fn infinite_and_while_loops() {
     if !have_rustc() {
@@ -826,11 +826,11 @@ fn range_loops_inclusive_and_step() {
     let src = "\
 fn run() {
     total := 0
-    loop n, 1..5 {
+    loop n in 1..5 {
         total = (total + n)
     }
     print(total)
-    loop k, 0..10, 2 {
+    loop k in 0..10, 2 {
         print(k)
     }
 }
@@ -859,12 +859,12 @@ fn range_loops_exclusive() {
     let src = "\
 fn run() {
     total := 0
-    loop n, 0..<5 {
+    loop n in 0..<5 {
         total = (total + n)
     }
     print(total)
     empty := 0
-    loop n, 3..<3 {
+    loop n in 3..<3 {
         empty = (empty + 1)
     }
     print(empty)
@@ -902,7 +902,7 @@ fn run() {
     print(band.contains(7))
     print((7..4).contains(5))
     total := 0
-    loop n, band {
+    loop n in band {
         total = (total + n)
     }
     print(total)
@@ -940,8 +940,8 @@ fn labeled_break_and_continue() {
     }
     let src = "\
 fn run() {
-    outer :: loop i, 1..3 {
-        loop j, 1..3 {
+    outer :: loop i in 1..3 {
+        loop j in 1..3 {
             if (j == 2) {
                 next(outer)
             }
@@ -973,7 +973,7 @@ fn labeled_break_and_continue_fallbacks() {
     }
     let src = r#"
 fn run() {
-    outer :: loop text, ["skip", "7"] {
+    outer :: loop text in ["skip", "7"] {
         loop {
             value :: Int.parse(text) ?? next(outer)
             print(value)
@@ -996,7 +996,7 @@ fn yielding_and_result_loops_compile_and_run() {
     let src = r#"
 fn find(xs: [Int]) Int {
     found :: loop {
-        loop x, xs {
+        loop x in xs {
             if x > 2 -> break(found, x)
         }
         break -1
@@ -1090,15 +1090,15 @@ fn value_if_exit() Int {
 
 fn run() {
     xs :: [Int]{ 1, 2, 3, 4 }
-    prefix :: loop x, xs -> {
+    prefix :: loop x in xs -> {
         if x > 3 -> break
         x * 2
     }
-    rows :: loop x, xs, y, [10, 20] -> {
+    rows :: loop x in xs, y in [10, 20] -> {
         if x == 2 && y == 20 -> break
         x + y
     }
-    outer :: loop x, xs {
+    outer :: loop x in xs {
         ignored :: loop {
             if x == 1 -> next(outer)
             if x == 2 -> break(outer)
@@ -1148,12 +1148,12 @@ fn stride() Int {
 }
 
 fn run() {
-    loop item, source(), stride() {
+    loop item in source(), stride() {
         print(item)
         if item == 0 { next }
     }
 
-    outer :: loop i, 0..<3 {
+    outer :: loop i in 0..<3 {
         loop {
             if i < 2 { next(outer) }
             break
@@ -1176,7 +1176,7 @@ fn stride() Int {
     return 0
 }
 fn run() {
-    loop item, source(), stride() {
+    loop item in source(), stride() {
         print(item)
     }
 }

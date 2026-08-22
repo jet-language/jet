@@ -192,7 +192,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ! [FieldError] {
+    fn decode(tree: DataTree) Email [FieldError]! {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return .Ok(Email{addr: s})
@@ -243,7 +243,7 @@ impl HandEmail.Encode {
     fn encode(self) DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) HandEmail ! [FieldError] {
+    fn decode(tree: DataTree) HandEmail [FieldError]! {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
@@ -295,7 +295,7 @@ use core.encoding.json as json
 struct Boxed<T> { value: T }
 
 fn generic_encode<T: Encode>(value: T) String -> json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) T ! [FieldError] -> json.decode<T>(wire)
+fn generic_decode<T: Decode>(wire: String) T [FieldError]! -> json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
@@ -333,7 +333,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ! [FieldError] {
+    fn decode(tree: DataTree) Email [FieldError]! {
         value := tree.field("address") ?? DataTree.Text("")
         return .Ok(Email{ addr: value.text() ?? "" })
     }
@@ -598,7 +598,7 @@ struct Inner { x: Int  y: Bool }
 struct Outer {
     display_name: String
     #Flatten inner: Inner
-    count: Int = 4 + 5
+    count: Int{4 + 5}
 }
 
 fn run() {
@@ -632,7 +632,7 @@ struct Strict { name: String }
 fn run() {
     result := json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}")
     if result == .Err(errors) {
-            loop error, errors {
+            loop error in errors {
             print(error.path)
             print(error.reason)
         }
@@ -674,12 +674,12 @@ fn run() {
     malformed := json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}")
     if malformed == .Err(errors) {
         print(errors.len())
-        loop error, errors { print(error.path) }
+        loop error in errors { print(error.path) }
     }
     invalid := json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}")
     if invalid == .Err(errors) {
         print(errors.len())
-        loop error, errors { print(error.path) }
+        loop error in errors { print(error.path) }
     }
 }
 "#;
@@ -857,7 +857,7 @@ use core.encoding.json as json
 derive T.ConfigSchema {
     #Codable
     struct GeneratedConfig {
-        ports: [Int] = [80, 443]
+        ports: [Int]{[80, 443]}
     }
 }
 
@@ -977,7 +977,7 @@ fn structure_once_loops_cover_marker_impl_and_test_items() {
     let source = r#"
 marker AddFields(@sites: [.Type]) {
     type_name :: target.@name
-    @loop field, target.@fields {
+    @loop field in target.@fields {
         method :: "field_{field.@name}"
         impl @type_name {
             fn @method(self) String -> field.@name
@@ -992,13 +992,13 @@ struct Person { first: String  last: String }
 
 @cases :: [Case]{ Case{ n: 1 }, Case{ n: 2 } }
 
-@loop T, [Person] {
+@loop T in [Person] {
     impl T {
         fn generated(self) String -> "generated"
     }
 }
 
-@loop case, @cases {
+@loop case in @cases {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }
@@ -1033,7 +1033,7 @@ fn structure_once_duplicate_generated_tests_reenter_test_registration() {
 struct Case { n: Int }
 @cases :: [Case]{ Case{ n: 1 }, Case{ n: 1 } }
 
-@loop case, @cases {
+@loop case in @cases {
     #Test("case {case.n}") {
         assert(case.n > 0)
     }
@@ -1225,7 +1225,7 @@ migration Config {
     add host: String = "localhost"
 }
 
-fn run() ! [FieldError] {
+fn run() [FieldError]! {
     old :: json.decode<Config>("{{\"port\":2}}")?
     print("json {old.port} {old.host}")
     toml_old :: toml.decode<Config>("port = 3\n")?

@@ -2766,35 +2766,35 @@ pub enum TFuncKind {
     },
 }
 
-/// c109 Phase 22: a special source iteration form on a `loop x, <coll>`,
+/// c109 Phase 22: a special source iteration form on a `loop x in <coll>`,
 /// resolved at lowering from the collection's type or method-call shape.
 /// Each carries the receiver's emitted Rust string;
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
 pub enum TForInMethod {
-    /// `loop c; s.chars()` — char iteration: `for __jet_c in ({recv}).chars()`,
+    /// `loop c in s.chars()` — char iteration: `for __jet_c in ({recv}).chars()`,
     /// binding `let <var> = __jet_c;`.
     Chars,
-    /// `loop line; reader.lines()` on a `FileReader` — streaming `BufRead::lines`
+    /// `loop line in reader.lines()` on a `FileReader` — streaming `BufRead::lines`
     /// over the reader's `inner`, with a mid-stream-error panic (line `0`, `cx.file`).
     LinesFile,
-    /// `loop line; io.stdin().lines()` / a `StdinHandle` — the same streaming read,
+    /// `loop line in io.stdin().lines()` / a `StdinHandle` — the same streaming read,
     /// but the receiver is materialised into a `__jet_stdin_h` local inside an extra
     /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
     /// extra closing brace.
     LinesStdin,
-    /// D-PROCESS1=A: `loop line; child.stdout.lines()` / `child.stderr.lines()` —
+    /// D-PROCESS1=A: `loop line in child.stdout.lines()` / `child.stderr.lines()` —
     /// a `ProcessChild`'s streaming reader. The receiver string is the plain field
     /// access (`(child).stdout`); each iteration polls
     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
     LinesProcessStream,
-    /// D-CONC-CHAN1=A: `loop value, receiver` pulls until the receiver closes.
+    /// D-CONC-CHAN1=A: `loop value in receiver` pulls until the receiver closes.
     ChannelReceiver,
     /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
     EncodingReader { reader_type: String },
-    /// D-ITER-HOOK: `loop x; mytype` when `mytype` implements `Iterable`.
+    /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
     Iterable {
         coll_type: String,
         iter_type: String,
@@ -3342,7 +3342,7 @@ pub enum TStmt {
         step: Option<Box<TStmt>>,
         body: Vec<TStmt>,
     },
-    /// `loop i; start..end [; stride]` — a numeric range loop (`ForKind::Range`).
+    /// `loop i in start..end [, stride]` — a numeric range loop (`ForKind::Range`).
     /// Inclusive `..` (S22) lowers to `start..=end`; exclusive `..<`
     /// (D-RANGE-EXCL1=C) lowers to `start..end`. Optional stride uses `.step_by`.
     Range {
@@ -3433,7 +3433,7 @@ pub enum TStmt {
         value: TExpr,
         clone_value: bool,
     },
-    /// c109 Phase 5/22: collection iteration `loop x; coll` / `loop k, v; map`
+    /// c109 Phase 5/22: collection iteration `loop x in coll` / `loop (k, v) in map`
     /// (`Stmt::For` with `ForKind::In`). `var2` distinguishes the two-binding map
     /// form (which iterates `(coll).iter()` and clones each key/value) from the
     /// single-binding form (`(coll).iter().cloned()`), reproducing `emit_for_in`
@@ -4329,9 +4329,9 @@ pub enum TExprKind {
     Present(Box<TExpr>),
     /// c109 Phase 8: bare `null` — an absent optional (`None`).
     Absent,
-    /// c109 Phase 8: `Ok(x)` — a success value of `T ! E` (`Ok(x)`).
+    /// c109 Phase 8: `Ok(x)` — a success value of `T E!` (`Ok(x)`).
     Ok(Box<TExpr>),
-    /// c109 Phase 8: `Err(e)` — a failure value of `T ! E` (`Err(e)`).
+    /// c109 Phase 8: `Err(e)` — a failure value of `T E!` (`Err(e)`).
     Err(Box<TExpr>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
@@ -4353,7 +4353,7 @@ pub enum TExprKind {
     },
     /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`).
     /// D-FAIL-CARRIER1=A: one carrier, so one lowering —
-    /// `match … { Ok(v) => v, Err(_) => fb }` reads `T?` and `T ! E` alike.
+    /// `match … { Ok(v) => v, Err(_) => fb }` reads `T?` and `T E!` alike.
     /// The fallback is a value or an early `return` (the panic form is deferred —
     /// its `safe_locals_expr` reproduction is out of subset).
     OrFallback {
@@ -5386,7 +5386,7 @@ pub enum THandleOp {
     JSONLWriterFlush,
     JSONLWriterFinish,
     CSVReaderNext,
-    /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `T? ! DataError`.
+    /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `T? DataError!`.
     DataStreamNext,
     XMLReaderNext,
     XMLWriterWrite,
@@ -5542,7 +5542,7 @@ pub enum THandleOp {
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
     /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
     AllocAlloc,
-    /// D-ALLOCFAIL1=A: allocator `try_alloc(v)` returns `T ! AllocError`.
+    /// D-ALLOCFAIL1=A: allocator `try_alloc(v)` returns `T AllocError!`.
     AllocTryAlloc,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `reset()` → `(recv).reset()`.
     AllocReset,
@@ -5617,7 +5617,7 @@ pub enum THandleOp {
     ReflectFieldName,
     ReflectFieldValue,
     /// D-CONC-FAIL1=A: Task `join()` → `(recv).join()`; sema types it as
-    /// `T ! TaskFailure`.
+    /// `T TaskFailure!`.
     TaskJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.

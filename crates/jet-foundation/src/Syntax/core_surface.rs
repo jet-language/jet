@@ -314,8 +314,8 @@ pub const KW_ALIAS: &str = "alias";
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
-/// D-ERRSIGIL1=A (ratified 2026-08-21): fallible type separator — `T ! E`.
-/// The bang is a type-position separator; expression `!` keeps its prefix use.
+/// D-ERRSUFFIX1=B (ratified 2026-08-21): fallible error suffix — `E!`.
+/// The bang is a type-position suffix; expression `!` keeps its prefix use.
 pub const TYPE_FALLIBLE_SEP: &str = "!";
 
 /// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.

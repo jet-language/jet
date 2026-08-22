@@ -146,9 +146,9 @@
 // callable results and control arms/bodies in every position.
 // D-ARROW-RESPELL1=A (ratified 2026-08-21): `->` is canonical; `:>` and `=>`
 // are retired teaching spellings with no alias.
-// D-ERRSIGIL1=A (ratified 2026-08-21) gives fallible types the dedicated
-// TYPE_FALLIBLE_SEP (`!`); `?` remains the optional suffix. Unit-fallible
-// functions use the same separator after their parameters.
+// D-ERRSUFFIX1=B (ratified 2026-08-21) gives each failure role its own suffix:
+// `[Success?] [ErrorUnion!]`; `?` remains absence and `!` marks the error type.
+// A bare `!` keeps the default-error meaning.
 // D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
 // the existing fact registry, and liveness uses the existing `_name` ladder
 // (D-NAME-SIGIL1). D-STRUCT-ONCE1=A adds no spelling: it extends the existing
@@ -172,10 +172,11 @@
 // function-body marker; braces hold statements and a trailing value. `::`
 // remains the name-binding sigil, and `=` remains for slot-filling declarations
 // such as extern bindings.
-// D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
-// clauses and `(key, value)` for a two-name source binding.
+// D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses `(key, value)` for a
+// two-name source binding. D-LOOP-IN1=A (card #2153) joins a source binding to
+// its source with `in`; commas remain for later clauses such as a stride.
 // D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
-// guards comma-less: `loop name, source if condition -> value`; `, if` is
+// guards comma-less: `loop name in source if condition -> value`; `, if` is
 // E0379, never a stride.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
@@ -230,7 +231,7 @@
 // Mutable locals, fields, indexes, aliases, and calls stay `T?`; bind with
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-// position as TYPE_UNION_SEP. `T ! E1 | E2` parses as `T ! (E1 | E2)`.
+// position as TYPE_UNION_SEP. `T (E1 | E2)!` parses as `T (E1 | E2)!`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
@@ -293,7 +294,7 @@ pub const TYPE_RECEIVER: &str = "Receiver";
 /// D-CONC-CHAN1=A: sender endpoint type is nameable in signatures.
 pub const TYPE_SENDER: &str = "Sender";
 /// D-CONC-CHAN1=A / D-CONC-CHAN2=D: loop source form for channel draining.
-pub const LOOP_CHANNEL_DRAIN: &str = "loop value, receiver";
+pub const LOOP_CHANNEL_DRAIN: &str = "loop value in receiver";
 /// D-CONC-CHAN2=D: contextual timeout arm in a readiness table.
 pub const READINESS_AFTER: &str = "after";
 /// Compiler-private field used while a readiness arm is carried through the

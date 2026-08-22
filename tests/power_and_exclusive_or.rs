@@ -121,7 +121,7 @@ fn show_exact(value: Int) {
     print(value)
 }
 
-fn raise(base: Int, exponent: Int) :> Int {
+fn raise(base: Int, exponent: Int) Int {
     return base ^ exponent
 }
 
@@ -168,7 +168,7 @@ fn exclusive_or_uses_the_tilde_pipe_spelling() {
 fn run() {
     print(12 ~| 10)
     acc := 0
-    loop byte, [17, 42, 99, 8] { acc ~|= byte }
+    loop byte in [17, 42, 99, 8] { acc ~|= byte }
     print(acc)
 }
 "#;
@@ -182,13 +182,13 @@ fn run() {
 fn exclusive_or_needs_matching_integer_widths() {
     assert!(accepts(
         "xor_same_width",
-        "fn run() {\n    a :: U8.{12}\n    b :: U8.{10}\n    print(a ~| b)\n}\n"
+        "fn run() {\n    a :: U8{12}\n    b :: U8{10}\n    print(a ~| b)\n}\n"
     ));
     // A pair with no common integer type reports the D-SG9 error, exactly as
     // it did under the old `^` spelling.
     let mixed = diagnostic_codes(
         "xor_mixed_width",
-        "fn run() {\n    a :: U8.{12}\n    b :: I8.{10}\n    print(a ~| b)\n}\n",
+        "fn run() {\n    a :: U8{12}\n    b :: I8{10}\n    print(a ~| b)\n}\n",
     );
     assert!(
         mixed.iter().any(|code| code == "E0109"),
@@ -211,10 +211,10 @@ fn prefix_take_and_copy_survive_the_rebind() {
     let src = r#"
 struct Sword { power: Int }
 
-fn melt(item: ^Sword) => Int { return item.power }
+fn melt(item: ^Sword) Int { return item.power }
 
 fn run() {
-    blade :: Sword.{ power: 3 }
+    blade :: Sword{ power: 3 }
     print(melt(^blade))
     flags :: 12
     source :: 5

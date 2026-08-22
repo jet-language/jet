@@ -27,7 +27,7 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// Char, String, a covered *plain user struct* (c109 Phase 3) or generic
 /// struct application (c109 Phase 19), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
-/// *optional* `T?` / *fallible* `T ! E` (c109 Phase 8). Generic type variables
+/// *optional* `T?` / *fallible* `T E!` (c109 Phase 8). Generic type variables
 /// are admitted when active in the enclosing function; recursive (boxed) types
 /// remain out of the value subset.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
@@ -587,7 +587,7 @@ pub(crate) fn is_covered_trait_object_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
-/// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T ! E`
+/// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T E!`
 /// (`Type::Result`) whose payload(s) are themselves covered *value* types. Both
 /// lower through `cx.rust_type` (`Option<…>` / `Result<…, …>`) exactly as the AST
 /// path does, so a covered-payload optional/fallible param/return needs no special
@@ -605,7 +605,7 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
-/// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T ! E`) the subset
+/// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T E!`) the subset
 /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
 /// `()` (the ok payload of fallible `run`, rendered as `()`), or sema's
 /// default error type `Err` (`Type::Named("Err")`, which `cx.rust_type`
@@ -641,7 +641,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
             return true;
         }
         // D-TYPE2-MEASURE1=A: `ComputeError` is the err side of every fallible
-        // compute operation, including the composed `Matrix<M, P> ! ComputeError`
+        // compute operation, including the composed `Matrix<M, P> ComputeError!`
         // a matrix product produces. Same argument as `CryptoError` above: it
         // renders through `cx.rust_type` to the Prelude-owned
         // `jet_std::JetComputeError` (`core_rust_type_name`), so the payload is
@@ -653,7 +653,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
         // `receiver_method_return`). It renders
         // via `cx.rust_type` to `{root}jet_std::Closed` (`core_rust_type_name`), so a
-        // `T ! Closed` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
+        // `T Closed!` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
         if n == "Closed" {
             return true;
         }

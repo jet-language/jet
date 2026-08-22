@@ -924,7 +924,7 @@ fn int_kind(ty: &Type) -> Option<(bool, u8)> {
 
 /// D-NUMOPS1: an integer width conversion is *widening* (infallible) when the
 /// target range fully contains the source range; otherwise *narrowing*
-/// (fallible — returns `T ! String`, with no silent truncation).
+/// (fallible — returns `T String!`, with no silent truncation).
 fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
     let (slo, shi) = crate::AST::int_range(src.0, src.1);
     let (dlo, dhi) = crate::AST::int_range(dst.0, dst.1);
@@ -1019,7 +1019,7 @@ pub fn numeric_conversion_return(
     }
     // D-SHAPE-CONVERT1=A: a float source can carry NaN, an infinity, or a
     // magnitude no integer names, so *every* float→integer conversion is
-    // checked narrowing and answers `T ! String`. `int_kind` reports no width
+    // checked narrowing and answers `T String!`. `int_kind` reports no width
     // for exact `Int` (D-INTBIG1), so the width table below cannot see this
     // crossing; naming it here is what keeps the checking layer agreeing with
     // the AOT emitter, the JIT host, the comptime tier, and the web tier, all
@@ -1662,7 +1662,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
-        // c97/D-STRPARSE1: fallible integer parse. Same `Int ! ParseError` result
+        // c97/D-STRPARSE1: fallible integer parse. Same `Int ParseError!` result
         // `Int.parse(s)` returns, so one error type covers text→int.
         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
         // the one parse mechanism `Int.parse`/`Float.parse` already run —

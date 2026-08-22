@@ -226,7 +226,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn fail_async(n: Int) ! String {
+fn fail_async(n: Int) String! {
     return Err("ASYNC_FAILURE_SECRET")
 }
 
@@ -394,7 +394,7 @@ fn run() {
     scope :: event.scope()
     many :: event.new<Int>()
     many.on(scope, (n: Int) -> {})
-    loop i, 0..<300 { many.emit(i) }
+    loop i in 0..<300 { many.emit(i) }
     print("READY")
     time.sleep(30000ms)
 }
@@ -423,7 +423,7 @@ fn run() {
     scope :: event.scope()
     concurrent :: event.async_result<Int, String>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
     concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
-    loop i, 0..<400 { concurrent.emit_async(i) }
+    loop i in 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500ms)
     print("READY")
     time.sleep(30000ms)

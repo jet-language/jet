@@ -123,7 +123,7 @@ The parallel scan example now uses direct operations such as
 `text.lines().len()`, `io.args().skip(1).to_list()`, and iterator mapping instead
 of manual loops that only counted, skipped, or copied elements.
 
-Manual loops remain where they teach loop syntax, preserve streaming behavior,
+Manual loops remain where they teach loop syntax in preserve streaming behavior,
 update several pieces of state, enforce a bound, or model a low-level
 algorithm. A chain was not accepted merely because it was shorter. It also had
 to be easier to read and preserve the example's lesson.

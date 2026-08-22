@@ -67,7 +67,7 @@ const CASES: &[&str] = &[
     "[3, 1, 2]",
     "[10, 20, 30][1]",
     "[\"x\", \"y\", \"z\"]",
-    "loop value, [1, 2, 3] -> value * 2",
+    "loop value in [1, 2, 3] -> value * 2",
     // Map ordering via derived lists (BTreeMap is sorted by key). `.keys()`/
     // `.values()` return a lazy one-pass `Iter` (no `Display`, E0915) —
     // `.to_list()` materializes it for the differential's string print.
@@ -318,10 +318,10 @@ fn yielding_loop_matches_comptime_and_runtime() {
     if !have_rustc() {
         return;
     }
-    check_comptime_case(0, "loop value, [1, 2, 3] -> value * 2");
+    check_comptime_case(0, "loop value in [1, 2, 3] -> value * 2");
     check_comptime_case(
         1,
-        "loop value, [1, 2, 3, 4] -> { if value > 2 { break }; value * 2 }",
+        "loop value in [1, 2, 3, 4] -> { if value > 2 { break }; value * 2 }",
     );
 }
 
@@ -341,7 +341,7 @@ fn stop_after_two() Stream<Int> {
 }
 
 fn first() [Int] {
-    return loop value, stop_after_two() -> {
+    return loop value in stop_after_two() -> {
         if value == 2 { break }
         value
     }
@@ -833,7 +833,7 @@ fn data_empty_input_error_matches_comptime_and_runtime() {
         let src = format!(
             r#"use core.data as data
 
-fn show(result: Float ! DataError) String {{
+fn show(result: Float DataError!) String {{
     if result == {{
         .Ok(value) -> return "ok {{value}}"
         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
@@ -866,7 +866,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree ! XMLError) String {
+fn show(result: DataTree XMLError!) String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -1048,11 +1048,11 @@ fn local_comptime_is_literal_data() {
         r#"
 fn build() [Int] {
     xs := [Int]{}
-    loop i, 1..5, 2 {
+    loop i in 1..5, 2 {
         if i == 3 { next }
         xs.push(i * 10)
     }
-    loop cursor, 0..<3 {
+    loop cursor in 0..<3 {
         if cursor == 1 { next }
         xs.push(cursor)
     }

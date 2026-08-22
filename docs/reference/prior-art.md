@@ -144,7 +144,9 @@ removal → changelog. https://podscripts.co/podcasts/the-standup-with-theprimea
 
 **Onboarding reference** (Tower card note) — https://youtu.be/OPuztQfM3Fg
 
-**Function-design canon batch (mined 2026-08-21).** One video plus its three
+### Function-design canon
+
+Mining date: 2026-08-21. One video plus its three
 linked sources, mined together for function/API design law. Findings: rubric
 rows and review vocabulary (card #2137), E0150 free-function wording (#2138),
 sequence-algorithm gaps (#2139), stored invariant facts design (#2140), and

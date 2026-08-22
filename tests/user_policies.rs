@@ -51,10 +51,10 @@ fn user_policy_apply_keeps_a_callable_binding() {
     std::fs::write(
         &file,
         r#"pub policy audit(topic: String) {
-    wrap(call) { return call() }
+    wrap(call) { return "{topic}:{call()}" }
 }
 
-#Policy(audit("users.load")) fn load_user() Int -> 7
+fn load_user() String -> "ok"
 
 fn run() {
     selected :: apply(audit("users.load"), load_user)
@@ -66,4 +66,18 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            exit_code,
+            stdout,
+            stderr,
+        } => {
+            assert_eq!(exit_code, 0);
+            assert_eq!(stdout, "users.load:ok\n");
+            assert_eq!(stderr, "");
+        }
+        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+            panic!("interpreter rejected the user policy apply source: {diagnostics:#?}")
+        }
+    }
 }

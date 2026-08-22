@@ -31,7 +31,7 @@ fn is_void_named(ty: &Type) -> bool {
 }
 
 /// True when a declared return type carries no value payload: `()` / `Unit`,
-/// or fallible void (`() ! E`). Same void-named match used by asm return
+/// or fallible void (`() E!`). Same void-named match used by asm return
 /// checks in this file.
 fn is_void_like_return(ty: &Type) -> bool {
     is_void_named(ty)
@@ -509,7 +509,7 @@ impl<'a> Checker<'a> {
         self.emit_unused_binding_lints();
         // D-ANY-JAI1: a trait-bounded variadic has no zero-cost representation
         // for arbitrary use (heterogeneous elements, no boxing allowed) — codegen
-        // only covers one shape, a direct `loop x; parts { … }` loop, unrolled
+        // only covers one shape, a direct `loop x in parts { … }` loop, unrolled
         // per call site's arity. Reject anything else here (E1314) so codegen
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
@@ -554,7 +554,7 @@ impl<'a> Checker<'a> {
     }
 
     /// D-ANY-JAI1 (c7jaiany): validate that a trait-bounded variadic parameter
-    /// is used *only* as the collection of a single top-level `loop x; parts {
+    /// is used *only* as the collection of a single top-level `loop x in parts {
     /// … }` loop — the one shape `crates/jet-codegen/src/Codegen/VariadicBound.rs`
     /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
     /// outside that loop (heterogeneous elements, boxing is disallowed), so any
@@ -606,17 +606,17 @@ fn asm_register_known(reg: &str) -> bool {
 }
 
 /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
-/// one supported shape (a direct `loop x; name { … }` loop).
+/// one supported shape (a direct `loop x in name { … }` loop).
 fn e1314(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1314",
-        format!("`{name}` can only be used in a `loop … in {name}` loop here"),
+        format!("`{name}` can only be used in a direct `loop x in {name} {{ … }}` loop here"),
         format!(
             "`{name}` is a trait-bounded variadic (`...Trait` / `...[A, B]`) — its elements can \
              have different concrete types, so there's no single Rust type to give `{name}` \
              outside a loop that visits each argument once"
         ),
-        format!("iterate it with `loop x; {name} {{ … }}` — that's the only supported use"),
+        format!("iterate it with `loop x in {name} {{ … }}` — that's the only supported use"),
         Some(span),
     )
 }
@@ -624,7 +624,7 @@ fn e1314(name: &str, span: Span) -> Diagnostic {
 /// Walk one statement looking for uses of `name` (a trait-bounded variadic
 /// parameter). `top_level` is true only for statements directly in the
 /// function body (not nested in `if`/`while`/`loop`/`switch`/…) — the blessed
-/// `loop x; name { … }` shape is only recognized there; `for_hits` counts how
+/// `loop x in name { … }` shape is only recognized there; `for_hits` counts how
 /// many times it's seen; every other reference to `name` lands in `other`.
 fn scan_stmt_for_variadic_uses(
     s: &Stmt,

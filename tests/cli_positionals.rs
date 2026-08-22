@@ -23,7 +23,7 @@ fn write_todo(dir: &std::path::Path) {
         dir.join("todo.jet"),
         r#"#CLI
 struct Commands {
-    fn add(self, text: String, due: String = "") {
+    fn add(self, text: String, due: String{""}) {
         print(text)
         print(due)
     }

@@ -172,7 +172,7 @@ false rhyme / absent.
 
 ### Family B — Control selection (`->` / `if` / `loop`)
 
-- Members: `if` arms, subjectless guards, collecting loop items, ordinary break
+- Members: `if` arms, subjectless guards, collecting loop items in ordinary break
   payloads.
 - Shared ontology: C14/C15/C16. Choose or produce the next control value.
 - Spellings: `->` marks selected or yielded values. Effect-only bodies omit the

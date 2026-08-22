@@ -1,6 +1,6 @@
 // D-CALLPOLICY1=E / D-STRUCT-POLICY1=A: declaration defaults and apply(...)
 // replacements keep the same checked callable signature.
-pub policy audit(topic: String, prefix: String = "audit") {
+pub policy audit(topic: String, prefix: String{"audit"}) {
     wrap(call) {
         return "{prefix}:{topic}:{call()}"
     }
@@ -8,7 +8,7 @@ pub policy audit(topic: String, prefix: String = "audit") {
 
 #Policy(audit("users.load")) fn audited_load() String -> "ok"
 
-#Policy(trace("users.load")) fn load_user(id: Int, label: String = "user") String {
+#Policy(trace("users.load")) fn load_user(id: Int, label: String{"user"}) String {
     return "{label}:{id}"
 }
 

@@ -546,7 +546,7 @@ pub(crate) fn resolve_static_rule_products(
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
     materialize_test_faults(&mut module.items, diags);
     materialize_test_expected_fail(&mut module.items, &validated);
-    // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T = expr`.
+    // D-FIELDDEF1=C: promote retired `#Default(expr)` into `field: T{expr}`.
     // Then sweep whatever retired spellings are left on the field: the field
     // attachment point had no reader at all, so the registry's `@retired`
     // column was true and silent there — `#Uninit label: String` parsed,
@@ -572,22 +572,7 @@ pub(crate) fn resolve_static_rule_products(
                 if field.default_ct.is_none() {
                     field.default_ct = marker.ct.clone();
                 }
-                diags.push(Diagnostic::error(
-                    "E0375",
-                    format!(
-                        "`#{}` on field `{}` is retired — write an `=` default on the field",
-                        Syntax::MARKER_DEFAULT,
-                        field.name
-                    ),
-                    "field defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1)"
-                        .to_string(),
-                    format!(
-                        "write `{}: … = …` instead of `#{}(…)`",
-                        field.name,
-                        Syntax::MARKER_DEFAULT
-                    ),
-                    Some(marker.span),
-                ));
+                diags.push(Diagnostic::from_row("E0375", &[], Some(marker.span)));
             }
             field.serde_markers.retain(|marker| {
                 if !matches!(
@@ -605,7 +590,7 @@ pub(crate) fn resolve_static_rule_products(
             });
         }
     }
-    // Evaluate `field: T = expr` defaults to compile-time values (D-SERDE5).
+    // Evaluate `field: T{expr}` defaults to compile-time values (D-SERDE5).
     for item in &mut module.items {
         let Item::Struct(item) = item else { continue };
         let needs_baked_default = item.derives.iter().any(|(t, _)| {
@@ -1328,7 +1313,7 @@ fn declared_rule_argument_shape_error(
             let default = parameter
                 .value
                 .as_deref()
-                .map(|_| " = …".to_string())
+                .map(|_| "{…}".to_string())
                 .unwrap_or_default();
             format!("{}: {variadic}{ty}{default}", parameter.name)
         })

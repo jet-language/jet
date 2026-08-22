@@ -4335,7 +4335,7 @@ fn lower_method_call_impl(
     // (Source/Collections.rs), read off the receiver's already-resolved type
     // `Task<T>`/`Receiver<T>`/`Sender<T>` (the LOWERED receiver's `.ty`, total from the
     // binding's annotated/inferred slot — never re-inferred in emit, I3): `join`
-    // → `T ! TaskFailure`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
+    // → `T TaskFailure!`; `detach`/`pause`/`resume`/`cancel`/`send` → Unit;
     // `receive` → `Result<T, Closed>`. Args lowered PLAINLY (the AST
     // `emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {

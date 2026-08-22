@@ -19,7 +19,7 @@ fn script_top_level_recovery_always_consumes_a_token() {
 
 #[test]
 fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
-    let source = "message :: \"script entry\"\nprint(message)\nprint(helper())\nfn helper() => Int { return 42 }\n";
+    let source = "message :: \"script entry\"\nprint(message)\nprint(helper())\nfn helper() Int { return 42 }\n";
     let output = jet::compile(source)
         .expect("script statements should lower through the normal entry path");
     assert!(
@@ -48,11 +48,11 @@ print(limit)
 print(even(limit + 2))
 print("end")
 
-fn even(n: Int) => Bool {
+fn even(n: Int) Bool {
     return if n == 0 -> true else -> odd(n - 1)
 }
 
-fn odd(n: Int) => Bool {
+fn odd(n: Int) Bool {
     return if n == 0 -> false else -> even(n - 1)
 }
 "#;
@@ -131,7 +131,7 @@ fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
         "expected an unknown-name diagnostic before the binding, got {diagnostics:?}"
     );
 
-    let inside_declaration = "later :: 1\nfn helper() => Int { return later }\n";
+    let inside_declaration = "later :: 1\nfn helper() Int { return later }\n";
     let diagnostics = jet::compile(inside_declaration)
         .expect_err("a loose binding must stay local to the implicit run body");
     assert!(
@@ -143,7 +143,7 @@ fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
 #[test]
 fn unannotated_run_is_fallible_by_default_and_reports_at_the_edge() {
     let source = r#"
-fn step() => Int ! {
+fn step() Int ! {
     return Err("boom")
 }
 
@@ -184,8 +184,8 @@ fn run() {
 #[test]
 fn structural_entry_error_uses_jet_show_report() {
     let source = r#"
-fn run() ! [String] {
-    return Err([String].{"boom"})
+fn run() [String]! {
+    return Err([String]{"boom"})
 }
 "#;
     let out = jet::compile(source).expect("a structural entry error should compile");
@@ -278,7 +278,7 @@ fn script_dev_verb_uses_the_single_file_implicit_run_entry() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("main.jet"),
-        "print(helper())\nfn helper() => String { return \"dev script\" }\n",
+        "print(helper())\nfn helper() String { return \"dev script\" }\n",
     )
     .unwrap();
 
@@ -313,7 +313,7 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "print(\"script body\")\n#Test(\"script test\") { assert(helper()) }\nfn helper() => Bool { return true }\n",
+        "print(\"script body\")\n#Test(\"script test\") { assert(helper()) }\nfn helper() Bool { return true }\n",
     )
     .unwrap();
     let path = file.to_str().unwrap();
@@ -405,7 +405,7 @@ fn declared_crypto_error_uses_the_generic_runtime_boundary() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() ! CryptoError {
+fn run() CryptoError! {
     length :: 0
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -437,11 +437,11 @@ fn unhandled_crypto_error_exits_1_with_the_generic_entry_report() {
     let src = r#"
 use core.crypto as crypto
 
-fn dynamic_length(value: Int) => Int {
+fn dynamic_length(value: Int) Int {
     return value
 }
 
-fn run() ! CryptoError {
+fn run() CryptoError! {
     length :: dynamic_length(8161)
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -474,7 +474,7 @@ enum CryptoError {
     Internal
 }
 
-fn run() ! CryptoError {
+fn run() CryptoError! {
     return Err(CryptoError.Internal)
 }
 "#;
@@ -488,7 +488,7 @@ enum StoreErr {
     Missing
 }
 
-fn run() ! StoreErr {
+fn run() StoreErr! {
     return Err(StoreErr.Missing)
 }
 "#;
@@ -548,7 +548,7 @@ fn internal_crypto_error_uses_the_reported_entry_exit() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() ! CryptoError {
+fn run() CryptoError! {
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)?
 }
 "#;
@@ -610,7 +610,7 @@ fn main() {{
 #[test]
 fn fallible_unit_run_can_finish_normally_after_try() {
     let src = r#"
-fn step() => Int ! {
+fn step() Int ! {
     return Ok(1)
 }
 
@@ -642,8 +642,8 @@ fn unit_fallible_signatures_lower_with_value_fallible_returns() {
     let src = r#"
 struct Config { value: Int }
 
-fn save(path: String) ! IOError {
-    return .Err(IOError.InvalidInput(IOContext.{
+fn save(path: String) IOError! {
+    return .Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
         os_code: None,
@@ -655,8 +655,8 @@ fn sync() ! {
     return Err("not implemented")
 }
 
-fn load() => Config ! IOError {
-    return Ok(Config.{ value: 1 })
+fn load() Config IOError! {
+    return Ok(Config{ value: 1 })
 }
 
 fn run() {}
@@ -696,7 +696,7 @@ fn run() {
 
 #[test]
 fn retired_void_type_reports_the_migration_diagnostic() {
-    let src = "fn run() => Void ! { return Err(\"boom\") }\n";
+    let src = "fn run() Void ! { return Err(\"boom\") }\n";
     let diagnostics = jet::compile(src).expect_err("Void must not remain a source type");
     assert!(
         diagnostics.iter().any(|d| d.code == "E0431"),
@@ -707,7 +707,7 @@ fn retired_void_type_reports_the_migration_diagnostic() {
 #[test]
 fn classic_if_without_else_does_not_satisfy_missing_return_check() {
     let src = r#"
-fn maybe(flag: Bool) => Int {
+fn maybe(flag: Bool) Int {
     if flag { return 1 }
 }
 

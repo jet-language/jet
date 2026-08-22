@@ -82,13 +82,13 @@ fn run() {
     v :: 3
     range := 0
     s :: "ok"
-    loop i, 1..<4 {
+    loop i in 1..<4 {
         range = (range + i)
     }
     pair :: Pair{ left: value, right: range }
     xs := [v, pair.right]
     xs[0] = value
-    loop item, xs {
+    loop item in xs {
         print(item)
     }
     print("{s}:{value}:{pair.left}:{range}")
@@ -588,7 +588,7 @@ fn comptime_local_is_literal_data() {
     let src = "\
 fn build() [Int] {
     xs := [Int]{}
-    loop i, 1..3 {
+    loop i in 1..3 {
         xs.push(i * 10)
     }
     return xs
@@ -887,7 +887,7 @@ fn run() {
 }
 
 /// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `Int.parse(text)` (→
-/// `Int ! ParseError`). Both are compiler built-ins, so `main` routes
+/// `Int ParseError!`). Both are compiler built-ins, so `main` routes
 /// through the TIR — proven by the emitted `jet_string_lines` helper call and
 /// the Prelude parse-kernel call. `Int.parse` composes with `??`: a good parse
 /// yields the value, a bad one (`"abc"`) takes the fallback.
@@ -904,11 +904,11 @@ fn run() {
     print(bad)
     lines :: \"a\\nb\\nc\".lines()
     print(lines.len())
-    loop line, lines {
+    loop line in lines {
         print(line)
     }
     total := 0
-    loop row, \"10\\n20\\n30\".lines() {
+    loop row in \"10\\n20\\n30\".lines() {
         total += (Int.parse(row) ?? 0)
     }
     print(total)

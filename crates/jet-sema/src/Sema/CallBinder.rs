@@ -29,7 +29,7 @@ pub(crate) struct BindParam<'a> {
     /// a supplied argument AST into the default.
     pub name: &'a str,
     pub zone: ParamZone,
-    /// D-NARG-D2: the `= expr` default, already registered on the signature.
+    /// D-NARG-D2: the `{expr}` default, already registered on the signature.
     pub default: Option<&'a crate::AST::Expr>,
     pub convention: crate::AST::AccessConvention,
     /// Declaration type used to type compiler-private default references.

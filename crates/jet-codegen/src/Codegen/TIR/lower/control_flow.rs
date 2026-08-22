@@ -127,7 +127,7 @@ pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
     label.as_ref().map(|(n, _)| n.clone())
 }
 
-/// c109 Phase 22: resolve a `loop x; <coll>` collection into its emitted Rust
+/// c109 Phase 22: resolve a `loop x in <coll>` collection into its emitted Rust
 /// string + (for a method-call collection) the iteration form, reproducing
 /// `emit_for_in`'s branch selection (Source/Codegen/Statement.rs) byte-for-byte.
 /// For `chars`/`lines` the returned string is the *receiver* (the form emits
@@ -135,7 +135,7 @@ pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
 /// (incl. a non-special method call routed to `.iter().cloned()`) it is the whole
 /// collection. The FileReader-vs-stdin `lines` split mirrors the AST's
 /// `expr_jet_ty(receiver)` / inline-`io.stdin()` test exactly.
-/// The iteration source a `loop x; <coll>` pulls from, plus the method-call
+/// The iteration source a `loop x in <coll>` pulls from, plus the method-call
 /// iteration form. For a `.chars()`/`.lines()` form the source is the method
 /// RECEIVER; otherwise it is the whole collection. Both are structured `TExpr`s —
 /// the Rust spelling happens in emit.

@@ -9,7 +9,7 @@ impl StoreErr -> Err {
     return Err("missing")
 }
 
-fn read_store() Int ! StoreErr {
+fn read_store() Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 
@@ -32,7 +32,7 @@ impl String -> Err {
     return Err(self)
 }
 
-fn read_store() Int ! String {
+fn read_store() Int String! {
     return Err("missing")
 }
 
@@ -66,7 +66,7 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int ! StoreErr {
+fn read_store() Int StoreErr! {
     return Err(StoreErr.Missing)
 }
 

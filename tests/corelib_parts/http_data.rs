@@ -1024,7 +1024,7 @@ fn run() {
     print(data.count(planned))
     print(data.count(data.rows(collected)))
     print(data.plan(planned)[2])
-    loop ticket, data.rows(collected) {
+    loop ticket in data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
     maybe_minutes :: [ Val(2.0), missing_minutes(), Val(6.0), missing_minutes() ]
@@ -1032,25 +1032,25 @@ fn run() {
     print(data.count(series))
     print(data.missing_count(series))
     groups :: data.group_mean(rows, (t) -> t.team, (t) -> t.minutes) ?? panic("group")
-    loop g, groups {
+    loop g in groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values) ?? panic("sum"))
     print(data.mean(values) ?? panic("mean"))
     joined :: data.inner_join(rows, budgets, (t) -> t.team, (b) -> b.team) ?? panic("join")
-    loop pair, joined {
+    loop pair in joined {
         print("{pair.left.team}:{pair.right.owner}")
     }
     left :: data.left_join(rows, [budgets[0]], (t) -> t.team, (b) -> b.team) ?? panic("left")
-    loop pair, left {
+    loop pair in left {
         if pair.right == {
             Val(budget) -> print("{pair.left.team}:{budget.owner}")
             None -> print("{pair.left.team}:none")
         }
     }
     pivot :: data.pivot_sum(rows, (t) -> t.team, (t) -> if t.minutes >= 6.0 -> "long" else -> "short", (t) -> t.minutes) ?? panic("pivot")
-    loop cell, pivot {
+    loop cell in pivot {
         print("{cell.row_key}|{cell.column_key}:{cell.count}")
     }
     rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
@@ -1166,12 +1166,12 @@ fn run() {
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c, cols {
+    loop c in cols {
         print("{c.name}:{c.type_name}")
     }
     selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t, selected {
+    loop t in selected {
         print("{t.team}:{t.minutes}")
     }
     print("{data.status()[5].step}:{data.status()[5].path}")
@@ -1215,12 +1215,12 @@ fn run() {
     rows :: data.json<Ticket>(raw) ?? panic("bad json")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c, cols {
+    loop c in cols {
         print("{c.name}:{c.type_name}")
     }
     selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t, selected {
+    loop t in selected {
         print("{t.team}:{t.minutes}")
     }
     print("{data.status()[6].step}:{data.status()[6].path}")
@@ -1271,23 +1271,23 @@ struct Box<T> {
 fn run() {
     empty_rows := [Ticket]{}
     empty_table :: data.table(empty_rows)
-    loop c, data.schema(empty_table) {
+    loop c in data.schema(empty_table) {
         print("empty:{c.name}:{c.type_name}")
     }
 
     nums :: data.series([1.0, 2.0])
-    loop c, data.schema(nums) {
+    loop c in data.schema(nums) {
         print("float:{c.name}:{c.type_name}")
     }
 
     tickets :: data.series([Ticket{team: "Core", minutes: 4.0}])
-    loop c, data.schema(tickets) {
+    loop c in data.schema(tickets) {
         print("struct:{c.name}:{c.type_name}")
     }
 
     empty_tickets := [Ticket]{}
     empty_series :: data.series(empty_tickets)
-    loop c, data.schema(empty_series) {
+    loop c in data.schema(empty_series) {
         print("empty_series:{c.name}:{c.type_name}")
     }
 
@@ -1295,7 +1295,7 @@ fn run() {
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
 
     boxed := [Box<Int>]{}
-    loop c, data.schema(data.table(boxed)) {
+    loop c in data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }
 }

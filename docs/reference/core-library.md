@@ -5,7 +5,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 The Jet Core library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
 enough to write real command-line tools. Every fallible call returns a
-`T ! E` value; nothing in Core panics on its own.
+`T E!` value; nothing in Core panics on its own.
 
 <!-- Stable IDs bind these public Core declarations to reviewed feature depth. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
@@ -119,7 +119,7 @@ not their items, so importing an item this way is **E1001** — keep qualified
 access through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
-Failure-returning core functions return `T ! E` and must be handled with `?`, `??`, or
+Failure-returning core functions return `T E!` and must be handled with `?`, `??`, or
 a pattern test like any other Jet result. `core.files` has both whole-file
 helpers (`read`/`write`/…) and streaming handles (`open`/`create`); path
 arguments accept `String | Path`; binary APIs use `U8` and `[U8]`.
@@ -128,7 +128,7 @@ arguments accept `String | Path`; binary APIs use `U8` and `[U8]`.
 
 ## Errors and results
 
-Failure-returning Core functions return `T ! E`. Handle them like any other Jet
+Failure-returning Core functions return `T E!`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
@@ -211,7 +211,7 @@ uses that truth row.
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
-| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove` (`x, by: RemoveBy = .Val`, D-LISTREMOVE1), `len`, `is_empty`, `clear` |
+| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove` (`x, by: RemoveBy{.Val}`, D-LISTREMOVE1), `len`, `is_empty`, `clear` |
 | `Cache<K,V>` | `Cache.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
 | `Bits` | `Bits.new()` | `add`, `remove`, `has`, `count`, `to_list`, `copy`, `len`, `is_empty`, `clear` |
@@ -228,7 +228,7 @@ and ballot-needed work:
 | Job | Current surface | Decision |
 | --- | --- | --- |
 | Sorted membership search | `binary_search(value)` and `binary_search_by(compare)` require sorted input and return `Int?`. | Already shipped. Do not add a second binary-search spelling. |
-| Lower-bound insertion position | `position(predicate)` can find a monotone boundary, but it scans; it is not a binary lower bound. | Keep separate from `binary_search`. Add only after choosing one name and defining the sorted-input contract. |
+| Lower-bound insertion position | `position(predicate)` uses a linear scan to find a monotone boundary; it is not a binary lower bound. | Deferred, not declined. Keep separate from `binary_search`; add only after choosing one name and defining the sorted-input contract. |
 | Move a contiguous selection (`slide`) | `slice` and `concat` can rebuild the result, but both move directions need destination adjustment and several segments. | Worth a named method for UI reorder code; not a useful one-liner. No method lands in this audit. |
 | Gather predicate matches at a pivot (`gather`) | Two `partition` calls over the left and right slices, followed by four concatenated parts, express the result without an index loop. | Worth a named method for repeated regroup edits; the composition is too long and easy to mis-wire. No method lands in this audit. |
 
@@ -301,7 +301,7 @@ labels become row fields; methods use `a`, `b`, `c`, and so on.
 left :: [1, 2, 3]
 right :: [10, 20]
 
-loop row, left.zip_pad(right, fill: 0) {
+loop row in left.zip_pad(right, fill: 0) {
     print(row.b)
 }
 ```
@@ -350,37 +350,37 @@ Whole-file helpers:
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `read(path)` | `String ! IOError` | Read entire file as UTF-8 text |
-| `read_bytes(path)` | `[U8] ! IOError` | Read entire file as bytes |
-| `write(path, text)` | `() ! IOError` | Create or overwrite a text file |
-| `write_bytes(path, bytes)` | `() ! IOError` | Create or overwrite a file with raw bytes |
-| `append_all(path, text)` | `() ! IOError` | Append text to a file, one shot |
+| `read(path)` | `String IOError!` | Read entire file as UTF-8 text |
+| `read_bytes(path)` | `[U8] IOError!` | Read entire file as bytes |
+| `write(path, text)` | `IOError!` | Create or overwrite a text file |
+| `write_bytes(path, bytes)` | `IOError!` | Create or overwrite a file with raw bytes |
+| `append_all(path, text)` | `IOError!` | Append text to a file, one shot |
 | `exists(path)` | `Bool` | Whether the path exists |
-| `remove(path)` | `() ! IOError` | Delete a file |
-| `remove_dir(path)` | `() ! IOError` | Delete an empty directory |
-| `remove_all(path)` | `() ! IOError` | Delete a file or directory tree |
-| `list_dir(path)` | `[DirEntry] ! IOError` | One entry per directory member, sorted by name (D-LSDIR1) |
-| `create_dir(path)` | `() ! IOError` | Create a directory, including missing parents |
-| `create_dir_all(path)` | `() ! IOError` | Create a directory tree |
+| `remove(path)` | `IOError!` | Delete a file |
+| `remove_dir(path)` | `IOError!` | Delete an empty directory |
+| `remove_all(path)` | `IOError!` | Delete a file or directory tree |
+| `list_dir(path)` | `[DirEntry] IOError!` | One entry per directory member, sorted by name (D-LSDIR1) |
+| `create_dir(path)` | `IOError!` | Create a directory, including missing parents |
+| `create_dir_all(path)` | `IOError!` | Create a directory tree |
 | `is_dir(path)` | `Bool` | Whether the path is a directory |
-| `copy(from, to)` | `() ! IOError` | Copy a file |
-| `copy_dir(from, to)` | `() ! IOError` | Copy a directory tree |
-| `rename(from, to)` | `() ! IOError` | Rename or move a file |
-| `stat(path)` | `Stat ! IOError` | Metadata: size, times, permissions, kind |
-| `canonicalize(path)` | `String ! IOError` | Existing path, absolute and symlink-resolved |
-| `absolute(path)` | `String ! IOError` | Absolute path without requiring it to exist |
-| `walk(path)` | `[WalkEntry] ! IOError` | Recursive entries below `path`, sorted per directory |
-| `glob(pattern)` | `[String] ! IOError` | Recursive `*`/`?` path match |
-| `symlink(from, to)` | `() ! IOError` | Create a symbolic link |
-| `read_link(path)` | `String ! IOError` | Read a symbolic link target |
-| `hard_link(from, to)` | `() ! IOError` | Create a hard link |
-| `read_at(path, offset, len)` | `[U8] ! IOError` | Read bytes at an offset |
-| `write_at(path, offset, bytes)` | `() ! IOError` | Write bytes at an offset |
-| `fsync(path)` | `() ! IOError` | Flush a file to stable storage |
-| `write_atomic(path, bytes)` | `() ! IOError` | Write via temp file then rename |
-| `temp_dir(prefix)` | `TempDir ! IOError` | Create a temp directory; last handle drop removes it |
-| `temp_file(prefix)` | `TempFile ! IOError` | Create a temp file; last handle drop removes it |
-| `lock(path)` | `FileLock ! IOError` | Create an advisory lock file; last handle drop removes it |
+| `copy(from, to)` | `IOError!` | Copy a file |
+| `copy_dir(from, to)` | `IOError!` | Copy a directory tree |
+| `rename(from, to)` | `IOError!` | Rename or move a file |
+| `stat(path)` | `Stat IOError!` | Metadata: size, times, permissions, kind |
+| `canonicalize(path)` | `String IOError!` | Existing path, absolute and symlink-resolved |
+| `absolute(path)` | `String IOError!` | Absolute path without requiring it to exist |
+| `walk(path)` | `[WalkEntry] IOError!` | Recursive entries below `path`, sorted per directory |
+| `glob(pattern)` | `[String] IOError!` | Recursive `*`/`?` path match |
+| `symlink(from, to)` | `IOError!` | Create a symbolic link |
+| `read_link(path)` | `String IOError!` | Read a symbolic link target |
+| `hard_link(from, to)` | `IOError!` | Create a hard link |
+| `read_at(path, offset, len)` | `[U8] IOError!` | Read bytes at an offset |
+| `write_at(path, offset, bytes)` | `IOError!` | Write bytes at an offset |
+| `fsync(path)` | `IOError!` | Flush a file to stable storage |
+| `write_atomic(path, bytes)` | `IOError!` | Write via temp file then rename |
+| `temp_dir(prefix)` | `TempDir IOError!` | Create a temp directory; last handle drop removes it |
+| `temp_file(prefix)` | `TempFile IOError!` | Create a temp file; last handle drop removes it |
+| `lock(path)` | `FileLock IOError!` | Create an advisory lock file; last handle drop removes it |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
 
@@ -391,7 +391,7 @@ buffering law](../spec/spec.md#bounded-buffering-law):
 ```jet
 use core.files as files
 
-fn count_lines(path: String) :> Int ! IOError {
+fn count_lines(path: String) :> Int IOError! {
     handle :: files.open(~path)?
     n := 0
     loop line; handle.lines() {
@@ -403,13 +403,13 @@ fn count_lines(path: String) :> Int ! IOError {
 
 | Function/method | Returns | What it does |
 |------------------|---------|--------------|
-| `open(path)` | `FileReader ! IOError` | Open a file for buffered line-by-line reading |
-| `create(path)` | `FileWriter ! IOError` | Create/overwrite a file for buffered writing |
-| `append(path)` | `FileWriter ! IOError` | Open a file for buffered appending |
-| `reader.read_line()` | `String? ! IOError` | One line (no newline), `None` at EOF |
+| `open(path)` | `FileReader IOError!` | Open a file for buffered line-by-line reading |
+| `create(path)` | `FileWriter IOError!` | Create/overwrite a file for buffered writing |
+| `append(path)` | `FileWriter IOError!` | Open a file for buffered appending |
+| `reader.read_line()` | `String? IOError!` | One line (no newline), `None` at EOF |
 | `reader.lines()` | iterator of `String` | `loop line; handle.lines()` |
-| `writer.write_line(text)` | `() ! IOError` | Write `text` plus a trailing newline |
-| `writer.flush()` | `() ! IOError` | Force buffered bytes to disk |
+| `writer.write_line(text)` | `IOError!` | Write `text` plus a trailing newline |
+| `writer.flush()` | `IOError!` | Force buffered bytes to disk |
 
 Handles close automatically on every exit path (RAII), including early `?`
 returns. `append_all` (whole-file) and `append` (streaming handle
@@ -459,16 +459,16 @@ fn run() {
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `url.parse(text)` | `Url ! String` | Parse absolute WHATWG-style URLs: http(s), file, data, and other schemes |
-| `url.from_parts(scheme, host, path, query, fragment)` | `Url ! String` | Build a URL from decoded components; query is `[[String]]` key/value rows |
+| `url.parse(text)` | `Url String!` | Parse absolute WHATWG-style URLs: http(s), file, data, and other schemes |
+| `url.from_parts(scheme, host, path, query, fragment)` | `Url String!` | Build a URL from decoded components; query is `[[String]]` key/value rows |
 | `url.file(path)` / `url.data(mime, text)` | `Url` | Build `file://` and `data:` URLs |
 | `url.query(pairs)` | `String` | Encode repeated query pairs from `[[String]]` |
-| `url.percent_encode(text)` / `url.percent_decode(text)` | `String` / `String ! String` | Component percent encoding and decoding |
+| `url.percent_encode(text)` / `url.percent_decode(text)` | `String` / `String String!` | Component percent encoding and decoding |
 | `u.scheme()` / `.host()` / `.port()` / `.path()` / `.fragment()` | mixed | Typed component accessors |
 | `u.username()` / `.password()` / `.userinfo()` / `.authority()` | `String` | Credential and authority accessors (empty when absent) |
 | `u.default_port()` | `Int?` | Well-known port for the scheme (`http`/`ws`→80, `https`/`wss`→443, …) |
 | `u.path_segments()` / `.query_pairs()` / `.query()` | `[String]` / `[[String]]` / `String` | Decoded path/query views plus encoded query text |
-| `u.normalize()` / `.join(relative)` | `Url` / `Url ! String` | Normalize or resolve a relative reference |
+| `u.normalize()` / `.join(relative)` | `Url` / `Url String!` | Normalize or resolve a relative reference |
 | `u.set_query(k, v)` / `.add_query(k, v)` | `Url` | Return a new URL with query pairs changed; repeated keys are preserved by `add_query` |
 
 `core.net.mime` parses `type/subtype; param=value`, exposes typed accessors, and
@@ -477,7 +477,7 @@ implicit; callers choose an explicit MIME type or extension lookup.
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `mime.parse(text)` | `Mime ! String` | Parse media type, subtype, and parameters |
+| `mime.parse(text)` | `Mime String!` | Parse media type, subtype, and parameters |
 | `mime.from_extension(ext)` / `mime.extension(type)` | `String?` / `String?` | Map common extensions and MIME essences |
 | `m.media_type()` / `.subtype()` / `.essence()` | `String` | Type/subtype accessors |
 | `m.param(name)` / `.params()` | `String?` / `[[String]]` | Parameter lookup and decoded key/value rows |
@@ -503,8 +503,8 @@ fn run() {
 |----------|---------|--------------|
 | `v4()` | `String` | Random UUID (system CSPRNG) |
 | `v7(clock)` | `String` | Time-ordered UUID from an injected `Clock`, deterministic in tests |
-| `parse(text)` | `String ! String` | Validate 8-4-4-4-12 hex, return the lowercased normal form |
-| `v5(namespace, name)` | `String ! String` | Deterministic UUID from a namespace UUID and a name (RFC 4122, SHA-1); errors if `namespace` doesn't parse |
+| `parse(text)` | `String String!` | Validate 8-4-4-4-12 hex, return the lowercased normal form |
+| `v5(namespace, name)` | `String String!` | Deterministic UUID from a namespace UUID and a name (RFC 4122, SHA-1); errors if `namespace` doesn't parse |
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `uuid4` already ships as
 `v4`. `uuid1` is MAC-address-based, an older and weaker format; Jet declines
@@ -615,7 +615,7 @@ Client surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `client.get(url)` / `client.post(url, body)` | `HTTPClientResp ! String` | One-shot request helpers |
+| `client.get(url)` / `client.post(url, body)` | `HTTPClientResp String!` | One-shot request helpers |
 | `client.request(method, url)` | `HTTPClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
 | `req.header(name, value)` / `.body(text|Body)` | `HTTPClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HTTPClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
@@ -628,7 +628,7 @@ Client surface:
 | `Client.new().redirects(.Follow{ max:, same_origin_credentials: })` | `HTTPClient` | Typed redirect policy (D-HTTP-CLIENT2); default unset is Follow(max:10, same_origin_credentials:true). Cross-origin always strips Authorization / Proxy-Authorization / Cookie; `same_origin_credentials: false` also strips them on same-origin hops |
 | `Client.new().allow_http_downgrade(true)` | `HTTPClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
 | `Client.new().retries(.Safe/.Idempotent/.None)` | `HTTPClient` | Stale pooled-connection retry before request bytes only (D-HTTP-CLIENT2): default unset is Safe (GET/HEAD/OPTIONS/TRACE); `.Idempotent` opts in PUT/DELETE; `.None` disables; max one attempt; IO-only (never Timeout/status); POST/PATCH never auto-retry |
-| `req.send()` / `client.send(req)` | `HTTPClientResp ! String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
+| `req.send()` / `client.send(req)` | `HTTPClientResp String!` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
 The compatibility text response path accepts at most 8 MiB of transfer-decoded
@@ -642,24 +642,24 @@ Server surface:
 |-------------------|---------|--------------|
 | `server.mux()` | `HTTPMux` | Create a function-first router |
 | `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) :> HTTPSrvResp` handlers |
-| `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HTTPServer ! String` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
-| `server.serve(addr, mux)` | `() ! String` | Serve HTTP/1.1 forever |
-| `server.serve(addr, mux, tls: server.tls(cert, key))` | `() ! String` | Serve HTTPS with explicit TLS material |
-| `server.serve_once(addr, mux)` / `server.serve_once_listener(listener, mux)` | `() ! String` | Testable one-request serving |
+| `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HTTPServer String!` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
+| `server.serve(addr, mux)` | `String!` | Serve HTTP/1.1 forever |
+| `server.serve(addr, mux, tls: server.tls(cert, key))` | `String!` | Serve HTTPS with explicit TLS material |
+| `server.serve_once(addr, mux)` / `server.serve_once_listener(listener, mux)` | `String!` | Testable one-request serving |
 | `server.response(status, body)` / `resp.header(name, value)` | `HTTPSrvResp` | Build a response |
-| `resp.trailers(^headers)` | `HTTPSrvResp ! HTTPError` | Consume and attach validated ordered response trailers; HTTP/1.0 and body-forbidden responses fail before publishing |
+| `resp.trailers(^headers)` | `HTTPSrvResp HTTPError!` | Consume and attach validated ordered response trailers; HTTP/1.0 and body-forbidden responses fail before publishing |
 | `server.sse(data)` | `HTTPSrvResp` | Server-sent event response |
-| `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HTTPSrvResp ! String` | Static file response, with Range support |
+| `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HTTPSrvResp String!` | Static file response, with Range support |
 | `server.json(status, value)` | `HTTPSrvResp` | One JSON response from a `#Codable` value; sets `Content-Type: application/json; charset=utf-8` |
-| `req.json<T>()` | `T ! HTTPError` | Read the request body as JSON and decode it; the ratified body cap frames the read |
-| `resp.json<T>(limit)` | `T ! HTTPError` | Read a client response body as JSON and decode it; without `limit` the shared body cap applies |
+| `req.json<T>()` | `T HTTPError!` | Read the request body as JSON and decode it; the ratified body cap frames the read |
+| `resp.json<T>(limit)` | `T HTTPError!` | Read a client response body as JSON and decode it; without `limit` the shared body cap applies |
 | `server.static_files(mux, prefix, root)` | nothing | Mount a directory under a prefix; add `index`, `dotfiles`, `follow_links` for expert policy |
-| `server.cors_policy(origins)` | `HTTPCorsPolicy ! HTTPError` | Build a CORS policy; add `methods`, `headers`, `credentials`, `max_age` for the full form |
+| `server.cors_policy(origins)` | `HTTPCorsPolicy HTTPError!` | Build a CORS policy; add `methods`, `headers`, `credentials`, `max_age` for the full form |
 | `server.cors(mux, policy)` | nothing | Install the policy as middleware on `mux` |
 | `server.access_log(req, status)` | `String` | Stable access-log line |
 | `server.request_id(mux)` | nothing | Install D-HTTP-SERVER2 built-in `request_id` middleware on `mux` |
 | `req.method()` / `.path()` / `.param(name)` / `.header(name)` / `.body()` / `.body_len()` / `.under_limit(max)` | mixed | Inspect request data and enforce body limits |
-| `req.trailers()` | `HTTPHeaders ! HTTPError` | Read ordered request trailers after Body reaches EOF; returns empty headers when none were sent |
+| `req.trailers()` | `HTTPHeaders HTTPError!` | Read ordered request trailers after Body reaches EOF; returns empty headers when none were sent |
 
 Card 301 audit state:
 
@@ -706,11 +706,11 @@ types for server upgrade and does not hide WebSocket APIs under `core.http`.
 
 | Function / method | Type | Notes |
 |-------------------|------|-------|
-| `ws.connect(url)` | `WsConn ! WsError` | Cleartext `ws://` dial and RFC6455 handshake |
-| `ws.upgrade(req)` | `WsConn ! WsError` | Server upgrade from an HTTP request during mux dispatch |
-| `conn.send_text(text)` / `.send_bytes(bytes)` | `() ! WsError` | Data frames; client frames are masked |
-| `conn.recv()` | `WsMessage ! WsError` | Text, binary, or close; respects ambient deadlines |
-| `conn.close(code, reason)` | `() ! WsError` | Sends a close frame and shuts down the socket |
+| `ws.connect(url)` | `WsConn WsError!` | Cleartext `ws://` dial and RFC6455 handshake |
+| `ws.upgrade(req)` | `WsConn WsError!` | Server upgrade from an HTTP request during mux dispatch |
+| `conn.send_text(text)` / `.send_bytes(bytes)` | `WsError!` | Data frames; client frames are masked |
+| `conn.recv()` | `WsMessage WsError!` | Text, binary, or close; respects ambient deadlines |
+| `conn.close(code, reason)` | `WsError!` | Sends a close frame and shuts down the socket |
 
 Example: `examples/features/net/ws_echo.jet`.
 
@@ -780,16 +780,16 @@ fn run() {
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8]` | PBKDF2-HMAC-SHA256 key derivation |
 | `Hasher.new()` / `update(bytes)` / `digest()` | `Hasher` / nothing / `String` | Incremental SHA-256 hashing |
 | `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
-| `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ! CryptoError` / `[U8] ! CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
-| `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ! FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
-| `expert.open_v1(key, envelope)` | `[U8] ! CryptoError` | Audited `#Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
-| `expert.migrate_v1(key, source, recipients, destination)` | `() ! FileCryptoError` | Audited `#Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
-| `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature ! CryptoError` / `Bool ! CryptoError` | Ed25519 signing and verification with nominal key and signature types |
-| `x25519(secret_key, public_key)` | `SharedSecret ! CryptoError` | X25519 key agreement with nominal key and shared-secret types |
-| `hkdf_sha256(ikm, salt, info, len)` | `Secret ! CryptoError` | HKDF-SHA256 expand with a 0–8160-byte output bound, without exposing derived secret bytes |
-| `password_hash(password)` | `PasswordHash ! CryptoError` | Argon2id password hash with generated salt and safe defaults; accepts a nominal `Secret` |
-| `password_verify(password, stored)` | `Bool ! CryptoError` | Verify a nominal `Secret` against a validated `PasswordHash` |
-| `expert.argon2id(password, salt, memory_kib, iterations, lanes, output_len)` | `Secret ! CryptoError` | Audited deterministic Argon2id with the ratified hard bounds; compiler-known violations are E2702 |
+| `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed CryptoError!` / `[U8] CryptoError!` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
+| `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `FileCryptoError!` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
+| `expert.open_v1(key, envelope)` | `[U8] CryptoError!` | Audited `#Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
+| `expert.migrate_v1(key, source, recipients, destination)` | `FileCryptoError!` | Audited `#Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
+| `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature CryptoError!` / `Bool CryptoError!` | Ed25519 signing and verification with nominal key and signature types |
+| `x25519(secret_key, public_key)` | `SharedSecret CryptoError!` | X25519 key agreement with nominal key and shared-secret types |
+| `hkdf_sha256(ikm, salt, info, len)` | `Secret CryptoError!` | HKDF-SHA256 expand with a 0–8160-byte output bound, without exposing derived secret bytes |
+| `password_hash(password)` | `PasswordHash CryptoError!` | Argon2id password hash with generated salt and safe defaults; accepts a nominal `Secret` |
+| `password_verify(password, stored)` | `Bool CryptoError!` | Verify a nominal `Secret` against a validated `PasswordHash` |
+| `expert.argon2id(password, salt, memory_kib, iterations, lanes, output_len)` | `Secret CryptoError!` | Audited deterministic Argon2id with the ratified hard bounds; compiler-known violations are E2702 |
 | `constant_time_equal(a, b)` | `Bool` | Constant-time comparison of nominal `Secret` values |
 | `constant_time_equal_bytes(a, b)` | `Bool` | Constant-time comparison of two byte lists |
 
@@ -913,16 +913,16 @@ Examples: `examples/features/crypto/vault_keys.jet` and
 batteries. `app.auth` reuses the same Prelude symbols (one mechanism):
 
 ```jet
-verify_jwt(token, key:, audience:, issuer:, clock_skew:) :> Claims ! AuthError
-verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) :> Claims ! AuthError
+verify_jwt(token, key:, audience:, issuer:, clock_skew:) :> Claims AuthError!
+verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) :> Claims AuthError!
 
-register_user(user_id, password_hash) ! String
-password_login(user_id, password_hash, now_ms, ttl_ms) :> Session ! String
-session_validate(session_id, now_ms) :> Session ! String
-magic_link_issue(user_id, now_ms, ttl_ms) :> String ! String
-magic_link_consume(token, now_ms, ttl_ms) :> Session ! String
-oauth_begin(provider) :> String ! String
-oauth_finish(state, subject, now_ms, ttl_ms) :> Session ! String
+register_user(user_id, password_hash) String!
+password_login(user_id, password_hash, now_ms, ttl_ms) :> Session String!
+session_validate(session_id, now_ms) :> Session String!
+magic_link_issue(user_id, now_ms, ttl_ms) :> String String!
+magic_link_consume(token, now_ms, ttl_ms) :> Session String!
+oauth_begin(provider) :> String String!
+oauth_finish(state, subject, now_ms, ttl_ms) :> Session String!
 ```
 
 `issuer` and `clock_skew` are optional for both verifiers; `footer` and
@@ -966,7 +966,7 @@ text_new / text_set / text_edit / text_merge / text_show / text_metadata
 counter_new / counter_inc / counter_merge / counter_value
 map_new / map_set / map_get / map_merge / map_show
 list_new / list_push / list_merge / list_show
-policy_new(table, expression) :> RowPolicy ! String
+policy_new(table, expression) :> RowPolicy String!
 policy_allows(policy, user, row_owner) :> Bool
 ```
 
@@ -1039,7 +1039,7 @@ fn run() {
 
 | Function/method | Returns | What it does |
 |------------------|---------|--------------|
-| `watcher.files(path)` | `WatchHandle ! IOError` | Watch a file or directory tree |
+| `watcher.files(path)` | `WatchHandle IOError!` | Watch a file or directory tree |
 | `watcher.process_pid(pid)` | `WatchHandle` | Watch a process id for exit |
 | `watcher.port(host, port)` | `WatchHandle` | Watch for TCP readiness |
 | `watcher.set()` | `WatchSet` | Create a multiplexer for handles |
@@ -1083,30 +1083,30 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `input([prompt])` | `String ! IOError` | Read one line from stdin; optional prompt |
-| `readline()` | `String ! IOError` | Same as `input()` with no prompt (peer free-function spelling) |
-| `read_until(delim)` | `String ! IOError` | Read stdin bytes until `delim` (excluded); empty delim errors |
-| `take(n)` | `[U8] ! IOError` | Read up to `n` raw bytes from stdin |
+| `input([prompt])` | `String IOError!` | Read one line from stdin; optional prompt |
+| `readline()` | `String IOError!` | Same as `input()` with no prompt (peer free-function spelling) |
+| `read_until(delim)` | `String IOError!` | Read stdin bytes until `delim` (excluded); empty delim errors |
+| `take(n)` | `[U8] IOError!` | Read up to `n` raw bytes from stdin |
 | `buffered()` | `StdinHandle` | Same buffered stdin handle as `stdin()` (Jet buffers by default) |
 | `confirm(prompt)` | `Bool` | Ask yes or no; show `[y/N]` and use no for a bare Enter |
-| `choose(prompt, items)` | `String ! IOError` | Number the strings and ask again for a rejected answer, up to ten retries; a closed stdin or a spent retry budget returns `InvalidInput` |
-| `input_secret(prompt)` | `String ! IOError` | Read one line without echo; return an error when stdin is not a terminal |
-| `read_all_input()` | `String ! IOError` | Read all of stdin to end-of-file |
+| `choose(prompt, items)` | `String IOError!` | Number the strings and ask again for a rejected answer, up to ten retries; a closed stdin or a spent retry budget returns `InvalidInput` |
+| `input_secret(prompt)` | `String IOError!` | Read one line without echo; return an error when stdin is not a terminal |
+| `read_all_input()` | `String IOError!` | Read all of stdin to end-of-file |
 | `print(value…)` | nothing | Print each value on its own line |
-| `binread(path)` | `[U8] ! IOError` | Read a file as raw bytes |
-| `binwrite(path, bytes)` | `() ! IOError` | Atomically write raw bytes to a file |
+| `binread(path)` | `[U8] IOError!` | Read a file as raw bytes |
+| `binwrite(path, bytes)` | `IOError!` | Atomically write raw bytes to a file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 | `stdin()` | `StdinHandle` | Buffered stdin handle with `.read_line()` and `.lines()` |
 | `stdout()` / `stderr()` | `Stdout` / `Stderr` | Stream handles |
-| `stream.write(text)` | `() ! IOError` | Write without adding a newline |
-| `stream.write_line(text)` | `() ! IOError` | Write text plus newline |
-| `stream.write_bytes(bytes)` | `() ! IOError` | Write raw `[U8]` bytes |
-| `stream.flush()` | `() ! IOError` | Force buffered bytes through the OS handle |
+| `stream.write(text)` | `IOError!` | Write without adding a newline |
+| `stream.write_line(text)` | `IOError!` | Write text plus newline |
+| `stream.write_bytes(bytes)` | `IOError!` | Write raw `[U8]` bytes |
+| `stream.flush()` | `IOError!` | Force buffered bytes through the OS handle |
 | `stream.is_tty()` | `Bool` | Whether that stream is attached to a terminal |
 | `terminal_width()` / `terminal_height()` | `Int` | Terminal size from the OS where available, then `COLUMNS`/`LINES`, then `80x24` |
 | `style(name, text)` | `String` | ANSI style only when stdout is a TTY and `NO_COLOR` is absent |
 | `style_force(name, text)` | `String` | Expert override that always emits known ANSI styles |
-| `progress(text)` | `() ! IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
+| `progress(text)` | `IOError!` | TTY: carriage-return progress update; non-TTY: one plain line |
 | `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
 `print` stays in the core prelude (no `use` needed). `term.print` is its
@@ -1175,7 +1175,7 @@ returns a new one:
 | `.version(text)` | `(String) → ArgsSpec` | enables `--version` |
 | `.completion(shell)` | `(String) → String` | shell completion text for bash/zsh/fish-style generators |
 | `.help()` | `() → String` | formatted help text with defaults, env fallbacks, choices, and subcommands |
-| `.parse(argv)` | `([String]) → ParsedArgs ! String` | parses `argv` against the spec; unknown flags include suggestions |
+| `.parse(argv)` | `([String]) → ParsedArgs String!` | parses `argv` against the spec; unknown flags include suggestions |
 | `.parse_or_exit(argv)` | `([String]) → ParsedArgs` | prints help and exits 0 for `--help`; prints usage errors and exits 2 |
 
 `ParsedArgs` query methods:
@@ -1192,7 +1192,7 @@ returns a new one:
 
 `--help` and `--version` are recognized automatically. Use `.parse` for tests,
 embedders, or custom error handling because it does not exit the process. It
-returns `ParsedArgs ! String`, where the error string contains the parse message.
+returns `ParsedArgs String!`, where the error string contains the parse message.
 Use `.parse_or_exit` for a command-line entry point. It prints help and exits 0
 for `--help`, or prints a usage error and exits 2 for invalid arguments.
 Wrong argument counts on builder/query methods are **E1301**–**E1304**.
@@ -1296,9 +1296,9 @@ fn run() {
 |----------|---------|--------------|
 | `get(name)` | `String?` | Environment variable, or None if unset |
 | `set(name, value)` | nothing | Set an environment variable |
-| `unset(name)` | `Bool ! EnvError` | Remove a variable; true when it existed |
-| `vars()` | `[String] ! EnvError` | Sorted owned snapshot of variable names |
-| `current_dir()` | `String ! IOError` | Current working directory |
+| `unset(name)` | `Bool EnvError!` | Remove a variable; true when it existed |
+| `vars()` | `[String] EnvError!` | Sorted owned snapshot of variable names |
+| `current_dir()` | `String IOError!` | Current working directory |
 | `home_dir()` | `String?` | User home directory, if known |
 
 Jet captures the inherited environment without decoding it and owns one
@@ -1315,7 +1315,7 @@ decoded losslessly; it never skips or replaces an entry.
 nonempty and contain neither NUL nor `=`; values cannot contain NUL. Current
 editions retain the source-compatible `set :> ()` signature and report an
 invalid call as E3001. A future major release and edition opt-in changes `set`
-to `() ! EnvError`.
+to `EnvError!`.
 
 ---
 
@@ -1354,7 +1354,7 @@ and machine.
 | `getuid()` / `geteuid()` | `Int` | Real / effective user id |
 | `getgid()` / `getegid()` | `Int` | Real / effective group id |
 | `getgroups()` | `List[Int]` | Supplementary group ids |
-| `getpgid(pid)` / `getsid(pid)` | `Int ! IOError` | Process group / session id |
+| `getpgid(pid)` / `getsid(pid)` | `Int IOError!` | Process group / session id |
 | `getpgrp()` | `Int` | Calling process group id |
 | `expand(template)` | `String` | Expand `$VAR` / `${VAR}` from the environment |
 | `uptime()` | `Float` | Seconds since boot when known, else `0.0` |
@@ -1364,25 +1364,25 @@ and machine.
 | `success(status)` | `Bool` | Whether a wait status is a normal zero exit |
 | `sync()` | `()` | Flush filesystem buffers (POSIX no-op elsewhere) |
 | `umask(mask)` | `Int` | Set and return the previous file-creation mask |
-| `getpriority(who)` | `Int ! IOError` | Nice value for process `who` (`0` = self) |
-| `setpriority(who, prio)` | `() ! IOError` | Set nice value for process `who` |
-| `utime(path, atime, mtime)` | `() ! IOError` | Set access / modification times |
+| `getpriority(who)` | `Int IOError!` | Nice value for process `who` (`0` = self) |
+| `setpriority(who, prio)` | `IOError!` | Set nice value for process `who` |
+| `utime(path, atime, mtime)` | `IOError!` | Set access / modification times |
 | `stop(code)` | never returns | Request process termination through the same cleanup boundary as `process.exit(code)` |
 | `atexit(handler)` | `()` | Register a process-exit callback; callbacks run in registration order |
-| `set_current_dir(path)` | `() ! IOError` | Change process working directory |
+| `set_current_dir(path)` | `IOError!` | Change process working directory |
 | `on_interrupt(handler)` | `()` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
 
 POSIX process/session control (requires `#Unsafe("…")` and an OS gate):
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `fork()` | `Int ! IOError` | Fork; `0` in the child, child pid in the parent |
+| `fork()` | `Int IOError!` | Fork; `0` in the child, child pid in the parent |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `setsid` / `initgroups` | fallible | Credential / session control |
-| `kill(pid, sig)` | `() ! IOError` | Send a signal |
-| `wait` / `waitpid` | `Int ! IOError` | Wait status |
-| `pipe()` | `List[Int] ! IOError` | `[read_fd, write_fd]` |
+| `kill(pid, sig)` | `IOError!` | Send a signal |
+| `wait` / `waitpid` | `Int IOError!` | Wait status |
+| `pipe()` | `List[Int] IOError!` | `[read_fd, write_fd]` |
 | `close_fd(fd)` | `()` | Close a raw pipe/fifo descriptor |
-| `mkfifo(path, mode)` | `() ! IOError` | Create a named pipe |
+| `mkfifo(path, mode)` | `IOError!` | Create a named pipe |
 
 Interrupt handlers are additive. Each Ctrl-C runs every registered handler in
 registration order on Jet's interrupt dispatcher, never inside the operating
@@ -1442,9 +1442,9 @@ fn run() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult ! IOError` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
+| `run(cmd)` | `ProcessResult IOError!` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
 | `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
-| `pipeline(specs)` | `ProcessResult ! IOError` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
+| `pipeline(specs)` | `ProcessResult IOError!` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
@@ -1510,7 +1510,7 @@ for stable facts. String keys remain open for preview facts without adding a
 second report type; a close literal typo suggests the nearest stable key.
 `ProcessChild.terminal` holds a terminal session only for a terminal-backed
 child, so its type is `TerminalSession?`. After unwrapping it, `resize(size)`
-returns `Unit ! IOError`.
+returns `Unit IOError!`.
 
 A terminal session needs a native PTY or ConPTY. On Unix, `run()` and
 `spawn()` create a real PTY, attach the child to a controlling session, and
@@ -1530,7 +1530,7 @@ separate backend slices of the same process mechanism.
 `.stdout`/`.stderr` streaming readers consumed only via
 `loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`term.stdin().lines()` — storing the reader or the line
-stream in a name is E2502). `exited()` is `Bool ! IOError`: a non-blocking
+stream in a name is E2502). `exited()` is `Bool IOError!`: a non-blocking
 companion to `wait()` that reports whether the child has already exited,
 without draining its output or blocking (#1481).
 
@@ -1857,7 +1857,7 @@ fn run() {
 | Surface | Returns | What it does |
 |---------|---------|--------------|
 | `game.Scene.new(name)` | `GameScene` | Create one scene identity with assets, input, components, and frame hooks |
-| `scene.assets.image(path)` / `.sound(path)` | `GameImage ! String` / `GameSound ! String` | Register a typed scene asset handle; paths containing `missing` fail deterministically |
+| `scene.assets.image(path)` / `.sound(path)` | `GameImage String!` / `GameSound String!` | Register a typed scene asset handle; paths containing `missing` fail deterministically |
 | `scene.input.bind(action, key)` | nothing | Bind an action name to a device key name |
 | `scene.on_frame((frame) :> { ... })` | nothing | Attach frame logic to the scene |
 | `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
@@ -1897,7 +1897,7 @@ fn run() ! {
 |----------|---------|--------------|
 | `fidelity()` | `Float` | Current value, from `0.0` lowest quality through `1.0` full quality |
 | `default_fidelity()` | `Float` | The default value, `1.0` |
-| `override_fidelity(v)` | `() ! String` | Set the process-global value; rejects values outside `0.0..1.0` |
+| `override_fidelity(v)` | `String!` | Set the process-global value; rejects values outside `0.0..1.0` |
 | `reset_fidelity()` | nothing | Restore `default_fidelity()` |
 
 Platform battery, thermal, network, load, and carbon providers do not ship in
@@ -1934,10 +1934,10 @@ comptime, and default `jet run`.
 | `.reverse()` | `String` | Reverse Unicode scalar order |
 | `.normalize()` | `String` | NFC (same as `core.text.nfc`) |
 | `.rsplit(sep)` | `Iter<String>` | Split from the right; part order is left-to-right |
-| `.to_int()` | `Int ! ParseError` | `D-STR-DECLINE1=C`: same builtin `Int.parse(s)` runs — the string is the receiver either way |
-| `.to_float()` | `Float ! ParseError` | `D-STR-DECLINE1=C`: same builtin `Float.parse(s)` runs |
-| `.matches(pattern)` | `Bool ! String` | `D-STR-DECLINE1=C`: routes to the one `core.regex` engine's `is_match`; the error is a bad-pattern compile failure |
-| `.match(pattern)` | `String? ! String` | `D-STR-DECLINE1=C`: routes to the same engine's `find` — first match, or none |
+| `.to_int()` | `Int ParseError!` | `D-STR-DECLINE1=C`: same builtin `Int.parse(s)` runs — the string is the receiver either way |
+| `.to_float()` | `Float ParseError!` | `D-STR-DECLINE1=C`: same builtin `Float.parse(s)` runs |
+| `.matches(pattern)` | `Bool String!` | `D-STR-DECLINE1=C`: routes to the one `core.regex` engine's `is_match`; the error is a bad-pattern compile failure |
+| `.match(pattern)` | `String? String!` | `D-STR-DECLINE1=C`: routes to the same engine's `find` — first match, or none |
 
 Competitor accounting is explicit: Python `partition`/`count`, Rust
 `find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
@@ -1981,7 +1981,7 @@ they do not inherit the host Rust, OS, locale, or terminal Unicode version.
 | `lower/upper(text)` | `String` | Full locale-free Unicode case mapping, including contextual final sigma |
 | `graphemes/words/sentences(text)` | `[String]` | Segmentation helpers |
 | `display_width(text)` | `Int` | Portable terminal columns: Ambiguous narrow, controls zero |
-| `display_width(text, policy: TextWidth)` | `Int ! TextError` | Same algorithm with Ambiguous narrow/wide and controls zero/reject policy |
+| `display_width(text, policy: TextWidth)` | `Int TextError!` | Same algorithm with Ambiguous narrow/wide and controls zero/reject policy |
 | `is_alphabetic/is_numeric/is_whitespace/is_ascii(text)` | `Bool` | Unicode classification over the whole string |
 | `scalar_count/byte_count/scalars(text)` | `Int` / `[String]` | UTF-8/scalar facts |
 | `splitn/rsplitn(text, sep, n)` | `[String]` | Bounded split helpers |
@@ -2041,13 +2041,13 @@ fn run() {
 | `now()` | `Int` | Current Unix time in milliseconds |
 | `now_utc()` | `DateTime` | Current UTC wall-clock date-time |
 | `from_unix_ms(ms)` | `DateTime` | Convert Unix milliseconds to UTC `DateTime` |
-| `parse_rfc3339(text)` | `DateTime ! String` | Parse RFC 3339 / ISO 8601 offset text |
+| `parse_rfc3339(text)` | `DateTime String!` | Parse RFC 3339 / ISO 8601 offset text |
 | `today()` | `LocalDate` | Current UTC date |
-| `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime ! String` | Local wall-clock time |
+| `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime String!` | Local wall-clock time |
 | `datetime(y, m, d, h, mi, s)` | `DateTime` | UTC date-time from civil components |
 | `days_in_month(y, m)` / `is_leap_year(y)` | `Int` / `Bool` | Calendar facts |
 | `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
-| `zone(name)` / `utc()` | `Zone ! String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
+| `zone(name)` / `utc()` | `Zone String!` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
 | `zoned_local(date, time, zone)` | `ZonedDateTime` | Resolve local civil time in a zone |
 | `sleep(duration: Duration)` | nothing | Block for the duration (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
@@ -2055,7 +2055,7 @@ fn run() {
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock starting at `seed` ms (D-DET1) |
 | `Clock.system()` | `Clock` | An explicit monotonic production clock; carries the `Time` effect |
-| `Duration.nanoseconds/microseconds/milliseconds/seconds/minutes/hours(n)` | `Duration ! RangeError` | Checked runtime elapsed-time span (D-TIMERES1=A: nanosecond count) |
+| `Duration.nanoseconds/microseconds/milliseconds/seconds/minutes/hours(n)` | `Duration RangeError!` | Checked runtime elapsed-time span (D-TIMERES1=A: nanosecond count) |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
 
 `DateTime` is an unambiguous UTC instant. `LocalDate` and `LocalTime` are civil
@@ -2135,7 +2135,7 @@ produces a `Duration`.
 
 | `Duration` method | Returns | What it does |
 |-------------------|---------|--------------|
-| `in(unit)` | `Int ! RangeError` | Whole nanoseconds, microseconds, milliseconds, seconds, minutes, or hours; truncates toward zero |
+| `in(unit)` | `Int RangeError!` | Whole nanoseconds, microseconds, milliseconds, seconds, minutes, or hours; truncates toward zero |
 | `is_zero()` | `Bool` | Whether the span is exactly zero |
 | `total_seconds()` | `Int` | Whole seconds in the span (truncates toward zero) |
 | `difference(other)` | `Duration` | This span minus `other` (saturating) |
@@ -2188,8 +2188,8 @@ fractional to `.Float`; objects keep field order.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `parse(text)` | `JSON ! JSONError` | Parse a JSON string |
-| `decode(text)` | `JSON ! JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
+| `parse(text)` | `JSON JSONError!` | Parse a JSON string |
+| `decode(text)` | `JSON JSONError!` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
 | `to_string(j)` | `String` | Compact JSON text |
 | `to_string_pretty(j)` | `String` | Indented JSON text |
 
@@ -2243,12 +2243,12 @@ as typed decode errors. This is the measured safety and diagnosis win. The
 executable proof is in `tests/encoding_corpus.rs::exact_typed_json_numbers` and
 `tests/encoding_parity.rs::exact_typed_json_numbers_match_aot_default_run_and_interpreter`.
 
-**`core.encoding.csv`** — `parse(text) :> [[String]] ! String` (rows of fields),
+**`core.encoding.csv`** — `parse(text) :> [[String]] String!` (rows of fields),
 `to_string(rows) :> String`, plus bounded `reader` / `writer` handles over
 RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
 newlines; malformed quote closure is an error rather than a partial row.
 **`core.encoding.toml`** / **`core.encoding.yaml`**
-— `parse(text) :> TOML ! JSONError` / `YAML ! JSONError` (full adapters over
+— `parse(text) :> TOML JSONError!` / `YAML JSONError!` (full adapters over
 `DataTree`, not a flat map), `to_string(value)`.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `DataTree`
@@ -2358,35 +2358,35 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `csv<T>(text)` | `[T] ! [FieldError]` | Header-mapped typed CSV rows |
-| `json<T>(text)` | `[T] ! [FieldError]` | Typed rows from a JSON array of objects |
-| `csv_reader<T>(file, limits)` / `json_reader<T>(file, limits)` | `DataStream<T> ! DataError` | Bounded pull over `core.encoding` readers |
+| `csv<T>(text)` | `[T] [FieldError]!` | Header-mapped typed CSV rows |
+| `json<T>(text)` | `[T] [FieldError]!` | Typed rows from a JSON array of objects |
+| `csv_reader<T>(file, limits)` / `json_reader<T>(file, limits)` | `DataStream<T> DataError!` | Bounded pull over `core.encoding` readers |
 | `DataLimits.safe()` | `DataLimits` | Default group/sort/join/output ceilings + `EncodingLimits.safe()` |
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
 | `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
 | `schema(table_or_series)` | `[DataColumn]` | Column names and Jet type names for the row/value model |
 | `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
-| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T> ! DataError` | Build a typed plan; execute it only when materialized |
+| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T> DataError!` | Build a typed plan; execute it only when materialized |
 | `lazy_filter(plan, row :> ok)` / `lazy_sort_by(plan, row :> key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
 | `plan(frame)` | `[String]` | Deterministic plan-step names for audit/test output |
 | `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
-| `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float ! DataError` | Numeric series stats over `[Float]` (empty mean/min/max are `Empty`) |
-| `median(values)` / `quantile(values, q)` | `Float ! DataError` | Sorted numeric quantiles; `q` must be finite in `0.0..=1.0` |
-| `variance(values)` / `stddev(values)` / `describe(values)` | `Float ! DataError` / `DataSummary ! DataError` | Population variance/stddev (Welford, divide by `n`); empty is `Empty` |
-| `rolling_mean(values, width)` | `[Float] ! DataError` | Rolling window mean; width must be positive |
-| `group_count(rows, row :> row.key)` | `[DataGroup] ! DataError` | Count rows by a `String` key |
-| `group_sum(rows, row :> row.key, row :> row.value)` | `[DataGroup] ! DataError` | Sum a `Float` selector per key |
-| `group_mean(rows\|stream, row :> row.key, row :> row.value)` | `[DataGroup] ! DataError` | Mean a `Float` selector per key; streams reuse pull limits |
-| `filter(rows, row :> ok)` / `sort_by(rows, row :> key)` | `[T]` / `[T] ! DataError` | Typed in-memory row pipeline |
-| `inner_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R>] ! DataError` | Stable matching row pairs with SQL join multiplicity |
-| `left_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R?>] ! DataError` | Stable row pairs; unmatched left rows carry `None` |
-| `pivot_sum(rows, row :> row_key, row :> col_key, row :> value)` | `[DataPivotCell] ! DataError` | Distinct row/column sum cells |
+| `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float DataError!` | Numeric series stats over `[Float]` (empty mean/min/max are `Empty`) |
+| `median(values)` / `quantile(values, q)` | `Float DataError!` | Sorted numeric quantiles; `q` must be finite in `0.0..=1.0` |
+| `variance(values)` / `stddev(values)` / `describe(values)` | `Float DataError!` / `DataSummary DataError!` | Population variance/stddev (Welford, divide by `n`); empty is `Empty` |
+| `rolling_mean(values, width)` | `[Float] DataError!` | Rolling window mean; width must be positive |
+| `group_count(rows, row :> row.key)` | `[DataGroup] DataError!` | Count rows by a `String` key |
+| `group_sum(rows, row :> row.key, row :> row.value)` | `[DataGroup] DataError!` | Sum a `Float` selector per key |
+| `group_mean(rows\|stream, row :> row.key, row :> row.value)` | `[DataGroup] DataError!` | Mean a `Float` selector per key; streams reuse pull limits |
+| `filter(rows, row :> ok)` / `sort_by(rows, row :> key)` | `[T]` / `[T] DataError!` | Typed in-memory row pipeline |
+| `inner_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R>] DataError!` | Stable matching row pairs with SQL join multiplicity |
+| `left_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R?>] DataError!` | Stable row pairs; unmatched left rows carry `None` |
+| `pivot_sum(rows, row :> row_key, row :> col_key, row :> value)` | `[DataPivotCell] DataError!` | Distinct row/column sum cells |
 | `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
-| `require_bridge(provider)` | `() ! DataError` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
-| `bar_text(groups)` / `bar_svg(groups)` | `String ! DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
-| `line_text(groups, options)` / `line_svg(groups, options)` | `String ! DataError` | Deterministic line output with x labels, title, axis labels, markers, optional reference line, style, color, and legend |
+| `require_bridge(provider)` | `DataError!` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
+| `bar_text(groups)` / `bar_svg(groups)` | `String DataError!` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
+| `line_text(groups, options)` / `line_svg(groups, options)` | `String DataError!` | Deterministic line output with x labels, title, axis labels, markers, optional reference line, style, color, and legend |
 
-`DataStream<T>.next()` returns `T? ! DataError`: clean EOF is stable `None`,
+`DataStream<T>.next()` returns `T? DataError!`: clean EOF is stable `None`,
 terminal errors latch, and complete rows already returned stay valid. Edition
 2026 keeps the prior non-fallible signatures frozen.
 
@@ -2445,8 +2445,8 @@ an optional reference line, style, color, and legend.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `bar_text(groups)` / `bar_svg(groups)` | `String ! DataError` | Deterministic text/SVG bar output |
-| `line_text(groups, options)` / `line_svg(groups, options)` | `String ! DataError` | Deterministic text/SVG line output |
+| `bar_text(groups)` / `bar_svg(groups)` | `String DataError!` | Deterministic text/SVG bar output |
+| `line_text(groups, options)` / `line_svg(groups, options)` | `String DataError!` | Deterministic text/SVG line output |
 
 ### `core.text.fmt` — human-readable formatting
 
@@ -2542,8 +2542,8 @@ value (the dynamic `JSON` tree and the `[[String]]`/`[K:V]` forms still work too
 order is preserved.
 
 **Typed decode** — `decode<T>(text)` (D-GENERIC-CALL1; D-SERDE6 owns the codec
-model) returns `T ! [FieldError]` for
-json/toml/yaml, and `[T] ! [FieldError]` for csv (one struct per row, columns mapped
+model) returns `T [FieldError]!` for
+json/toml/yaml, and `[T] [FieldError]!` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
 cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no
 target stays the lenient dynamic `JSON` (above). Decode failures carry an
@@ -2558,7 +2558,7 @@ print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}
 
 **Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
 protocol as built-in derives. Write `impl T.Encode` with `encode(self) :>
-DataTree` and `impl T.Decode` with `decode(tree: DataTree) :> T ! [FieldError]`.
+DataTree` and `impl T.Decode` with `decode(tree: DataTree) :> T [FieldError]!`.
 `.field` and `.at` add their field/index path; scalar accessors leave the path
 empty and a containing decoder frames them with `FieldError.under`. All return
 `[FieldError]`, so `?` chains without manual mapping. `tree.decode<T>()` dispatches any subtree
@@ -2569,7 +2569,7 @@ one mechanism.
 
 ```jet
 impl Email.Decode {
-    fn decode(tree: DataTree) :> Email ! [FieldError] {
+    fn decode(tree: DataTree) :> Email [FieldError]! {
         address := FieldError.under("address", tree.text())?
         return Ok(Email{ address })
     }
@@ -2611,7 +2611,7 @@ struct Signup {
     }
 }
 
-errs :: Signup.validate(bad_signup) // Signup ! [FieldError]
+errs :: Signup.validate(bad_signup) // Signup [FieldError]!
 ```
 
 `Type.validate(value)` runs the block standalone, returning `value !
@@ -2622,7 +2622,7 @@ calls, never Net/DB/IO. Derived decoders invoke this validator after shape
 decoding; hand codecs opt in explicitly. `Validate.over(s)` starts the
 outside-context builder. Its chained `check(cond, at: field, "message")` rules
 use the same field path and `[FieldError]` contract, accumulate across the
-chain, and `finish()` returns `T ! [FieldError]`.
+chain, and `finish()` returns `T [FieldError]!`.
 
 **Field attributes** (D-SERDE5):
 
@@ -2661,7 +2661,7 @@ bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
 The expert hand-impl path is live: `impl T.Encode { fn encode(self) :> DataTree
-{ … } }` and `impl T.Decode { fn decode(tree: DataTree) :> T ! [FieldError] {
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) :> T [FieldError]! {
 … } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---
@@ -2699,7 +2699,7 @@ fn run() {
     }
     handle.join() ?? panic("task failed")
     sender.close()
-    loop value, ch :> print(value)
+    loop value in ch :> print(value)
 }
 ```
 
@@ -2712,13 +2712,13 @@ there's no combined channel value).
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `task body` / `task { body }` | `Task<T>` | Run one zero-parameter child |
-| `task.all { … }` | `[T] ! TaskFailure` | Run every branch, fail-fast, and return results in source order |
-| `task.race { … }` | `T ! TaskFailure` | Return the first successful branch and cancel losers |
-| `task.any { … }` | `T ! TaskFailure` | Return the first completed branch and cancel the rest |
+| `task.all { … }` | `[T] TaskFailure!` | Run every branch, fail-fast, and return results in source order |
+| `task.race { … }` | `T TaskFailure!` | Return the first successful branch and cancel losers |
+| `task.any { … }` | `T TaskFailure!` | Return the first completed branch and cancel the rest |
 | `task.group name(limit: n) { … }` | nothing | Own children and join them at scope close |
 | `tasks.yield_now()` | nothing | Cooperative yield at a scheduler wait point (`yield` is the stream keyword) |
 | `tasks.current_task()` | `String` | Control-plane trace of the running task (`paused=...,cancel=...`) |
-| `handle.join()` | `T ! TaskFailure` | Wait for the task and consume the task handle |
+| `handle.join()` | `T TaskFailure!` | Wait for the task and consume the task handle |
 | `handle.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
 | `handle.resume()` | nothing | Clear paused state on the task control plane |
 | `handle.cancel()` | nothing | Request cancellation on the task control plane |
@@ -2730,7 +2730,7 @@ there's no combined channel value).
 | `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `sender.close()` | nothing | Close the send half explicitly |
-| `receiver.receive()` | `T ! Closed` | Block for one value, or return `Closed` when senders are gone; use `loop value, receiver` to drain until close |
+| `receiver.receive()` | `T Closed!` | Block for one value, or return `Closed` when senders are gone; use `loop value in receiver` to drain until close |
 | `receiver.close()` | nothing | Close the receive half explicitly |
 
 Values crossing a task body or `send` must be sendable: no `View<T>` or string-view
@@ -2936,18 +2936,18 @@ fn run() {
 |------|---------|------|
 | `re.flags(case_insensitive, multiline, dotall)` | `RegexFlags` | typed flag set |
 | `re.escape(text)` | `String` | escape metacharacters for a literal match |
-| `re.compile(pat)` | `Regex ! String` | parse once with default flags |
-| `re.compile_with(pat, flags)` | `Regex ! String` | parse once with typed flags |
-| `re.is_match(pat, text)` | `Bool ! String` | whether `pat` occurs anywhere |
-| `re.full_match(pat, text)` | `Bool ! String` | whether `pat` matches the whole text |
-| `re.match(pat, text)` | `Match? ! String` | first match with capture groups, `None` if none |
-| `re.find(pat, text)` | `String? ! String` | first matched substring, `None` if none |
-| `re.find_all(pat, text)` | `[String] ! String` | every non-overlapping match, left to right |
-| `re.matches(pat, text)` | `[Match] ! String` | every non-overlapping match with captures/spans |
-| `re.replace(pat, text, repl)` | `String ! String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
-| `re.replace_all(pat, text, repl)` | `String ! String` | replace every match |
-| `re.split(pat, text)` | `[String] ! String` | split `text` on every match |
-| `re.split_limit(pat, text, n)` | `[String] ! String` | split at most `n - 1` times |
+| `re.compile(pat)` | `Regex String!` | parse once with default flags |
+| `re.compile_with(pat, flags)` | `Regex String!` | parse once with typed flags |
+| `re.is_match(pat, text)` | `Bool String!` | whether `pat` occurs anywhere |
+| `re.full_match(pat, text)` | `Bool String!` | whether `pat` matches the whole text |
+| `re.match(pat, text)` | `Match? String!` | first match with capture groups, `None` if none |
+| `re.find(pat, text)` | `String? String!` | first matched substring, `None` if none |
+| `re.find_all(pat, text)` | `[String] String!` | every non-overlapping match, left to right |
+| `re.matches(pat, text)` | `[Match] String!` | every non-overlapping match with captures/spans |
+| `re.replace(pat, text, repl)` | `String String!` | replace the first match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace_all(pat, text, repl)` | `String String!` | replace every match |
+| `re.split(pat, text)` | `[String] String!` | split `text` on every match |
+| `re.split_limit(pat, text, n)` | `[String] String!` | split at most `n - 1` times |
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
 | `rx.full_match(text)` | `Bool` | whether a compiled regex matches the whole text |
 | `rx.match(text)` | `Match?` | first match with captures/spans |
@@ -3121,7 +3121,7 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `event.new<T>()` | `Event<T>` | create a typed many-subscriber event |
-| `event.async_result<T, E>(policy, failures)` | `AsyncEvent<T, E> ! String` | create one scheduler-backed event queue; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
+| `event.async_result<T, E>(policy, failures)` | `AsyncEvent<T, E> String!` | create one scheduler-backed event queue; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `event.hook<T, R>(fallback)` | `Hook<T, R>` | create an ordered hook; last active handler result wins |
 | `event.decision_hook<T, E>(policy)` | `DecisionHook<T, E>` | create an ordered transform/continue/cancel/fail fold |
 | `event.scope()` | `EventScope` | create an owner for subscriptions |
@@ -3321,8 +3321,8 @@ fn run() {
 
 | API | Returns | What it does |
 |-----|---------|--------------|
-| `Int.parse(text)` | `Int ! ParseError` | Parse text as an integer (leading/trailing space ignored) |
-| `Float.parse(text)` | `Float ! ParseError` | Parse text as a float |
+| `Int.parse(text)` | `Int ParseError!` | Parse text as an integer (leading/trailing space ignored) |
+| `Float.parse(text)` | `Float ParseError!` | Parse text as a float |
 | `String.lines()` | `[String]` | Split into lines (`\n` and `\r\n`; no trailing empty line) |
 
 `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
@@ -3350,8 +3350,8 @@ fn run() {
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `Cursor.over(s)` | `Cursor` | Wrap a `String` in a consuming scanner |
-| `c.take_pattern("…{h:T}…")` | `(holes…) ! String` | Match + consume a prefix; literal pattern only |
-| `c.take_until(delim)` | `String ! String` | Text up to (not including) `delim`; error if absent |
+| `c.take_pattern("…{h:T}…")` | `(holes…) String!` | Match + consume a prefix; literal pattern only |
+| `c.take_until(delim)` | `String String!` | Text up to (not including) `delim`; error if absent |
 | `c.skip_ws()` | — | Skip leading whitespace |
 
 `examples/features/parsing/text-cursor.jet` is the golden example.
@@ -3377,8 +3377,8 @@ fn run() {
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `String.bytes()` | `[U8]` | UTF-8 bytes of a string |
-| `String.from_bytes(bs)` | `String ! UTF8Error` | Decode UTF-8 bytes |
-| `U8.from_int(n)` | `U8 ! String` | Checked Int → U8 |
+| `String.from_bytes(bs)` | `String UTF8Error!` | Decode UTF-8 bytes |
+| `U8.from_int(n)` | `U8 String!` | Checked Int → U8 |
 | `Int.from_u8(b)` | `Int` | U8 → Int |
 
 Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
@@ -3418,12 +3418,12 @@ fn run() {
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `Reader.over(bs)` | `Reader` | Wrap a `[U8]` in a consuming scanner |
-| `r.read_u8()` | `U8 ! String` | One byte |
-| `r.read_u16_le()` / `_be()` | `U16 ! String` | Two bytes, little/big-endian |
-| `r.read_u32_le()` / `_be()` | `U32 ! String` | Four bytes |
-| `r.read_u64_le()` / `_be()` | `U64 ! String` | Eight bytes |
-| `r.take(n)` | `[U8] ! String` | Next `n` bytes (`n`: `Int`, `U8`, `U16`, or `U32`; sized lengths widen internally, while `U64` stays explicit) |
-| `r.take_pattern([U8]{"…{h:U<w>}…"})` | `(holes…) ! String` | Match + consume a prefix; literal pattern only |
+| `r.read_u8()` | `U8 String!` | One byte |
+| `r.read_u16_le()` / `_be()` | `U16 String!` | Two bytes, little/big-endian |
+| `r.read_u32_le()` / `_be()` | `U32 String!` | Four bytes |
+| `r.read_u64_le()` / `_be()` | `U64 String!` | Eight bytes |
+| `r.take(n)` | `[U8] String!` | Next `n` bytes (`n`: `Int`, `U8`, `U16`, or `U32`; sized lengths widen internally, while `U64` stays explicit) |
+| `r.take_pattern([U8]{"…{h:U<w>}…"})` | `(holes…) String!` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
 | `r.is_at_end()` | `Bool` | Position at buffer end |
 
@@ -3521,9 +3521,9 @@ for one crossing. Narrowing is never implicit.
 
 | Method | Returns | Direction |
 |--------|---------|-----------|
-| `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T ! String` | fallible (`?`/`??`) |
-| `F32.from_float(n)` | `F32 ! String` | fallible (finite F32 range) |
-| `Int.from_float(n)` / `U8.from_float(n)` / … | `T ! String` | fallible (finite, in-range, truncates toward zero) |
+| `U8.from_int(n)` / `I16.from_int(n)` / … (narrowing) | `T String!` | fallible (`?`/`??`) |
+| `F32.from_float(n)` | `F32 String!` | fallible (finite F32 range) |
+| `Int.from_float(n)` / `U8.from_float(n)` / … | `T String!` | fallible (finite, in-range, truncates toward zero) |
 
 ---
 
@@ -3556,48 +3556,48 @@ Beginner calls accept strings; expert calls accept typed
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ip_addr(text)` | `IPAddr ! NetError` | Parse IPv4/IPv6 |
+| `ip_addr(text)` | `IPAddr NetError!` | Parse IPv4/IPv6 |
 | `ip_to_string(ip)` / `ip_is_ipv4(ip)` | `String` / `Bool` | Inspect typed IP values |
-| `socket_addr(host, port)` | `SocketAddr ! NetError` | Resolve/parse host and port |
-| `socket_addr_parse(text)` | `SocketAddr ! NetError` | Parse `host:port` |
+| `socket_addr(host, port)` | `SocketAddr NetError!` | Resolve/parse host and port |
+| `socket_addr_parse(text)` | `SocketAddr NetError!` | Parse `host:port` |
 | `socket_host(addr)` / `socket_port(addr)` / `socket_to_string(addr)` | `String` / `Int` / `String` | Inspect typed socket addresses |
-| `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener ! NetError` / `TcpStream ! NetError` | String entrypoints |
-| `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ! NetError` / `TcpStream ! NetError` | Typed entrypoints |
-| `tcp_connect_timeout(addr, ms)` | `TcpStream ! NetError` | Typed dial with timeout |
-| `tcp_connect_happy(host, port, ms)` | `TcpStream ! NetError` | Dual-stack dial with staggered IPv6/IPv4 racing under one cancellation/deadline budget |
-| `listener.accept(deadline: Duration)?` | `TcpStream ! NetError` | Accept with an optional per-call deadline |
-| `stream.read(limit, deadline: Duration)?` / `stream.write(bytes, deadline: Duration)?` / `stream.write_all(bytes, deadline: Duration)?` | `[U8] ! NetError` / `Int ! NetError` / `() ! NetError` | Canonical byte operations with optional per-call deadlines |
-| `stream.read_text(limit, deadline: Duration)?` / `stream.write_text(text, deadline: Duration)?` | `String ! NetError` / `() ! NetError` | Checked UTF-8 projections with optional per-call deadlines |
-| `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `() ! NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
-| `stream.ready(.Read/.Write/.ReadWrite, deadline: Duration)` | `NetReady ! NetError` | Same-handle readiness; earliest ambient or explicit deadline wins |
-| `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr ! NetError` | Typed stream addresses |
-| `listener_local_socket_addr(listener)` | `SocketAddr ! NetError` | Typed listener address |
-| `set_timeout(stream, ms)` | `() ! NetError` | Set read/write timeouts |
-| `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ! NetError` | Directional timeouts |
-| `nodelay(stream)` / `set_nodelay(stream, enabled)` | `Bool ! NetError` / `() ! NetError` | TCP_NODELAY get/set |
-| `ttl(stream)` / `set_ttl(stream, hops)` | `Int ! NetError` / `() ! NetError` | IP TTL get/set |
+| `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener NetError!` / `TcpStream NetError!` | String entrypoints |
+| `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener NetError!` / `TcpStream NetError!` | Typed entrypoints |
+| `tcp_connect_timeout(addr, ms)` | `TcpStream NetError!` | Typed dial with timeout |
+| `tcp_connect_happy(host, port, ms)` | `TcpStream NetError!` | Dual-stack dial with staggered IPv6/IPv4 racing under one cancellation/deadline budget |
+| `listener.accept(deadline: Duration)?` | `TcpStream NetError!` | Accept with an optional per-call deadline |
+| `stream.read(limit, deadline: Duration)?` / `stream.write(bytes, deadline: Duration)?` / `stream.write_all(bytes, deadline: Duration)?` | `[U8] NetError!` / `Int NetError!` / `NetError!` | Canonical byte operations with optional per-call deadlines |
+| `stream.read_text(limit, deadline: Duration)?` / `stream.write_text(text, deadline: Duration)?` | `String NetError!` / `NetError!` | Checked UTF-8 projections with optional per-call deadlines |
+| `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `NetError!` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
+| `stream.ready(.Read/.Write/.ReadWrite, deadline: Duration)` | `NetReady NetError!` | Same-handle readiness; earliest ambient or explicit deadline wins |
+| `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr NetError!` | Typed stream addresses |
+| `listener_local_socket_addr(listener)` | `SocketAddr NetError!` | Typed listener address |
+| `set_timeout(stream, ms)` | `NetError!` | Set read/write timeouts |
+| `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `NetError!` | Directional timeouts |
+| `nodelay(stream)` / `set_nodelay(stream, enabled)` | `Bool NetError!` / `NetError!` | TCP_NODELAY get/set |
+| `ttl(stream)` / `set_ttl(stream, hops)` | `Int NetError!` / `NetError!` | IP TTL get/set |
 | `socket_type(stream)` | `String` | Always `"stream"` for TCP |
-| `sendfile(stream, path)` | `Int ! NetError` | Copy file bytes onto the stream (observable sendfile; not sendfile(2)) |
-| `dns_ptr(name, ms)` | `[String] ! NetError` | PTR reverse lookup |
-| `getservbyname(name)` / `getservbyport(port)` | `Int ! NetError` / `String ! NetError` | Embedded well-known service table |
-| `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ! NetError` | Datagram sockets |
-| `udp_local_addr(socket)` | `SocketAddr ! NetError` | Typed local address |
-| `udp_set_timeout(socket, ms)` | `() ! NetError` | Persistent read/write deadline budget; earliest ambient deadline wins |
-| `socket.ready(.Read/.Write/.ReadWrite, deadline: Duration)` / `socket.close()` | `NetReady ! NetError` / `() ! NetError` | Same UDP handle readiness and idempotent lifecycle |
-| `udp_send_bytes_to(socket, bytes, addr)` | `Int ! NetError` | Send one arbitrary-byte datagram |
-| `udp_receive(socket, limit)` | `UDPPacket ! NetError` | Full datagram receive with bounded returned payload |
-| `socket.send_to(bytes, addr, deadline: Duration)` / `socket.receive(limit, deadline: Duration)` | `Int ! NetError` / `UDPPacket ! NetError` | Datagram-preserving per-call deadline overrides |
+| `sendfile(stream, path)` | `Int NetError!` | Copy file bytes onto the stream (observable sendfile; not sendfile(2)) |
+| `dns_ptr(name, ms)` | `[String] NetError!` | PTR reverse lookup |
+| `getservbyname(name)` / `getservbyport(port)` | `Int NetError!` / `String NetError!` | Embedded well-known service table |
+| `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket NetError!` | Datagram sockets |
+| `udp_local_addr(socket)` | `SocketAddr NetError!` | Typed local address |
+| `udp_set_timeout(socket, ms)` | `NetError!` | Persistent read/write deadline budget; earliest ambient deadline wins |
+| `socket.ready(.Read/.Write/.ReadWrite, deadline: Duration)` / `socket.close()` | `NetReady NetError!` / `NetError!` | Same UDP handle readiness and idempotent lifecycle |
+| `udp_send_bytes_to(socket, bytes, addr)` | `Int NetError!` | Send one arbitrary-byte datagram |
+| `udp_receive(socket, limit)` | `UDPPacket NetError!` | Full datagram receive with bounded returned payload |
+| `socket.send_to(bytes, addr, deadline: Duration)` / `socket.receive(limit, deadline: Duration)` | `Int NetError!` / `UDPPacket NetError!` | Datagram-preserving per-call deadline overrides |
 | `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
-| `unix_listen(path)` / `unix_connect(path)` | `UnixListener ! NetError` / `UnixStream ! NetError` | Unix-domain sockets where supported |
-| `unix_accept(listener)` | `UnixStream ! NetError` | Accept one Unix stream; scheduler-aware cancellation and deadlines |
-| `listener.accept(deadline: Duration)` | `UnixStream ! NetError` | Same-listener per-call deadline override |
-| `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ! NetError` / `() ! NetError` | Unix byte stream operations; same deadline/close law as TCP |
-| `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ! NetError` | Explicit shutdown and idempotent close |
+| `unix_listen(path)` / `unix_connect(path)` | `UnixListener NetError!` / `UnixStream NetError!` | Unix-domain sockets where supported |
+| `unix_accept(listener)` | `UnixStream NetError!` | Accept one Unix stream; scheduler-aware cancellation and deadlines |
+| `listener.accept(deadline: Duration)` | `UnixStream NetError!` | Same-listener per-call deadline override |
+| `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] NetError!` / `NetError!` | Unix byte stream operations; same deadline/close law as TCP |
+| `unix_shutdown(stream, how)` / `unix_close(stream)` | `NetError!` | Explicit shutdown and idempotent close |
 | `stream.set_timeout(Duration)` / `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix persistent/per-call deadlines, readiness, and lifecycle |
-| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IPAddr] ! NetError` | System resolver config, timeout in ms |
-| `dns_txt(name, ms)` | `[String] ! NetError` | TXT records |
-| `dns_ptr(name, ms)` | `[String] ! NetError` | PTR reverse lookup |
-| `dns_srv(name, ms)` | `[DNSSrv] ! NetError` | SRV records |
+| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IPAddr] NetError!` | System resolver config, timeout in ms |
+| `dns_txt(name, ms)` | `[String] NetError!` | TXT records |
+| `dns_ptr(name, ms)` | `[String] NetError!` | PTR reverse lookup |
+| `dns_srv(name, ms)` | `[DNSSrv] NetError!` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
 
@@ -3626,21 +3626,21 @@ The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ClientConfig.default().with_alpn(protocols)` | `TLSClientConfig ! IOError` | Validate and offer ALPN protocols before any stream is consumed, without disabling verification |
-| `RootCertificates.from_pem(bytes)` | `RootCertificates ! IOError` | Validate a custom PEM root bundle before any network use |
-| `ClientIdentity.from_pem(cert_chain: bytes, private_key: bytes)` | `ClientIdentity ! IOError` | Validate one PEM identity chain and matching PKCS#8, PKCS#1, or SEC1 private key; key bytes are secret and wiped on drop |
-| `config.with_trust(policy)` | `TLSClientConfig ! IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` on a new immutable config |
-| `config.with_client_identity(identity)` | `TLSClientConfig ! IOError` | Add a validated mTLS client identity on a new immutable config |
-| `config.with_version_bounds(min: version, max: version)` | `TLSClientConfig ! IOError` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use |
-| `client(stream, server_name)` | `TLSStream ! NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
-| `client(stream, server_name: name, config: config, deadline: duration)` | `TLSStream ! NetError` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
-| `read(stream, limit)` / `read_text(stream)` | `[U8] ! IOError` / `String ! IOError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
-| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ! IOError` / `() ! IOError` | Scheduler-aware partial or complete byte write |
-| `write_text(stream, text)` | `() ! IOError` | Write the complete text payload |
-| `close(stream)` | `() ! IOError` | Send close-notify; repeated close is harmless |
+| `ClientConfig.default().with_alpn(protocols)` | `TLSClientConfig IOError!` | Validate and offer ALPN protocols before any stream is consumed, without disabling verification |
+| `RootCertificates.from_pem(bytes)` | `RootCertificates IOError!` | Validate a custom PEM root bundle before any network use |
+| `ClientIdentity.from_pem(cert_chain: bytes, private_key: bytes)` | `ClientIdentity IOError!` | Validate one PEM identity chain and matching PKCS#8, PKCS#1, or SEC1 private key; key bytes are secret and wiped on drop |
+| `config.with_trust(policy)` | `TLSClientConfig IOError!` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` on a new immutable config |
+| `config.with_client_identity(identity)` | `TLSClientConfig IOError!` | Add a validated mTLS client identity on a new immutable config |
+| `config.with_version_bounds(min: version, max: version)` | `TLSClientConfig IOError!` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use |
+| `client(stream, server_name)` | `TLSStream NetError!` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
+| `client(stream, server_name: name, config: config, deadline: duration)` | `TLSStream NetError!` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
+| `read(stream, limit)` / `read_text(stream)` | `[U8] IOError!` / `String IOError!` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
+| `write(stream, bytes)` / `write_all(stream, bytes)` | `Int IOError!` / `IOError!` | Scheduler-aware partial or complete byte write |
+| `write_text(stream, text)` | `IOError!` | Write the complete text payload |
+| `close(stream)` | `IOError!` | Send close-notify; repeated close is harmless |
 | `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same TLS handle, explicit per-call deadlines, readiness, and close-notify lifecycle |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer; negotiated cipher suite is `cipher_suite` and protocol is `tls_version` |
-| `stream.close_write(deadline: Duration)` | `() ! IOError` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
+| `stream.close_write(deadline: Duration)` | `IOError!` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
 
 TLS handshake, read, write, and close-notify use the consumed socket's shared
 readiness path. Handshake failures use `core.net.NetError`; stream byte,
@@ -3686,17 +3686,17 @@ the driver. Cleanup stays on `Close` via `close(...)`.
 
 | API | Returns | Notes |
 |-----|---------|-------|
-| `db.policy(table, expression)` | `RowPolicy ! String` | Closed policies: `true` or `owner == user` |
+| `db.policy(table, expression)` | `RowPolicy String!` | Closed policies: `true` or `owner == user` |
 | `conn.with_policy(policy, user)` | `DBScope` | Binds the policy and identity; the raw connection has no row operations |
 | `db.policy_audit(scope)` | `String` | Audits the active scope's compiled predicate and bound user |
-| `scoped.execute(sql, params)` | `Int ! DBError` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
-| `scoped.query(sql, params)` | `[Row] ! DBError` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
-| `scoped.query_one(sql, params)` | `Row? ! DBError` | First allowed row, if any |
-| `scoped.live(sql, params)` | `LiveQuery ! DBError` | The same policy is applied to the live-query read; matching write-set invalidation reruns it and updates the canonical signal/transport seam |
+| `scoped.execute(sql, params)` | `Int DBError!` | Affected row count, with the policy applied; schema/control SQL belongs to `db.migrate` or explicit transaction controls |
+| `scoped.query(sql, params)` | `[Row] DBError!` | `Row` is `Map<String, DBValue>`; returned rows are scoped |
+| `scoped.query_one(sql, params)` | `Row? DBError!` | First allowed row, if any |
+| `scoped.live(sql, params)` | `LiveQuery DBError!` | The same policy is applied to the live-query read; matching write-set invalidation reruns it and updates the canonical signal/transport seam |
 | `scoped.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control through the same scope |
-| `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T ! String` | Typed column read with missing/type errors |
-| `db.transaction(scoped, label, statements)` | `Int ! DBError` | Runs scoped statements in one transaction, rollback on first error |
-| `db.migrate(scoped, name, statements)` | `Int ! DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
+| `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T String!` | Typed column read with missing/type errors |
+| `db.transaction(scoped, label, statements)` | `Int DBError!` | Runs scoped statements in one transaction, rollback on first error |
+| `db.migrate(scoped, name, statements)` | `Int DBError!` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
 
 `DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
 
@@ -3731,7 +3731,7 @@ fn run() {
 
 | API | Result |
 |-----|--------|
-| `zeros` / `ones` / `full` / `from_list` | `Tensor ! ComputeError` |
+| `zeros` / `ones` / `full` / `from_list` | `Tensor ComputeError!` |
 | `vec` / `matrix` | rank-1 / rank-2 `Tensor` aliases |
 | `add` / `mul` / `sub` / `div` / `maximum` / `minimum` | elementwise (broadcasting) |
 | `matmul` / `reshape` / `broadcast_to` / `transpose` | shape ops |
@@ -3919,8 +3919,8 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 
 | Module | Job | API |
 |--------|-----|-----|
-| `core.archive.gzip` | gzip byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] ! String` |
-| `core.archive.zstd` | zstd byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] ! String` |
+| `core.archive.gzip` | gzip byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] String!` |
+| `core.archive.zstd` | zstd byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] String!` |
 | `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for

@@ -395,8 +395,11 @@ fn read_vm_hwm(pid: u32) -> Result<Option<u64>, ProviderFailure> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("cannot read {path}: {error}"))),
     };
+    // A very short-lived receipt can become a zombie between the readiness
+    // read and this /proc read. In that window Linux has already discarded
+    // VmHWM; wait4 below still supplies ru_maxrss for the same child.
     let Some(line) = status.lines().find(|line| line.starts_with("VmHWM:")) else {
-        return Err(ProviderFailure::operation(FailureClass::Unavailable, "artifact status has no VmHWM"));
+        return Ok(None);
     };
     let mut fields = line.split_whitespace();
     let _ = fields.next();

@@ -3,16 +3,49 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
+        /// D-LAMBDA-IFACE1=A: a lambda may carry the same result, error, and
+        /// effect suffixes as a named callable. Look past `)` without parsing
+        /// the type; the real parser below remains the single source of truth.
+        fn lambda_tail_starts_at(&self, index: usize) -> bool {
+            let Some(kind) = self.toks.get(index).map(|token| &token.kind) else {
+                return false;
+            };
+            if Self::at_unified_arrow_token(kind)
+                || matches!(kind, TokKind::Bang | TokKind::Question)
+            {
+                return true;
+            }
+            if matches!(kind, TokKind::Minus | TokKind::Colon | TokKind::Eq)
+                && matches!(self.toks.get(index + 1).map(|token| &token.kind), Some(TokKind::LBracket))
+            {
+                return true;
+            }
+            if matches!(kind, TokKind::MinusMinus) {
+                return true;
+            }
+            if matches!(kind, TokKind::Hash) {
+                let next = self.toks.get(index + 1).map(|token| &token.kind);
+                if matches!(next, Some(TokKind::LParen)) {
+                    return true;
+                }
+            }
+            matches!(
+                kind,
+                TokKind::KwFn
+                    | TokKind::Ident(_)
+                    | TokKind::LParen
+                    | TokKind::LBracket
+                    | TokKind::Star
+            )
+        }
+
         /// S46: recognize `(` … `) ->` only when the contents have lambda
         /// parameter shape. A condition such as `(a > b) ->` is an
         /// if-expression condition, not a lambda parameter list.
         pub(super) fn after_lparen_is_lambda(&self) -> bool {
             let mut i = self.pos + 1;
             if matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::RParen)) {
-                return matches!(
-                    self.toks.get(i + 1).map(|token| &token.kind),
-                    Some(kind) if Parser::at_unified_arrow_token(kind)
-                );
+                return self.lambda_tail_starts_at(i + 1);
             }
             loop {
                 if !matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::Ident(_))) {
@@ -63,10 +96,7 @@ impl<'a> Parser<'a> {
                 }
                 match self.toks.get(i).map(|token| &token.kind) {
                     Some(TokKind::RParen) => {
-                        return matches!(
-                            self.toks.get(i + 1).map(|token| &token.kind),
-                            Some(kind) if Parser::at_unified_arrow_token(kind)
-                        );
+                        return self.lambda_tail_starts_at(i + 1);
                     }
                     Some(TokKind::Comma) => {
                         i += 1;
@@ -133,14 +163,47 @@ impl<'a> Parser<'a> {
             }
             let close_paren = self.peek().span;
             self.expect(TokKind::RParen, "after lambda parameters")?;
-            self.expect_unified_arrow("after `)` in a lambda")?;
+            let (result_type, error_type) = self.parse_lambda_return_interface()?;
+            let (effects, effect_via) = self.parse_opt_func_effects()?;
+            if let Some((_, span)) = effect_via {
+                return Err(Diagnostic::error(
+                    "E0119",
+                    "a lambda effect row cannot publish `via`".to_string(),
+                    "a lambda stores a concrete effect row as part of its callable interface".to_string(),
+                    "write the effects directly, for example `-[Net]>`".to_string(),
+                    Some(span),
+                ));
+            }
+            if effects.is_none() {
+                self.expect_unified_arrow("after the lambda interface")?;
+            }
             let (body, end) = self.lambda_arrow_body(close_paren.end)?;
             Ok(Lambda {
                 take_names,
                 params,
+                result_type,
+                error_type,
+                effects,
                 body,
                 span: Span::new(open.start, end),
                 meta: LambdaMeta::default(),
+            })
+        }
+
+        fn parse_lambda_return_interface(
+            &mut self,
+        ) -> Result<(Option<super::super::Type>, Option<super::super::Type>), Diagnostic> {
+            let return_type = if !self.func_effect_starts_here()
+                && (self.type_starts_here() || matches!(self.peek().kind, TokKind::Star))
+            {
+                Some(self.type_()?.0)
+            } else {
+                self.parse_unit_fallible_return()?.map(|(ty, _)| ty)
+            };
+            Ok(match return_type {
+                Some(super::super::Type::Result { ok, err }) => (Some(*ok), Some(*err)),
+                Some(ty) => (Some(ty), None),
+                None => (None, None),
             })
         }
     
@@ -161,6 +224,9 @@ impl<'a> Parser<'a> {
                     ty: None,
                     ty_span: None,
                 }],
+                result_type: None,
+                error_type: None,
+                effects: None,
                 body,
                 span: Span::new(name_span.start, end),
                 meta: LambdaMeta::default(),

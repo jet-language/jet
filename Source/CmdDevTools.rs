@@ -187,7 +187,7 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
+        let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
             file,
             try_anyway,
             use_interpreter,
@@ -195,6 +195,8 @@ pub(crate) fn run_dev(
             profile,
             setting_overrides,
         );
+        render_lints(file, mode, &run.lints);
+        let outcome = run.outcome;
         render_dev_outcome(&outcome, file, mode);
         let status = match &outcome {
             jet::Interpreter::RunOutcome::Ran { exit_code, .. } => *exit_code,
@@ -609,7 +611,7 @@ fn render_dev_change(
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
+        let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
             file,
             try_anyway,
             use_interpreter,
@@ -617,6 +619,8 @@ fn render_dev_change(
             profile,
             setting_overrides,
         );
+        render_lints(file, mode, &run.lints);
+        let outcome = run.outcome;
         render_dev_outcome(&outcome, file, mode);
     }
 
@@ -721,7 +725,7 @@ fn render_dev_iteration(
     setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
-    let outcome = jet::Interpreter::dev_iteration_with_gates_profile_and_settings(
+    let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
         file,
         try_anyway,
         use_interpreter,
@@ -729,6 +733,8 @@ fn render_dev_iteration(
         profile,
         setting_overrides,
     );
+    render_lints(file, mode, &run.lints);
+    let outcome = run.outcome;
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
     let bundle = if ran_ok {
@@ -744,12 +750,6 @@ fn render_dev_iteration(
                     report_problems(mode, file, &source, &diags);
                     None
                 } else {
-                    let diagnostics = jet::Sema::check_bundle_gates(
-                        &mut bundle,
-                        jet::Sema::CompileMode::Run,
-                        gates,
-                    );
-                    render_dev_lints(file, mode, &diagnostics);
                     Some(bundle)
                 }
             }
@@ -794,12 +794,20 @@ fn exit_dev_outcome(outcome: jet::Interpreter::RunOutcome) {
     }
 }
 
-fn render_dev_lints(file: &str, mode: OutputMode, diagnostics: &[jet::Diagnostics::Diagnostic]) {
+pub(crate) fn render_lints(
+    file: &str,
+    mode: OutputMode,
+    diagnostics: &[jet::Diagnostics::Diagnostic],
+) {
     let lints = visible_lints(diagnostics);
     if !lints.is_empty() {
         let source = fs::read_to_string(file).unwrap_or_default();
         report_problems(mode, file, &source, &lints);
     }
+}
+
+fn render_dev_lints(file: &str, mode: OutputMode, diagnostics: &[jet::Diagnostics::Diagnostic]) {
+    render_lints(file, mode, diagnostics);
 }
 
 /// After a successful dev iteration, collect ServiceProbe/SceneProbe evidence

@@ -345,7 +345,7 @@ impl<'a> StateCtx<'a> {
         self.flow.clone()
     }
 
-    /// The shared loop rule, stated once in `FlowFacts::after_loop`.
+    /// The shared loop rule is stated once in `FlowFacts::after_loop`.
     fn check_loop_body(&mut self, body: &[Stmt], span: Span) {
         let before = self.flow.clone();
         self.check_block(body);

@@ -27,29 +27,47 @@ mod Statements;
 mod Types;
 
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-    parse_inner(toks, false, false)
+    parse_inner(toks, false, false, None)
 }
 
 /// Parse a Jetpack config surface. The config grammar reserves `$NAME` for a
 /// typed environment read; ordinary Jet source keeps the same token retired.
 pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-    parse_inner(toks, false, true)
+    parse_inner(toks, false, true, None)
 }
 
 /// Parse for `jet fmt`: succeeds when the AST is recoverable, even if live
 /// teaching diagnostics rewrote retired marker or punctuation forms.
 pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
-    parse_inner(toks, true, false)
+    parse_inner(toks, true, false, None)
 }
 
 /// Parse for editor/LSP check: recover through live teaching errors, return
 /// them alongside the AST so sema can still run (M6 phase 4).
 pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
+    parse_for_check_inner(toks, None)
+}
+
+/// Parse for editor/LSP check while retaining the source text for
+/// source-derived machine fixes (S14). Token spans remain byte offsets into
+/// this same source string.
+pub fn parse_for_check_with_source(
+    toks: &[Token],
+    source: &str,
+) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
+    parse_for_check_inner(toks, Some(source))
+}
+
+fn parse_for_check_inner(
+    toks: &[Token],
+    source: Option<&str>,
+) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
     let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
     check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
+        source: source.map(str::to_owned),
         pos: 0,
         diags: Vec::new(),
         pending_type_gt: false,
@@ -92,12 +110,14 @@ fn parse_inner(
     toks: &[Token],
     for_fmt: bool,
     allow_environment_reads: bool,
+    source: Option<&str>,
 ) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
     let (toks, fenced_statements) = crate::FencedNames::expand(&toks)?;
     check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
+        source: source.map(str::to_owned),
         pos: 0,
         diags: Vec::new(),
         pending_type_gt: false,
@@ -180,6 +200,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0066"
             | "E0068"
             | "E0070"
+            | "E0080"
             | "E0077"
             | "E0146"
             | "E0154"
@@ -195,6 +216,10 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0374"
             | "E0378"
             | "E0379"
+            | "E0383"
+            | "E0384"
+            | "E0385"
+            | "E0386"
             | "E-ERR-SIGIL"
             | "E0999"
             | "E0412"
@@ -224,6 +249,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
 
 struct Parser<'a> {
     toks: &'a [Token],
+    source: Option<String>,
     pos: usize,
     diags: Vec<Diagnostic>,
     /// S33: when `>>` is split while closing nested `Type<…>`.
@@ -549,6 +575,16 @@ impl<'a> Parser<'a> {
                 Some(span),
             )),
             Token {
+                kind: TokKind::KwIn,
+                span,
+            } => Err(Diagnostic::error(
+                "E0003",
+                format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
+                format!("the `{}` keyword marks the boundary between a loop binding and its source", Syntax::KW_IN),
+                format!("choose a different identifier name, or use `{}` in a source loop", Syntax::KW_IN),
+                Some(span),
+            )),
+            Token {
                 kind: TokKind::KwTag,
                 span,
             } => Ok((Syntax::KW_TAG.to_string(), span)),
@@ -735,6 +771,48 @@ mod s61_tests {
         parse(&toks).unwrap_or_else(|d| panic!("parse errors: {d:?}"))
     }
 
+    #[test]
+    fn dispatch_atom_boolean_group_has_safe_source_edit() {
+        let source = "fn run() {\n    n :: 48\n    ready :: true\n    if n < {\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }\n}\n";
+        let (tokens, lex_diags) = lex(source);
+        assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+        let (_, diagnostics) = parse_for_check_with_source(&tokens, source)
+            .expect("E0386 should recover the dispatch arm");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0386")
+            .expect("E0386");
+        let edit = diagnostic.edit.as_ref().expect("source edit");
+        assert_eq!(&source[edit.span.start..edit.span.end], "48 | 45");
+        assert_eq!(edit.new_text, "(48 | 45)");
+        assert_eq!(
+            diagnostic.applicability,
+            Some(crate::Diagnostics::FixApplicability::Safe)
+        );
+        assert_eq!(
+            diagnostic.safety,
+            Some(crate::Diagnostics::FixSafety::Formatting)
+        );
+        let fixed = source.replace("48 | 45", "(48 | 45)");
+        let (tokens, lex_diags) = lex(&fixed);
+        assert!(lex_diags.is_empty(), "fixed lex diagnostics: {lex_diags:?}");
+        assert!(parse(&tokens).is_ok(), "fixed dispatch arm should parse");
+
+        for variant in [
+            source.replace("&&", "||"),
+            source.replace("48 | 45 && ready", "ready && 48 | 45"),
+        ] {
+            let (tokens, lex_diags) = lex(&variant);
+            assert!(lex_diags.is_empty(), "variant lex diagnostics: {lex_diags:?}");
+            let (_, diagnostics) = parse_for_check_with_source(&tokens, &variant)
+                .expect("Boolean operands should recover with E0386");
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == "E0386"),
+                "expected E0386 in variant: {diagnostics:?}"
+            );
+        }
+    }
+
     /// S84 (regression): spaced `a - b` is still subtraction. The dashed-name
     /// reader only fires in name positions and only on span-adjacent hyphens, so
     /// the expression grammar is untouched.
@@ -836,7 +914,7 @@ fn build(b: BuildContext) {
     fn root_template_loop_parses_closed_type_list_and_declarations() {
         let p = program(
             r#"
-@loop T, [Point] {
+@loop T in [Point] {
     impl T {
         fn generated(self) String -> "generated"
     }
@@ -990,7 +1068,7 @@ fn build(b: BuildContext) {
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-    let src = "#FFI(c) fn add(a: Int, b: Int) Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
+    let src = "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1017,7 +1095,7 @@ fn build(b: BuildContext) {
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 -> {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1040,7 +1118,7 @@ fn build(b: BuildContext) {
 
     #[test]
     fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
-        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) Int -> {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
         let p = program(src);
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "add" => Some(func),
@@ -1328,8 +1406,8 @@ fn build(b: BuildContext) {
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "#FFI(c) fn add(a: Int, b: Int) Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
+            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 -> {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("FFI("), "formatted output keeps the FFI marker: {once}");
@@ -1381,6 +1459,7 @@ fn run() {
         let toks = crate::Lexer::without_comments(&toks);
         let mut p = Parser {
             toks: &toks,
+            source: None,
             pos: 0,
             diags: Vec::new(),
             pending_type_gt: false,
@@ -1429,7 +1508,7 @@ fn classify(score: Int) Grade -> if {
 
 fn notify(ready: Bool) -[Net]> {
     if ready -> send() else -> skip()
-    loop item, items -> audit(item)
+    loop item in items -> audit(item)
     outer :: loop {
         next(outer)
     }
@@ -1447,7 +1526,7 @@ fn notify(ready: Bool) -[Net]> {
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) -[Net]> {"), "{once}");
         assert!(once.contains("if ready -> send() else -> skip()"), "{once}");
-        assert!(once.contains("loop item, items -> audit(item)"), "{once}");
+        assert!(once.contains("loop item in items -> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
         assert!(once.contains("#Abilities(caps: FS, Net)"), "{once}");
@@ -1473,7 +1552,7 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn multiline_callable_tail_preserves_its_source_expression() {
         let p = program(
-            "fn double(value: Int) Int {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
+            "fn double(value: Int) Int -> {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
         );
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "double" => Some(func),
@@ -1485,6 +1564,41 @@ fn notify(ready: Bool) -[Net]> {
                 Some(Stmt::Expr(_))
             ),
             "parser must preserve the final expression; sema lowers it to the callable result"
+        );
+    }
+
+    #[test]
+    fn lambda_callable_interface_parses_result_error_and_effects() {
+        let p = program(
+            "fn run() {\n\
+                f :: (n: Int) Int MyError! -[IO]> { return Ok(n) }\n\
+            }\n",
+        );
+        let lambda = p
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(func) if func.name == "run" => func.body.iter().find_map(|stmt| {
+                    let Stmt::Val(binding) = stmt else { return None };
+                    match &binding.init {
+                        Expr::Lambda(lambda) => Some(lambda),
+                        _ => None,
+                    }
+                }),
+                _ => None,
+            })
+            .expect("stored lambda");
+        assert!(matches!(lambda.result_type, Some(crate::AST::Type::Int)));
+        assert!(matches!(
+            &lambda.error_type,
+            Some(crate::AST::Type::Named(name)) if name == "MyError"
+        ));
+        assert_eq!(
+            lambda
+                .effects
+                .as_ref()
+                .map(|effects| effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>()),
+            Some(vec!["IO"])
         );
     }
 
@@ -1626,10 +1740,10 @@ fn notify(ready: Bool) -[Net]> {
         }
     }
 
-    /// D-ERRSIGIL1: tight `T?` is Optional; `T ! E` is fallible.
+    /// D-ERRSUFFIX1=B: `T?` is Optional; an error type owns the `!` suffix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() Int? { return None }\nfn run() {}\n");
+        let opt = program("fn a() Int? -> { return None }\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -1639,7 +1753,7 @@ fn notify(ready: Bool) -[Net]> {
             "tight `Int?` must be Optional"
         );
 
-        let res = program("fn b() Int ! { return Ok(1) }\nfn run() {}\n");
+        let res = program("fn b() Int ! -> { return Ok(1) }\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -1652,7 +1766,7 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !` must be Result"
         );
 
-        let paren = program("fn c() (Int?) { return None }\nfn run() {}\n");
+        let paren = program("fn c() (Int?) -> { return None }\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -1666,9 +1780,9 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
-            "struct Holder { value: Int ! IOError }\n\
+            "struct Holder { value: Int? IOError! }\n\
              alias Box<T> :: T\n\
-             fn take(value: Int ! IOError) Box<Int ! IOError> { return value }\n\
+             fn take(value: Int? IOError!) Box<Int? IOError!> -> { return value }\n\
              fn run() {}\n",
         );
         assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
@@ -1676,12 +1790,43 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn unit_fallible_signatures_use_the_post_parameter_bang() {
+    fn failure_suffixes_compose_optional_success_and_error_union() {
         let parsed = program(
-            "fn save(path: String) ! IOError {}\n\
+            "struct Holder { value: Int? IOError! }\n\
+             fn take(value: Int? IOError!) Int (DbError | TimeoutError)! -> { return value }\n\
+             fn apply(callback: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> { return None }\n\
+             fn run() {}\n",
+        );
+        let holder = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+            _ => None,
+        }).expect("Holder");
+        assert!(matches!(
+            &holder.fields[0].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
+        ));
+
+        let take = parsed.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(func) if func.name == "take" => Some(func),
+            _ => None,
+        }).expect("take");
+        assert!(matches!(
+            take.return_type.as_ref(),
+            Some(crate::AST::Type::Result { ok, err })
+                if matches!(ok.as_ref(), crate::AST::Type::Int)
+                    && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2)
+        ));
+    }
+
+    #[test]
+    fn unit_fallible_signatures_use_the_error_suffix() {
+        let parsed = program(
+            "fn save(path: String) IOError! {}\n\
              fn sync() ! {}\n\
-             fn bounded() ! IOError -[FS]> {}\n\
-             fn load() Config ! IOError {}\n",
+             fn bounded() IOError! -[FS]> {}\n\
+             fn load() Config IOError! -> {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {
@@ -1712,11 +1857,11 @@ fn notify(ready: Bool) -[Net]> {
         use crate::Formatter::format_source;
 
         let source =
-            "fn save(path: String) ! IOError {}\nfn sync() ! {}\nfn bounded() :[FS]> ! IOError {}\n";
+            "fn save(path: String) IOError! {}\nfn sync() ! {}\nfn bounded() IOError! -[FS]> {}\n";
         let once = format_source(source).expect("unit-fallible signatures format");
-        assert!(once.contains("fn save(path: String) ! IOError"), "{once}");
+        assert!(once.contains("fn save(path: String) IOError!"), "{once}");
         assert!(once.contains("fn sync() !"), "{once}");
-        assert!(once.contains("fn bounded() :[FS]> ! IOError"), "{once}");
+        assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
         assert_eq!(once, format_source(&once).expect("formatted form is stable"));
     }
 
@@ -1733,7 +1878,7 @@ fn notify(ready: Bool) -[Net]> {
             .iter()
             .find(|diagnostic| diagnostic.code == "E0003")
             .expect("E0003");
-        assert!(diagnostic.fix.contains("fn save(path: String) ! IOError"));
+        assert!(diagnostic.fix.contains("fn save(path: String) IOError!"));
     }
 
     /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.

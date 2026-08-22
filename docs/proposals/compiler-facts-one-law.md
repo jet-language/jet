@@ -222,7 +222,7 @@ fn ingest(rows: [Row]) =[DB.Read, Log]=> Report {
     stats :: shared Stats{ seen: 0 }            // place facts: lock story inferred
 
     task.group g(limit: 4) {                     // work facts: state, duty, reach
-        loop row, rows {
+        loop row in rows {
             task process(row, stats)             // duty: g joins every child
         }
     }

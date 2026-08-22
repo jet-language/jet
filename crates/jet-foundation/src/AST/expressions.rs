@@ -253,7 +253,7 @@ pub enum StrPart {
     Interp(Box<Expr>, StrFormat),
 }
 
-/// S46 (M8): one parameter in `(x: Int) => …`.
+/// S46 (M8): one parameter in `(x: Int) -> …`.
 #[derive(Debug, Clone)]
 pub struct LambdaParam {
     pub name: String,
@@ -262,7 +262,7 @@ pub struct LambdaParam {
     pub ty_span: Option<Span>,
 }
 
-/// S46: expression or block body after `=>`.
+/// S46: expression or block body after `->`.
 #[derive(Debug, Clone)]
 pub enum LambdaBody {
     Expr(Box<Expr>),
@@ -318,12 +318,12 @@ pub struct LambdaMeta {
     /// D-CONC-SPAWN1: the body contains a `?` that sema typed against the
     /// enclosing function's fallible return. A spawned closure with this flag
     /// early-returns that error, so every engine must give the closure a
-    /// `Result` carrier (`Task<T ! E>`), or the rendered Rust `?` sits inside
+    /// `Result` carrier (`Task<T E!>`), or the rendered Rust `?` sits inside
     /// a `()` closure and rustc rejects the generated code (I2).
     pub fallible_propagation: bool,
 }
 
-/// S46/S47 (M8): `(params) => body`; captures are inferred.
+/// S46/S47 (M8): `(params) -> body`; captures are inferred.
 #[derive(Debug, Clone)]
 pub struct Lambda {
     /// Explicit consuming captures (`task ^name { … }`). The retired
@@ -331,6 +331,14 @@ pub struct Lambda {
     /// emits migration diagnostics.
     pub take_names: Vec<(String, Span)>,
     pub params: Vec<LambdaParam>,
+    /// D-LAMBDA-IFACE1=A: optional success result written before the lambda
+    /// body arrow. `None` keeps result inference from the expected fn slot.
+    pub result_type: Option<Type>,
+    /// D-LAMBDA-IFACE1=A: optional failure type paired with `result_type`.
+    /// An error-only annotation means a unit success result.
+    pub error_type: Option<Type>,
+    /// D-LAMBDA-IFACE1=A / D-EFFECT-ROW2=B: the lambda's explicit effect row.
+    pub effects: Option<Vec<(String, Span)>>,
     pub body: LambdaBody,
     pub span: Span,
     pub meta: LambdaMeta,
@@ -652,9 +660,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `Ok(expr)` — success value for `T ! E`.
+    /// S34: `Ok(expr)` — success value for `T E!`.
     Ok(Box<Expr>, Span),
-    /// S34: `Err(expr)` — failure value for `T ! E`.
+    /// S34: `Err(expr)` — failure value for `T E!`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
     /// S7/D-FAIL-CTX1: `expr?` — propagates failure and may carry a lazy
@@ -683,7 +691,7 @@ pub enum Expr {
     /// S73 (D-SG7): `(x: 1, y: 2)` — named members only; source order preserved for fmt.
     /// `ty` is filled by sema for codegen (canonical sorted shape).
     TupleLit(Vec<(String, Expr)>, Span, Option<Type>),
-    /// S46 (M8): `(params) => expr` or block body.
+    /// S46 (M8): `(params) -> expr` or block body.
     Lambda(Lambda),
     /// S47 / D-CALLVALUE1=B: direct call of a function-valued expression such
     /// as a lambda, field, or index; a returned call result uses `.call(args)`.

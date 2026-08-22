@@ -46,6 +46,9 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
+                result_type: None,
+                error_type: None,
+                effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body,
                     span: start,
@@ -69,7 +72,7 @@ impl<'a> Parser<'a> {
             && (Self::at_unified_arrow_token(&self.peek2().kind)
                 || matches!(self.peek2().kind, TokKind::KwIf));
         // `it` lexes as its own keyword, not an identifier, so a header that
-        // names the implicit binding explicitly — `loop it, users` — reaches
+        // names the implicit binding explicitly — `loop it in users` — reaches
         // here too. It is not the ratified spelling (D-LOOP-SUBJECT1 writes
         // the subject bare), but it must earn the honest "that is not a name"
         // diagnostic rather than a misleading claim about exhaustion.
@@ -78,7 +81,11 @@ impl<'a> Parser<'a> {
             || (binding_head
                 && (matches!(
                     self.peek2().kind,
-                    TokKind::ColonEq | TokKind::Semi | TokKind::Comma | TokKind::KwIf
+                    TokKind::ColonEq
+                        | TokKind::Semi
+                        | TokKind::Comma
+                        | TokKind::KwIf
+                        | TokKind::KwIn
                 ) || Self::at_unified_arrow_token(&self.peek2().kind)));
         if !finite_header {
             return Err(Diagnostic::error(
@@ -138,7 +145,7 @@ impl<'a> Parser<'a> {
         } else {
             loop {
                 let (var, var_span, var2) = self.loop_source_binding()?;
-                self.expect_loop_comma("after the loop source binding")?;
+                self.expect_loop_source_separator()?;
                 let first = self.expr_no_struct_lit()?;
                 let kind = if let Expr::Range {
                     start,
@@ -271,6 +278,9 @@ impl<'a> Parser<'a> {
             let lambda = crate::AST::Lambda {
                 take_names: Vec::new(),
                 params: Vec::new(),
+                result_type: None,
+                error_type: None,
+                effects: None,
                 body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
                     body: vec![loop_stmt],
                     span: start,
@@ -383,6 +393,9 @@ impl<'a> Parser<'a> {
         let lambda = crate::AST::Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
             body: crate::AST::LambdaBody::Block(vec![loop_stmt]),
             span: Span::new(start.start, end),
             meta: crate::AST::LambdaMeta {
@@ -1426,8 +1439,8 @@ impl<'a> Parser<'a> {
                                      // S19-amend: `loop` handles all three loop forms by header.
                                      //   loop { }               → infinite
         //   loop cond { }          → conditional (was `while`)
-        //   loop x, ... { }        → iteration (was `for`)
-        //   loop (k, v), ... { }   → key-value iteration
+        //   loop x in ... { }      → iteration (was `for`)
+        //   loop (k, v) in ... { } → key-value iteration
         if self.at_unified_arrow() {
             // D-ONELINE-BODY1=B: an infinite effect loop may use the same
             // one-statement arrow body as conditional and source loops.
@@ -1482,7 +1495,7 @@ impl<'a> Parser<'a> {
                     "C-style counter loop headers are retired".to_string(),
                     "a three-slot loop header is binding, source, and step rule — not init, condition, and assignment"
                         .to_string(),
-                    "write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state"
+                    "write `loop i in 0..<n { … }` or `loop i in 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state"
                         .to_string(),
                     Some(step_span),
                 ));
@@ -1498,13 +1511,13 @@ impl<'a> Parser<'a> {
                 label,
             })
         } else if (matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma))
+            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma | TokKind::KwIn))
             || matches!(&self.peek().kind, TokKind::LParen)
         {
-            // D-LOOP-COMMA1=A: `loop x, source [, stride]`; two-name
-            // iteration groups the binding as `loop (key, value), source`.
+            // D-LOOP-IN1=A: `loop x in source [, stride]`; two-name iteration
+            // groups the binding as `loop (key, value) in source`.
             let (var, var_span, var2) = self.loop_source_binding()?;
-            self.expect_loop_comma("after the loop source binding")?;
+            self.expect_loop_source_separator()?;
             let first = self.expr_no_struct_lit()?;
             let kind = if let Expr::Range {
                 start,
@@ -1674,8 +1687,8 @@ impl<'a> Parser<'a> {
         }
 
         let (first, first_span) = self.expect_ident("as the loop variable")?;
-        // Retired `loop key, value; source`: retain enough structure for fmt
-        // to produce `loop (key, value), source`.
+        // Retired unparenthesized two-name binding: retain enough structure for
+        // fmt to produce the canonical parenthesized binding.
         if matches!(self.peek().kind, TokKind::Comma)
             && matches!(self.peek2().kind, TokKind::Ident(_))
             && matches!(self.peek3().kind, TokKind::Semi)
@@ -1692,6 +1705,26 @@ impl<'a> Parser<'a> {
             Ok(())
         } else {
             self.expect(TokKind::Comma, context)
+        }
+    }
+
+    pub(in crate::Parser) fn expect_loop_source_separator(&mut self) -> Result<(), Diagnostic> {
+        match self.peek().kind {
+            TokKind::KwIn => {
+                self.bump();
+                Ok(())
+            }
+            TokKind::Comma => {
+                let span = self.bump().span;
+                self.diags
+                    .push(Diagnostic::from_row("E0383", &[], Some(span)));
+                Ok(())
+            }
+            TokKind::Semi if self.peek().span.start < self.peek().span.end => {
+                self.take_loop_comma();
+                Ok(())
+            }
+            _ => self.expect(TokKind::KwIn, "between the loop binding and source"),
         }
     }
 
@@ -1736,7 +1769,7 @@ impl<'a> Parser<'a> {
         matches!(self.peek().kind, TokKind::Comma)
             && (matches!(self.peek2().kind, TokKind::LParen)
                 || (matches!(self.peek2().kind, TokKind::Ident(_))
-                    && matches!(self.peek3().kind, TokKind::Comma)))
+                    && matches!(self.peek3().kind, TokKind::Comma | TokKind::KwIn)))
     }
 
     fn at_yielding_loop_stride(&self) -> bool {
@@ -1940,7 +1973,7 @@ impl<'a> Parser<'a> {
             Some(ForeignKeywordKind::For) => (
                 format!("expected a statement, found `{word}`"),
                 "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
-                "write `loop item, source { … }`".to_string(),
+                "write `loop item in source { … }`".to_string(),
             ),
             Some(ForeignKeywordKind::While) => (
                 format!("expected a statement, found `{word}`"),

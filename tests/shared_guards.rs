@@ -57,7 +57,7 @@ fn return_early(handle: Shared<Int>) {
     return
 }
 
-fn fail_early(handle: Shared<Int>) Int ! String {
+fn fail_early(handle: Shared<Int>) Int String! {
     guard :: handle.guard_edit()
     guard.value += 1
     return .Err("stop")

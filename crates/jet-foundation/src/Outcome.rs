@@ -1,5 +1,5 @@
 // D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06) — the one outcome
-// carrier under `T?` and `T ! E`.
+// carrier under `T?` and `T E!`.
 //
 // An outcome has three independent facts:
 //
@@ -14,7 +14,7 @@
 //
 //   * `T?`     is `JetOutcome<T, JetAbsent>` — absence is clean, so the report
 //              is `JetAbsent`, which carries nothing.
-//   * `T ! E`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
+//   * `T E!`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
 //
 // Happy-path erasure: `JetAbsent` is zero-sized, so `JetOutcome<T, JetAbsent>`
 // has the same layout, the same niche and the same two branches as a bare
@@ -821,7 +821,7 @@ impl<T> JetOptionalView<T> for JetOutcome<T, JetAbsent> {
     }
 }
 
-/// Build a present payload. `T?` and `T ! E` build the same carrier.
+/// Build a present payload. `T?` and `T E!` build the same carrier.
 pub fn jet_present<T, E>(value: T) -> JetOutcome<T, E> {
     Ok(value)
 }

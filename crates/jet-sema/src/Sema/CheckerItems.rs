@@ -2127,7 +2127,7 @@ impl<'a> Checker<'a> {
             .filter(|(n, _, _)| !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
-        // D-FIELDDEF1=C: omitted fields with `=` defaults are filled in.
+        // D-DEFAULT-SHAPE1=B: omitted fields with `{}` defaults are filled in.
         let defaults = if owner_mod == self.module_idx {
             self.registry
                 .field_defaults(type_name)
@@ -3418,7 +3418,7 @@ impl<'a> Checker<'a> {
                         subject_ty.name()
                     ),
                     format!(
-                        "use `== {}(...)` or `== {}(...)` on `T ! E`",
+                        "use `== {}(...)` or `== {}(...)` on `T E!`",
                         Syntax::LIT_OK,
                         Syntax::LIT_ERR
                     ),

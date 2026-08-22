@@ -1386,13 +1386,13 @@ use "./right" as right
 fn build(b: BuildContext) BuildPlan ! {
     answer :: left.answer()
     if answer == 7 { b.error(b.program.functions()[0].span, "CALL", "qualified", "evaluator", "ok") }
-    loop ty, b.program.types() {
+    loop ty in b.program.types() {
         if ty.identity == "left::Choice" { b.error(ty.span, "ENUM", "enum", "identity", "ok") }
-        loop method, ty.methods {
+        loop method in ty.methods {
             if method.identity == "right::Choice.inspect" { b.error(ty.span, "METHOD", "method", "identity", "ok") }
         }
     }
-    loop f, b.program.functions() {
+    loop f in b.program.functions() {
         if f.name == "build" { b.error(f.span, "BUILDREFLECT", "build leaked into ProgramInfo", "build is an authoring hook, not runtime program surface", "keep build excluded from the read-only reflection snapshot") }
         if f.identity == "left::same" && f.effects.has("Net") && f.reaches_panic() { b.error(f.span, "LEFT", "left", "effect", "ok") }
         if f.identity == "right::same" && (f.effects.has("Net") || f.reaches_panic()) { b.error(f.span, "BAD", "collision", "effect", "fix") }

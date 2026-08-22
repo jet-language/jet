@@ -17,7 +17,7 @@ fn spawn_later(group: Group) Shared<Gate> {
         loop gate.step == 1 {}
         gate.step += 1
         total := 0
-        loop n, 0..<2000000 { total += n }
+        loop n in 0..<2000000 { total += n }
         print("task")
     }
     loop gate.step == 0 {}
@@ -504,7 +504,7 @@ fn leave_on_deadline() {
     task.group group {
         child :: task {
             total := 0
-            loop n, 0..<2000000 { total += n }
+            loop n in 0..<2000000 { total += n }
             print("settled")
         }
         #Context(deadline: time.now() - 1) {
@@ -530,7 +530,7 @@ struct Gate { step: Int }
 fn slow_value(gate: Shared<Gate>) Int {
     gate.step = 1
     total := 0
-    loop n, 0..<2000000 { total += n }
+    loop n in 0..<2000000 { total += n }
     print("settled")
     return 1
 }
@@ -611,7 +611,7 @@ fn leave() Int {
     task.group group {
         spawn_bad(group)
         total := 0
-        loop n, 0..<2000000 { total += n }
+        loop n in 0..<2000000 { total += n }
         return 1
     }
     return 0

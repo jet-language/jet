@@ -1,7 +1,7 @@
-Error [E-ERR-SIGIL]: `?` is the retired fallible type separator.
+Error [E-ERR-SIGIL]: retired infix fallible type spelling; use an error suffix (D-ERRSUFFIX1)
   --> tests/ui/retired_fallible_type_sigil.jet:3:12
     |
-  3 | fn f() Int ? E -> Ok(1)
+  3 | fn f() Int ! E -> Ok(1)
     |            ^
- Why: A fallible type has its own separator so `?` has one meaning: possible absence.
- Fix: Write `T ! E`, such as `Config ! IOError`; write `T !` for the default `Err` type.
+ Why: The success type and error type each have a clear suffix zone, so `?` keeps one meaning: possible absence.
+ Fix: Write `Entry? StoreError!`, `Int (DbError | TimeoutError)!`, or `IOError!`; write bare `!` for the default `Err` type.

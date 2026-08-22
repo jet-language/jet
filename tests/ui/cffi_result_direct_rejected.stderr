@@ -1,7 +1,7 @@
 Error [E0070]: this uses a retired arrow spelling
   --> tests/ui/cffi_result_direct_rejected.jet:4:22
     |
-  4 |     fn load(id: U64) => U64 ! String = "store_load"
+  4 |     fn load(id: U64) => U64 String! = "store_load"
     |                      ^^
  Why: callables, arms, and lambdas use one arrow: `->`
  Fix: replace `:>` or `=>` with `->`
@@ -9,15 +9,15 @@ Error [E0070]: this uses a retired arrow spelling
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/cffi_result_direct_rejected.jet:4:22
     |
-  4 |     fn load(id: U64) => U64 ! String = "store_load"
+  4 |     fn load(id: U64) => U64 String! = "store_load"
     |                      ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
-Error [E3203]: `U64 ! String` is not a C-compatible type for a foreign function parameter or return.
+Error [E3203]: `U64 String!` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_result_direct_rejected.jet:4:25
     |
-  4 |     fn load(id: U64) => U64 ! String = "store_load"
+  4 |     fn load(id: U64) => U64 String! = "store_load"
     |                         ^^^^^^^^^^^^
  Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.

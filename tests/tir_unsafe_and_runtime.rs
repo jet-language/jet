@@ -24,7 +24,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) => Int {
+fn read_reg(addr: Int) Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -71,7 +71,7 @@ fn mem_address_of_never_folds_plain_or_parenthesized() {
             "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) => Int {{
+fn read_reg(addr: Int) Int {{
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }}
@@ -120,7 +120,7 @@ fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be valid\")
-fn read_reg(addr: Int) => Int {
+fn read_reg(addr: Int) Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -386,24 +386,24 @@ struct Pair<T> {
     first: T
     second: T
 }
-fn make_pair<T>(a: T, b: T) => Pair<T> {
-    return Pair<T>.{first: ~a, second: ~b}
+fn make_pair<T>(a: T, b: T) Pair<T> {
+    return Pair<T>{first: ~a, second: ~b}
 }
 struct Stack<T> {
     items: [T]
 }
-fn empty_stack<T>() => Stack<T> {
-    return Stack<T>.{items: []}
+fn empty_stack<T>() Stack<T> {
+    return Stack<T>{items: []}
 }
-fn push<T>(s: Stack<T>, item: T) => Stack<T> {
+fn push<T>(s: Stack<T>, item: T) Stack<T> {
     dup := ~s
     dup.items.push(item)
     return dup
 }
 fn run() {
-p :: Pair<Int>.{ make_pair(1, 2) }
+p :: Pair<Int>{ make_pair(1, 2) }
     print(p.first)
-    st := Stack<Int>.{ empty_stack() }
+    st := Stack<Int>{ empty_stack() }
     st = push(st, 42)
     print(st.items[0])
 }
@@ -430,8 +430,8 @@ fn foreign_struct_construction() {
     .unwrap();
     let main_src = "\
 use \"note\"
-fn make() => Note {
-    return note.Note.{ title: \"hello\", pages: 3 }
+fn make() Note {
+    return note.Note{ title: \"hello\", pages: 3 }
 }
 fn run() {
     n := make()
@@ -470,7 +470,7 @@ use core.time
 fn run() {
     sw := time.start()
     n := 0
-    loop i, 0..100 {
+    loop i in 0..100 {
         n = n + i
     }
     ms := sw.elapsed_millis()
@@ -582,7 +582,7 @@ fn polymorphic_core_specials() {
 use core.math as math
 use core.math.random as random
 use core.term as io
-fn calc() => Int {
+fn calc() Int {
     a :: math.abs((-5))
     b :: math.min(3, 7)
     c :: math.max(3, 7)
@@ -621,7 +621,7 @@ fn http_request_response_accessors() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) => HTTPResponse {
+fn handle(req: HTTPRequest) HTTPResponse {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
@@ -629,7 +629,7 @@ fn handle(req: HTTPRequest) => HTTPResponse {
     body :: \"m={m} p={p}\"
     return server.response(200, body)
 }
-fn describe(resp: HTTPResponse) => String {
+fn describe(resp: HTTPResponse) String {
     s :: resp.status()
     b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"
@@ -654,9 +654,9 @@ fn task_spawn_join() {
         return;
     }
     let src = "\
-fn sum_range(first: Int, last: Int) => Int {
+fn sum_range(first: Int, last: Int) Int {
     total := 0
-    loop n, first..last {
+    loop n in first..last {
         total = (total + n)
     }
     return total
@@ -669,7 +669,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_task_spawn_join", src);
     assert_eq!(code, 0);
-    // `loop n, first..last` is inclusive (S22/D-SG8): sum(1..=25) + sum(26..=50).
+    // `loop n in first..last` is inclusive (S22/D-SG8): sum(1..=25) + sum(26..=50).
     assert_eq!(stdout, "1275\n");
 }
 
@@ -747,9 +747,9 @@ fn task_all() {
         return;
     }
     let src = r#"
-fn work(value: Int, turns: Int) => Int {
+fn work(value: Int, turns: Int) Int {
     total := value
-    loop _, 1..turns {
+    loop _ in 1..turns {
         total += 1
         total -= 1
     }
@@ -777,17 +777,17 @@ fn task_failure_rail() {
     let src = r#"
 use core.time as time
 
-fn boom() => Int {
+fn boom() Int {
     panic("boom")
     return 0
 }
-fn deadline() => Int {
+fn deadline() Int {
     #Context(deadline: 0) {
         time.sleep(1ms)
     }
     return 0
 }
-fn failure_label(error: TaskFailure) => String {
+fn failure_label(error: TaskFailure) String {
     if error == {
         .Panicked(reason) -> {
             return "panic:{reason}"
@@ -840,7 +840,7 @@ fn task_all_allows_nested_task_in_every_tier() {
         return;
     }
     let src = "\
-fn nested(value: Int) => Int {
+fn nested(value: Int) Int {
     inner :: task value + 1
     return inner.join() ?? 0
 }
@@ -941,10 +941,10 @@ fn run() {
 #[test]
 fn task_all_consumes_branches_once() {
     let valid = r#"
-fn first() => Int {
+fn first() Int {
     return 10
 }
-fn second() => Int {
+fn second() Int {
     return 20
 }
 fn run() {
@@ -968,7 +968,7 @@ fn task_combinator_parent_deadline_is_e3003_in_every_tier() {
     let src = "\
 use core.time as time
 
-fn slow(value: Int) => Int {
+fn slow(value: Int) Int {
     time.sleep(1ms)
     return value
 }
@@ -1082,7 +1082,7 @@ fn run() {
 /// c109 Phase 21 / D-TUPLE-DESTRUCT1: the full channel surface —
 /// `channel<T>()` producer returning `(Sender<T>, Receiver<T>)`,
 /// `sender.clone()` (a second sender), `Sender.send(v)` (inside a `task` body),
-/// `Task.join()`, and `loop value, receiver` draining until close.
+/// `Task.join()`, and `loop value in receiver` draining until close.
 #[test]
 fn channel_send_receive() {
     if !have_rustc() {
@@ -1103,9 +1103,9 @@ fn run() {
     s1.close()
     s2.close()
     results := [Int]{}
-    loop value, ch :> results.push(value)
+    loop value in ch -> results.push(value)
     results.sort()
-    loop x, results {
+    loop x in results {
         print(x)
     }
 }
@@ -1126,7 +1126,7 @@ fn run() {
     task :: task {
         sender.send(42)
         if {
-            value, receiver :> print(value)
+            value, receiver -> print(value)
         }
     }
     task.join() ?? panic("task failed")
@@ -1137,8 +1137,8 @@ fn run() {
     assert_eq!(stdout, "42\n");
 }
 
-/// c109 Phase 22: method-call-collection iteration — `loop c, s.chars()` (char
-/// iteration) and `loop w, s.split(sep)` (the `.iter().cloned()` default), both
+/// c109 Phase 22: method-call-collection iteration — `loop c in s.chars()` (char
+/// iteration) and `loop w in s.split(sep)` (the `.iter().cloned()` default), both
 /// reproduced from `emit_for_in`'s `Expr::MethodCall` branches.
 #[test]
 fn method_call_collection_iteration() {
@@ -1146,16 +1146,16 @@ fn method_call_collection_iteration() {
         return;
     }
     let src = "\
-fn count_chars(s: String) => Int {
+fn count_chars(s: String) Int {
     n := 0
-    loop c, s.chars() {
+    loop c in s.chars() {
         n+= 1
     }
     return n
 }
-fn join_words(s: String) => String {
+fn join_words(s: String) String {
     out := \"\"
-    loop w, s.split(\",\") {
+    loop w in s.split(\",\") {
         out = \"{out}[{w}]\"
     }
     return out
@@ -1179,7 +1179,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: Int?) => String {
+fn describe(x: Int?) String {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -1188,8 +1188,8 @@ fn describe(x: Int?) => String {
     }
     return \"?\"
 }
-fn first_even(xs: [Int]) => Int {
-    out := [Int].{}
+fn first_even(xs: [Int]) Int {
+    out := [Int]{}
     i := 0
     loop i < xs.len() {
         if xs.get(i) == Val(v) {
@@ -1217,32 +1217,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: Int?) => Int {
+fn from_ne(x: Int?) Int {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: Int?) => Int {
+fn from_else(x: Int?) Int {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: Int?) => Int {
+fn and_tail(x: Int?) Int {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: Int?) => Int {
+fn still_binds(x: Int?) Int {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: String?) => String {
+fn text_ne(x: String?) String {
     if x != None {
         return x
     }
@@ -1291,7 +1291,7 @@ struct Box {
     n: Int?
 }
 fn run() {
-    b :: Box.{ n: Val(1) }
+    b :: Box{ n: Val(1) }
     if b.n != None {
         print(b.n + 1)
     }
@@ -1305,7 +1305,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() => Int? { return Val(1) }
+fn get() Int? { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)

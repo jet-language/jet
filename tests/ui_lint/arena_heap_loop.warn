@@ -1,7 +1,7 @@
 Warning [L0505] (heap_growth_in_loop): heap growth inside a loop — consider an arena
   --> tests/ui_lint/arena_heap_loop.jet:5:25
     |
-  5 |     loop i, 0..<4 -> xs.push(i)
+  5 |     loop i in 0..<4 -> xs.push(i)
     |                         ^^^^
  Why: each `push` may allocate on the global heap; in a hot loop that adds up
  Fix: bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data

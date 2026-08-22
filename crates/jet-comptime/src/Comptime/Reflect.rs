@@ -1483,8 +1483,19 @@ pub fn registered_fact_value(
 /// This is the static `Type.reflect()` fold; it does not create a runtime
 /// reflection call or a second type table.
 pub fn reflect_type_value(items: &[Item], type_name: &str, module: &str) -> Option<CtValue> {
+    let target = TargetLayout::host();
+    reflect_type_value_with_target(items, type_name, module, &target)
+}
+
+/// Fold `Type.reflect()` with the target carried by the checked build.
+pub fn reflect_type_value_with_target(
+    items: &[Item],
+    type_name: &str,
+    module: &str,
+    target: &TargetLayout,
+) -> Option<CtValue> {
     let module = if module.is_empty() { "main" } else { module };
-    let layout_engine = TargetLayoutEngine::host(items.iter());
+    let layout_engine = TargetLayoutEngine::new(items.iter(), target.clone());
     for item in items {
         match item {
             Item::Struct(def) if def.name == type_name => {
@@ -1590,7 +1601,8 @@ pub fn fact_read_value(
     {
         if method == "reflect" && args.is_empty() {
             if let Expr::Ident(type_name, _) = receiver.as_ref() {
-                return reflect_type_value(items, type_name, "main");
+                let target = TargetLayout::from_triple(&build_facts.target_triple);
+                return reflect_type_value_with_target(items, type_name, "main", &target);
             }
         }
     }
@@ -2195,11 +2207,12 @@ pub fn build_program_info(
     bundle: &crate::AST::ProgramBundle,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
-    let layout_engine = TargetLayoutEngine::host(
+    let layout_engine = TargetLayoutEngine::new(
         bundle
             .modules
             .iter()
             .flat_map(|module| module.items.iter()),
+        TargetLayout::from_triple(&bundle.build_facts.target_triple),
     );
     let mut external_impls = std::collections::HashMap::<
         (String, String),

@@ -3104,7 +3104,7 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
-            // D-DATAFLOW1=A: DataStream<T>.next() → T? ! DataError
+            // D-DATAFLOW1=A: DataStream<T>.next() → T? DataError!
             if let Type::Apply { name, args: type_args } = &recv_ty {
                 if name == "DataStream" && method == "next" {
                     if !args.is_empty() {
@@ -3819,7 +3819,7 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(handle_ty_s.clone());
                     // For allocator value methods, infer the payload once. The
                     // fallible spelling keeps the same payload inside one
-                    // `T ! AllocError` carrier.
+                    // `T AllocError!` carrier.
                     if matches!(method, "alloc" | "try_alloc") {
                         if let Some(arg) = args.get_mut(0) {
                             let inferred = self.infer(&mut arg.expr);

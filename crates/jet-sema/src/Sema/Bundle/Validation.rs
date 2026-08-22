@@ -583,6 +583,161 @@ fn callable_policy_targets(items: &[crate::AST::Item]) -> Vec<crate::AST::Func> 
     targets
 }
 
+/// D-STRUCT-POLICY1=A: `apply(user_policy(...), target)` is a checked
+/// callable transformation even when `target` has no `#Policy` marker of its
+/// own. Record the named targets from the already-checked call arguments so
+/// they use the same generated wrapper seam as marker-decorated targets.
+fn collect_callable_policy_apply_uses(
+    items: &mut [crate::AST::Item],
+    uses: &mut HashMap<String, Vec<String>>,
+) {
+    fn collect_func(function: &mut crate::AST::Func, uses: &mut HashMap<String, Vec<String>>) {
+        for statement in &mut function.body {
+            statement.for_each_expr_mut(|expr| {
+                let crate::AST::Expr::Call(call) = expr else {
+                    return;
+                };
+                if call.name != "apply" {
+                    return;
+                }
+                let Some(last) = call.args.last() else {
+                    return;
+                };
+                let Some(chain) = last.flags.callable_policy.as_ref() else {
+                    return;
+                };
+                let target_name = match &last.expr {
+                    crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                    crate::AST::Expr::Paren(inner, _) => match inner.as_ref() {
+                        crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(target_name) = target_name else {
+                    return;
+                };
+                let policy_names = chain
+                    .policies
+                    .iter()
+                    .filter(|policy| {
+                        !crate::AST::CallablePolicyChain::is_builtin(&policy.name)
+                    })
+                    .map(|policy| policy.name.clone())
+                    .collect::<Vec<_>>();
+                if policy_names.is_empty() {
+                    return;
+                }
+                let entry = uses.entry(target_name).or_default();
+                for policy_name in policy_names {
+                    if !entry.contains(&policy_name) {
+                        entry.push(policy_name);
+                    }
+                }
+            });
+        }
+    }
+
+    for item in items {
+        match item {
+            crate::AST::Item::Func(function) => collect_func(function, uses),
+            crate::AST::Item::Struct(definition) => {
+                for function in &mut definition.methods {
+                    collect_func(function, uses);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for function in &mut implementation.methods {
+                        collect_func(function, uses);
+                    }
+                }
+            }
+            crate::AST::Item::Enum(definition) => {
+                for function in &mut definition.methods {
+                    collect_func(function, uses);
+                }
+                for implementation in &mut definition.trait_impls {
+                    for function in &mut implementation.methods {
+                        collect_func(function, uses);
+                    }
+                }
+            }
+            crate::AST::Item::Impl(implementation) => {
+                for function in &mut implementation.methods {
+                    collect_func(function, uses);
+                }
+            }
+            crate::AST::Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    collect_callable_policy_apply_uses(body, uses);
+                }
+            }
+            crate::AST::Item::GenericModule(module) => {
+                collect_callable_policy_apply_uses(&mut module.body, uses)
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_named_callable_policy_functions<'a>(
+    functions: impl IntoIterator<Item = &'a crate::AST::Func>,
+    names: &HashSet<String>,
+    targets: &mut Vec<crate::AST::Func>,
+) {
+    targets.extend(
+        functions
+            .into_iter()
+            .filter(|function| names.contains(&function.name))
+            .cloned(),
+    );
+}
+
+fn named_callable_policy_targets(
+    items: &[crate::AST::Item],
+    names: &HashSet<String>,
+    targets: &mut Vec<crate::AST::Func>,
+) {
+    for item in items {
+        match item {
+            crate::AST::Item::Func(function) if names.contains(&function.name) => {
+                targets.push(function.clone())
+            }
+            crate::AST::Item::Struct(definition) => {
+                collect_named_callable_policy_functions(&definition.methods, names, targets);
+                for implementation in &definition.trait_impls {
+                    collect_named_callable_policy_functions(
+                        &implementation.methods,
+                        names,
+                        targets,
+                    );
+                }
+            }
+            crate::AST::Item::Enum(definition) => {
+                collect_named_callable_policy_functions(&definition.methods, names, targets);
+                for implementation in &definition.trait_impls {
+                    collect_named_callable_policy_functions(
+                        &implementation.methods,
+                        names,
+                        targets,
+                    );
+                }
+            }
+            crate::AST::Item::Impl(implementation) => {
+                collect_named_callable_policy_functions(&implementation.methods, names, targets);
+            }
+            crate::AST::Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    named_callable_policy_targets(body, names, targets);
+                }
+            }
+            crate::AST::Item::GenericModule(module) => {
+                named_callable_policy_targets(&module.body, names, targets)
+            }
+            _ => {}
+        }
+    }
+}
+
 /// D-STRUCT-POLICY1=A: one checked wrapper function is emitted for each
 /// policy/target pair. The name is compiler-private and deterministic so the
 /// shared TIR can call it without carrying policy semantics in an engine.
@@ -1434,13 +1589,19 @@ pub(crate) fn check_module_bodies(
     // changing the wrapped function type.
     let mut generated_policy_wrappers = Vec::new();
     let mut generated_policy_wrapper_names = HashSet::new();
-    for target in callable_policy_targets(&module.items) {
+    let mut apply_policy_uses = HashMap::new();
+    collect_callable_policy_apply_uses(&mut module.items, &mut apply_policy_uses);
+    let apply_target_names = apply_policy_uses.keys().cloned().collect::<HashSet<_>>();
+    let mut policy_targets = callable_policy_targets(&module.items);
+    named_callable_policy_targets(&module.items, &apply_target_names, &mut policy_targets);
+    for target in policy_targets {
         let target_sig = st
             .funcs
             .get(&target.name)
             .cloned()
             .unwrap_or_else(|| crate::Sema::func_to_sig(&target));
         let call_ty = func_sig_to_fn_type(&target_sig);
+        let mut policy_names = Vec::new();
         for marker in target
             .markers
             .iter()
@@ -1450,79 +1611,89 @@ pub(crate) fn check_module_bodies(
                 continue;
             };
             for policy in chain.policies {
-                let policy_key = (st.package_scope.clone(), policy.name.clone());
-                let Some((_declaring_module, declaration)) =
-                    st.callable_policy_declarations.get(&policy_key)
-                else {
-                    continue;
-                };
-                let wrapper_name = callable_policy_wrapper_name(&policy.name, &target.name);
-                let mut wrapper = Func::implicit_run(declaration.body.clone(), declaration.span);
-                wrapper.name = wrapper_name.clone();
-                wrapper.name_span = declaration.name_span;
-                wrapper.params = declaration.params.clone();
-                wrapper.params.push(Param {
-                    convention: crate::AST::AccessConvention::Read,
-                    root: false,
-                    name: "call".to_string(),
-                    name_span: declaration.name_span,
-                    public_label: None,
-                    zone: crate::AST::ParamZone::Either,
-                    ty: call_ty.clone(),
-                    ty_span: declaration.name_span,
-                    default: None,
-                    variadic: false,
-                    variadic_bound_list: None,
-                    declared_view_from_names: None,
-                });
-                wrapper.params.extend(target.params.iter().cloned().map(|mut param| {
+                if !policy_names.contains(&policy.name) {
+                    policy_names.push(policy.name);
+                }
+            }
+        }
+        if let Some(applied_policies) = apply_policy_uses.get(&target.name) {
+            for policy_name in applied_policies {
+                if !policy_names.contains(policy_name) {
+                    policy_names.push(policy_name.clone());
+                }
+            }
+        }
+        for policy_name in policy_names {
+            let policy_key = (st.package_scope.clone(), policy_name.clone());
+            let Some((_declaring_module, declaration)) =
+                st.callable_policy_declarations.get(&policy_key)
+            else {
+                continue;
+            };
+            let wrapper_name = callable_policy_wrapper_name(&policy_name, &target.name);
+            let mut wrapper = Func::implicit_run(declaration.body.clone(), declaration.span);
+            wrapper.name = wrapper_name.clone();
+            wrapper.name_span = declaration.name_span;
+            wrapper.params = declaration.params.clone();
+            wrapper.params.push(Param {
+                convention: crate::AST::AccessConvention::Read,
+                root: false,
+                name: "call".to_string(),
+                name_span: declaration.name_span,
+                public_label: None,
+                zone: crate::AST::ParamZone::Either,
+                ty: call_ty.clone(),
+                ty_span: declaration.name_span,
+                default: None,
+                variadic: false,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+            });
+            wrapper
+                .params
+                .extend(target.params.iter().cloned().map(|mut param| {
                     // The outer callable has already had defaults resolved by
                     // its checked call contract. The generated wrapper receives
                     // every target argument explicitly from its closure.
                     param.default = None;
                     param
                 }));
-                wrapper.return_type = target_sig.return_type.clone();
-                wrapper.return_type_span = target.return_type_span;
-                wrapper.return_view_provenance = target.return_view_provenance.clone();
-                wrapper.declared_return_view_provenance =
-                    target.declared_return_view_provenance.clone();
-                wrapper.compiler_generated = true;
-                let mut wrapper_summaries = HashMap::new();
-                let mut wrapper_inputs = Vec::new();
-                let mut wrapper_addresses = HashSet::new();
-                let mut wrapper_ledger = name_ledger.body_snapshot();
-                let mut wrapper_pending = Vec::new();
-                diags.extend(check_func_body_bundle(
-                    &mut wrapper,
-                    module_idx,
-                    states,
-                    effect_facts,
-                    None,
-                    &ct_funcs,
-                    &ct_externs,
-                    &ct_base_dir,
-                    &ct_globals,
-                    freestanding,
-                    gates,
-                    &mut wrapper_summaries,
-                    &mut wrapper_inputs,
-                    &mut wrapper_addresses,
-                    no_prelude,
-                    &mut wrapper_ledger,
-                    &mut wrapper_pending,
-                ));
-                for pending in &mut wrapper_pending {
-                    pending.function_key = format!(
-                        "policy:{}::{}",
-                        policy.name,
-                        target.name
-                    );
-                }
-                pending_diagnostics_out.extend(wrapper_pending);
-                if generated_policy_wrapper_names.insert(wrapper.name.clone()) {
-                    generated_policy_wrappers.push(crate::AST::Item::Func(wrapper));
-                }
+            wrapper.return_type = target_sig.return_type.clone();
+            wrapper.return_type_span = target.return_type_span;
+            wrapper.return_view_provenance = target.return_view_provenance.clone();
+            wrapper.declared_return_view_provenance =
+                target.declared_return_view_provenance.clone();
+            wrapper.compiler_generated = true;
+            let mut wrapper_summaries = HashMap::new();
+            let mut wrapper_inputs = Vec::new();
+            let mut wrapper_addresses = HashSet::new();
+            let mut wrapper_ledger = name_ledger.body_snapshot();
+            let mut wrapper_pending = Vec::new();
+            diags.extend(check_func_body_bundle(
+                &mut wrapper,
+                module_idx,
+                states,
+                effect_facts,
+                None,
+                &ct_funcs,
+                &ct_externs,
+                &ct_base_dir,
+                &ct_globals,
+                freestanding,
+                gates,
+                &mut wrapper_summaries,
+                &mut wrapper_inputs,
+                &mut wrapper_addresses,
+                no_prelude,
+                &mut wrapper_ledger,
+                &mut wrapper_pending,
+            ));
+            for pending in &mut wrapper_pending {
+                pending.function_key = format!("policy:{}::{}", policy_name, target.name);
+            }
+            pending_diagnostics_out.extend(wrapper_pending);
+            if generated_policy_wrapper_names.insert(wrapper.name.clone()) {
+                generated_policy_wrappers.push(crate::AST::Item::Func(wrapper));
             }
         }
     }
@@ -1717,6 +1888,7 @@ fn check_func_body_bundle_scoped(
         current_function_span: f.span,
         name_ledger,
         diags: Vec::new(),
+        statement_lint_allows: Vec::new(),
         unused_bindings: Vec::new(),
         unused_binding_refs: HashSet::new(),
         flow: crate::Sema::FlowFacts::FlowFacts {
@@ -1727,6 +1899,7 @@ fn check_func_body_bundle_scoped(
         suppress_partial_move_root_read: false,
         loop_depth: 0,
         implicit_loop_subject_depth: 0,
+        subject_shorthand_depth: 0,
         source_nesting: 0,
         loop_labels: Vec::new(),
         collect_item_types: Vec::new(),

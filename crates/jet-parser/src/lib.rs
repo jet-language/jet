@@ -167,7 +167,7 @@ mod loop_header_tests {
 
     #[test]
     fn yielding_loop_keeps_numeric_stride_after_source() {
-        let source = "fn run() {\n    values :: loop i, 0..10, 2 -> i\n}\n";
+        let source = "fn run() {\n    values :: loop i in 0..10, 2 -> i\n}\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("genuine stride should parse");
@@ -206,6 +206,61 @@ mod loop_header_tests {
             panic!("expected numeric stride, got {step:?}");
         };
         assert_eq!(*value, 2);
+    }
+
+    #[test]
+    fn source_loops_use_in_for_bindings_and_keep_stride_comma() {
+        let source = r#"
+fn run() {
+    loop x in xs { print(x) }
+    loop (key, value) in map { print(key, value) }
+    loop n in 0..10, 2 { print(n) }
+    filtered :: loop x in xs if x > 0 -> x
+}
+"#;
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens).expect("canonical source-loop forms should parse");
+    }
+
+    #[test]
+    fn retired_source_loop_comma_teaches_in() {
+        let source = "fn run() { loop x, xs { print(x) } }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("retired source-loop comma");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0383"
+                && diagnostic.what.contains("retired comma")
+                && diagnostic.why.contains("`in`")
+                && diagnostic.fix.contains("loop item in items")
+        }), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn expression_membership_teaches_contains() {
+        let source = "fn run() { found :: x in xs }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("membership is not an operator");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0384"
+                && diagnostic.what.contains("membership")
+                && diagnostic.fix.contains(".contains(x)")
+        }), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn in_is_reserved_for_source_loops() {
+        let source = "fn in() {}\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("`in` must not be an identifier");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0003"
+                && diagnostic.what.contains("reserved")
+                && diagnostic.fix.contains("in")
+        }), "{diagnostics:?}");
     }
 }
 

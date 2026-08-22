@@ -4,7 +4,7 @@
 fn fib(n: Int) Int {
     a := 0
     b := 1
-    loop i, 0..<n {
+    loop i in 0..<n {
         next := a + b
         a = b
         b = next
@@ -16,14 +16,14 @@ fn work(i: Int) Int { return (i * 17 + 3) % 101 }
 
 // The baseline drops every loop value. An optimizing build may erase its work.
 fn elided_baseline(n: Int) Int {
-    loop i, 0..<n -> work(i)
+    loop i in 0..<n -> work(i)
     return 0
 }
 
 // Feed each value to keep() inside the measured loop before using it.
 fn kept_loop(n: Int) Int {
     total := 0
-    loop i, 0..<n -> total += keep(work(i))
+    loop i in 0..<n -> total += keep(work(i))
     return total
 }
 
@@ -41,7 +41,7 @@ fn run() {
 #Test("sum to 100") {
     .measure {
         total := 0
-        loop i, 0..<100 -> total += i
+        loop i in 0..<100 -> total += i
         assert_eq(total, 4950)
     }
 }

@@ -271,6 +271,9 @@ fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> 
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
             meta: LambdaMeta::default(),
@@ -289,6 +292,9 @@ fn tensor_handle_to_ct(
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
             meta: LambdaMeta::default(),
@@ -304,6 +310,9 @@ fn opaque_closure<T: std::any::Any + Send + Sync>(opaque: T) -> CtValue {
         lambda: Lambda {
             take_names: Vec::new(),
             params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
             body: LambdaBody::Block(Vec::new()),
             span: Span::new(0, 0),
             meta: LambdaMeta::default(),

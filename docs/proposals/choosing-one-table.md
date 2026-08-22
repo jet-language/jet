@@ -119,15 +119,15 @@ Because the reader meets `==` before the quote, the holes are announced as bindi
 ```jet
 loop { poll() }                          // forever
 loop fuel > 0 { fuel -= 1 }              // while a condition holds
-loop i, 1..5 { print(i) }                // over a source
-loop (key, count), counts { show(key) }  // pair iteration
-loop i, 0..10, 2 { probe(i) }            // with a stride
+loop i in 1..5 { print(i) }                // over a source
+loop (key, count) in counts { show(key) }  // pair iteration
+loop i in 0..10, 2 { probe(i) }            // with a stride
 ```
 
 ### 7. Filter and collect — unchanged
 
 ```jet
-names :: loop u, users if u.active -> u.name
+names :: loop u in users if u.active -> u.name
 ```
 
 ### 8. Destructure while iterating — withdrawn, stays as it is
@@ -135,7 +135,7 @@ names :: loop u, users if u.active -> u.name
 ~~Rev 2: `loop .{name, age}, users { }`~~ — withdrawn on your call, and the audit agrees: the head falls into the condition-loop parse and garden-paths, and the pattern head added characters without adding clarity. The head stays a name or a `(key, value)` pair. Fields come off the binding, or off one explicit bind line when a body uses many:
 
 ```jet
-loop u, users {
+loop u in users {
     greet(u.name, u.age)
 }
 ```
@@ -147,7 +147,7 @@ loop u, users {
 **A — today.** The arm table already says the skip out loud, and this compiles now:
 
 ```jet
-loop r, readings {
+loop r in readings {
     if r == {
         .Ok(reading) -> record(reading)
         else         -> next
@@ -158,7 +158,7 @@ loop r, readings {
 **B — proposed (TEST1, same law as case 2).** For a long happy path, the flat form: one line, subject first, skip written:
 
 ```jet
-loop r, readings {
+loop r in readings {
     r == .Ok(reading) ?? next
     record(reading)
 }
@@ -172,7 +172,7 @@ This is not new loop syntax — it is case 2's statement inside a loop body, whe
 
 ```jet
 found :: loop {
-    loop u, users {
+    loop u in users {
         if u.role == .Admin break(found, Val(u))
     }
     break None
@@ -183,7 +183,7 @@ admin :: found ?? return Err("no admin")
 **B — proposed (FIND1, revised).** A finite loop in value position with `break v` exits — and the route is *mandatory*, so nothing is inferred: the loop's own type is the break value's type, and the written route answers exhaustion. `?? next` and `?? break` are illegal immediately after the loop's `}` (they would read as controlling the loop that just closed); use the labeled form above for that.
 
 ```jet
-admin :: loop u, users {
+admin :: loop u in users {
     if u.role == .Admin break u
 } ?? return Err("no admin")
 ```

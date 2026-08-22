@@ -12,7 +12,7 @@
       const name = (row.querySelector("[data-param-name]") || {}).value || "";
       const type = (row.querySelector("[data-param-type]") || {}).value || "Int";
       const fallback = (row.querySelector("[data-param-default]") || {}).value || "";
-      const defaultExpr = fallback.trim() ? " = " + fallback.trim() : "";
+      const defaultExpr = fallback.trim() ? "{" + fallback.trim() + "}" : "";
       return name.trim() + ": " + type.trim() + defaultExpr;
     }).filter((p) => !p.startsWith(":"));
     const visibility = fnMeta && fnMeta.visibility === "public" ? "pub " : "";
@@ -80,7 +80,7 @@
       const name = param.name === variable.name ? (next.name || param.name) : param.name;
       const type = param.name === variable.name ? (next.type || param.type || "Int") : (param.type || "Int");
       const fallback = param.name === variable.name ? (next.defaultSource || "") : (param.default_source || "");
-      return name + ": " + type + (String(fallback).trim() ? " = " + String(fallback).trim() : "");
+      return name + ": " + type + (String(fallback).trim() ? "{" + String(fallback).trim() + "}" : "");
     }).join(", ");
     const originalSignature = String(fnMeta.signature || "");
     const hasEffectArrow = originalSignature.includes("=[");

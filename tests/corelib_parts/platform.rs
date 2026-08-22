@@ -160,7 +160,7 @@ fn run() {{
     print(piped.output)
 
     child :: process.cmd(["{lines}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
-    loop line, child.stdout.lines() {{
+    loop line in child.stdout.lines() {{
         print(line)
     }}
     waited :: child.wait() ?? panic("wait failed")

@@ -46,10 +46,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_OK),
             format!(
-                "`{}` builds the success side of a `T ! E` result",
+                "`{}` builds the success side of a `T E!` result",
                 Syntax::LIT_OK
             ),
-            "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"
+            "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -121,10 +121,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_ERR),
             format!(
-                "`{}` builds the failure side of a `T ! E` result",
+                "`{}` builds the failure side of a `T E!` result",
                 Syntax::LIT_ERR
             ),
-            "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"
+            "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -312,7 +312,7 @@ impl<'a> Checker<'a> {
                     ),
                     "postfix `?` unwraps success or returns early with the failure".to_string(),
                     format!(
-                        "call something that returns `T ! E` or an optional value, or remove `{}`",
+                        "call something that returns `T E!` or an optional value, or remove `{}`",
                         Syntax::OP_TRY_SUFFIX
                     ),
                     Some(span),

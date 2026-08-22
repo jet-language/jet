@@ -650,8 +650,9 @@ fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -
             .map(|p| {
                 let mut s = format!("{}: {}", p.name, p.ty.name());
                 if let Some(default) = &p.default {
-                    s.push_str(" = ");
+                    s.push('{');
                     s.push_str(&snippet(src, default.span()));
+                    s.push('}');
                 }
                 s
             })

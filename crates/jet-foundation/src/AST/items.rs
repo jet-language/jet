@@ -141,7 +141,7 @@ pub struct MarkerTextDecl {
 }
 
 /// D-META-FORM1=A: one entry in a `marker Name(...)` parameter list. An
-/// ordinary entry is `name: Type [= default]` — an argument the marker's
+/// ordinary entry is `name: Type [{default}]` — an argument the marker's
 /// own use site supplies (`ty` carries the type, `value` an optional
 /// default). An `@`-marked entry (`Syntax::is_comptime_name(&name)`) is
 /// `@name: value` — a fixed fact about the rule itself (@sites, @repeatable,
@@ -1247,7 +1247,7 @@ impl Func {
 }
 
 /// D-WEBAPP1=D: does this type name the `App` service builder — `App` itself,
-/// or `App ! E`?
+/// or `App E!`?
 ///
 /// One canonical answer (I8). Sema's app-graph extraction, AOT entry emit, the
 /// web artifact front door, and the interpreter entry each carried a private
@@ -1505,7 +1505,7 @@ pub struct Param {
     pub zone: ParamZone,
     pub ty: Type,
     pub ty_span: Span,
-    /// S61: trailing `= expr` default value. Only trailing params may have defaults.
+    /// D-DEFAULT-SHAPE1=B: trailing `{expr}` default value. Only trailing params may have defaults.
     pub default: Option<Box<Expr>>,
     /// D-VARIADIC1: `name: ...T` — last parameter only; `ty` is the element type.
     pub variadic: bool,
@@ -1739,7 +1739,7 @@ impl StructDef {
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T ! E` — transparent generic type shortcut.
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T E!` — transparent generic type shortcut.
 #[derive(Debug, Clone)]
 pub struct TypeAliasDef {
     pub is_pub: bool,
@@ -2096,12 +2096,12 @@ pub struct Field {
     /// is known (see `Sema::CheckerFieldPolicy`). `None` for an ordinary stored
     /// field.
     pub computed: Option<Box<Expr>>,
-    /// D-FIELDDEF1=C: `name: T = expr` — absence default for wire/CLI and for
-    /// omitted fields in `Type.{ … }` construction. Same spelling as parameter
-    /// defaults (S61). Replaces `#Default(expr)`. Mutually exclusive with
+    /// D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence default for wire/CLI and for
+    /// omitted fields in `Type{ … }` construction. Same spelling as parameter
+    /// defaults. Replaces `#Default(expr)`. Mutually exclusive with
     /// `computed`.
     pub default: Option<Box<Expr>>,
-    /// Compile-time value of `default`, when it evaluates (D-SERDE5 / D-FIELDDEF1).
+    /// Compile-time value of `default`, when it evaluates (D-SERDE5 / D-DEFAULT-SHAPE1).
     pub default_ct: Option<CtValue>,
 }
 

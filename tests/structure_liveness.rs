@@ -23,6 +23,13 @@ fn run_jet(args: &[&str]) -> Output {
         .expect("run jet")
 }
 
+fn assert_liveness_warnings(label: &str, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for code in ["L0101", "L0103", "L0104", "L0105"] {
+        assert!(stderr.contains(code), "{label} missing {code}: {stderr}");
+    }
+}
+
 #[test]
 fn liveness_facts_and_fixes_are_one_checked_result() {
     let source = fs::read_to_string(repo().join(example())).expect("liveness example source");
@@ -37,10 +44,15 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
             && diagnostic
                 .edit
                 .as_ref()
-                .is_some_and(|edit| edit.new_text.starts_with('_'))
+                .is_some_and(|edit| edit.new_text.is_empty() || edit.new_text.starts_with('_'))
     }));
 
-    let facts = bundle.name_ledger.structure_facts();
+    let facts: Vec<_> = bundle
+        .name_ledger
+        .structure_facts()
+        .iter()
+        .filter(|fact| fact.kind == StructureFactKind::Liveness)
+        .collect();
     assert_eq!(facts.len(), 4);
     assert!(facts.iter().all(|fact| {
         fact.kind == StructureFactKind::Liveness
@@ -55,8 +67,13 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     for diagnostic in &diagnostics {
         let span = diagnostic.span.expect("liveness diagnostic span");
         let edit = diagnostic.edit.as_ref().expect("liveness source edit");
-        assert_eq!(edit.span, span);
-        assert_eq!(edit.new_text, format!("_{}", &source[span.start..span.end]));
+        if edit.new_text.is_empty() {
+            assert_eq!(diagnostic.code.as_str(), "L0104");
+            assert!(edit.span.start <= span.start && edit.span.end >= span.end);
+        } else {
+            assert_eq!(edit.span, span);
+            assert_eq!(edit.new_text, format!("_{}", &source[span.start..span.end]));
+        }
     }
 
     jet::Codegen::TIR::lower_jit_program(&bundle).expect("liveness example lowers to TIR");
@@ -108,6 +125,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, b"structure liveness\n", "{mode} output");
+        assert_liveness_warnings(mode, &output);
     }
 
     let dev = run_jet(&["dev", example(), "--watch=off"]);
@@ -118,6 +136,7 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
         String::from_utf8_lossy(&dev.stderr)
     );
     assert_eq!(dev.stdout, b"structure liveness\n", "dev output");
+    assert_liveness_warnings("dev", &dev);
     let _ = fs::remove_dir_all(cache);
 }
 
@@ -138,4 +157,5 @@ fn liveness_web_compile_keeps_the_same_front_end_result() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    assert_liveness_warnings("web", &output);
 }

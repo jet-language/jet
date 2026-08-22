@@ -452,4 +452,25 @@ mod tests {
         assert_eq!(out[0].severity, Severity::Error);
         assert!(out[0].what.contains("unused_local_binding"));
     }
+
+    #[test]
+    fn promotes_nested_subject_shorthand_lint_by_registered_name() {
+        assert_eq!(code_for_name("subject_shorthand_nesting"), Some("L0512"));
+        let deny = parse_package_source(
+            "policy: .{ lints: .{ deny: [subject_shorthand_nesting] } }",
+        )
+        .unwrap()
+        .unwrap();
+        let lint = Diagnostic::lint(
+            "L0512",
+            "nested subject shorthand needs an explicit binding".to_string(),
+            "implicit subjects become hard to track when shorthand scopes nest".to_string(),
+            "rewrite the inner shorthand with a named binding".to_string(),
+            None,
+        );
+        let out = apply(&deny, vec![lint]);
+        assert_eq!(out[0].code, "E1293");
+        assert_eq!(out[0].severity, Severity::Error);
+        assert!(out[0].what.contains("subject_shorthand_nesting"));
+    }
 }

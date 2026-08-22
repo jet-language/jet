@@ -817,7 +817,7 @@ fn distinct_conversion_symbols(
                 kind: SemanticSymbolKind::Member,
                 signature: format!(
                     "{owner}.{method}(value: {source}) -> {owner}{}",
-                    if fallible { " ! String" } else { "" }
+                    if fallible { " String!" } else { "" }
                 ),
                 summary: format!("Converts {source} to {owner}."),
                 examples: Vec::new(),
@@ -930,7 +930,7 @@ fn semantic_shape(
             let params = parameter_parts.join(", ");
             let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
             // D-SIG-SHAPE1=B: return type bare after the parameter list, and an
-            // effect ceiling in the body-arrow slot as `:[IO]>`. The retired
+            // effect ceiling in the body-arrow slot as `-[IO]>`. The retired
             // `=[…]=>` must not reach a hover, completion or symbol label.
             //
             // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem
@@ -953,11 +953,11 @@ fn semantic_shape(
                 .map(|ty| format!(" {}", display_type(&ty.name())))
                 .unwrap_or_default();
             let ceiling = if let Some((param, _)) = effect_via {
-                format!(" :[via {param}]>")
+                format!(" -[via {param}]>")
             } else if shown.is_empty() {
                 String::new()
             } else {
-                format!(" :[{}]>", shown.join(", "))
+                format!(" -[{}]>", shown.join(", "))
             };
             (SemanticSymbolKind::Function, format!("{prefix}({params}){result}{ceiling}"))
         }
@@ -1123,13 +1123,13 @@ fn language_symbols() -> Vec<SemanticSymbol> {
     for (owner, signature, summary, example) in [
         (
             "Int",
-            "Int.parse(text: String) -> Int ! ParseError",
+            "Int.parse(text: String) -> Int ParseError!",
             "Parses text as an Int.",
             "Int.parse(text)?",
         ),
         (
             "Float",
-            "Float.parse(text: String) -> Float ! ParseError",
+            "Float.parse(text: String) -> Float ParseError!",
             "Parses text as a Float.",
             "Float.parse(text)?",
         ),
@@ -1163,7 +1163,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
                 .flatten()
                 .expect("numeric conversion catalog entry has a return type");
             let result = match ret {
-                AST::Type::Result { .. } => format!("{target_name} ! String"),
+                AST::Type::Result { .. } => format!("{target_name} String!"),
                 _ => target_name.to_string(),
             };
             let qualified_name = format!("{target_name}.{method}");
@@ -1187,48 +1187,48 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 }
 
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
-    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in milliseconds.", None),
-    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in seconds.", None),
-    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in minutes.", None),
+    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in milliseconds.", None),
+    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in seconds.", None),
+    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in minutes.", None),
     ("Clock.system", "Clock.system() -> Clock #(Time)", "Explicit monotonic production clock.", None),
-    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration ! RangeError", "Checked runtime duration in hours.", None),
-    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int ! RangeError", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
-    ("List.len", "List.len() => Int", "Number of items.", Some("items.len()")),
-    ("List.is_empty", "List.is_empty() => Bool", "True when there are no items.", None),
+    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in hours.", None),
+    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int RangeError!", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
+    ("List.len", "List.len() -> Int", "Number of items.", Some("items.len()")),
+    ("List.is_empty", "List.is_empty() -> Bool", "True when there are no items.", None),
     ("List.push", "List.push(item: T)", "Appends an item to the end.", None),
-    ("List.pop", "List.pop() => T?", "Removes and returns the last item, if any.", None),
-    ("List.get", "List.get(i: Int) => T?", "The item at index i, if in bounds.", None),
-    ("List.first", "List.first() => T?", "The first item, if any.", None),
-    ("List.last", "List.last() => T?", "The last item, if any.", None),
-    ("List.contains", "List.contains(item: T) => Bool", "True when item appears in the list.", None),
-    ("List.index_of", "List.index_of(item: T) => Int?", "Index of the first matching item, if any.", None),
-    ("List.join", "List.join(sep: String) => String", "Joins string items with sep.", None),
-    ("List.sum", "List.sum() => T", "Sum of all items.", None),
-    ("List.product", "List.product() => T", "Product of all items.", None),
-    ("List.min", "List.min() => T?", "The smallest item, if any.", None),
-    ("List.max", "List.max() => T?", "The largest item, if any.", None),
-    ("List.map", "List.map(f: fn(T) => R) => [R]", "Transforms each item with f.", None),
-    ("List.filter", "List.filter(f: fn(T) => Bool) => List<T>", "Keeps items where f(item) is true.", Some("items.filter(fn (item: T) => Bool { return true })")),
-    ("List.filter_map", "List.filter_map(f: fn(T) => V?) => [V]", "Maps then drops failures — keeps only successes.", None),
+    ("List.pop", "List.pop() -> T?", "Removes and returns the last item, if any.", None),
+    ("List.get", "List.get(i: Int) -> T?", "The item at index i, if in bounds.", None),
+    ("List.first", "List.first() -> T?", "The first item, if any.", None),
+    ("List.last", "List.last() -> T?", "The last item, if any.", None),
+    ("List.contains", "List.contains(item: T) -> Bool", "True when item appears in the list.", None),
+    ("List.index_of", "List.index_of(item: T) -> Int?", "Index of the first matching item, if any.", None),
+    ("List.join", "List.join(sep: String) -> String", "Joins string items with sep.", None),
+    ("List.sum", "List.sum() -> T", "Sum of all items.", None),
+    ("List.product", "List.product() -> T", "Product of all items.", None),
+    ("List.min", "List.min() -> T?", "The smallest item, if any.", None),
+    ("List.max", "List.max() -> T?", "The largest item, if any.", None),
+    ("List.map", "List.map(f: fn(T) R) -> [R]", "Transforms each item with f.", None),
+    ("List.filter", "List.filter(f: fn(T) Bool) -> List<T>", "Keeps items where f(item) is true.", Some("items.filter(fn (item: T) Bool { return true })")),
+    ("List.filter_map", "List.filter_map(f: fn(T) V?) -> [V]", "Maps then drops failures — keeps only successes.", None),
     ("List.each", "List.each(f: fn(T))", "Runs f once per item, for its side effects.", None),
-    ("List.find", "List.find(f: fn(T) => Bool) => T?", "The first item where f(item) is true, if any.", None),
-    ("List.any", "List.any(f: fn(T) => Bool) => Bool", "True if f is true for at least one item.", None),
-    ("List.all", "List.all(f: fn(T) => Bool) => Bool", "True if f is true for every item.", None),
-    ("List.sort_by", "List.sort_by(key: fn(T) => K)", "Sorts in place by the key f extracts.", None),
-    ("List.sort_by_desc", "List.sort_by_desc(key: fn(T) => K)", "Sorts in place by the key f extracts, descending.", None),
-    ("List.reduce", "List.reduce(init: R, f: fn(R, T) => R) => R", "Folds items into one value, starting from init.", None),
-    ("List.fold", "List.fold(init: R, f: fn(R, T) => R) => R", "Folds items into one value, starting from init.", None),
+    ("List.find", "List.find(f: fn(T) Bool) -> T?", "The first item where f(item) is true, if any.", None),
+    ("List.any", "List.any(f: fn(T) Bool) -> Bool", "True if f is true for at least one item.", None),
+    ("List.all", "List.all(f: fn(T) Bool) -> Bool", "True if f is true for every item.", None),
+    ("List.sort_by", "List.sort_by(key: fn(T) K)", "Sorts in place by the key f extracts.", None),
+    ("List.sort_by_desc", "List.sort_by_desc(key: fn(T) K)", "Sorts in place by the key f extracts, descending.", None),
+    ("List.reduce", "List.reduce(init: R, f: fn(R, T) R) -> R", "Folds items into one value, starting from init.", None),
+    ("List.fold", "List.fold(init: R, f: fn(R, T) R) -> R", "Folds items into one value, starting from init.", None),
     ("List.reverse", "List.reverse()", "Reverses the list in place.", None),
     ("List.sort", "List.sort()", "Sorts the list in place.", None),
     ("List.sort_desc", "List.sort_desc()", "Sorts the list in place, descending.", None),
     ("List.clear", "List.clear()", "Removes every item.", None),
     ("List.insert", "List.insert(i: Int, item: T)", "Inserts item at index i.", None),
-    ("List.remove", "List.remove(value: T, by: RemoveBy = .Val) => T?", "Removes the first equal value; `.Slot` selects positional removal.", None),
-    ("List.count", "List.count(value: T) => Int", "Counts items equal to value.", None),
+    ("List.remove", "List.remove(value: T, by: RemoveBy{.Val}) -> T?", "Removes the first equal value; `.Slot` selects positional removal.", None),
+    ("List.count", "List.count(value: T) -> Int", "Counts items equal to value.", None),
     ("List.extend", "List.extend(other: [T])", "Appends every item from other in order.", None),
-    ("List.concat", "List.concat(other: [T]) => [T]", "Returns this list followed by other.", None),
-    ("List.enumerate", "List.enumerate() => [(idx: Int, item: T)]", "Pairs each item with its index.", None),
-    ("List.zip", "List.zip(other: [U]) => [(a: T, b: U)]", "Pairs items from two lists positionally.", None),
+    ("List.concat", "List.concat(other: [T]) -> [T]", "Returns this list followed by other.", None),
+    ("List.enumerate", "List.enumerate() -> [(idx: Int, item: T)]", "Pairs each item with its index.", None),
+    ("List.zip", "List.zip(other: [U]) -> [(a: T, b: U)]", "Pairs items from two lists positionally.", None),
     ("Map.len", "Map.len() -> Int", "Number of entries.", None),
     ("Map.is_empty", "Map.is_empty() -> Bool", "True when there are no entries.", None),
     ("Map.get", "Map.get(key: K) -> V?", "Value for key, if present.", None),

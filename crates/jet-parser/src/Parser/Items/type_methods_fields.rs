@@ -18,7 +18,7 @@ impl<'a> Parser<'a> {
                 _return_type_span,
                 mut declared_effects,
                 _effect_via,
-                _prefix_effect_span,
+                prefix_effect_span,
             ) = self.parse_callable_result_and_prefix_effects()?;
             // A retired `-> Type` trait signature has no body marker after the
             // result, so the shared callable lookahead cannot distinguish it
@@ -36,12 +36,27 @@ impl<'a> Parser<'a> {
             }
             let declared_return_view_provenance =
                 self.parse_opt_declared_view_from(&params);
+            let effect_body_marker =
+                prefix_effect_span.is_some() || self.func_effect_starts_here();
             if declared_effects.is_none() {
                 declared_effects = self.parse_opt_effect_annotation()?;
             }
             let is_pure = is_pure
                 || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
+            let body_marker_present = effect_body_marker || self.at_unified_arrow();
+            if self.at_unified_arrow() {
+                self.bump();
+            }
             // D-LIB2: optional default body `{ … }` instead of `;`.
+            if !body_marker_present
+                && return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::return_type_has_value(ty))
+                && matches!(self.peek().kind, TokKind::LBrace)
+            {
+                self.diags
+                    .push(Self::missing_callable_body_arrow(self.peek().span));
+            }
             let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
                 let previous_tail_depth = self.callable_tail_block_depth;
@@ -147,12 +162,19 @@ impl<'a> Parser<'a> {
             // single expression (no block); sibling field names inside it are
             // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
             // to `self.<field>` once every field of the struct is known.
-            // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
+            // D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence / construction default.
             let (computed, default) = if self.at_unified_arrow() {
                 self.expect_unified_arrow("before a computed field expression")?;
                 (Some(Box::new(self.expr()?)), None)
-            } else if matches!(self.peek().kind, TokKind::Eq) {
+            } else if matches!(self.peek().kind, TokKind::LBrace) {
                 self.bump();
+                let default = Box::new(self.expr()?);
+                self.expect(TokKind::RBrace, "after a field default")?;
+                (None, Some(default))
+            } else if matches!(self.peek().kind, TokKind::Eq) {
+                let eq = self.bump().span;
+                self.diags
+                    .push(Diagnostic::from_row("E0385", &[], Some(eq)));
                 (None, Some(Box::new(self.expr()?)))
             } else {
                 (None, None)

@@ -14,7 +14,7 @@ use std::process::exit;
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
 use jet::AST::{Item, ProgramBundle};
-use jet_foundation::Layout::TargetLayoutEngine;
+use jet_foundation::Layout::{TargetLayout, TargetLayoutEngine};
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
@@ -69,7 +69,7 @@ const LENSES: &[Lens] = &[
     },
     Lens {
         name: "templates",
-        summary: "checked @loop marker, impl, test, and measurement expansions (D-STRUCT-ONCE1)",
+        summary: "checked @loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)",
         render: render_templates,
         render_json: render_templates_json,
     },
@@ -681,11 +681,12 @@ struct LayoutRow {
 }
 
 fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
-    let layout_engine = TargetLayoutEngine::host(
+    let layout_engine = TargetLayoutEngine::new(
         bundle
             .modules
             .iter()
             .flat_map(|module| module.items.iter()),
+        TargetLayout::from_triple(&bundle.build_facts.target_triple),
     );
     let mut rows = Vec::new();
     for module in &bundle.modules {
@@ -1097,7 +1098,7 @@ fn callable_parameter_text(parameter: &jet_semindex::CallableParameterFact) -> S
     let default = parameter
         .default
         .as_ref()
-        .map_or_else(String::new, |value| format!(" = {value}"));
+        .map_or_else(String::new, |value| format!("{{{value}}}"));
     let variadic = if parameter.variadic { "..." } else { "" };
     format!(
         "{access}{variadic}{label}{default}: {} [{}]",

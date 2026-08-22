@@ -1825,7 +1825,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::String);
                 }
                 // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-                // dynamic decode — same `Data ! JSONError` shape as `parse`, with
+                // dynamic decode — same `Data JSONError!` shape as `parse`, with
                 // string→number/bool coercions surfaced as log lines
                 // (docs/reference/core-library.md, `jet_std_json_decode_lenient`
                 // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
@@ -5043,7 +5043,7 @@ impl<'a> Checker<'a> {
                 // D-TEXTWIDTH1=B: `text.display_width(s)` (portable default,
                 // returns bare `Int`) vs `text.display_width(s, policy: cjk)`
                 // (the `.Reject` control policy can fail, so it returns
-                // `Int ! TextError`). Named-arg dispatch mirrors `game.run`.
+                // `Int TextError!`). Named-arg dispatch mirrors `game.run`.
                 ("core.text", "display_width") => {
                     match args.len() {
                         1 => {

@@ -151,8 +151,8 @@ fn external_completion_preserves_checked_program_commands() {
     let dir = isolated_cwd("shape_cli_program_commands");
     fs::write(dir.join("commands.jet"), r#"#CLI(Standard)
 struct Commands {
-    #[Doc("shared config"), Short("c"), Env("JET_CONFIG")] config: String = "default"
-    #Doc("start the service") fn serve(self, port: Int = 3000) {}
+    #[Doc("shared config"), Short("c"), Env("JET_CONFIG")] config: String{"default"}
+    #Doc("start the service") fn serve(self, port: Int{3000}) {}
     #Doc("import one file") fn import(self, file: String) {}
 }
 fn run(args: Commands) {}
@@ -1056,7 +1056,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    assert!(fs::read_to_string(&formatting).unwrap().contains("loop item,"));
+    assert!(fs::read_to_string(&formatting).unwrap().contains("loop item in"));
 
     let output = Command::new(jet())
         .args(["fix", immutable.to_str().unwrap()])
@@ -1418,7 +1418,7 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
         .expect("run jet ! List.filter");
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("List.filter(f: fn(T) => Bool) => List<T>"), "signature missing: {stdout}");
+    assert!(stdout.contains("List.filter(f: fn(T) Bool) -> List<T>"), "signature missing: {stdout}");
     assert!(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}");
     assert!(stdout.contains("Example:"), "example missing: {stdout}");
     assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");

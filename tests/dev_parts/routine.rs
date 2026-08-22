@@ -105,7 +105,7 @@ fn job_runner_named_jobs_match_expected_golden() {
 /// E2202 fuel stop: a program whose top-level `loop` never breaks exhausts the
 /// dev interpreter's step budget and stops with E2202 (an honest boundary, not
 /// a hang). Driven through the comptime engine with a tiny fuel cap so the test
-/// hits the same `burn()` path the watch loop uses, without burning the full
+/// hits the same `burn()` path the watch loop uses in without burning the full
 /// billion-step production budget.
 #[test]
 fn infinite_loop_hits_e2202_fuel_stop() {
@@ -320,7 +320,7 @@ fn task_program_runs_via_jit() {
 ///
 /// D-FAIL-EXIT1=A — fallible entry and one exit law *(ratified 2026-08-06,
 /// card #1533)*: "`fn run()` is fallible by default." Entry `fn run` is
-/// therefore stamped `Unit ! Err`, and a `return` inside a `task { … }` body
+/// therefore stamped `Unit Err!`, and a `return` inside a `task { … }` body
 /// belongs to the *enclosing* function — `examples/features/net/http_get.jet`
 /// relies on exactly that, where `?? return` inside `task { … }` leaves `run`.
 /// So `task { return "child" }` handed a `String` back from `run`: E0113 from
@@ -620,7 +620,7 @@ fn strict_jit_traces_execution_without_fallback() {
 /// D-LOOP-HEADER3=D — one three-slot header meaning *(ratified 2026-07-31,
 /// card #1325)*: "slots are binding; source; step rule … The C-style counter
 /// form retires with a teaching diagnostic." `counted_init_exit` used
-/// `loop i := init; cond; step {}`, which is E0373 (semicolons, D-LOOP-COMMA1=A)
+/// `loop i := init, cond, step {}`, which is E0376 (the retired three-slot form)
 /// plus E0376; E0376's own fix names the replacement kept here: "keep
 /// `loop name := value, condition { … }` for mutable state."
 #[test]
@@ -635,7 +635,7 @@ fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
         &file,
         r#"fn find(xs: [Int]) Int {
     found :: loop {
-        loop x, xs {
+        loop x in xs {
             if x > 2 -> break(found, x)
         }
         break -1
@@ -729,8 +729,8 @@ fn value_if_exit() Int {
 
 fn run() {
     xs :: [Int]{ 1, 2, 3, 4 }
-    doubled :: loop x, xs -> x * 2
-    outer :: loop x, xs {
+    doubled :: loop x in xs -> x * 2
+    outer :: loop x in xs {
         ignored :: loop {
             if x == 1 -> next(outer)
             if x == 2 -> break(outer)
@@ -808,14 +808,14 @@ fn value_loop_named_routes_match_interpreter_default_jit_and_aot() {
     attempts := 0
     retry :: loop {
         attempts += 1
-        found :: loop value, [1] {
+        found :: loop value in [1] {
             if attempts == 2 { break value }
         } ?? next(retry)
         print(found)
         break(retry)
     }
     stop :: loop {
-        ignored :: loop value, [1] {
+        ignored :: loop value in [1] {
             if value == 2 { break value }
         } ?? break(stop)
         print(ignored)
@@ -1334,7 +1334,7 @@ fn maybe(values: [Int]) (Window?) {
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) Window ! String {
+fn result(values: [Int]) Window String! {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
@@ -1498,7 +1498,7 @@ struct Envelope<T> { value: T, marker: Int }
 trait Select {
     fn select(self, left: [Int], right: [Int]) Pair
     fn optional(self, left: [Int], right: [Int]) (Pair?)
-    fn fallible(self, left: [Int], right: [Int]) Pair ! String
+    fn fallible(self, left: [Int], right: [Int]) Pair String!
     fn tupled(self, left: [Int], right: [Int]) (pair: Pair, count: Int)
     fn generic(self, left: [Int], right: [Int]) Envelope<Pair>
 }
@@ -1530,7 +1530,7 @@ impl $TYPE.Select {
         right_view :: right[0..1]
         return Val(Pair{ left: left_view, right: right_view })
     }
-    fn fallible(self, left: [Int], right: [Int]) Pair ! String {
+    fn fallible(self, left: [Int], right: [Int]) Pair String! {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Ok(Pair{ left: left_view, right: right_view })
@@ -2545,18 +2545,18 @@ fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
 
 #[test]
 fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
-    let counted = "fn run() {\n    loop i, 0..<4 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
+    let counted = "fn run() {\n    loop i in 0..<4 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {
         let native = run_cranelift_without_fallback(counted, "counted_next");
         assert_eq!(native.stdout, "0\n2\n3\n");
     }
 
-    let stride = "fn run() {\n    xs := [0, 1, 2, 3, 4]\n    loop x, xs, 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n";
+    let stride = "fn run() {\n    xs := [0, 1, 2, 3, 4]\n    loop x in xs, 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {
         let native = run_cranelift_without_fallback(stride, "source_stride_next");
         assert_eq!(native.stdout, "0\n2\n4\n");
 
-        let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x, xs, stride {\n        print(x)\n    }\n}\n";
+        let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x in xs, stride {\n        print(x)\n    }\n}\n";
         // AOT emits jet_panic("E0123: …") → exit 70 + panic: wording (I9).
         // Resident JIT must match that shape, not a Problems diagnostic.
         match run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull") {
@@ -2605,7 +2605,7 @@ fn run() {
     print(bands[0].start)
     print(bands[0].contains(3))
     total := 0
-    loop n, copied {
+    loop n in copied {
         total += n
     }
     print(total)
@@ -2668,7 +2668,7 @@ fn run() {
     print(band.contains(4))
     print((5..2).contains(3))
     total := 0
-    loop n, band {
+    loop n in band {
         total += n
     }
     print(total)
@@ -2992,7 +2992,7 @@ fn run() ! {
     // way E3002 now registers it: `  {n}. {fn} ({file}:{line})`, origin first,
     // under the root failure line. D-FAIL-ERROR1=A
     // (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?` means
-    // `run() ! Err`, so the conversion's plain `String` error arrives as the
+    // `run() Err!`, so the conversion's plain `String` error arrives as the
     // default error and `jet_render_err` prints `Error: {message}` -- no code,
     // because this error carries none -- at the process edge, then exits 1.
     let inexact_shown = fixture_shown("physical_quantity_inexact");
@@ -3519,15 +3519,15 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose_ok() Float ! String {
+fn choose_ok() Float String! {
     return Ok(0.25)
 }
 
-fn choose_err() Float ! String {
+fn choose_err() Float String! {
     return Err("typed boom")
 }
 
-fn forward() Float ! String {
+fn forward() Float String! {
     value :: choose_ok()?
     return Ok(value + 0.25)
 }
@@ -3553,7 +3553,7 @@ fn run() ! {
     // line 16 — origin first under the root failure, spelled the way E3002 now
     // registers it: `  {n}. {fn} ({file}:{line})`.
     // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?`
-    // means `run() ! Err`, so the `String` error arrives as the default error and
+    // means `run() Err!`, so the `String` error arrives as the default error and
     // the process edge prints one full report and exits 1. `jet_render_err`
     // renders `Error: {message}` with no code and `Error [{code}]: {message}`
     // with one. Same shape as the ratified AOT golden
@@ -3684,7 +3684,7 @@ fn run() ! {
             "both_arms_terminate",
             both_arms_terminate,
             // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare
-            // `fn run() ?` means `run() ! Err`, so `return Err("left branch")`
+            // `fn run() ?` means `run() Err!`, so `return Err("left branch")`
             // reaches the process edge as one full default-error report and exits
             // 1. `jet_render_err` renders `Error: {message}` when the error
             // carries no code — see the ratified golden
@@ -4017,11 +4017,11 @@ fn closes() Stream<Int> {
     return
 }
 fn run() {
-    loop value, stopped() {
+    loop value in stopped() {
         print(value)
         break
     }
-    loop value, closes() { print(value) }
+    loop value in closes() { print(value) }
     print("done")
 }
 "#,
@@ -5357,7 +5357,7 @@ fn resident_jit_safe_labeled_loop_control() {
     }
     let src = r#"
 fn run() {
-    outer :: loop i, 0..<2 {
+    outer :: loop i in 0..<2 {
         loop {
             if i == 0 {
                 next(outer)
@@ -5382,7 +5382,7 @@ fn resident_jit_named_or_fallback_loop_control() {
     let src = r#"
 fn run() {
     values := [7]
-    outer :: loop i, 0..<2 {
+    outer :: loop i in 0..<2 {
         loop {
             value :: values.get(1 - i) ?? next(outer)
             print(value)
@@ -6196,11 +6196,11 @@ fn cranelift_matches_variadic_fixed_writeback() {
     );
 }
 
-/// c139 M3+: counted `loop init, cond, step` with compound assign.
+/// c139 M3+: range `loop i in source` with a compound assign in its body.
 #[test]
 fn cranelift_covers_counted_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    sum := 0\n    loop i, 0..<5 {\n        sum += i\n    }\n    print(sum)\n}\n",
+        "fn run() {\n    sum := 0\n    loop i in 0..<5 {\n        sum += i\n    }\n    print(sum)\n}\n",
         "counted_loop",
     );
 }
@@ -6218,7 +6218,7 @@ fn cranelift_covers_while_loop() {
 #[test]
 fn cranelift_covers_range_loop() {
     assert_cranelift_matches_interpreter(
-        "fn run() {\n    loop n, 1..3 {\n        print(n)\n    }\n}\n",
+        "fn run() {\n    loop n in 1..3 {\n        print(n)\n    }\n}\n",
         "range_loop",
     );
 }
@@ -6488,7 +6488,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email ! [FieldError] {
+    fn decode(tree: DataTree) Email [FieldError]! {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})

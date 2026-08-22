@@ -81,7 +81,7 @@ impl DapServer {
             .unwrap_or("")
     }
 
-    /// Dispatch one DAP request. `Some(())` to keep the loop going, `None` to
+    /// Dispatch one DAP request. `Some(())` to keep the loop going; `None` to
     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
     fn handle(&mut self, msg: &JSONValue, out: &mut impl Write) -> Option<()> {
         let command = json_get(msg, "command").and_then(json_str)?;

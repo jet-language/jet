@@ -997,7 +997,7 @@ pub fn parse_source(src: &str) -> SyntaxTree {
     }
 
     let (tokens, _) = Lexer::lex(src);
-    match Parser::parse_for_check(&tokens) {
+    match Parser::parse_for_check_with_source(&tokens, src) {
         Ok((program, parse_teaching)) => SyntaxTree {
             api_version: API_VERSION,
             schema_version: SCHEMA_VERSION,
@@ -1453,6 +1453,7 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwPriv => "keyword.priv",
         TokKind::KwIf => "keyword.if",
         TokKind::KwElse => "keyword.else",
+        TokKind::KwIn => "keyword.in",
         TokKind::KwSwitch => "keyword.switch",
         TokKind::KwBreak => "keyword.break",
         TokKind::KwTrue => "literal.true",

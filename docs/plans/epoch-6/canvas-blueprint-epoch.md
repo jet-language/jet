@@ -81,7 +81,7 @@ and DOM, asserts resulting source text, and runs in CI via
   insert, undo) headless in CI; matrix enforcement live; a deliberately broken
   click handler fails the suite (anti-regression proof).
 
-### M1 — The core loop works, visibly
+### M1 — The core loop works in visibly
 
 The owner's demo path, bulletproof: open project → read graph → insert any
 node from any category → wire it → edit values → undo → run → see output.

@@ -707,7 +707,7 @@ fn web_wasm_stmts_supported(
                 && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
                 && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)).unwrap_or(true)
         }
-        // Inclusive `loop i; start..end` (D-SG8 / S22). Same covered Int arithmetic
+        // Inclusive `loop i in start..end` (D-SG8 / S22). Same covered Int arithmetic
         // already used by Wasm if/let — close the JS/Wasm TIR gap for compute loops.
         TIR::TStmt::Range { start, end, step, body, .. } => {
             web_wasm_expr_supported(start, bundle, file_prefix, reconstructions)
@@ -718,7 +718,7 @@ fn web_wasm_stmts_supported(
                     .unwrap_or(true)
                 && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
-        // Plain `loop x; xs` / `loop i, x; xs` over a list/local (JS already emits
+        // Plain `loop x in xs` / `loop (i, x) in xs` over a list/local (JS already emits
         // `for…of` / `.entries()`). Keep method/map/stride/columnar forms unsupported.
         TIR::TStmt::ForIn {
             step: None,

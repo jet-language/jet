@@ -878,7 +878,7 @@ pub enum InternalTag {
     /// already a raw C function pointer, not a boxed Jet closure.
     CppCallbackAbi,
     /// D-ALLOCFAIL1=A: the compiler-only mutable reference carrier returned by
-    /// `mem.*.try_alloc`. It stays transparent to Jet's `T ! AllocError`
+    /// `mem.*.try_alloc`. It stays transparent to Jet's `T AllocError!`
     /// identity while preserving the allocator slot through every tier.
     AllocatorView,
 }
@@ -951,8 +951,8 @@ pub enum Type {
     Shared(Box<Type>),
     /// S32: `T?` optional value.
     Option(Box<Type>),
-    /// S34 / D-ERRSIGIL1: `T ! E` fallible return. Internally lowered through
-    /// Rust `Result<T, E>`.
+    /// S34 / D-ERRSUFFIX1: `[Success?] [ErrorUnion!]` fallible type zone.
+    /// Internally lowered through Rust `Result<T, E>`.
     Result {
         ok: Box<Type>,
         err: Box<Type>,
@@ -2087,6 +2087,43 @@ impl Type {
         }
     }
 
+    fn error_suffix_name(err: &Type) -> String {
+        if let Type::Union(members) = err {
+            format!(
+                "({})",
+                members
+                    .iter()
+                    .map(|member| member.name())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            )
+        } else {
+            err.name()
+        }
+    }
+
+    fn result_surface_name(ok: &Type, err: &Type) -> String {
+        let default_error = matches!(err, Type::Named(name) if name == crate::Syntax::TYPE_ERR);
+        let unit_success =
+            matches!(ok, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
+        if unit_success {
+            if default_error {
+                crate::Syntax::TYPE_FALLIBLE_SEP.to_string()
+            } else {
+                format!("{}{}", Self::error_suffix_name(err), crate::Syntax::TYPE_FALLIBLE_SEP)
+            }
+        } else if default_error {
+            format!("{} {}", ok.name(), crate::Syntax::TYPE_FALLIBLE_SEP)
+        } else {
+            format!(
+                "{} {}{}",
+                ok.name(),
+                Self::error_suffix_name(err),
+                crate::Syntax::TYPE_FALLIBLE_SEP
+            )
+        }
+    }
+
     /// Plain-words name for diagnostics (docs/spec/diagnostics.md voice: name both types).
     pub fn show(&self) -> String {
         match self {
@@ -2099,7 +2136,7 @@ impl Type {
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("{} ! {}", ok.name(), err.name()),
+            Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
                 ret,
@@ -2197,7 +2234,7 @@ impl Type {
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("{} ! {}", ok.name(), err.name()),
+            Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
                 ret,

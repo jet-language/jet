@@ -61,17 +61,17 @@ fn day_kind(day: String) String {
     }
 }
 
-// --- errors: `T ! E`, ok/err, `?` propagate, `??` fallback ---------------
+// --- errors: `T E!`, ok/err, `?` propagate, `??` fallback ------------------
 enum ParseError {
     Empty
 }
 
-fn parse_age(raw: String) Int ! ParseError {
+fn parse_age(raw: String) Int ParseError! {
     if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn double_age(raw: String) Int ! ParseError {
+fn double_age(raw: String) Int ParseError! {
     n :: parse_age(raw)?
     return Ok(n * 2)
 }
@@ -116,7 +116,7 @@ fn show_uninit() Int {
 // file's single `fn run()` the one program entry.
 #CLI
 struct ServeArgs {
-    #Doc("port to listen on") port: Int = 3000
+    #Doc("port to listen on") port: Int{3000}
     #Doc("print extra detail") verbose: Bool
 }
 
@@ -252,7 +252,7 @@ fn run() {
     print("split: {parts.len()} trimmed: {trimmed}")
     // control flow
     sum := 0
-    loop i, 1..5 -> sum += i
+    loop i in 1..5 -> sum += i
     print("loop_sum: {sum}")
     // low-level: uninit sentinel
     print("uninit: {show_uninit()}")

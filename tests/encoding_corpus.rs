@@ -290,7 +290,7 @@ fn run() {
 
     stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
     rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
-    loop row, rows {
+    loop row in rows {
         print(row.adjacent_hi.to_string())
         print(row.large.to_string())
     }

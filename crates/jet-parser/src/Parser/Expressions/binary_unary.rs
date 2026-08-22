@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0045",
                             "Jet writes the fallback as `??`, not `or`".to_string(),
-                            "`??` supplies a value when a `T?` is absent or a `T ! E` failed — `count ?? 0`, `read() ?? return`"
+                            "`??` supplies a value when a `T?` is absent or a `T E!` failed — `count ?? 0`, `read() ?? return`"
                                 .to_string(),
                             "replace `or` with `??`".to_string(),
                             Some(span),
@@ -338,6 +338,10 @@ impl<'a> Parser<'a> {
         /// E0333, naming the direction break.
         pub(in crate::Parser) fn expr_cmp(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let lhs = self.expr_bitxor(allow_struct_lit)?;
+            if matches!(self.peek().kind, TokKind::KwIn) {
+                let span = self.bump().span;
+                return Err(Diagnostic::from_row("E0384", &[], Some(span)));
+            }
             let op = match &self.peek().kind {
                 TokKind::EqEq => Some(BinOp::Eq),
                 TokKind::NotEq => Some(BinOp::Ne),

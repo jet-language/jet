@@ -32,9 +32,9 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 
 #[test]
 fn type_alias_binding_sigils_are_canonical_and_idempotent() {
-    let source = "alias Result<T> :: T ! Int\nfn run() {}\n";
+    let source = "alias Result<T> :: T Int!\nfn run() {}\n";
     let once = jet::format_source(source).expect("canonical alias spelling should format");
-    assert!(once.contains("alias Result<T> :: T ! Int"), "{once}");
+    assert!(once.contains("alias Result<T> :: T Int!"), "{once}");
     assert!(!once.contains("alias Result<T> ="), "{once}");
     let twice = jet::format_source(&once).expect("canonical alias spelling should reformat");
     assert_eq!(once, twice, "alias formatting must be idempotent");
@@ -380,7 +380,7 @@ fn step_speed(speed: Int) Int {
     let out = jet::format_source(src).expect("fmt should accept #Meta attributes");
     for needle in [
         "#Meta(category: \"Movement\", tunable)",
-        "fn step_speed(speed: Int) Int {",
+        "fn step_speed(speed: Int) Int -> {",
         "next :: speed + 1",
     ] {
         assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
@@ -434,14 +434,14 @@ fn fmt_keeps_transaction_comment_inside_transaction_block() {
 
 #[test]
 fn fmt_keeps_optional_return_sugar() {
-    // D-ERRSIGIL1: bare `T?` is Optional; fallible is `T ! E`.
+    // D-ERRSUFFIX1=B: `T?` is Optional; the error type owns the `!` suffix.
     let src = r#"fn parse_count(raw: String) Int? {
     return Err("empty");
 }
 "#;
     let out = jet::format_source(src).expect("fmt should parse optional return");
     assert!(
-        out.contains("fn parse_count(raw: String) Int? {"),
+        out.contains("fn parse_count(raw: String) Int? -> {"),
         "expected `Int?` optional return to stay `Int?`, got:\n{out}"
     );
     let fallible = r#"fn parse_count(raw: String) Int ! {
@@ -451,7 +451,7 @@ fn fmt_keeps_optional_return_sugar() {
     let fallible_out =
         jet::format_source(fallible).expect("fmt should parse fallible return");
     assert!(
-        fallible_out.contains("fn parse_count(raw: String) Int ! {"),
+        fallible_out.contains("fn parse_count(raw: String) Int ! -> {"),
         "expected `Int !` fallible return to stay canonical, got:\n{fallible_out}"
     );
 
@@ -461,8 +461,8 @@ fn fmt_keeps_optional_return_sugar() {
 "#;
     let retired_out = jet::format_source(retired).expect("fmt should teach retired fallible type");
     assert!(
-        retired_out.contains("fn parse_count(raw: String) Int ! String {"),
-        "expected retired `Int ? String` to rewrite to `Int ! String`, got:\n{retired_out}"
+        retired_out.contains("fn parse_count(raw: String) Int String! -> {"),
+        "expected retired `Int ? String` to rewrite to `Int String!`, got:\n{retired_out}"
     );
 }
 
@@ -903,7 +903,7 @@ fn run() {
         "expected named tuple literal preserved, got:\n{out}"
     );
     assert!(
-        out.contains("fn bounds() (max: Int, min: Int) {"),
+        out.contains("fn bounds() (max: Int, min: Int) -> {"),
         "expected canonical named tuple return type preserved, got:\n{out}"
     );
     assert!(
@@ -965,7 +965,7 @@ fn use_collections(items: [String], counts: [String:Int]) {}
 fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
     let source = "fn answer() Int {\n    return 42\n}\n";
     let plain = jet::format_source(source).expect("plain fmt should format");
-    assert!(plain.contains("fn answer() Int { return 42 }"), "{plain}");
+    assert!(plain.contains("fn answer() Int -> { return 42 }"), "{plain}");
     assert!(!plain.contains(":: 42"), "plain fmt must not simplify:\n{plain}");
 
     let options = jet::Formatter::FormatOptions { simplify: true };
@@ -1041,14 +1041,14 @@ fn fmt_simplify_leaves_a_recovered_parse_alone() {
 
 #[test]
 fn fmt_simplify_keeps_a_routed_value_loop_binding() {
-    // Card #1514: `loop value, values { … } ?? route` desugars to a carrier
+    // Card #1514: `loop value in values { … } ?? route` desugars to a carrier
     // whose generated break label spells the loop header's byte offset
     // (`__jet_value_loop_<offset>`). An R1 rewrite earlier in the file moves
     // that header, so the identity check must be blind to the offset — and the
     // binding itself must come out byte-identical, since R1 only ever collapses
     // a braced single-`return` function body.
     let options = jet::Formatter::FormatOptions { simplify: true };
-    let source = "fn answer() Int {\n    return 42\n}\n\nfn search() Int {\n    values :: [Int]{1, 2, 3, 4}\n    first :: loop value, values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n";
+    let source = "fn answer() Int {\n    return 42\n}\n\nfn search() Int {\n    values :: [Int]{1, 2, 3, 4}\n    first :: loop value in values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n";
 
     let plain = jet::format_source(source).expect("a routed value loop should format");
     let simplified = jet::format_source_with_options(&plain, options)
@@ -1076,6 +1076,37 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 }
 
 #[test]
+fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
+    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn effect() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } }\n";
+    let once = jet::format_source(source).expect("callable body shapes should format");
+    assert!(once.contains("fn value() Int -> { return 1 }"), "{once}");
+    assert!(once.contains("fn concise() Int -> 1"), "{once}");
+    assert!(once.contains("fn effect() { print(1) }"), "{once}");
+    assert!(once.contains("fn fail() ! {}"), "{once}");
+    assert!(once.contains("fn bounded() Int -[IO]> { return 1 }"), "{once}");
+    assert!(once.contains("fn get(self) Int -> {"), "{once}");
+    assert_eq!(once, jet::format_source(&once).expect("formatted callables should be stable"));
+}
+
+#[test]
+fn parser_rejects_arrowless_value_callable_and_offers_insertion_fix() {
+    let source = "fn value() Int { return 1 }\n";
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
+    assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+    let diagnostics = jet::Parser::parse(&tokens).expect_err("the body arrow is required");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0080")
+        .expect("missing callable body arrow diagnostic");
+    assert_eq!(diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()), Some("-> "));
+
+    let (canonical_tokens, canonical_lex_diagnostics) =
+        jet::Lexer::lex("fn value() Int -> { return 1 }\n");
+    assert!(canonical_lex_diagnostics.is_empty(), "{canonical_lex_diagnostics:?}");
+    jet::Parser::parse(&canonical_tokens).expect("the canonical body arrow should parse");
+}
+
+#[test]
 fn fmt_simplify_keeps_a_struct_literal_return_braced() {
     // D-LIT-DOT1/D-FMT-SIMPLIFY1=A: R3 drops the redundant `Rect` head because
     // the declared return type names it, but the parser
@@ -1088,7 +1119,7 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
     let once = jet::format_source_with_options(source, options)
         .expect("a struct-literal return must stay parseable under simplify");
     assert!(
-        once.contains("fn make(width: Int, height: Int) Rect { return {"),
+        once.contains("fn make(width: Int, height: Int) Rect -> { return {"),
         "the braced struct-literal return did not survive simplify:\n{once}"
     );
     assert!(
@@ -1180,7 +1211,7 @@ fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
     assert!(once.contains("values: [String:Int]"), "{once}");
-    assert!(once.contains(") [String:Int] {"), "{once}");
+    assert!(once.contains(") [String:Int] -> {"), "{once}");
     assert!(once.contains("[\"key\": 1]"), "map value spacing changed:\n{once}");
     assert!(!once.contains("[String: Int]"), "retired map type spacing remains:\n{once}");
     assert_eq!(once, jet::format_source(&once).expect("map type output should be stable"));
@@ -1274,7 +1305,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_optional_result_variants() {
-    let src = r#"fn f(flag: Bool) Int ! String {
+    let src = r#"fn f(flag: Bool) Int String! {
     maybe :: .Val(1)
     empty :: .None
     if maybe == {
@@ -1299,7 +1330,7 @@ fn fmt_canonicalizes_anonymous_union_types() {
     let src = r#"fn hold(v: String | Int) Int | String {
     return v
 }
-fn parse(raw: String) Int ! String | Bool {
+fn parse(raw: String) Int (String | Bool)! {
     return .Err(false)
 }
 "#;
@@ -1309,7 +1340,7 @@ fn parse(raw: String) Int ! String | Bool {
         "expected canonical `Int | String` spelling, got:\n{once}"
     );
     assert!(
-        once.contains("Int ! Bool | String") || once.contains("Int ! String | Bool"),
+        once.contains("Int (Bool | String)!"),
         "expected fallible error-side union, got:\n{once}"
     );
     let twice = jet::format_source(&once).expect("union fmt must be idempotent");
@@ -1472,7 +1503,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
-    loop value, rx -> tx.send(value)
+    loop value in rx -> tx.send(value)
     return .Panicked("boom")
 }
 
@@ -1495,7 +1526,7 @@ fn open() {
         "handle.join()",
         ".Cancelled",
         ".DeadlineBlown",
-        "loop value, rx",
+        "loop value in rx",
         ".Panicked(\"boom\")",
         "channel<Int>(capacity: 8)",
         "freeze(1)",
@@ -1641,11 +1672,11 @@ fn fmt_preserves_single_line_loops_and_fn() {
     let state_src = "fn run() {\n    loop i := 0, i < 3 -> i += 1\n}\n";
     assert_fmt_stable(state_src, "single-line state loop");
 
-    let for_src = "fn run() {\n    loop i, 0..3 -> print(\"{i}\")\n}\n";
+    let for_src = "fn run() {\n    loop i in 0..3 -> print(\"{i}\")\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
-    let excl_src = "fn run() {\n    loop i, 0..<3 -> print(\"{i}\")\n}\n";
+    let excl_src = "fn run() {\n    loop i in 0..<3 -> print(\"{i}\")\n}\n";
     assert_fmt_stable(excl_src, "exclusive range loop");
-    let two_bind = "fn run() {\n    loop (i, x), xs -> print(\"{i}\")\n}\n";
+    let two_bind = "fn run() {\n    loop (i, x) in xs -> print(\"{i}\")\n}\n";
     assert_fmt_stable(two_bind, "list two-binding loop");
 
 
@@ -1780,7 +1811,7 @@ fn fmt_keeps_cli_doc_and_default_field_markers() {
     let src = "\
 #CLI
 struct ServeArgs {
-    #[Doc(\"port to listen on\")] port: Int = 3000
+    #[Doc(\"port to listen on\")] port: Int{3000}
     #Doc(\"print extra detail\") verbose: Bool
 }
 
@@ -1791,7 +1822,7 @@ fn run(args: ServeArgs) {
 ";
     assert_fmt_keeps(
         src,
-        &["#Doc(\"port to listen on\")", "port: Int = 3000", "#CLI"],
+        &["#Doc(\"port to listen on\")", "port: Int{3000}", "#CLI"],
         "cli #Doc + field = default",
     );
     assert_fmt_stable(src, "cli doc/default field markers");
@@ -2467,7 +2498,7 @@ fn run() {
         &[
             "fn heal(&self, amount: Int)",
             "fn damage(p: &Player, amount: Int)",
-            "fn archive(p: ^Player) Int {",
+            "fn archive(p: ^Player) Int -> {",
             "damage(&p, 10)",
             "archive(^p)",
         ],
@@ -2541,8 +2572,8 @@ fn fmt_loop_label_d_looplabel3_stability() {
     // D-LOOPLABEL3=A: named loops and target-argument exits survive unchanged.
     let src = "\
 fn run() {
-    outer :: loop i, [1, 2] {
-        loop j, [1, 2] {
+    outer :: loop i in [1, 2] {
+        loop j in [1, 2] {
             if i == j {
                 value() ?? next(outer)
                 break(outer)
@@ -2566,7 +2597,7 @@ fn run() {
 fn fmt_loop_values_and_yielding_loops_are_idempotent() {
 let src = r#"fn find(xs: [Int]) Int {
     found :: loop {
-        loop x, xs {
+        loop x in xs {
             if x > 2 { break(found, x) }
         }
         break -1
@@ -2576,7 +2607,7 @@ let src = r#"fn find(xs: [Int]) Int {
 
 fn run() {
     xs :: [Int]{ 1, 2, 3, 4 }
-    values :: loop x, xs -> {
+    values :: loop x in xs -> {
         if x > 3 { break }
         x * 2
     }
@@ -2585,7 +2616,7 @@ fn run() {
 "#;
     assert_fmt_keeps(
         src,
-        &["found :: loop", "break(found, x)", "values :: loop x, xs ->"],
+        &["found :: loop", "break(found, x)", "values :: loop x in xs ->"],
         "loop values",
     );
     let once = jet::format_source(src).expect("fmt should accept loop values");
@@ -2596,7 +2627,7 @@ fn run() {
         "formatter must hide compiler-generated machine labels: {once}"
     );
 
-    let guard_src = "fn run() {\n    values :: loop u, users if u.active -> u.name\n}\n";
+    let guard_src = "fn run() {\n    values :: loop u in users if u.active -> u.name\n}\n";
     let guard_once = jet::format_source(guard_src).expect("guarded loop should format");
     assert_eq!(
         guard_once, guard_src,
@@ -2615,13 +2646,13 @@ fn fmt_counted_loop_d_loop_semicolon1_stability() {
     let src = "\
 fn run() {
     sum := 0
-    loop i, 0..<5 {
+    loop i in 0..<5 {
         sum += i
     }
     print(sum)
 }
 ";
-    assert_fmt_keeps(src, &["loop i, 0..<5"], "range counted loop header");
+    assert_fmt_keeps(src, &["loop i in 0..<5"], "range counted loop header");
     let once = jet::format_source(src).expect("fmt should accept range counted loop");
     let twice = jet::format_source(&once).expect("second fmt of counted loop must succeed");
     assert_eq!(once, twice, "counted loop fmt must be idempotent");
@@ -2629,7 +2660,7 @@ fn run() {
 
 #[test]
 fn fmt_unified_loop_headers_and_next_stability() {
-    let src = "fn next() Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item, [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
+    let src = "fn next() Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item in [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
     assert_fmt_keeps(
         src,
         &[
@@ -2637,7 +2668,7 @@ fn fmt_unified_loop_headers_and_next_stability() {
             "next()",
             ".next()",
             "?? (next)",
-            "loop item, [1, 2, 3], 2",
+            "loop item in [1, 2, 3], 2",
             "?? next",
             "if value == 1 -> next",
         ],
@@ -2649,7 +2680,7 @@ fn fmt_unified_loop_headers_and_next_stability() {
 
     for retired in [
         "fn run() { loop x in [1] {} }\n",
-        "fn run() { loop i, 0..2 step 1 {} }\n",
+        "fn run() { loop i in 0..2 step 1 {} }\n",
         "fn run() { loop { continue } }\n",
         "fn run() { loop i :: 0, true {} }\n",
         "fn run() { loop [i] := [0], true {} }\n",
@@ -2676,24 +2707,24 @@ fn control_bodies_use_arrows_when_they_fit() {
 
 #[test]
 fn effect_control_arrows_format_as_one_statement_bodies() {
-    let src = "fn run() {\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item, [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}\n";
+    let src = "fn run() {\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item in [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}\n";
     let once = jet::format_source(src).expect("effect control arrows should format");
     assert!(once.contains("if true -> print(\"yes\") else -> print(\"no\")"), "{once}");
     assert!(once.contains("loop false -> print(\"again\")"), "{once}");
     assert!(once.contains("loop -> print(\"forever\")"), "{once}");
-    assert!(once.contains("loop item, [1, 2] -> print(item)"), "{once}");
+    assert!(once.contains("loop item in [1, 2] -> print(item)"), "{once}");
     assert!(once.contains("loop i := 0, i < 2 -> i += 1"), "{once}");
     assert_eq!(once, jet::format_source(&once).expect("arrow controls should be stable"));
 }
 
 #[test]
-fn loop_headers_use_comma_clauses_and_group_two_names() {
-    let src = "fn run() {\n    loop item, [1, 2, 3], 2 { print(item) }\n    loop (key, value), counts { print(key) }\n    loop i, 0..<3 { print(i) }\n}\n";
-    let once = jet::format_source(src).expect("fmt should accept comma loop headers");
+fn loop_headers_use_in_binding_and_comma_clauses() {
+    let src = "fn run() {\n    loop item in [1, 2, 3], 2 { print(item) }\n    loop (key, value) in counts { print(key) }\n    loop i in 0..<3 { print(i) }\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept canonical loop headers");
     for expected in [
-        "loop item, [1, 2, 3], 2 -> print(item)",
-        "loop (key, value), counts -> print(key)",
-        "loop i, 0..<3 -> print(i)",
+        "loop item in [1, 2, 3], 2 -> print(item)",
+        "loop (key, value) in counts -> print(key)",
+        "loop i in 0..<3 -> print(i)",
     ] {
         assert!(once.contains(expected), "missing `{expected}`:\n{once}");
     }
@@ -2704,12 +2735,12 @@ fn loop_headers_use_comma_clauses_and_group_two_names() {
 #[test]
 fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
     let src = r#"fn run() {
-    loop item, // source clause
+    loop item in // source clause
         [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000], // stride clause
         2 {
         next
     }
-    loop cursor, // start
+    loop cursor in // start
         0..<9000000000000000000, // end
         1000000000000000000 {
         print(cursor)
@@ -2721,11 +2752,11 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
 "#;
     let once = jet::format_source(src).expect("long unified loop headers should format");
     for token in [
-        "loop item,",
+        "loop item in",
         "// source clause",
         "],",
         "// stride clause",
-        "loop cursor,",
+        "loop cursor in",
         "0..<9000000000000000000,",
         "1000000000000000000",
         "loop ready := true, ready {",
@@ -2733,7 +2764,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
         assert!(once.contains(token), "fmt dropped loop token `{token}`:\n{once}");
     }
     assert!(
-        once.contains("loop cursor,"),
+        once.contains("loop cursor in"),
         "long range header must keep comma clauses:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted long loop headers must reparse");
@@ -3081,7 +3112,7 @@ fn count(n: Int) Stream<Int> {
 }
 
 fn run() {
-    loop x, count(3) { print(\"{x}\") }
+    loop x in count(3) { print(\"{x}\") }
 }
 ";
     assert_fmt_stable(src, "yield");
@@ -3168,7 +3199,7 @@ fn fmt_preserves_variadic_trait_bound_bare() {
     // bound sugar — must survive byte-for-byte.
     let src = "\
 fn log_all(parts: ...Renderable) {
-    loop p, parts { print(\"{p}\") }
+    loop p in parts { print(\"{p}\") }
 }
 
 fn run() {
@@ -3186,7 +3217,7 @@ fn fmt_preserves_variadic_trait_bound_list() {
     let src = "\
 fn log_all(prefix: String, parts: ...[Renderable]) {
     print(prefix)
-    loop p, parts { print(\"{p}\") }
+    loop p in parts { print(\"{p}\") }
 }
 
 fn run() {
@@ -3753,9 +3784,9 @@ fn fmt_preserves_parameter_zones_and_public_labels() {
     // from the local name. All three must round-trip byte-for-byte (fmt
     // STABILITY — idempotence alone would not notice a dropped separator,
     // because a dropped one stays dropped on the second pass).
-    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String -> host\n";
+    let src = "fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String -> host\n";
     let once = jet::format_source(src).expect("fmt should accept parameter zones");
-    for token in ["host: String", ", /,", ", *,", "timeout seconds: Int = 30", "tls: Bool = true"] {
+    for token in ["host: String", ", /,", ", *,", "timeout seconds: Int{30}", "tls: Bool{true}"] {
         assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
     }
     let twice = jet::format_source(&once).expect("zoned parameters should re-fmt");

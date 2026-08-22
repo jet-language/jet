@@ -253,7 +253,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             body,
             ..
         } => match kind {
-            // `loop i; start..end [step k]` — start/end/step must be in-subset
+            // `loop i in start..end [step k]` — start/end/step must be in-subset
             // integer expressions; the loop var `i` is an Int local in the body.
             // The two-binding `key, value` form is map iteration (a collection),
             // outside this phase.
@@ -270,7 +270,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                 body_locals.insert(var.clone());
                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
             }
-            // c109 Phase 5/22: `loop x; coll` / `loop k, v; map` (ForKind::In).
+            // c109 Phase 5/22: `loop x in coll` / `loop (k, v) in map` (ForKind::In).
             // A method-call collection (`.chars()`/`.lines()`/`.split(…)`) takes a
             // distinct `emit_for_in` branch; Phase 22 reproduces each (`forin_method_
             // collection_in_subset`). A non-method-call collection is the plain
@@ -281,7 +281,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                 if step.as_ref().is_some_and(|step| !expr_in_subset(step, cx, locals)) {
                     return false;
                 }
-                // The TWO-BINDING map form (`loop k, v; map`) ALWAYS emits
+                // The TWO-BINDING map form (`loop (k, v) in map`) ALWAYS emits
                 // `({coll}).iter()` (the `var2` branch of `emit_for_in` fires first,
                 // before the `.chars()`/`.lines()` method-call branches). So a method-call
                 // collection in the two-binding position (notably an owning-field-read
@@ -443,7 +443,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
     }
 }
 
-/// c109 Phase 22: is a method-call collection iteration (`loop x; <coll>` where
+/// c109 Phase 22: is a method-call collection iteration (`loop x in <coll>` where
 /// `<coll>` is an `Expr::MethodCall`) in-subset? Mirrors `emit_for_in`'s
 /// `Expr::MethodCall` branches (Source/Codegen/Statement.rs):
 ///  - `.chars()` — char iteration; only the *receiver* (a string) is emitted, so it

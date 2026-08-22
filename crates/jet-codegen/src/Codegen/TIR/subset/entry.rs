@@ -44,7 +44,7 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
         return false;
     }
     // Params must be scalars, String, or a covered value type. c109 Phase 23: a
-    // DEFAULT parameter value (`h: Int = w`, S61/D-NARG-D2) is covered — sema fills
+    // DEFAULT parameter value (`h: Int{w}`, S61/D-NARG-D2) is covered — sema fills
     // omitted trailing args at every CALL SITE (`CheckerItems::default-value filling`,
     // substituting earlier-param refs with the supplied arg), so by codegen the call's
     // args are complete and the default expr is GONE from the AST. Codegen never reads

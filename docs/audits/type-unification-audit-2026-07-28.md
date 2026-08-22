@@ -360,7 +360,7 @@ fact, not a surface fact. One accepted asymmetry, stated in the spec:
 `Range` flowing into a type declaration is value-indexed types — a different
 language.
 
-**Evidence.** `a..b` is legal in exactly five slots (loop source, arm head,
+**Evidence.** `a..b` is legal in exactly five slots (loop source in arm head,
 slice, view arg, distinct constraint) and nowhere else. No `Range` type
 exists in the registry (S22/S72, D-RANGE-EXCL1; `AST/lvalues.rs:134-145`).
 `bands :: [0..<10, 10..<100]` has no type to be.

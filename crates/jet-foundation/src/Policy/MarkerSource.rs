@@ -142,15 +142,30 @@ fn arg_type(source_type: &str) -> RuleArgType {
     }
 }
 
-/// Split `Type = default` on the one `=` that is not part of the type. A `=`
-/// inside a bracket, paren, or string belongs to the value it sits in.
+/// Split `Type{default}` on its outer braces. Braces inside the default belong
+/// to the value, as do commas and braces inside strings.
 fn split_default(value: &str) -> Option<(&str, &str)> {
     let bytes = value.as_bytes();
     let mut scan = Scan::new();
     for (index, byte) in bytes.iter().enumerate() {
-        if scan.step(*byte) && *byte == b'=' {
-            return Some((value[..index].trim(), value[index + 1..].trim()));
+        if scan.depth == 0 && !scan.in_string && *byte == b'{' {
+            let mut default_scan = Scan::new();
+            for (end, inner_byte) in bytes[index..].iter().enumerate() {
+                default_scan.step(*inner_byte);
+                if *inner_byte == b'}'
+                    && default_scan.depth == 0
+                    && !default_scan.in_string
+                {
+                    let end = index + end;
+                    if value[end + 1..].trim().is_empty() {
+                        return Some((value[..index].trim(), value[index + 1..end].trim()));
+                    }
+                    break;
+                }
+            }
+            break;
         }
+        scan.step(*byte);
     }
     None
 }
@@ -369,7 +384,7 @@ mod tests {
             vec!["a: [x, y]", "b: \"p, q\""]
         );
         assert_eq!(
-            split_default("String = \"a = b\""),
+            split_default("String{\"a = b\"}"),
             Some(("String", "\"a = b\""))
         );
         assert_eq!(split_default("Duration | String"), None);

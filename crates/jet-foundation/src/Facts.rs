@@ -35,6 +35,9 @@ pub struct BuildFactSnapshot {
     pub package_name: String,
     pub package_version: String,
     pub os: crate::OSTarget::OSTarget,
+    /// Target identity used by target-aware compiler facts. This is an
+    /// internal build input, not a user-declared fact row.
+    pub target_triple: String,
     pub profile: String,
     pub stamp: BuildStamp,
     /// Resolved contribution chains used by `jet explain`; fact readers still
@@ -63,6 +66,7 @@ impl Default for BuildFactSnapshot {
             package_name: "script".to_string(),
             package_version: "0.0.0".to_string(),
             os: crate::OSTarget::OSTarget::host(),
+            target_triple: crate::Layout::TargetLayout::host_triple(),
             profile: "dev".to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),
@@ -86,6 +90,7 @@ impl BuildFactSnapshot {
             package_name,
             package_version: "0.0.0".to_string(),
             os,
+            target_triple: crate::Layout::TargetLayout::host_triple(),
             profile: profile.to_string(),
             stamp: BuildStamp::default(),
             contributions: BTreeMap::new(),

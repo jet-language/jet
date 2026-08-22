@@ -2,7 +2,7 @@ struct FetchError {
     message: String
 }
 
-fn load_text(ok: Bool) String ! FetchError {
+fn load_text(ok: Bool) String FetchError! {
     if ok -> return Ok("ready")
     return Err(FetchError{message: "offline"})
 }
@@ -15,7 +15,7 @@ fn recovered(ok: Bool) String {
     return value
 }
 
-fn chained(ok: Bool) Int ! FetchError {
+fn chained(ok: Bool) Int FetchError! {
     value :: load_text(ok)? "chained fetch"
     return Ok(value.len())
 }

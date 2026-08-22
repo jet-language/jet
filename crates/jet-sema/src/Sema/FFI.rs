@@ -108,7 +108,7 @@ pub(crate) fn check_extern_fn(
 
 /// S59 (E2-M14): type rules at the **C** boundary. Stricter than Rust FFI: only
 /// scalars, `Char`, and `String` (D-CBIND5) cross by value, plus structs/enums
-/// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T ! E`) have
+/// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T E!`) have
 /// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
 /// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
 /// `use core.mem` + `#Unsafe`.

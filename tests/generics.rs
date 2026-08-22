@@ -941,7 +941,7 @@ impl Box {
         return Box<T>{ value: value }
     }
 
-    fn convert<U>(self, value: ^U, *, note: String = "unused") U {
+    fn convert<U>(self, value: ^U, *, note: String{"unused"}) U {
         return value
     }
 

@@ -2532,7 +2532,7 @@ pub(crate) fn emit_tir_core_call(
         
         
         // D-TEXTWIDTH1=B: 1-arg = portable default (`Int`); 2-arg (`policy:`)
-        // routes through the `TextWidth`-taking helper (`Int ! TextError`).
+        // routes through the `TextWidth`-taking helper (`Int TextError!`).
         ("core.text", "display_width") if args.len() >= 2 => format!(
             "{}(&({}), &({}))",
             helper("jet_text_display_width"),

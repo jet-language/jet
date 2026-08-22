@@ -74,7 +74,7 @@ pub const KW_DISTINCT: &str = "distinct";
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
 /// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `T?`
-/// and `T ! E`. Optional and fallible spellings are distinct; these are the
+/// and `T E!`. Optional and fallible spellings are distinct; these are the
 /// three reads that reach the carrier's facts.
 ///
 /// `.or_err("why")` lifts a clean absence into a failure — the payload rides
@@ -411,6 +411,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_IF,
     KW_ELSE,
     KW_LOOP,
+    KW_IN,
     KW_BREAK,
     KW_RETURN,
     KW_DEFER,
@@ -490,7 +491,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
 ///
 /// Only types a user writes in source. `Result` is the legacy fallible type
 /// (S34) kept for teaching errors; it is intentionally excluded here since
-/// `T ! E` is the current spelling.
+/// `T E!` is the current spelling.
 pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_INT,
     TYPE_FLOAT,
@@ -649,6 +650,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BREAK, KW_CONC_TASK, KW_DEFER,
     KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN, KW_FN, KW_FREEZE, KW_IF, KW_IMPL,
+    KW_IN,
     KW_IMPURE, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE, KW_POLICY, KW_PRIV, KW_PROTOCOL,
     KW_PUB, KW_RETURN, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TEST,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, KW_WRAP, LIT_FALSE, LIT_NULL,

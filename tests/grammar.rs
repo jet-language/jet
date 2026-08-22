@@ -591,7 +591,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 fn parse_option_fn() {
     let src = r#"
 fn find_even(limit: Int) (Int?) {
-    loop i, 1..limit {
+    loop i in 1..limit {
         if i % 2 == 0 {
             return Val(i);
         }
@@ -684,6 +684,75 @@ fn run() {
     };
     assert!(matches!(label.init, jet::AST::Expr::If { .. }));
     assert!(matches!(run.body[4], jet::AST::Stmt::Switch { .. }));
+}
+
+#[test]
+fn dispatch_atom_boolean_groups_are_required_and_machine_fixable() {
+    let invalid = r#"
+fn run() {
+    n :: 48
+    ready :: true
+    if n < {
+        48 | 45 && ready -> print("hit")
+        else -> print("miss")
+    }
+}
+"#;
+    let (tokens, lex_diags) = jet::Lexer::lex(invalid);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let (_, diagnostics) = jet::Parser::parse_for_check_with_source(&tokens, invalid)
+        .expect("the new teaching diagnostic should recover the arm table");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0386")
+        .expect("unparenthesized distributed group diagnostic");
+    let edit = diagnostic
+        .edit
+        .as_ref()
+        .expect("machine-applicable grouping edit");
+    assert_eq!(&invalid[edit.span.start..edit.span.end], "48 | 45");
+    assert_eq!(edit.new_text, "(48 | 45)");
+    assert_eq!(
+        diagnostic.applicability,
+        Some(jet::Diagnostics::FixApplicability::Safe)
+    );
+    assert_eq!(
+        diagnostic.safety,
+        Some(jet::Diagnostics::FixSafety::Formatting)
+    );
+
+    let legal = invalid.replace("48 | 45", "(48 | 45)");
+    let (tokens, lex_diags) = jet::Lexer::lex(&legal);
+    assert!(lex_diags.is_empty(), "fixed lex diagnostics: {lex_diags:?}");
+    assert!(
+        jet::Parser::parse(&tokens).is_ok(),
+        "fixed arm head should parse"
+    );
+
+    let untouched = r#"
+fn run() {
+    value :: 1
+    if value == {
+        301 | 302 -> print("atom")
+        value >= 500 -> print("predicate")
+        .Err(e) && e.fatal -> print("guard")
+        else -> print("other")
+    }
+}
+"#;
+    let (tokens, lex_diags) = jet::Lexer::lex(untouched);
+    assert!(
+        lex_diags.is_empty(),
+        "untouched lex diagnostics: {lex_diags:?}"
+    );
+    let (_, diagnostics) = jet::Parser::parse_for_check_with_source(&tokens, untouched)
+        .expect("untouched arm forms should parse");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "E0386"),
+        "pure atoms, predicates, and pattern guards are unchanged: {diagnostics:?}"
+    );
 }
 
 #[test]

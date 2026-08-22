@@ -125,7 +125,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.term", "print")
             | ("core.term", "progress")
             // D-TEXTWIDTH1=B: `text.display_width(s)` returns `Int`, while
-            // `text.display_width(s, policy: p)` returns `Int ! TextError` —
+            // `text.display_width(s, policy: p)` returns `Int TextError!` —
             // the `.Reject` control policy can fail. One call, two return
             // types chosen by arity, so no `core_fixed_sig` row can state it:
             // that table holds exactly one param list and one return, and
@@ -3020,7 +3020,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
         )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
-        // returns `[Byte] ! String` (invalid input → Err).
+        // returns `[Byte] String!` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }

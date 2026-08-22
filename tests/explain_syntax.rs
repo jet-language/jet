@@ -33,7 +33,7 @@ fn explain_syntax_dictionary_golden() {
         ("@", "explain_syntax_at.txt"),
         ("::", "explain_syntax_bind.txt"),
         ("#Live", "explain_syntax_marker.txt"),
-        (":>", "explain_syntax_arrow.txt"),
+        ("->", "explain_syntax_arrow.txt"),
         ("loop", "explain_syntax_keyword.txt"),
     ] {
         let out = Command::new(jet())

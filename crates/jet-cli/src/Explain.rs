@@ -424,7 +424,7 @@ pub fn render(ex: &Explanation, color: bool) -> String {
 
 fn detailed_example(code: &str) -> Option<String> {
     (code == "E0003").then(|| {
-        "fn save(path: String) ! IOError {\n    print(path)\n}".to_string()
+        "fn save(path: String) IOError! {\n    print(path)\n}".to_string()
     })
 }
 

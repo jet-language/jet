@@ -142,8 +142,8 @@ impl<'a> Parser<'a> {
         Ok((ty, Span::new(start, end)))
     }
 
-    /// D-ERRSIGIL1=A: a unit-fallible declaration writes its failure clause
-    /// directly after the parameter list (`fn save() ! IOError`).
+    /// D-ERRSUFFIX1=B: a unit-fallible declaration writes its error suffix
+    /// directly after the parameter list (`fn save() IOError!`).
     pub(in crate::Parser) fn parse_unit_fallible_return(
         &mut self,
     ) -> Result<Option<(Type, Span)>, Diagnostic> {
@@ -159,7 +159,9 @@ impl<'a> Parser<'a> {
             Type::Named(Syntax::TYPE_ERR.to_string())
         };
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
-        if old_sigil {
+        if old_sigil
+            || !matches!(&err, Type::Named(name) if name == Syntax::TYPE_ERR)
+        {
             self.diags.push(Diagnostic::from_row(
                 "E-ERR-SIGIL",
                 &[],
@@ -193,16 +195,51 @@ impl<'a> Parser<'a> {
             "E0003",
             "this unit-fallible signature uses the retired arrow-and-unit form".to_string(),
             "a function that can fail but returns no value has no result payload for an arrow to introduce".to_string(),
-            "write `fn save(path: String) ! IOError`, or `fn sync() !` for the default error".to_string(),
+            "write `fn save(path: String) IOError!`, or `fn sync() !` for the default error".to_string(),
             Some(span),
         )
     }
 
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
-        // D-ERRSIGIL1: return types use the same `T?` / `T !` / `T ! E`
-        // rules as every other type position. Parentheses only group
-        // (including optional `(T?)` when the author wants them).
+        // D-ERRSUFFIX1: return types use the same `T? E!` / `T (E1 | E2)!`
+        // rules as every other type position. Parentheses only group.
         self.type_()
+    }
+
+    fn parse_error_suffix(&mut self, success: Type) -> Result<Type, Diagnostic> {
+        if !self.type_starts_here() {
+            return Ok(success);
+        }
+
+        let saved_pos = self.pos;
+        let saved_diags = self.diags.len();
+        let saved_pending_type_gt = self.pending_type_gt;
+        let saved_type_generic_depth = self.type_generic_depth;
+        let saved_type_generic_chain_len = self.type_generic_chain.len();
+        let saved_type_generic_truncated = self.type_generic_truncated;
+        let parsed = self.type_().ok();
+        let error = parsed.and_then(|(ty, _)| match ty {
+            Type::Result { ok, err }
+                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) =>
+            {
+                Some(*err)
+            }
+            _ => None,
+        });
+        if let Some(error) = error {
+            return Ok(Type::Result {
+                ok: Box::new(success),
+                err: Box::new(error),
+            });
+        }
+
+        self.pos = saved_pos;
+        self.diags.truncate(saved_diags);
+        self.pending_type_gt = saved_pending_type_gt;
+        self.type_generic_depth = saved_type_generic_depth;
+        self.type_generic_chain.truncate(saved_type_generic_chain_len);
+        self.type_generic_truncated = saved_type_generic_truncated;
+        Ok(success)
     }
 
     /// Skip tokens until the enclosing `Type<…>` or `[T]` argument ends.
@@ -768,8 +805,8 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
-                            "fallible Jet types are written as `T ! E`".to_string(),
-                            "write the return type as `T ! E`, or `T !` for the default Err type"
+                            "fallible Jet types use a success type and an error suffix".to_string(),
+                            "write `T? E!`, `T (E1 | E2)!`, or `!` for the default Err type"
                                 .to_string(),
                             Some(start),
                         ));
@@ -843,6 +880,7 @@ impl<'a> Parser<'a> {
         // `(` belongs to the enclosing call, not to an inline range.
         let base = if !self.pending_type_gt
             && matches!(self.peek().kind, TokKind::LParen)
+            && matches!(self.peek2().kind, TokKind::Int(_, _) | TokKind::Minus)
         {
             let open = self.bump().span;
             let (lo, lo_span) = self.expect_range_bound_int("as the range's lower bound")?;
@@ -888,18 +926,18 @@ impl<'a> Parser<'a> {
                 Some(qspan),
             ));
         }
-        // D-ERRSIGIL1 / S34: tight `T?` is Optional; `T ! E` is fallible.
-        // The old spaced `T ? E` form is recovered as the same Result and
-        // teaches the dedicated fallible separator. Type-position `!` is
-        // claimed here, so expression-prefix `!` parsing is unchanged.
+        // D-ERRSUFFIX1: `T?` is Optional; `T E!` is fallible; `T!` is a
+        // unit-fallible error suffix. A separated bare `!` keeps the default
+        // error meaning. Retired infix `T ! E` / `T ? E` is recovered so fmt
+        // can migrate it and the parser can teach the new suffix zone.
+        let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
         let member = match self.peek().kind {
             TokKind::Question => {
                 let question = self.peek().span;
-                let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
                 let tight = question.start == base_end;
                 self.bump();
                 if tight {
-                    Type::Option(Box::new(base))
+                    self.parse_error_suffix(Type::Option(Box::new(base)))?
                 } else {
                     let err = if self.type_starts_here() {
                         self.type_()?.0
@@ -918,21 +956,34 @@ impl<'a> Parser<'a> {
                 }
             }
             TokKind::Bang => {
-                self.bump();
-                let err = if self.type_starts_here() {
-                    self.type_()?.0
+                let bang = self.bump().span;
+                if self.type_starts_here() {
+                    let err = self.type_()?.0;
+                    self.diags.push(Diagnostic::from_row(
+                        "E-ERR-SIGIL",
+                        &[],
+                        Some(bang),
+                    ));
+                    Type::Result {
+                        ok: Box::new(base),
+                        err: Box::new(err),
+                    }
+                } else if bang.start == base_end {
+                    Type::Result {
+                        ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                        err: Box::new(base),
+                    }
                 } else {
-                    Type::Named(Syntax::TYPE_ERR.to_string())
-                };
-                Type::Result {
-                    ok: Box::new(base),
-                    err: Box::new(err),
+                    Type::Result {
+                        ok: Box::new(base),
+                        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                    }
                 }
             }
-            _ => base,
+            _ => self.parse_error_suffix(base)?,
         };
-        // D-UNIONTYPE1=A: `A | B | …`. Right-hand side is recursive so nested
-        // pipes flatten through `canonicalize_union`.
+        // D-UNIONTYPE1=A / D-ERRSUFFIX1=B: a suffix-owned error union is
+        // parenthesized, so the outer union parser never steals its members.
         if matches!(self.peek().kind, TokKind::Pipe) {
             self.bump();
             let (right, _) = self.type_()?;

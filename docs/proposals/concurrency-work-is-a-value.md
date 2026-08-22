@@ -34,7 +34,7 @@ code.
 | One background task | imported spawn helper plus a lambda | `task work()` |
 | Task failure | string state and trace helpers | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `task.group g(limit: 4) { … }` |
-| Drain a channel | repeated receive calls | `loop v, rx :> …` |
+| Drain a channel | repeated receive calls | `loop v in rx :> …` |
 | Wait on two channels | a group-owned readiness builder | `if { v, a :> …  v, b :> …  after 100ms :> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
 | Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
@@ -132,7 +132,7 @@ h :: task work()                         // one child task, handle in hand
 h.join() ?? 0
 
 task.group g(limit: 4) {                  // dynamic fan-out with a worker cap
-    loop url, urls { task fetch(url) }
+    loop url in urls { task fetch(url) }
 }                                        // the group joins every child here
 ```
 
@@ -200,10 +200,10 @@ D-CONC-CHAN1=A.
 ```jet
 (tx, rx) :: channel<Int>(capacity: 8)
 
-loop job, rx :> handle(job)               // receive until the channel closes
+loop job in rx :> handle(job)               // receive until the channel closes
 
 if {
-    job, jobs    :> handle(job)          // arm binding mirrors `loop v, source`
+    job, jobs    :> handle(job)          // arm binding mirrors `loop v in source`
     msg, control :> obey(msg)
     after 100ms  :> retry()              // Duration literal, one time rail (D-TYPE2-TIME1)
 }
@@ -275,7 +275,7 @@ fn prune_sessions() { … }             // Duration literal every API uses
 #[Job, Every("03:00")]
 fn nightly_backup() {
     task.group g(limit: 4) {
-        loop shard, shards { task back_up(shard) }
+        loop shard in shards { task back_up(shard) }
     }
 }
 ```
@@ -346,7 +346,7 @@ Settled answers:
   plane.
 - **One branching engine.** Readiness arms are S68 arm-table arms inside a
   subjectless `if`, not a private grammar. The binding `v, source` mirrors
-  `loop v, source`.
+  `loop v in source`.
 
 ## What this unlocks
 
@@ -356,7 +356,7 @@ Settled answers:
   knows how to handle a task failure.
 - **Worker pools are one line.** `task.group g(limit: 4)` replaces the 49-line
   token pattern the pragmatism audit flagged.
-- **Channel services are two lines.** `loop job, rx :>` plus a readiness `if`
+- **Channel services are two lines.** `loop job in rx :>` plus a readiness `if`
   table covers the
   most common concurrency shape in real code.
 - **Shared state loses its closure tax.** Counters and config are field
@@ -396,7 +396,7 @@ records the amendment.
 | D-CONC-STM1 | A | A transaction body runs once. The commit takes locks in fixed order. Contention waits; it does not retry. |
 | D-CONC-SCHED1 | A | Schedule values use the typed time rail. A scheduled `#Job` is the lifecycle unit the runtime starts; `task` remains the structured-concurrency construct. Services use supervisor tasks and groups. |
 | D-CONC-STREAM1 | A | A stream is a task. Dropping its iterator cancels its producer at the next wait point, with normal cleanup. |
-| D-CONC-CHAN1 | A, spelling amended by CHAN2=D | `channel<T>()` is builtin. `loop value, receiver` drains it. The readiness wait uses the arm-table shape on plain endpoints. |
+| D-CONC-CHAN1 | A, spelling amended by CHAN2=D | `channel<T>()` is builtin. `loop value in receiver` drains it. The readiness wait uses the arm-table shape on plain endpoints. |
 | D-CONC-SHARE1 | A | `shared` values use plain field access. Each statement is one atomic step. Several steps use `#Transact`; expert guards stay. |
 | D-CONC-SPAWN1 | D | One reserved word owns the family: `task`, `task.all`, `task.race`, `task.any`, and `task.group`. Only `task` is reserved. |
 | D-CONC-FAIL1 | A | `join()` returns `T ? TaskFailure`. `TaskFailure` has `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. It retires the separate outcome types. |

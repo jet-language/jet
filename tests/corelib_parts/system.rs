@@ -104,7 +104,7 @@ fn core_db_implements_driver_trait() {
     let src = r#"
 use core.db as db
 
-fn count_people<T: Driver>(&conn: T) Int ! DBError {
+fn count_people<T: Driver>(&conn: T) Int DBError! {
     row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])?
     found :: row ?? panic("missing")
     missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])?
@@ -741,13 +741,13 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) : channel<Int>()
     producer :: task {
-        loop i, 1..1000 {
+        loop i in 1..1000 {
             sender.send(i)
         }
     }
     producer.join() ?? 0
     total: Int = 0
-    loop i, 1..1000 {
+    loop i in 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"))
     }
     print(total)
@@ -779,14 +779,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: channel<Int>()
-    loop i, 1..1000 {
+    loop i in 1..1000 {
         dup :: ~sender
         task {
             dup.send(1)
         }
     }
     total := 0
-    loop i, 1..1000 {
+    loop i in 1..1000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -818,14 +818,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: channel<Int>()
-    loop i, 1..10000 {
+    loop i in 1..10000 {
         dup :: ~sender
         task {
             dup.send(1)
         }
     }
     total := 0
-    loop i, 1..10000 {
+    loop i in 1..10000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)
@@ -858,14 +858,14 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: channel<Int>()
-    loop i, 1..100000 {
+    loop i in 1..100000 {
         dup :: ~sender
         task {
             dup.send(1)
         }
     }
     total := 0
-    loop i, 1..100000 {
+    loop i in 1..100000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
     print(total)

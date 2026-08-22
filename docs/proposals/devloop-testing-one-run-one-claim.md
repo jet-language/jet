@@ -12,7 +12,7 @@ Why now. The landing zone is already ratified and unbuilt: D-REPORT-TEST1=A give
 
 What the ballots ask: one word for assertions (D-CLAIM-WORD1), benchmarks as measured tests — one marker, one verb (D-CLAIM-BENCH1), table-driven claims (D-CLAIM-CASES1), watch as a modifier on every runnable verb (D-RUN-WATCH1), one resident session with in-session keys (D-RUN-SESSION1), and the recording observer as the Epoch 6 time-travel on-ramp (D-RUN-RECORD1). D-RUN-LAW1 adopts the model itself. Each ballot stands alone, and every element lands on a rail a sibling audit already ratified — the report frame, the stop family, the settings plane, the member grammar, the script-mode entry law, the machine report shape — so nothing here founds a second mechanism.
 
-What does not change: I9 tier parity, `#Test` as the only test syntax (D-TESTKIT1=A), `jet dev` as the one dev loop (D-CLI-DEVSERVE1=A), silent deopt with `--trace-tiers` (D-LENS-RUN2=A), the nine Output kinds, the `jet prove` evidence words, and the Epoch 6 deferral of per-variable time travel (D-TIMETRAVEL1=C).
+What does not change: I9 tier parity, `#Test` as the only test syntax (D-TESTKIT1=A), `jet dev` as the one dev loop (D-CLI-DEVSERVE1=A) in silent deopt with `--trace-tiers` (D-LENS-RUN2=A), the nine Output kinds, the `jet prove` evidence words, and the Epoch 6 deferral of per-variable time travel (D-TIMETRAVEL1=C).
 
 ## The problem, briefly
 

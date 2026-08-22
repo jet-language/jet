@@ -1374,7 +1374,10 @@ fn load_entry_with_overlays_mode_on_stack(
                 LoaderError::at(&display, &source, lex_diags),
             ));
         }
-        let (mut program, teaching) = match Parser::parse_for_check(&tokens) {
+        let (mut program, teaching) = match Parser::parse_for_check_with_source(
+            &tokens,
+            &source,
+        ) {
             Ok(parsed) => parsed,
             Err(diags) => {
                 return Err(record_loader_error(
@@ -1993,7 +1996,7 @@ fn load_file(
     if !lex_diags.is_empty() {
         return Err(LoaderError::at(display, &source, lex_diags));
     }
-    let mut prog = match Parser::parse_for_check(&toks) {
+    let mut prog = match Parser::parse_for_check_with_source(&toks, &source) {
         Ok((p, teaching)) => {
             parse_teaching.extend(teaching);
             p

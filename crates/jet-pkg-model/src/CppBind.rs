@@ -979,7 +979,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         ));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") => {} ! CppError {{\n    value :: abi.{name}_new(",
+            ") => {} CppError! {{\n    value :: abi.{name}_new(",
             class.name
         ));
         jet_args(&mut out, &class.ctor);
@@ -997,7 +997,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") => {} ! CppError {{\n        result_value :: abi.{name}_{}(self.value",
+                ") => {} CppError! {{\n        result_value :: abi.{name}_{}(self.value",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -1016,7 +1016,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("pub fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") => {} ! CppError {{\n    result_value :: abi.{}(",
+            ") => {} CppError! {{\n    result_value :: abi.{}(",
             function.result.jet(),
             function.jet_name
         ));

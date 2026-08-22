@@ -675,7 +675,7 @@ use core.encoding.xml as xml
 
 fn same_bytes(left: [U8], right: [U8]) Bool {
     if left.len() != right.len() { return false }
-    loop index, 0..<left.len() {
+    loop index in 0..<left.len() {
         if left[index] != right[index] { return false }
     }
     return true
@@ -745,7 +745,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree ! XMLError) String {
+fn show(result: DataTree XMLError!) String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -1046,7 +1046,7 @@ use core.files as files
 fn run() {{
     paths :: [String]{{ {boundary_paths} }}
     passed := 0
-    loop path, paths {{
+    loop path in paths {{
         input :: files.open(path) ?? panic("open boundary")
         reader :: xml.reader(^input) ?? panic("reader defaults")
         document_start := false

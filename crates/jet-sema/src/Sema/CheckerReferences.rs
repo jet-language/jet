@@ -75,12 +75,48 @@ impl<'a> Checker<'a> {
             let code = if binding.parameter { "L0102" } else { "L0101" };
             let name = binding.name.as_str();
             let diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span))
-                .with_edit(crate::Diagnostics::TextEdit {
-                    span: binding.span,
-                    new_text: format!("_{name}"),
-                });
+                .with_edit(self.unused_binding_edit(&binding, name));
             self.diags.push(diagnostic);
         }
+    }
+
+    fn unused_binding_edit(
+        &self,
+        binding: &UnusedBinding,
+        name: &str,
+    ) -> crate::Diagnostics::TextEdit {
+        if !binding.parameter {
+            if let Some(span) = self.side_effect_free_binding_span(binding.span) {
+                return crate::Diagnostics::TextEdit {
+                    span,
+                    new_text: String::new(),
+                };
+            }
+        }
+        crate::Diagnostics::TextEdit {
+            span: binding.span,
+            new_text: format!("_{name}"),
+        }
+    }
+
+    fn side_effect_free_binding_span(&self, name_span: Span) -> Option<Span> {
+        let function = find_function_by_span(&self.items, self.current_function_span)?;
+        let binding = binding_by_span(&function.body, name_span)?;
+        if binding.pattern.is_some()
+            || binding.is_comptime
+            || binding.ct.is_some()
+            || binding.uninit
+            || binding.meta.is_some()
+            || !binding.markers.is_empty()
+            || binding.arena_view
+            || binding.string_view
+            || binding.gc_promotion.is_some()
+            || binding.gc_transferred
+            || !literal_without_effects(&binding.init)
+        {
+            return None;
+        }
+        Some(Span::new(binding.name_span.start, binding.init.span().end))
     }
 
     pub(crate) fn record_reference_anchor(
@@ -274,5 +310,83 @@ impl<'a> Checker<'a> {
                 identity,
             );
         }
+    }
+}
+
+fn find_function_by_span<'a>(
+    items: &'a [crate::AST::Item],
+    span: Span,
+) -> Option<&'a crate::AST::Func> {
+    for item in items {
+        let function = match item {
+            crate::AST::Item::Func(function) if function.span == span => Some(function),
+            crate::AST::Item::Struct(definition) => definition
+                .methods
+                .iter()
+                .find(|function| function.span == span)
+                .or_else(|| {
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter())
+                        .find(|function| function.span == span)
+                }),
+            crate::AST::Item::Enum(definition) => definition
+                .methods
+                .iter()
+                .find(|function| function.span == span)
+                .or_else(|| {
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter())
+                        .find(|function| function.span == span)
+                }),
+            crate::AST::Item::Impl(implementation) => implementation
+                .methods
+                .iter()
+                .find(|function| function.span == span),
+            crate::AST::Item::CodeModule(module) => module
+                .body
+                .as_deref()
+                .and_then(|body| find_function_by_span(body, span)),
+            _ => None,
+        };
+        if function.is_some() {
+            return function;
+        }
+    }
+    None
+}
+
+fn binding_by_span<'a>(body: &'a [Stmt], span: Span) -> Option<&'a crate::AST::Binding> {
+    for statement in body {
+        let binding = match statement {
+            Stmt::Val(binding) => Some(binding),
+            _ => None,
+        };
+        if binding.is_some_and(|binding| binding.name_span == span) {
+            return binding;
+        }
+        for nested in crate::Sema::UnsafeObligations::nested_bodies(statement) {
+            if let Some(binding) = binding_by_span(nested, span) {
+                return Some(binding);
+            }
+        }
+    }
+    None
+}
+
+fn literal_without_effects(expr: &Expr) -> bool {
+    match expr.without_parens() {
+        Expr::Str(parts, _) => parts
+            .iter()
+            .all(|part| matches!(part, StrPart::Lit(_))),
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Bool(..)
+        | Expr::Char(..)
+        | Expr::Absent(..) => true,
+        _ => false,
     }
 }

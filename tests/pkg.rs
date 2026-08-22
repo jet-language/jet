@@ -1835,6 +1835,54 @@ fn cli_build_enforces_lint_policy_e1293() {
 }
 
 #[test]
+fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
+    if !jet_bin().is_file() {
+        eprintln!(
+            "note: skipping cli_build_unused_lint_warns_by_default_and_denies_by_policy (run `cargo build` first)"
+        );
+        return;
+    }
+    let tmp = tmp_dir("lintpolicy_unused");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "package.jet", &min_manifest("app", "0.1.0"));
+    write(
+        &tmp,
+        "run.jet",
+        "fn run() { unused_binding :: 1; print(\"hi\"); }\n",
+    );
+
+    let warning = jet_cmd(&["build", "run.jet"], &tmp, &store);
+    let warning_stderr = String::from_utf8_lossy(&warning.stderr);
+    assert!(warning_stderr.contains("L0101"), "expected unused-local warning:\n{warning_stderr}");
+    assert!(warning_stderr.contains("effects:"), "default build did not pass the lint gate:\n{warning_stderr}");
+    assert!(
+        !warning_stderr.contains("E1293"),
+        "default warning must not be denied:\n{warning_stderr}"
+    );
+
+    write(
+        &tmp,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "\npolicy: {\n    lints: { deny: [unused_local_binding] },\n}\n"),
+    );
+    let denied = jet_cmd(&["build", "run.jet"], &tmp, &store);
+    let denied_stderr = String::from_utf8_lossy(&denied.stderr);
+    assert!(!denied.status.success(), "denied lint must fail:\n{denied_stderr}");
+    assert!(
+        denied_stderr.contains("E1293") && denied_stderr.contains("L0101"),
+        "expected E1293 to name unused_local_binding/L0101:\n{denied_stderr}"
+    );
+    assert!(
+        !denied_stderr.contains("Warning [L0101]"),
+        "denied lint must not remain a plain warning:\n{denied_stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
     if !jet_bin().is_file() {
         eprintln!(

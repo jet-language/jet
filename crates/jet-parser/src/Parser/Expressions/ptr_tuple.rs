@@ -430,7 +430,8 @@ impl<'a> Parser<'a> {
                 | TokKind::SlashPercent
                 | TokKind::Percent
                 | TokKind::PercentPercent
-                | TokKind::Caret => true,
+                | TokKind::Caret
+                | TokKind::KwIn => true,
                 TokKind::Gt => self.module_arg_expr_depth != Some(self.depth),
                 _ => false,
             }
@@ -457,7 +458,14 @@ impl<'a> Parser<'a> {
         /// `if subject {` never reads `subject { … }` as a struct value.
         pub(in crate::Parser) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
             let span = self.peek().span;
-            self.with_nesting(span, |p| p.expr_bitxor(false))
+            self.with_nesting(span, |p| {
+                let expr = p.expr_bitxor(false)?;
+                if matches!(p.peek().kind, TokKind::KwIn) {
+                    let span = p.bump().span;
+                    return Err(Diagnostic::from_row("E0384", &[], Some(span)));
+                }
+                Ok(expr)
+            })
         }
     
 }

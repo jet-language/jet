@@ -1221,8 +1221,11 @@ fn check_bundle_opts_for_output_inner(
                         let type_path = name_ledger
                             .canonical_path(idx, &s.name)
                             .expect("derive target missing from the name ledger");
-                        let layout_engine = jet_foundation::Layout::TargetLayoutEngine::host(
+                        let layout_engine = jet_foundation::Layout::TargetLayoutEngine::new(
                             module.items.iter(),
+                            jet_foundation::Layout::TargetLayout::from_triple(
+                                &bundle.build_facts.target_triple,
+                            ),
                         );
                         let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
                             s,
@@ -1405,8 +1408,11 @@ fn check_bundle_opts_for_output_inner(
                 let type_path = name_ledger
                     .canonical_path(idx, &target.name)
                     .expect("declared rule target missing from the name ledger");
-                let layout_engine = jet_foundation::Layout::TargetLayoutEngine::host(
+                let layout_engine = jet_foundation::Layout::TargetLayoutEngine::new(
                     module.items.iter(),
+                    jet_foundation::Layout::TargetLayout::from_triple(
+                        &bundle.build_facts.target_triple,
+                    ),
                 );
                 let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
                     &target,

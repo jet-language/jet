@@ -327,12 +327,12 @@ fn async_event_overflow_and_failure_policies() {
 use core.event as event
 use core.tasks as tasks
 
-fn panic_log_handler(n: Int) ! String {
+fn panic_log_handler(n: Int) String! {
     panic("log boom")
     return .Err("unreachable")
 }
 
-fn panic_ignore_handler(n: Int) ! String {
+fn panic_ignore_handler(n: Int) String! {
     panic("ignore boom")
     return .Err("unreachable")
 }

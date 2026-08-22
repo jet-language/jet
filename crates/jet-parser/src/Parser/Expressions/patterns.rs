@@ -200,6 +200,7 @@ impl<'a> Parser<'a> {
         ) -> Result<StrMatchPart, Diagnostic> {
             let mut sub = Parser {
                 toks: &toks,
+                source: None,
                 pos: 0,
                 diags: Vec::new(),
                 pending_type_gt: false,
