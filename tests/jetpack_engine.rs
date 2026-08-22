@@ -1594,7 +1594,7 @@ checksum = "insta-checksum"
 
 #[test]
 fn provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier() {
-    use jet_pkg_model::ProviderFacts::ProviderFacts;
+    use jetpack::ProviderFacts;
     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
 
     let documents = [
