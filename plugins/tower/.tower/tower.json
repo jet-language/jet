@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 41162,
+    "rev": 41265,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -9974,7 +9974,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-nix-compat",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **No-installed-Nix gate: remove package and environment shell-outs** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-NIXSTORE1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src, tests/jetpack_engine.rs, tests/jetpack_dispatch.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Extend the private compatibility evaluator without exposing Nix as a second Jet model. Keep imports bounded by explicit authority.\n6. Unsupported or over-budget input fails honestly. The product proof runs with Nix absent and PATH stripped, with no hidden shell-out.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -10042,52 +10042,52 @@
         }
       ],
       "created": "2026-07-09T18:16:39.644Z",
-      "updated": "2026-08-01T17:56:10.807Z",
+      "updated": "2026-08-22T15:37:21.161Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:10.806Z"
+          "evidence": "evidence: Provider.rs:939, CLI/realize.rs:167, NixEval/Boundary.rs:171; production no-Nix tests pass. [lane z399]",
+          "at": "2026-08-22T15:37:18.933Z"
         },
         {
           "n": 2,
           "text": "Pinned differential fixtures match the required Nix behavior, including values, errors, locks, and output identities.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:10.807Z"
+          "evidence": "evidence: pinned fixture stage-a-derivation.json:53, :77; private_derivation_materializer_matches_pinned_fixture_and_errors; evaluator suite 42/42. [lane z399]",
+          "at": "2026-08-22T15:37:19.286Z"
         },
         {
           "n": 3,
           "text": "Unsupported or over-budget input fails honestly. The product proof runs with Nix absent and PATH stripped, with no hidden shell-out.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:10.807Z"
+          "evidence": "evidence: jetpack_engine.rs:2628, :2649; PATH-stripped E1272 and bounded-budget tests pass. [lane z399]",
+          "at": "2026-08-22T15:37:19.664Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:10.807Z"
+          "evidence": "evidence: no-shellout gate, flake, package, mixed-env, JSON, and jet env production tests pass. [lane z399]",
+          "at": "2026-08-22T15:37:20.034Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:10.807Z"
+          "evidence": "evidence: world-class-package-manager.md:492, :714; diagnostic-rows.md:690; E1272.stderr:1. [lane z399]",
+          "at": "2026-08-22T15:37:20.405Z"
         }
       ],
       "needsAcceptance": false,
@@ -10097,9 +10097,10 @@
         "tests/jetpack_engine.rs",
         "tests/jetpack_dispatch.rs"
       ],
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T15:37:21.160Z"
     },
     {
       "id": "c0233d1b",
@@ -12289,7 +12290,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-profiles-providers",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Package profiles: source-backed generation model** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-PROFILE1=D, D-JPK-PROFILECOLLISION1=A.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/CLI/tool.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower profiles and providers into the shared typed fact model. Preserve lossless import, export, lock, and explain behavior.\n6. Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -12403,7 +12404,7 @@
         }
       ],
       "created": "2026-07-09T20:38:07.502Z",
-      "updated": "2026-08-14T10:49:19.655Z",
+      "updated": "2026-08-22T15:37:22.852Z",
       "criteria": [
         {
           "n": 1,
@@ -12426,11 +12427,11 @@
         {
           "n": 3,
           "text": "Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.497Z"
+          "evidence": "explicit loss/conflict behavior passes ProviderFacts and production plan tests; Source.rs:185-210, diagnostic-rows.md:595-598. [lane z425]",
+          "at": "2026-08-22T15:37:21.777Z"
         },
         {
           "n": 4,
@@ -12444,11 +12445,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.497Z"
+          "evidence": "docs, reference behavior, diagnostics, and executable coverage match; world-class-package-manager.md:547-565, jetpack-epoch5.md:140-178. [lane z425]",
+          "at": "2026-08-22T15:37:22.122Z"
         }
       ],
       "needsAcceptance": false,
@@ -12458,7 +12459,7 @@
         "crates/jetpack/src/Store.rs",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "fable-e3-burndown",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -12807,7 +12808,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-cache-remote",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Reproducibility certification: independent-root build runner** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-REPROCACHE1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src, crates/jet-pkg-model/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse the content-addressed store and action identity. Verify all remote facts before they can become local truth.\n6. Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -12907,34 +12908,34 @@
         }
       ],
       "created": "2026-07-09T20:38:08.158Z",
-      "updated": "2026-08-01T17:56:12.208Z",
+      "updated": "2026-08-22T15:37:25.183Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.208Z"
+          "evidence": "evidence: Store.rs:1819-1933 runs the real provider through two fresh roots and promotes only after agreement. [lane z429]",
+          "at": "2026-08-22T15:37:23.463Z"
         },
         {
           "n": 2,
           "text": "Cache and remote results preserve local build identity, declared capabilities, provenance, and deterministic outputs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.208Z"
+          "evidence": "evidence: canonical action identity and output/provenance comparison in Closure.rs:635-693 and Reproducibility.rs:214-275,787-861. [lane z429]",
+          "at": "2026-08-22T15:37:23.793Z"
         },
         {
           "n": 3,
           "text": "Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.208Z"
+          "evidence": "evidence: rejection and cleanup gates in Reproducibility.rs:296-377,527-551 and promotion ordering in Store.rs:1855-1868,1920-1928. [lane z429]",
+          "at": "2026-08-22T15:37:24.151Z"
         },
         {
           "n": 4,
@@ -12948,11 +12949,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.208Z"
+          "evidence": "evidence: ratified decision docs/spec/syntax-decisions.md:5576-5581; behavior docs docs/reference/jetpack-epoch5.md:391-399. [lane z429]",
+          "at": "2026-08-22T15:37:24.492Z"
         }
       ],
       "needsAcceptance": false,
@@ -12962,7 +12963,7 @@
         "crates/jet-pkg-model/src",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -13334,7 +13335,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-build-actions",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Staged builds: sandboxed plan action** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-DYNAMICPLAN1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jet-pkg-model/src, crates/jet-env-model/src, crates/jetpack/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower the feature into the existing finite action graph. Bind action identity to all declared inputs and authority.\n6. Reject undeclared access, cycles, invalid outputs, and partial stage results. Cancellation or failure leaves no valid-looking artifact.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -13455,52 +13456,52 @@
         }
       ],
       "created": "2026-07-09T20:38:08.640Z",
-      "updated": "2026-08-01T17:56:12.912Z",
+      "updated": "2026-08-22T15:37:27.821Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.912Z"
+          "evidence": "evidence: crates/jetpack/src/Recipe.rs:375, tests/jetpack_engine.rs:6081 [lane z432]",
+          "at": "2026-08-22T15:37:25.804Z"
         },
         {
           "n": 2,
           "text": "The action graph captures every declared input, output, tool, effect, and platform fact. Repeated builds produce the same result identity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.912Z"
+          "evidence": "evidence: crates/jet-pkg-model/src/Recipe.rs:285, crates/jetpack/src/Recipe.rs:485 [lane z432]",
+          "at": "2026-08-22T15:37:26.120Z"
         },
         {
           "n": 3,
           "text": "Reject undeclared access, cycles, invalid outputs, and partial stage results. Cancellation or failure leaves no valid-looking artifact.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.912Z"
+          "evidence": "evidence: crates/jetpack/src/Recipe.rs:198, crates/jetpack/src/Recipe.rs:679, tests/jetpack_engine.rs:6186 [lane z432]",
+          "at": "2026-08-22T15:37:26.453Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.912Z"
+          "evidence": "evidence: focused production tests passed below [lane z432]",
+          "at": "2026-08-22T15:37:26.793Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:12.912Z"
+          "evidence": "evidence: docs/plans/epoch-4/world-class-package-manager.md:655, crates/jet-codegen/src/Prelude/Diagnostics.jet:649 [lane z432]",
+          "at": "2026-08-22T15:37:27.127Z"
         }
       ],
       "needsAcceptance": false,
@@ -13511,9 +13512,10 @@
         "crates/jetpack/src",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T15:37:27.821Z"
     },
     {
       "id": "c00lqj9d",
@@ -13524,7 +13526,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-platform-acceptance",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Epoch 4 gate: tier-1 platform matrix** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, docs/spec/roadmap.md, tests/jetpack_engine.rs, tests/jetpack_dispatch.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Prove the integrated Jetpack workflow on clean machines and the declared platform matrix. Do not implement duplicate feature paths here.\n6. Missing tools, offline mode, clean stores, unsupported platforms, and injected component failure expose no hidden dependency or false-green skip.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -13602,7 +13604,7 @@
         }
       ],
       "created": "2026-07-09T20:38:08.821Z",
-      "updated": "2026-08-19T13:28:28.602Z",
+      "updated": "2026-08-22T15:37:29.112Z",
       "criteria": [
         {
           "n": 1,
@@ -13643,11 +13645,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:13.150Z"
+          "evidence": "docs updated; rustfmt and diff checks passed. [lane z433]",
+          "at": "2026-08-22T15:37:28.421Z"
         }
       ],
       "needsAcceptance": false,
@@ -13657,7 +13659,7 @@
         "tests/jetpack_engine.rs",
         "tests/jetpack_dispatch.rs"
       ],
-      "updatedBy": "fable",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -13670,7 +13672,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-trust-policy",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Package trust: registry and cache integration** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-CACHEAUTH1=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/TrustRoot.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Apply trust and policy before any package, cache, or remote result becomes usable. Keep decisions visible in receipts and explain output.\n6. Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -13741,34 +13743,34 @@
         }
       ],
       "created": "2026-07-09T20:42:55.814Z",
-      "updated": "2026-08-01T17:56:13.395Z",
+      "updated": "2026-08-22T15:37:31.469Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:13.395Z"
+          "evidence": "evidence: signed registry verification [Tuf.rs](/home/nate/Projects/Github/jet/Source/Publish/Tuf.rs:151), cache transfer [Cache.rs](/home/nate/Projects/Github/jet/crates/jetpack/src/Store/Cache.rs:541), passing production cache tests. [lane z434]",
+          "at": "2026-08-22T15:37:29.719Z"
         },
         {
           "n": 2,
           "text": "Identity, signatures, provenance, locks, advisory policy, and offline state produce one deterministic allow or deny result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:13.395Z"
+          "evidence": "evidence: receipt validation [TrustRoot.rs](/home/nate/Projects/Github/jet/crates/jetpack/src/TrustRoot.rs:300), fail-closed cache config [Store.rs](/home/nate/Projects/Github/jet/crates/jetpack/src/Store.rs:1740), 7 cache unit tests passed. [lane z434]",
+          "at": "2026-08-22T15:37:30.071Z"
         },
         {
           "n": 3,
           "text": "Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:13.395Z"
+          "evidence": "evidence: tamper/rollback/freeze/mix-and-match coverage [tests/jetpack_engine.rs](/home/nate/Projects/Github/jet/tests/jetpack_engine.rs:517). [lane z434]",
+          "at": "2026-08-22T15:37:30.418Z"
         },
         {
           "n": 4,
@@ -13782,11 +13784,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:13.395Z"
+          "evidence": "evidence: receipt/explain documentation [world-class-package-manager.md](/home/nate/Projects/Github/jet/docs/plans/epoch-4/world-class-package-manager.md:347), JSON projection [Explain.rs](/home/nate/Projects/Github/jet/crates/jetpack/src/Store/Explain.rs:1544), integration assertions [jetpack_engine.rs](/home/nate/Projects/Github/jet/tests/jetpack_engine.rs:315). [lane z434]",
+          "at": "2026-08-22T15:37:30.774Z"
         }
       ],
       "needsAcceptance": false,
@@ -13796,7 +13798,7 @@
         "crates/jetpack/src/Store.rs",
         "tests/jetpack_engine.rs"
       ],
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -17994,7 +17996,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-store-repair",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Package graph: System Output projection** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-ECO-JETOS2=A, D-ECO-JETOS-PREVIEW1=A, D-ECO-FLEETVERB1=A.\n2. Start with docs/proposals/ecosystem-shape.md, docs/spec/syntax-decisions.md, docs/spec/architecture.md, crates/jet-pkg-model, crates/jet-env-model, crates/jetpack/src/Output.rs, crates/jet-semindex/src, tests/jetpack_engine.rs, tests/canvas.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical Hangar and closure model. Make every mutation atomic, recoverable, and explainable.\n6. Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -18076,11 +18078,11 @@
         {
           "n": 2,
           "text": "Store identity, reachability, receipts, and projections agree. Repeated operations are safe and deterministic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:14.138Z"
+          "evidence": "identity and deterministic projection at PackageOutput.rs:90, PackageOutput.rs:106, generation_files.rs:709; focused projection test passed. [lane z609]",
+          "at": "2026-08-22T15:37:32.021Z"
         },
         {
           "n": 3,
@@ -18103,11 +18105,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:14.138Z"
+          "evidence": "docs updated at ecosystem-shape.md:143 and architecture.md:109; plan-field assertion at tests/jetpack_engine.rs:6313. [lane z609]",
+          "at": "2026-08-22T15:37:32.350Z"
         }
       ],
       "refs": [
@@ -18123,8 +18125,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-14T23:00:05.144Z",
-      "updated": "2026-08-01T17:56:14.138Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T15:37:33.046Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -18717,7 +18719,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-store-repair",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Hangar receipts: canonical connected receipt schema** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/proposals/ecosystem-shape.md, docs/spec/syntax-decisions.md, docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/Store.rs, crates/jet-pkg-model/src/WorkspaceLock.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical Hangar and closure model. Make every mutation atomic, recoverable, and explainable.\n6. Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -18821,29 +18823,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.324Z"
+          "evidence": "evidence: Closure.rs:1238-1276, Ingest.rs:696-700, Store.rs:75-79 [lane z655]",
+          "at": "2026-08-22T15:37:33.644Z"
         },
         {
           "n": 2,
           "text": "Store identity, reachability, receipts, and projections agree. Repeated operations are safe and deterministic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.324Z"
+          "evidence": "evidence: Closure.rs:1292-1298,1795-1839, Store.rs:1943-2012; receipt_roundtrips_without_changing_other_packages [lane z655]",
+          "at": "2026-08-22T15:37:34.071Z"
         },
         {
           "n": 3,
           "text": "Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.324Z"
+          "evidence": "evidence: Closure.rs:1161-1235, Store.rs:168-177,2047-2088; crash, corruption, symlink, lease, and concurrent tests [lane z655]",
+          "at": "2026-08-22T15:37:34.438Z"
         },
         {
           "n": 4,
@@ -18857,11 +18859,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.324Z"
+          "evidence": "evidence: docs/spec/syntax-decisions.md:4357-4368, crates/jet-pkg-model/src/Lock.rs:57-60,524-525,1175-1177 [lane z655]",
+          "at": "2026-08-22T15:37:34.766Z"
         }
       ],
       "refs": [
@@ -18874,9 +18876,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-15T21:05:11.873Z",
-      "updated": "2026-08-01T17:56:15.324Z",
+      "updated": "2026-08-22T15:37:35.440Z",
       "workOrder": 3090,
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -24699,7 +24701,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Service presets: shared typed constructor framework** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, crates/jetpack/src, examples/features. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -24737,47 +24739,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.827Z"
+          "evidence": "evidence: [Services.rs:49](/home/nate/Projects/Github/jet/crates/jetpack/src/Services.rs:49), [Services.rs:345](/home/nate/Projects/Github/jet/crates/jetpack/src/Services.rs:345), passing typed_catalog_presets_share_runtime_package_and_port_facts [lane z786]",
+          "at": "2026-08-22T15:37:36.048Z"
         },
         {
           "n": 2,
           "text": "Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.828Z"
+          "evidence": "evidence: [Services.rs:803](/home/nate/Projects/Github/jet/crates/jetpack/src/Services.rs:803), [jetpack-epoch5.md:451](/home/nate/Projects/Github/jet/docs/reference/jetpack-epoch5.md:451), passing production catalog test [lane z786]",
+          "at": "2026-08-22T15:37:36.379Z"
         },
         {
           "n": 3,
           "text": "Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.828Z"
+          "evidence": "evidence: [Services.rs:2323](/home/nate/Projects/Github/jet/crates/jetpack/src/Services.rs:2323), [Services.rs:2570](/home/nate/Projects/Github/jet/crates/jetpack/src/Services.rs:2570), all 40 scoped service unit tests passed [lane z786]",
+          "at": "2026-08-22T15:37:36.708Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.828Z"
+          "evidence": "evidence: passing production_catalog_services_prepare_state_and_pass_readiness, production_path_bounds_readiness_probe_runtime, and production_path_stops_dependents_after_dependency_failure [lane z786]",
+          "at": "2026-08-22T15:37:37.034Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:15.828Z"
+          "evidence": "evidence: [devenv-parity.md:141](/home/nate/Projects/Github/jet/docs/research/2026-07-24-devenv-parity.md:141), [services.jet:11](/home/nate/Projects/Github/jet/tests/fixtures/jetpack-typed/services.jet:11), [diagnostics.md:863](/home/nate/Projects/Github/jet/docs/spec/diagnostics.md:863), [E1328.stderr:1](/home/nate/Projects/Github/jet/tests/fixtures/module-eval-diagnostics/E1328.stderr:1) [lane z786]",
+          "at": "2026-08-22T15:37:37.362Z"
         }
       ],
       "refs": [
@@ -24788,11 +24790,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:51.877Z",
-      "updated": "2026-08-01T17:56:15.828Z",
+      "updated": "2026-08-22T15:37:38.034Z",
       "workOrder": 3380,
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T15:37:38.034Z"
     },
     {
       "id": "c0s1t30c",
@@ -24919,7 +24922,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-images-packs",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Option A is ratified. Project an Environment through the existing image record. Use a safe non-root shell image as the beginner default. Let experts select services, platforms, users, entrypoints, layers, ports, health, cache, and provenance. Classify each environment fact as included, changed, omitted, or rejected. Keep secrets out of layers. Use runtime mounts or references for secrets. Reuse Hangar, .jet/lock, D-JPK-REMOTE1, and jet os image. Add no second container record, lock, publish path, or Dockerfile mechanism. Cards #783 and the existing service prerequisite remain blockers.",
       "blockedBy": [
@@ -24968,20 +24971,20 @@
         {
           "n": 1,
           "text": "The existing image record accepts from: env.* and creates a safe non-root shell image by default. It can select supervised services without a second model.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T01:11:48.798Z"
+          "evidence": "evidence: System.rs:140-258, add_remove_push_image.rs:774-790, tests/image.rs:142-158; service gate golden tests/cli/image_service_projection_e1336.txt. [lane z788]",
+          "at": "2026-08-22T15:37:38.649Z"
         },
         {
           "n": 2,
           "text": "Projection classifies each fact as included, changed, omitted, or rejected. Host-only state fails clearly, and secrets never enter image layers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T01:11:48.798Z"
+          "evidence": "evidence: add_remove_push_image.rs:632-714,1012-1025; secret/path tests tests/image.rs:360-445. [lane z788]",
+          "at": "2026-08-22T15:37:38.993Z"
         },
         {
           "n": 3,
@@ -25019,9 +25022,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.145Z",
-      "updated": "2026-08-19T13:28:32.273Z",
+      "updated": "2026-08-22T15:37:39.711Z",
       "workOrder": 3520,
-      "updatedBy": "fable",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -33074,7 +33077,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-cache-remote",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Binary cache: canonical NAR read and write codec** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/Store.rs, crates/jet-pkg-model/src/Envelope.rs, tests/jetpack_engine.rs, tests/diagnostic_snapshots.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse the content-addressed store and action identity. Verify all remote facts before they can become local truth.\n6. Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -33112,29 +33115,29 @@
         {
           "n": 2,
           "text": "Cache and remote results preserve local build identity, declared capabilities, provenance, and deterministic outputs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:18.000Z"
+          "evidence": "evidence: crates/jetpack/src/Store/Cache.rs:473, crates/jetpack/src/Store/Cache.rs:612; passing binary_cache_local_publish_verify_and_reject_corruption [lane z879]",
+          "at": "2026-08-22T15:37:40.288Z"
         },
         {
           "n": 3,
           "text": "Reject corrupt, unsigned, mismatched, replayed, or malicious results. Cancellation, retry, and worker loss cannot publish partial output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:18.000Z"
+          "evidence": "evidence: crates/jetpack/src/Store/Nar.rs:1097, crates/jetpack/src/Store/Cache.rs:614, crates/jetpack/src/Store/Cache.rs:728; passing corruption, trust-receipt, and malicious-input tests [lane z879]",
+          "at": "2026-08-22T15:37:40.616Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:18.000Z"
+          "evidence": "evidence: targeted production command passed all 4 binary_cache_ tests [lane z879]",
+          "at": "2026-08-22T15:37:40.932Z"
         },
         {
           "n": 5,
@@ -33155,10 +33158,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:33.821Z",
-      "updated": "2026-08-21T18:49:23.777Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-22T15:37:41.621Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T15:37:41.620Z"
     },
     {
       "id": "c07vjd36",
@@ -141073,29 +141077,29 @@
         {
           "n": 3,
           "text": "For both receipts, jet budget check --json reports all three declared measurements, baseline bootstrap/update records the pinned identity, and a subsequent check passes without missing-baseline or provider-version errors.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T22:56:29.990Z"
+          "evidence": "evidence: hello baseline 7be5801e…, check 42bdcb37…; server baseline 12404763…, check 89431d03…; both JSON reports: 3 measurements, 3 pass. [lane z2142]",
+          "at": "2026-08-22T15:37:16.370Z"
         },
         {
           "n": 4,
           "text": "docs/reference/performance-receipt.md contains the receipt table with named hardware, OS, toolchain, target/profile, trial count, p50/p95/p99 values where applicable, budget values, and baseline identity; no cross-machine or cross-profile comparison is used.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T22:56:30.605Z"
+          "evidence": "evidence: [performance-receipt.md](/home/nate/Projects/Github/jet/docs/reference/performance-receipt.md:6) and table at line 17. [lane z2142]",
+          "at": "2026-08-22T15:37:16.709Z"
         },
         {
           "n": 5,
           "text": "The server readiness measurement proves a TCP-connectable, HTTP-ready endpoint after binding, uses the existing ServiceReadiness/ServiceProbe contract, and records the configured fresh-sample count rather than process-start time.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T22:56:31.269Z"
+          "evidence": "evidence: [run.jet](/home/nate/Projects/Github/jet/examples/performance/receipts/http_ready/src/run.jet:32), [env.jet](/home/nate/Projects/Github/jet/examples/performance/receipts/http_ready/env.jet:8), ServiceProbe test at [expand.rs](/home/nate/Projects/Github/jet/tests/cli_parts/expand.rs:1043). [lane z2142]",
+          "at": "2026-08-22T15:37:17.065Z"
         },
         {
           "n": 6,
@@ -141124,7 +141128,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T15:34:28.652Z",
-      "updated": "2026-08-22T11:34:25.565Z",
+      "updated": "2026-08-22T15:37:17.065Z",
       "updatedBy": "Main"
     },
     {
@@ -141229,7 +141233,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -141301,11 +141305,11 @@
         {
           "n": 5,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T21:36:54.603Z"
+          "evidence": "evidence: crates/jet-foundation/src/Syntax.rs:145-160 [lane z2144]",
+          "at": "2026-08-22T15:36:42.622Z"
         },
         {
           "n": 6,
@@ -141319,20 +141323,20 @@
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T21:36:54.603Z"
+          "evidence": "evidence: jet self devtools grammars reported regenerated editor grammar sections; grammar assertions passed. [lane z2144]",
+          "at": "2026-08-22T15:36:42.958Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T21:36:54.603Z"
+          "evidence": "evidence: scoped UI/lint blessing runs passed; no snapshot diff. [lane z2144]",
+          "at": "2026-08-22T15:36:43.285Z"
         },
         {
           "n": 9,
@@ -141349,8 +141353,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T21:13:45.933Z",
-      "updated": "2026-08-21T23:50:14.541Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T15:36:44.024Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T15:36:44.024Z"
     },
     {
       "id": "c0qvv1mi",
@@ -141477,7 +141482,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -141486,7 +141491,80 @@
       ],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Braced non-unit callables format with -> and remain stable.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: formatter probe output E0080 + formatter matrix: ok; crates/jet-parser/src/Formatter/Items.rs:1320 [lane z2147]",
+          "at": "2026-08-22T15:36:50.879Z"
+        },
+        {
+          "n": 2,
+          "text": "Unit and unit-fallible bodies remain bare; effect rows remain -[E]>/-[]>.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: Parser::s61_tests::unit_fallible_signatures_format_without_arrow [lane z2147]",
+          "at": "2026-08-22T15:36:51.213Z"
+        },
+        {
+          "n": 3,
+          "text": "One-expression bodies remain -> expr.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: probe output fn concise() Int -> 1 [lane z2147]",
+          "at": "2026-08-22T15:36:52.341Z"
+        },
+        {
+          "n": 4,
+          "text": "Arrowless value bodies emit E0080 with an insertion fix.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/ui/missing_callable_body_arrow.stderr:1; targeted UI snapshot passed [lane z2147]",
+          "at": "2026-08-22T15:36:53.629Z"
+        },
+        {
+          "n": 5,
+          "text": "Value-body tails preserve final expressions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: Parser::s61_tests::multiline_callable_tail_preserves_its_source_expression [lane z2147]",
+          "at": "2026-08-22T15:36:54.204Z"
+        },
+        {
+          "n": 6,
+          "text": "task {} remains unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: Parser::s61_tests::task_keyword_callable_body_parses_as_spawn [lane z2147]",
+          "at": "2026-08-22T15:36:55.321Z"
+        },
+        {
+          "n": 7,
+          "text": "Diagnostics, snapshots, examples, and docs record the rule.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: crates/jet-codegen/src/Prelude/Diagnostics.jet:82, docs/spec/spec.md:2186, examples/features/basics/body_rules.jet:3 [lane z2147]",
+          "at": "2026-08-22T15:36:56.345Z"
+        },
+        {
+          "n": 8,
+          "text": "Body-rule behavior matches across execution tiers.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: body_rules_example_matches_all_execution_tiers [lane z2147]",
+          "at": "2026-08-22T15:36:56.787Z"
+        }
+      ],
       "refs": [
         "#2144"
       ],
@@ -141494,8 +141572,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:01.965Z",
-      "updated": "2026-08-21T23:50:16.561Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T15:36:58.373Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T15:36:58.373Z"
     },
     {
       "id": "c0jalyt0",
@@ -141732,7 +141811,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -141741,7 +141820,71 @@
       ],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": ".len() method-head shorthand works in a unary call slot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: passing bare_method_head_shorthand_in_callable_slot; tests/tir_collections_and_methods.rs:1016 [lane z2151]",
+          "at": "2026-08-22T15:37:04.204Z"
+        },
+        {
+          "n": 2,
+          "text": "Member/method chains normalize to one subject-chain path.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: crates/jet-sema/src/Sema/CheckerInfer/expr.rs:44 and examples/features/basics/method_chain.jet:25 [lane z2151]",
+          "at": "2026-08-22T15:37:04.562Z"
+        },
+        {
+          "n": 3,
+          "text": "Lowering remains an ordinary one-parameter lambda across AOT, JIT, and interpreter.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/tir_support/mod.rs:155 and tests/tir_support/mod.rs:176; focused parity test passed [lane z2151]",
+          "at": "2026-08-22T15:37:04.897Z"
+        },
+        {
+          "n": 4,
+          "text": "Nested shorthand emits registered lint L0512 with named-binding guidance.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: crates/jet-codegen/src/Prelude/Diagnostics.jet:328; tests/ui_lint/subject_shorthand_nesting.warn:1 [lane z2151]",
+          "at": "2026-08-22T15:37:05.235Z"
+        },
+        {
+          "n": 5,
+          "text": "Canonical local #allow(subject_shorthand_nesting) suppresses the lint.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: passing subject_shorthand_nesting_lint_and_allow; tests/tir_collections_and_methods.rs:1027 [lane z2151]",
+          "at": "2026-08-22T15:37:05.569Z"
+        },
+        {
+          "n": 6,
+          "text": "policy.lints.deny promotes the lint to E1293.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: passing LintPolicy::tests::promotes_nested_subject_shorthand_lint_by_registered_name; crates/jet-foundation/src/LintPolicy.rs:457 [lane z2151]",
+          "at": "2026-08-22T15:37:05.916Z"
+        },
+        {
+          "n": 7,
+          "text": "The UI snapshot matches the diagnostic.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: focused lint_snapshots test passed for tests/ui_lint/subject_shorthand_nesting.jet [lane z2151]",
+          "at": "2026-08-22T15:37:06.262Z"
+        }
+      ],
       "refs": [
         "#2144"
       ],
@@ -141749,8 +141892,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:06.227Z",
-      "updated": "2026-08-21T23:50:20.321Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T15:37:06.968Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T15:37:06.967Z"
     },
     {
       "id": "c0l24ldp",
@@ -141761,7 +141905,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -141770,7 +141914,80 @@
       ],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Parser and formatter support name: Type{default} for parameters, fields, and marker parameters.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: crates/jet-parser/src/Parser/Items/functions_params.rs:958, type_methods_fields.rs:165, Formatter/Items.rs:1560 [lane z2152]",
+          "at": "2026-08-22T15:37:12.228Z"
+        },
+        {
+          "n": 2,
+          "text": "Defaults preserve per-call, left-to-right reference evaluation.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: jet run examples/features/basics/default_refs.jet produced 5x5, 5x3, 4x4x4, 4x2x2, 4x2x1; expected output tests/tir_language_features.rs:253 [lane z2152]",
+          "at": "2026-08-22T15:37:12.626Z"
+        },
+        {
+          "n": 3,
+          "text": "CLI/serde field defaults use typed defaults and do not become positional API slots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: Source/Publish/API.rs:271, regression test tests/pkg.rs:3453 [lane z2152]",
+          "at": "2026-08-22T15:37:13.025Z"
+        },
+        {
+          "n": 4,
+          "text": "Retired name: Type = value emits E0385 with complete diagnostics and snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/ui/default_shape_retired.stderr:1, diagnostic row docs/spec/diagnostic-rows.md:841 [lane z2152]",
+          "at": "2026-08-22T15:37:13.483Z"
+        },
+        {
+          "n": 5,
+          "text": "Use-side fills retain colons.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/tir_language_features.rs:275, docs/spec/syntax-decisions.md:7873 [lane z2152]",
+          "at": "2026-08-22T15:37:13.826Z"
+        },
+        {
+          "n": 6,
+          "text": "= remains reassignment and extern slot fill.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: reassignment parser crates/jet-parser/src/Parser/Statements/control.rs:1660, extern fill parser external_tests_ffi.rs:686 [lane z2152]",
+          "at": "2026-08-22T15:37:14.199Z"
+        },
+        {
+          "n": 7,
+          "text": "Corpus, docs, diagnostics, and canvas signatures use the canonical spelling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: scripts/canvas-test/scenario.mjs:2108, ratified grammar docs/spec/syntax-decisions.md:7866 [lane z2152]",
+          "at": "2026-08-22T15:37:14.552Z"
+        },
+        {
+          "n": 8,
+          "text": "A targeted AOT/JIT/interpreter parity test covers default references.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-22T15:37:11.668Z"
+        }
+      ],
       "refs": [
         "#2144"
       ],
@@ -141778,7 +141995,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:07.225Z",
-      "updated": "2026-08-21T23:50:21.502Z",
+      "updated": "2026-08-22T15:37:15.277Z",
       "updatedBy": "Main"
     },
     {
@@ -189537,6 +189754,727 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T15:37:41.621Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02atgwz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:40.932Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02atgwz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:40.617Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02atgwz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:40.288Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02atgwz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:39.711Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u5x7kf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:38.994Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0u5x7kf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:38.650Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0u5x7kf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:38.034Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pqeiev",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:37.363Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqeiev",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:37.035Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqeiev",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:36.708Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqeiev",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:36.379Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqeiev",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:36.048Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqeiev",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:35.440Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gvkibe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:34.766Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gvkibe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:34.438Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gvkibe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:34.071Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gvkibe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:33.645Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gvkibe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:33.046Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kxss7s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:32.351Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kxss7s",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:32.021Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kxss7s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:31.470Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:30.775Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0v0y46r",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:30.419Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0v0y46r",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:30.071Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0v0y46r",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:29.720Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0v0y46r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:29.113Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00lqj9d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:28.421Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00lqj9d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:27.821Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xm7b14",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:27.127Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xm7b14",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:26.794Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xm7b14",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:26.454Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xm7b14",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:26.121Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xm7b14",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:25.804Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xm7b14",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:25.184Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:24.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pn8z35",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:24.151Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pn8z35",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:23.793Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pn8z35",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:23.464Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pn8z35",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:22.852Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:22.123Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0esko6c",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:21.778Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0esko6c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:21.161Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:20.405Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00wjjmo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:20.034Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00wjjmo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:19.665Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00wjjmo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:19.287Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00wjjmo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:18.934Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00wjjmo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:17.065Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0af6jch",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:16.710Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0af6jch",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:16.371Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0af6jch",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:15.278Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l24ldp",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:14.552Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-22T15:37:14.199Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T15:37:13.827Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:13.483Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:13.025Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:12.626Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:12.228Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l24ldp",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:11.668Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#8 A targeted AOT/JIT/interpreter parity test covers default re"
+    },
+    {
+      "at": "2026-08-22T15:37:11.162Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#7 Corpus, docs, diagnostics, and canvas signatures use the can"
+    },
+    {
+      "at": "2026-08-22T15:37:10.149Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#6 = remains reassignment and extern slot fill."
+    },
+    {
+      "at": "2026-08-22T15:37:08.924Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#5 Use-side fills retain colons."
+    },
+    {
+      "at": "2026-08-22T15:37:08.578Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#4 Retired name: Type = value emits E0385 with complete diagnos"
+    },
+    {
+      "at": "2026-08-22T15:37:08.238Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#3 CLI/serde field defaults use typed defaults and do not becom"
+    },
+    {
+      "at": "2026-08-22T15:37:07.897Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#2 Defaults preserve per-call, left-to-right reference evaluati"
+    },
+    {
+      "at": "2026-08-22T15:37:07.544Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0l24ldp",
+      "note": "#1 Parser and formatter support name: Type{default} for paramet"
+    },
+    {
+      "at": "2026-08-22T15:37:06.968Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04jzhj6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:37:06.262Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-22T15:37:05.917Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T15:37:05.570Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:37:05.236Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:37:04.898Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:37:04.562Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:37:04.205Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04jzhj6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:37:03.617Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#7 The UI snapshot matches the diagnostic."
+    },
+    {
+      "at": "2026-08-22T15:37:03.282Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#6 policy.lints.deny promotes the lint to E1293."
+    },
+    {
+      "at": "2026-08-22T15:37:02.934Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#5 Canonical local #allow(subject_shorthand_nesting) suppresses"
+    },
+    {
+      "at": "2026-08-22T15:37:02.582Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#4 Nested shorthand emits registered lint L0512 with named-bind"
+    },
+    {
+      "at": "2026-08-22T15:37:02.177Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#3 Lowering remains an ordinary one-parameter lambda across AOT"
+    },
+    {
+      "at": "2026-08-22T15:37:01.050Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#2 Member/method chains normalize to one subject-chain path."
+    },
+    {
+      "at": "2026-08-22T15:37:00.118Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04jzhj6",
+      "note": "#1 .len() method-head shorthand works in a unary call slot."
+    },
+    {
+      "at": "2026-08-22T15:36:58.373Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0622n49",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:36:56.787Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-22T15:36:56.345Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-22T15:36:55.321Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T15:36:54.204Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T15:36:53.630Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T15:36:52.341Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T15:36:51.214Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T15:36:50.880Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0622n49",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T15:36:50.309Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#8 Body-rule behavior matches across execution tiers."
+    },
+    {
+      "at": "2026-08-22T15:36:49.962Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#7 Diagnostics, snapshots, examples, and docs record the rule."
+    },
+    {
+      "at": "2026-08-22T15:36:49.615Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#6 task {} remains unchanged."
+    },
+    {
+      "at": "2026-08-22T15:36:49.237Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#5 Value-body tails preserve final expressions."
+    },
+    {
+      "at": "2026-08-22T15:36:47.833Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#4 Arrowless value bodies emit E0080 with an insertion fix."
+    },
+    {
+      "at": "2026-08-22T15:36:46.736Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#3 One-expression bodies remain -> expr."
+    },
+    {
+      "at": "2026-08-22T15:36:46.386Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#2 Unit and unit-fallible bodies remain bare; effect rows remai"
+    },
+    {
+      "at": "2026-08-22T15:36:45.523Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0622n49",
+      "note": "#1 Braced non-unit callables format with -> and remain stable."
+    },
+    {
+      "at": "2026-08-22T15:36:44.024Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0an426i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T15:36:43.286Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0an426i",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-22T15:36:42.958Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0an426i",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-22T15:36:42.622Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0an426i",
+      "note": "#5"
+    },
+    {
       "at": "2026-08-22T13:55:48.891Z",
       "by": "owner",
       "action": "done.clear",
@@ -192313,727 +193251,6 @@
       "by": "orchestrator",
       "action": "card.criteria-meet",
       "ref": "c0s602tp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:51.808Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s602tp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:51.301Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s602tp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:50.732Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s602tp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:49.661Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mu1nmx",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:49.169Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mu1nmx",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:48.660Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mu1nmx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:48.159Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0mu1nmx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:46.449Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vqrufi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:45.962Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vqrufi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T18:32:45.449Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vqrufi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:44.944Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vqrufi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:43.115Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kfw5lq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:42.626Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kfw5lq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:42.136Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0kfw5lq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:41.087Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c07vjd36",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:40.625Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c07vjd36",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:40.178Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c07vjd36",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:39.706Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c07vjd36",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:38.673Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02atgwz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:38.202Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c02atgwz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:37.063Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e4nuy5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:36.583Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e4nuy5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:36.127Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e4nuy5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:35.618Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0e4nuy5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:34.501Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yl347q",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:34.041Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yl347q",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:33.572Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yl347q",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T18:32:32.494Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0w7297z",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T18:32:32.036Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0w7297z",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T18:32:31.533Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0w7297z",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T18:32:31.038Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0w7297z",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T17:53:03.574Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-21T17:53:03.574Z"
-    },
-    {
-      "at": "2026-08-21T17:40:01.551Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#8 [8/8] A checked example demonstrates one user rule over exis"
-    },
-    {
-      "at": "2026-08-21T17:40:01.086Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#7 [7/8] The same check result is produced before AOT `jet buil"
-    },
-    {
-      "at": "2026-08-21T17:40:00.581Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#6 [6/8] `Source/CmdInspect.rs` plus `Source/CmdCompile.rs`, `C"
-    },
-    {
-      "at": "2026-08-21T17:40:00.084Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#5 [5/8] After the syntax gate, sema runs one deterministic, bo"
-    },
-    {
-      "at": "2026-08-21T17:39:59.542Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#4 [4/8] Before parser or API work, an owner decision either ra"
-    },
-    {
-      "at": "2026-08-21T17:39:59.018Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#3 [3/8] The read surface reuses `crates/jet-semindex/src/Types"
-    },
-    {
-      "at": "2026-08-21T17:39:58.495Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0mbyz4d",
-      "note": "#2 [2/8] The plan and implementation record the boundary with #"
-    },
-    {
-      "at": "2026-08-21T17:39:57.988Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#8 [8/8] `docs/spec/syntax-decisions.md` cites the D-STRUCT-ONC"
-    },
-    {
-      "at": "2026-08-21T17:39:57.462Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#7 [7/8] A feature example and golden output cover one marker-b"
-    },
-    {
-      "at": "2026-08-21T17:39:56.950Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#6 [6/8] `jet inspect expand <file>` from `Source/CmdExpand.rs`"
-    },
-    {
-      "at": "2026-08-21T17:39:56.446Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#5 [5/8] `@if` remains live after the amendment: `tests/ui/comp"
-    },
-    {
-      "at": "2026-08-21T17:39:55.938Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#4 [4/8] `crates/jet-comptime/src/Comptime/mod.rs::expand_templ"
-    },
-    {
-      "at": "2026-08-21T17:39:55.389Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#3 [3/8] Sema accepts only literal or comptime-pure closed sour"
-    },
-    {
-      "at": "2026-08-21T17:39:54.880Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#2 [2/8] The parser accepts `@loop` in marker bodies and root d"
-    },
-    {
-      "at": "2026-08-21T17:39:54.379Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c09w33e1",
-      "note": "#1 [1/8] `crates/jet-foundation/src/Syntax.rs` keeps `@loop` an"
-    },
-    {
-      "at": "2026-08-21T17:39:53.880Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#8 [8/8] `docs/spec/syntax-decisions.md`, `docs/spec/diagnostic"
-    },
-    {
-      "at": "2026-08-21T17:39:53.344Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#7 [7/8] `examples/features/callable/callable_policies.jet` and"
-    },
-    {
-      "at": "2026-08-21T17:39:52.859Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#6 [6/8] TIR and codegen lower the checked wrapper through `cra"
-    },
-    {
-      "at": "2026-08-21T17:39:52.332Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#5 [5/8] `PolicySetting` stays one Core registry in `crates/jet"
-    },
-    {
-      "at": "2026-08-21T17:39:51.860Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#4 [4/8] The wrapper receives one checked callable, can observe"
-    },
-    {
-      "at": "2026-08-21T17:39:51.386Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#3 [3/8] The sema path checks typed, defaulted, and variadic pa"
-    },
-    {
-      "at": "2026-08-21T17:39:50.901Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#2 [2/8] `Program` and `LoadedModule` carry declarations throug"
-    },
-    {
-      "at": "2026-08-21T17:39:50.395Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c02582xi",
-      "note": "#1 [1/8] `crates/jet-foundation/src/Syntax/core_surface.rs:351`"
-    },
-    {
-      "at": "2026-08-21T17:39:49.870Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#7 [7/7] `docs/spec/diagnostics.md`, the package and manifest d"
-    },
-    {
-      "at": "2026-08-21T17:39:49.369Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#6 [6/7] `examples/features/packages/import_boundaries.jet` and"
-    },
-    {
-      "at": "2026-08-21T17:39:48.876Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#5 [5/7] The same checked result holds for AOT `jet build`, Cra"
-    },
-    {
-      "at": "2026-08-21T17:39:48.395Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#4 [4/7] Each loaded boundary rule that matches no edge reports"
-    },
-    {
-      "at": "2026-08-21T17:39:47.879Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#3 [3/7] `crates/jet-driver/src/Loader.rs` checks each resolved"
-    },
-    {
-      "at": "2026-08-21T17:39:47.369Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#2 [2/7] `crates/jet-pkg-model/src/Package/Blocks.rs` accepts e"
-    },
-    {
-      "at": "2026-08-21T17:39:46.877Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0tw88ts",
-      "note": "#1 [1/7] `crates/jet-foundation/src/Syntax/jetpack_config.rs:63"
-    },
-    {
-      "at": "2026-08-21T17:39:00.384Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c0mbyz4d",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:38:59.236Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c09w33e1",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:38:58.571Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c02582xi",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:38:57.912Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c0tw88ts",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:36:00.365Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#8 `docs/spec/diagnostics.md` and `docs/spec/release-policy.md`"
-    },
-    {
-      "at": "2026-08-21T17:35:59.861Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#7 `examples/features/modules/soft_public/main.jet` and `exampl"
-    },
-    {
-      "at": "2026-08-21T17:35:59.125Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#6 I9 parity is proven for user and cbor marker metadata throug"
-    },
-    {
-      "at": "2026-08-21T17:35:58.420Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#5 Registered `L2001` and `E2002` rows in `crates/jet-codegen/s"
-    },
-    {
-      "at": "2026-08-21T17:35:57.809Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#4 The existing L2001/E2002 path remains the single renderer: c"
-    },
-    {
-      "at": "2026-08-21T17:35:57.337Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#3 The two-row Core deprecation table and duplicate `Deprecatio"
-    },
-    {
-      "at": "2026-08-21T17:35:56.829Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#2 Sema accepts the marker in any package on a public item and "
-    },
-    {
-      "at": "2026-08-21T17:35:56.322Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0lzs7ou",
-      "note": "#1 `crates/jet-foundation/src/Syntax/markers.rs:99` and `crates"
-    },
-    {
-      "at": "2026-08-21T17:35:55.827Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#8 `docs/spec/diagnostics.md` and `docs/spec/philosophy.md` doc"
-    },
-    {
-      "at": "2026-08-21T17:35:55.138Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#7 `examples/features/tooling/structure_liveness.jet` and `exam"
-    },
-    {
-      "at": "2026-08-21T17:35:54.393Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#6 I9 parity is proven for the four verdicts through parser → s"
-    },
-    {
-      "at": "2026-08-21T17:35:53.356Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#5 `jet fix` applies the plain rename to the existing `_name` f"
-    },
-    {
-      "at": "2026-08-21T17:35:52.501Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#4 Each warning has a registered liveness lint row in `crates/j"
-    },
-    {
-      "at": "2026-08-21T17:35:50.629Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#3 Each liveness verdict is recorded as a `Structure.Liveness` "
-    },
-    {
-      "at": "2026-08-21T17:35:50.142Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#2 `crates/jet-sema/src/Sema/CheckerReferences.rs`, `crates/jet"
-    },
-    {
-      "at": "2026-08-21T17:35:49.638Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c0ec460v",
-      "note": "#1 The existing `_name` repair and `Structure.Liveness` registr"
-    },
-    {
-      "at": "2026-08-21T17:35:48.982Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#7 `docs/spec/philosophy.md` and `docs/spec/architecture.md` do"
-    },
-    {
-      "at": "2026-08-21T17:35:47.997Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#6 `examples/features/tooling/structure_plane.jet` and `example"
-    },
-    {
-      "at": "2026-08-21T17:35:47.111Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#5 I9 parity is proven for one fixture through parser → sema → "
-    },
-    {
-      "at": "2026-08-21T17:35:46.212Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#4 `tests/gate_ledger.rs` proves inspection is read-only: struc"
-    },
-    {
-      "at": "2026-08-21T17:35:45.732Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#3 `jet inspect structure <file.jet>` and `jet inspect structur"
-    },
-    {
-      "at": "2026-08-21T17:35:45.220Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#2 Sema producers in `crates/jet-sema/src/Sema/Bundle/Pipeline."
-    },
-    {
-      "at": "2026-08-21T17:35:44.044Z",
-      "by": "sol",
-      "action": "card.criteria-add",
-      "ref": "c05xx3y0",
-      "note": "#1 `crates/jet-foundation/src/Names.rs` and the existing fact i"
-    },
-    {
-      "at": "2026-08-21T17:35:42.914Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c0lzs7ou",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:35:42.237Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c0ec460v",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:35:41.518Z",
-      "by": "sol",
-      "action": "card.update",
-      "ref": "c05xx3y0",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-21T17:31:19.591Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0rcv8n1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T17:31:18.629Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0rcv8n1",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T17:31:18.091Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0rcv8n1",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T17:31:17.593Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0rcv8n1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T17:31:16.909Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0rcv8n1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T17:24:34.799Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-21T17:24:17.562Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-21T17:21:26.513Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pb8211",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T17:21:26.011Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pb8211",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T17:21:25.513Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pb8211",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T17:21:24.993Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0pb8211",
       "note": "#5"
     }
   ],
