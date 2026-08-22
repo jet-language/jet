@@ -1105,7 +1105,7 @@ impl<'a> Checker<'a> {
                             "E0112",
                             "a readiness table cannot mix channel arms with Boolean guards".to_string(),
                             "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
-                            "write `value, receiver :> ...` or move the Boolean guard to a separate `if`".to_string(),
+                            "write `value, receiver -> ...` or move the Boolean guard to a separate `if`".to_string(),
                             Some(arm.cond.span()),
                         ));
                         self.check_block(&mut arm.body, true);
@@ -1218,7 +1218,7 @@ impl<'a> Checker<'a> {
                     "E0112",
                     "a readiness table has no usable wait arm".to_string(),
                     "a table must wait on a Receiver<T> or a Duration".to_string(),
-                    "add `value, receiver :> ...` or `after 100ms :> ...`".to_string(),
+                    "add `value, receiver -> ...` or `after 100ms -> ...`".to_string(),
                     Some(arms.first().map(|arm| arm.cond.span()).unwrap_or(Span::new(0, 0))),
                 ));
             }

@@ -3,8 +3,8 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-        /// S46: recognize `(` … `) :>` only when the contents have lambda
-        /// parameter shape. A condition such as `(a > b) :>` is an
+        /// S46: recognize `(` … `) ->` only when the contents have lambda
+        /// parameter shape. A condition such as `(a > b) ->` is an
         /// if-expression condition, not a lambda parameter list.
         pub(super) fn after_lparen_is_lambda(&self) -> bool {
             let mut i = self.pos + 1;
@@ -145,9 +145,9 @@ impl<'a> Parser<'a> {
         }
     
         /// D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param lambda with
-        /// no parens and no type — `m :> m.hp > 0`. Legal wherever the expected
+        /// no parens and no type — `m -> m.hp > 0`. Legal wherever the expected
         /// closure/fn type fixes the param type (sema rejects it elsewhere, same
-        /// as the existing omitted-type `(m) :> …` form under S46/D-LAMBDAINFER1).
+        /// as the existing omitted-type `(m) -> …` form under S46/D-LAMBDAINFER1).
         /// D-ARROW-CONTROL1: captures are always inferred.
         pub(super) fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let (name, name_span) = self.expect_ident("as a lambda parameter")?;
@@ -167,13 +167,13 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `:>` and
+        /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `->` and
         /// the lambda's overall end offset. `fallback_end` is used only for an
         /// empty block body (no statements to read an end span from).
         ///
-        /// S46: `:> expr` or `:> { … }`. A single assignment after `:>` needs no
-        /// braces — `a :> a.balance -= n` is the one-statement form of
-        /// `a :> { a.balance -= n }` (braces stay for multi-statement bodies).
+        /// S46: `-> expr` or `-> { … }`. A single assignment after `->` needs no
+        /// braces — `a -> a.balance -= n` is the one-statement form of
+        /// `a -> { a.balance -= n }` (braces stay for multi-statement bodies).
         fn lambda_arrow_body(
             &mut self,
             fallback_end: usize,

@@ -289,8 +289,9 @@ impl<'a> Lexer<'a> {
                 // before plain `]`.
                 ']' if next == '@' => toks.push(simple(self, TokKind::FenceClose, 2)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
-                // D-BIND4: `:=` mutable binding sigil.
-                ':' if next == '>' => toks.push(simple(self, TokKind::UnifiedArrow, 2)),
+                // D-BIND4: `:=` mutable binding sigil. D-ARROW-RESPELL1=A
+                // retains `:>` only for the retired-spelling teaching path.
+                ':' if next == '>' => toks.push(simple(self, TokKind::Arrow, 2)),
                 ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
                 ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
@@ -348,7 +349,8 @@ impl<'a> Lexer<'a> {
                 '+' if next == '+' => toks.push(simple(self, TokKind::PlusPlus, 2)),
                 '+' if next == '=' => toks.push(simple(self, TokKind::PlusEq, 2)),
                 '+' => toks.push(simple(self, TokKind::Plus, 1)),
-                '-' if next == '>' => toks.push(simple(self, TokKind::Arrow, 2)),
+                // D-ARROW-RESPELL1=A: canonical callable/control arrow.
+                '-' if next == '>' => toks.push(simple(self, TokKind::UnifiedArrow, 2)),
                 '-' if next == '-' => toks.push(simple(self, TokKind::MinusMinus, 2)),
                 '-' if next == '=' => toks.push(simple(self, TokKind::MinusEq, 2)),
                 '-' => toks.push(simple(self, TokKind::Minus, 1)),

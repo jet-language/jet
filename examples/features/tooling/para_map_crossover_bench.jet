@@ -13,13 +13,13 @@
 // and cost 32 never won in this matrix, and 64 × cost 256 still lost.
 fn input(count: Int) [Int] {
     values := [Int]{}
-    loop index, 0..<count :> values.push(index)
+    loop index, 0..<count -> values.push(index)
     return values
 }
 
 fn work(item: Int, cost: Int) Int {
     value := item + 1
-    loop step, 0..<cost :> value = (value * 31 + step + item) % 1000003
+    loop step, 0..<cost -> value = (value * 31 + step + item) % 1000003
     return value
 }
 
@@ -27,20 +27,20 @@ fn work(item: Int, cost: Int) Int {
 // interior callback work while retaining only a first/last sentinel.
 fn map_case(count: Int, cost: Int) Int {
     values :: input(count)
-    mapped :: values.map((item: Int) :> work(item, cost))
+    mapped :: values.map((item: Int) -> work(item, cost))
     return mapped.sum()
 }
 
 fn para_map_case(count: Int, cost: Int) Int {
     values :: input(count)
-    mapped :: values.para_map((item: Int) :> work(item, cost))
+    mapped :: values.para_map((item: Int) -> work(item, cost))
     return mapped.sum()
 }
 
 fn run() {
     // A cheap executable sanity check keeps the example useful under `jet run`.
     sanity :: para_map_case(64, 32)
-    if sanity < 0 :> print("benchmark sanity check failed")
+    if sanity < 0 -> print("benchmark sanity check failed")
     print("para_map crossover: compare map and para_map across 64/256/1024/4096 items and costs 1/32/256")
 }
 

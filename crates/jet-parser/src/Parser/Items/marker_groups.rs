@@ -1752,7 +1752,7 @@ impl<'a> Parser<'a> {
         }
     
         /// S28 + D-ARROW-CONTROL1: top-level
-        /// `trait Name { fn sig(self) :> T; … }`.
+        /// `trait Name { fn sig(self) T; … }`.
         pub(in crate::Parser) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let (is_pub, is_package_pub) = if nested {

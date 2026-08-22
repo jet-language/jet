@@ -1,6 +1,6 @@
 // D-EFFTREE1: the ten D-EFF4/5 effect names (`Net`, `FS`, `DB`, …) are tree
 // ROOTS. A leaf under one — `FS.Read`, `FS.Write` — is expressible on a
-// signature, and ancestor matching is subsumption: a `=[FS]=>` bound accepts
+// signature, and ancestor matching is subsumption: a `-[FS]>` bound accepts
 // any `FS.*` callee. This is the same rule D-TAG1 already taught for nested
 // tag/variant groups — learned once, applied to effects too.
 //
@@ -8,13 +8,13 @@
 // glance it can never delete anything. `archive` is scoped to `FS.Write`.
 // `boot` declares the ROOT `FS` (plus `IO` for its own `print` calls) — `FS`
 // subsumes both the `FS.Read` and `FS.Write` leaves reached through `load`/
-// `archive`, exactly as `=[FS]=>` already covered a bare `FS` callee before
+// `archive`, exactly as `-[FS]>` already covered a bare `FS` callee before
 // this decision (no migration break for existing flat code).
-fn load(path: String) String :[FS.Read]> "contents of {path}"
+fn load(path: String) String -[FS.Read]> { return "contents of {path}" }
 
-fn archive(path: String) String :[FS.Write]> "archived {path}"
+fn archive(path: String) String -[FS.Write]> { return "archived {path}" }
 
-fn boot() :[FS, IO]> {
+fn boot() -[FS, IO]> {
     print(load("app.conf"))
     print(archive("out.tar"))
 }

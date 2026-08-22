@@ -16,9 +16,9 @@ fn run() ! IOError | [FieldError] {
     files.write(path, "item,qty\npen,3\nink,5\nclip,1")?
     query :: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}
     sales :: csv.query<Sale>(path, query)?
-    total :: sales.map(s :> s.qty).sum()
+    total :: sales.map(s -> s.qty).sum()
     print("rows: {sales.len()}")
-    loop sale, sales :> print("  {sale.item}: {sale.qty}")
+    loop sale, sales -> print("  {sale.item}: {sale.qty}")
     print("total qty: {total}")
     files.remove(path)?
 }

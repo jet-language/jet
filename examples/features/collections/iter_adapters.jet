@@ -2,12 +2,12 @@
 // and return plain collections. Write `.lazy()` before the chain for Iter.
 fn run() {
     nums :: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    doubled :: nums.map((n: Int) :> n * 2)
+    doubled :: nums.map((n: Int) -> n * 2)
     print(doubled)
     print(doubled.len())
-    evens :: nums.filter((n: Int) :> n % 2 == 0)
+    evens :: nums.filter((n: Int) -> n % 2 == 0)
     print(evens)
-    lazy_hot :: nums.lazy().filter((n: Int) :> n > 7).map((n: Int) :> n * 10).to_list()
+    lazy_hot :: nums.lazy().filter((n: Int) -> n > 7).map((n: Int) -> n * 10).to_list()
     print(lazy_hot)
 
     // take / skip
@@ -27,26 +27,26 @@ fn run() {
     duped :: [1, 1, 2, 2, 3, 1, 1]
     print(duped.dedup().to_list())
     // take_while / skip_while
-    small :: nums.take_while((n: Int) :> (n < 5)).to_list()
+    small :: nums.take_while((n: Int) -> (n < 5)).to_list()
     print(small)
-    rest :: nums.skip_while((n: Int) :> (n < 5)).to_list()
+    rest :: nums.skip_while((n: Int) -> (n < 5)).to_list()
     print(rest)
     // fold (terminal reducer — no to_list)
-    sum :: nums.fold(0, (acc: Int, n: Int) :> (acc + n))
+    sum :: nums.fold(0, (acc: Int, n: Int) -> (acc + n))
     print(sum)
     // position
-    pos :: nums.position((n: Int) :> (n == 7))
+    pos :: nums.position((n: Int) -> (n == 7))
     print(pos)
     // min_by / max_by
     words :: ["banana", "apple", "cherry", "date"]
-    shortest :: words.min_by((w: String) :> w.len())
+    shortest :: words.min_by((w: String) -> w.len())
     print(shortest)
-    longest :: words.max_by((w: String) :> w.len())
+    longest :: words.max_by((w: String) -> w.len())
     print(longest)
     // Concrete List flatten/flat_map are eager; `.lazy()` above opts into Iter.
     nested :: [[1, 2], [3, 4], [5, 6]]
     print(nested.flatten())
-    flat :: nested.flat_map((xs: [Int]) :> xs)
+    flat :: nested.flat_map((xs: [Int]) -> xs)
     print(flat)
     // #1479: remaining Iter ledger surface
     // repeat / cycle — repeat(n) loops the whole sequence n times; cycle(n)
@@ -59,10 +59,10 @@ fn run() {
     print(nums.is_sorted())
     unsorted :: [3, 1, 2]
     print(unsorted.is_sorted())
-    print(unsorted.is_sorted_by((n: Int) :> -n))
+    print(unsorted.is_sorted_by((n: Int) -> -n))
     // dedup_by — collapses consecutive items sharing a key
     parities :: [2, 4, 6, 1, 3, 8, 10]
-    print(parities.dedup_by((n: Int) :> (n % 2)).to_list())
+    print(parities.dedup_by((n: Int) -> (n % 2)).to_list())
     // last_index_of
     repeats :: [5, 3, 1, 3, 9]
     print(repeats.last_index_of(3))
@@ -78,7 +78,7 @@ fn run() {
     print(nums.shuffle().to_list())
     // chunk_while — groups runs where the predicate holds between neighbors
     jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
-    print(jagged.chunk_while((a: Int, b: Int) :> (b == a + 1)).to_list())
+    print(jagged.chunk_while((a: Int, b: Int) -> (b == a + 1)).to_list())
     // to_set — length only; set element order is not print-stable
     print(nums.to_set().len())
 }
@@ -86,7 +86,7 @@ fn run() {
 #Test("eager map/filter fusion") {
     .measure {
         values :: [1, 2, 3, 4, 5, 6, 7, 8]
-        result :: values.map((n: Int) :> n * 2).filter((n: Int) :> n > 8)
+        result :: values.map((n: Int) -> n * 2).filter((n: Int) -> n > 8)
         assert_eq(result.len(), 4)
     }
 }

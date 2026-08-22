@@ -8,7 +8,7 @@ fn slow_one() Int {
 }
 
 // This example is about cancelling siblings, so it panics outright rather than
-// through arithmetic. `1 / zero` no longer type-checks in a `=> Int` function
+// through arithmetic. `1 / zero` no longer type-checks in an `Int`-returning function
 // (D-INTDIV1: the quotient is a Float), and `/%` is not a drop-in either,
 // because the comptime evaluator folds a divisor it can see and stops the
 // build before the task ever runs.
@@ -19,9 +19,9 @@ fn boom() Int {
 
 fn failure_text(error: TaskFailure) String {
     if error == {
-        .Panicked(reason) :> { return reason }
-        .DeadlineBlown :> { return "deadline" }
-        .Cancelled :> { return "cancelled" }
+        .Panicked(reason) -> { return reason }
+        .DeadlineBlown -> { return "deadline" }
+        .Cancelled -> { return "cancelled" }
     }
 }
 
@@ -29,8 +29,8 @@ fn run() {
     task.group g {
         results :: task.all {slow_one(), boom()}
         if results == {
-            .Err(error) :> { panic(failure_text(error)) }
-            .Ok(_) :> { print("unexpected success") }
+            .Err(error) -> { panic(failure_text(error)) }
+            .Ok(_) -> { print("unexpected success") }
         }
     }
 }

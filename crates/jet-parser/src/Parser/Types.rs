@@ -944,7 +944,7 @@ impl<'a> Parser<'a> {
         Ok((member, start))
     }
 
-    /// Parse a function type `fn(T1, …) R :[E]>`, the cursor at `fn`.
+    /// Parse a function type `fn(T1, …) R -[E]>`, the cursor at `fn`.
     /// `effect_bound` is non-None only while recovering retired prefix syntax.
     /// D-MEMPROVENANCE3=A: optional `name: Type` params and a trailing `from`
     /// after the return type populate `return_view_provenance` (names resolve
@@ -1041,24 +1041,29 @@ impl<'a> Parser<'a> {
                 .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
                 .collect()
         });
-        let decorated = matches!(self.peek().kind, TokKind::Colon)
+        let canonical_effect = matches!(self.peek().kind, TokKind::Minus)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_colon = matches!(self.peek().kind, TokKind::Colon)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_eq = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
-        let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
-            && matches!(self.peek2().kind, TokKind::LBracket);
-        let prefix_effect_span = decorated.then(|| self.peek().span);
-        if decorated || retired_eq || retired_double || retired_ballot {
-            if retired_eq || retired_double || retired_ballot {
+        let prefix_effect_span = (canonical_effect || retired_colon)
+            .then(|| self.peek().span);
+        if canonical_effect || retired_colon || retired_eq || retired_double {
+            if retired_colon || retired_eq || retired_double {
                 self.diags.push(Self::retired_effect_syntax(self.peek().span));
             }
-            effect_bound =
-                Some(self.parse_effect_arrow_row(decorated, retired_eq, retired_ballot)?);
+            effect_bound = Some(self.parse_effect_arrow_row(
+                canonical_effect,
+                retired_colon,
+                retired_eq,
+                retired_double,
+            )?);
         }
         let mut arrow_return = false;
         let mut return_type_span = None;
-        let ret = if decorated {
+        let ret = if canonical_effect || retired_colon {
             if self.type_starts_here() {
                 arrow_return = true;
                 let (r, span) = self.type_()?;
@@ -1078,12 +1083,11 @@ impl<'a> Parser<'a> {
             }
         } else if retired_eq
             || retired_double
-            || retired_ballot
             || self.at_unified_arrow()
         {
             let arrow = self.at_unified_arrow().then(|| self.bump());
-            arrow_return = arrow.is_some() || retired_eq || retired_double || retired_ballot;
-            if !retired_eq && !retired_double && !retired_ballot {
+            arrow_return = arrow.is_some() || retired_eq || retired_double;
+            if !retired_eq && !retired_double {
                 if arrow.is_none() {
                     self.expect_unified_arrow("before a callable result type")?;
                 }
@@ -1091,10 +1095,7 @@ impl<'a> Parser<'a> {
             if self.type_starts_here() {
                 let (r, span) = self.type_()?;
                 return_type_span = Some(span);
-                if arrow
-                    .as_ref()
-                    .is_some_and(|token| matches!(&token.kind, TokKind::UnifiedArrow))
-                {
+                if arrow.is_some() {
                     self.diags.push(Self::retired_signature_shape(
                         arrow.as_ref().map(|token| token.span).unwrap_or(span),
                     ));
@@ -1140,11 +1141,23 @@ impl<'a> Parser<'a> {
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
-        if effect_bound.is_none()
-            && matches!(self.peek().kind, TokKind::Colon)
-            && matches!(self.peek2().kind, TokKind::LBracket)
-        {
-            effect_bound = Some(self.parse_effect_arrow_row(true, false, false)?);
+        if effect_bound.is_none() && self.func_effect_starts_here() {
+            let canonical = matches!(self.peek().kind, TokKind::Minus)
+                && matches!(self.peek2().kind, TokKind::LBracket);
+            let retired_colon = matches!(self.peek().kind, TokKind::Colon)
+                && matches!(self.peek2().kind, TokKind::LBracket);
+            let retired_eq = matches!(self.peek().kind, TokKind::Eq)
+                && matches!(self.peek2().kind, TokKind::LBracket);
+            let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
+            if retired_colon || retired_eq || retired_double {
+                self.diags.push(Self::retired_effect_syntax(self.peek().span));
+            }
+            effect_bound = Some(self.parse_effect_arrow_row(
+                canonical,
+                retired_colon,
+                retired_eq,
+                retired_double,
+            )?);
         }
         let call_metadata = Some(crate::AST::FunctionCallMetadata {
             names: from_params.iter().map(|param| param.name.clone()).collect(),
@@ -1169,17 +1182,19 @@ impl<'a> Parser<'a> {
     fn parse_effect_arrow_row(
         &mut self,
         canonical: bool,
+        retired_colon: bool,
         retired_eq: bool,
-        retired_ballot: bool,
+        retired_double: bool,
     ) -> Result<Vec<(String, Span)>, Diagnostic> {
         self.expect(
             if canonical {
+                TokKind::Minus
+            } else if retired_colon {
                 TokKind::Colon
             } else if retired_eq {
                 TokKind::Eq
-            } else if retired_ballot {
-                TokKind::Minus
             } else {
+                debug_assert!(retired_double);
                 TokKind::MinusMinus
             },
             "to start an effect arrow",
@@ -1207,7 +1222,7 @@ impl<'a> Parser<'a> {
                     "E0119",
                     format!("`{name}` is only valid as a memory denial"),
                     "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
-                    format!("write `:[!{name}]>`"),
+                    format!("write `-[!{name}]>`"),
                     Some(span),
                 ));
             }
@@ -1221,10 +1236,12 @@ impl<'a> Parser<'a> {
         self.expect(
             if canonical {
                 TokKind::Gt
+            } else if retired_colon {
+                TokKind::Gt
             } else if retired_eq {
                 TokKind::LambdaArrow
             } else {
-                TokKind::Arrow
+                TokKind::UnifiedArrow
             },
             "after the effect row",
         )?;

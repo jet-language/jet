@@ -93,10 +93,11 @@ pub enum TokKind {
     /// numbering): `:=` mutable binding sigil (was `var`).
     ColonEq,
     Comma,
-    Arrow,
-    /// D-ARROW-UNIFY1=B: one callable/control arrow, `:>`.
+    /// D-ARROW-RESPELL1=A: one callable/control arrow, `->`.
     UnifiedArrow,
-    /// Retired D-ARROW-UNIFY1 spellings kept only for migration diagnostics.
+    /// Retired D-ARROW-RESPELL1 spelling, `:>`.
+    Arrow,
+    /// Retired D-ARROW-UNIFY1 spelling, `=>`.
     LambdaArrow,
     Semi,
     Eq,
@@ -262,8 +263,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
-        TokKind::Arrow => "`->`".to_string(),
-        TokKind::UnifiedArrow => "`:>`".to_string(),
+        TokKind::UnifiedArrow => "`->`".to_string(),
+        TokKind::Arrow => "`:>`".to_string(),
         TokKind::LambdaArrow => "`=>`".to_string(),
         TokKind::Semi => "`;`".to_string(),
         TokKind::Eq => "`=`".to_string(),

@@ -6,13 +6,13 @@ use core.reactive as reactive
 fn run() {
     backend :: ui.tui_backend()
     label :: reactive.signal("hi")
-    ui.reactive_render(() :> {
+    ui.reactive_render(() -> {
         node :: ui.node(label.get(), 2.0, 1.0)
         ui.mount(backend, node)
     })
     print(backend.render_count())
-    loop line, backend.frame_lines() :> print(line)
+    loop line, backend.frame_lines() -> print(line)
     label.set("yo")
     print(backend.render_count())
-    loop line, backend.frame_lines() :> print(line)
+    loop line, backend.frame_lines() -> print(line)
 }

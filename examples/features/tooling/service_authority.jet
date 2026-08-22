@@ -6,22 +6,22 @@ fn orders_worker() {}
 
 fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
-        .Enqueued(id) :> { return id }
-        .Executed(id) :> { return id }
-        .Retained(id, _) :> { return id }
-        .DeadLettered(id) :> { return id }
+        .Enqueued(id) -> { return id }
+        .Executed(id) -> { return id }
+        .Retained(id, _) -> { return id }
+        .DeadLettered(id) -> { return id }
     }
     return ""
 }
 
 fn receipt_kind(receipt: ServiceReceipt) String {
     if receipt == {
-        .Enqueued(_) :> { return "enqueued" }
-        .Executed(_) :> { return "executed" }
-        .Retained(_, _) :> { return "retained" }
-        .DeadLettered(_) :> { return "dead" }
-        .Rejected(_) :> { return "rejected" }
-        .Unavailable(_) :> { return "unavailable" }
+        .Enqueued(_) -> { return "enqueued" }
+        .Executed(_) -> { return "executed" }
+        .Retained(_, _) -> { return "retained" }
+        .DeadLettered(_) -> { return "dead" }
+        .Rejected(_) -> { return "rejected" }
+        .Unavailable(_) -> { return "unavailable" }
     }
     return "unknown"
 }
@@ -38,7 +38,7 @@ fn run() {
 
     first :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(first)
-    if id == "" :> panic("missing receipt id")
+    if id == "" -> panic("missing receipt id")
     print("first:{receipt_kind(first)}")
     duplicate :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(duplicate)}")

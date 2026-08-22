@@ -556,7 +556,7 @@ impl<'a> Parser<'a> {
                         Syntax::KW_RUST
                     ),
                     format!(
-                        "write: {} {} \"std\" {{ fn name() :> Int = \"std::path\"; }}",
+                        "write: {} {} \"std\" {{ fn name() Int = \"std::path\"; }}",
                         Syntax::KW_EXTERN,
                         Syntax::KW_RUST
                     ),
@@ -664,9 +664,7 @@ impl<'a> Parser<'a> {
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);
-                if matches!(arrow.kind, TokKind::UnifiedArrow) {
-                    self.diags.push(Self::retired_signature_shape(arrow.span));
-                }
+                self.diags.push(Self::retired_signature_shape(arrow.span));
             } else if self.type_starts_here() {
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);

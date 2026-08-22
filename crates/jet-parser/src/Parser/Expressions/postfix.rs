@@ -310,25 +310,25 @@ impl<'a> Parser<'a> {
                             )
                         {
                             // D-TRAILBLOCK2=A: trailing `{ }` after a call is retired.
-                            // Pass code as an ordinary `() :> { … }` argument inside the
+                            // Pass code as an ordinary `() -> { … }` argument inside the
                             // parentheses (multiline bodies and multiple code args allowed).
                             let bad_span = self.peek().span;
                             let fix = match &expr {
                                 Expr::Ident(name, _) => format!(
-                                    "write `{name}(() :> {{ … }})` — a multiline code argument uses `() :> {{ … }}` inside the call"
+                                    "write `{name}(() -> {{ … }})` — a multiline code argument uses `() -> {{ … }}` inside the call"
                                 ),
                                 Expr::Call(c) => format!(
-                                    "write `{}(…, () :> {{ … }})` — put the block inside the parentheses as `() :> {{ … }}`",
+                                    "write `{}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`",
                                     c.name
                                 ),
                                 Expr::MethodCall { method, .. } => format!(
-                                    "write `….{method}(…, () :> {{ … }})` — put the block inside the parentheses as `() :> {{ … }}`"
+                                    "write `….{method}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`"
                                 ),
-                                _ => "write `callee(…, () :> { … })` — put the block inside the parentheses as `() :> { … }`".to_string(),
+                                _ => "write `callee(…, () -> { … })` — put the block inside the parentheses as `() -> { … }`".to_string(),
                             };
                             return Err(Diagnostic::error(
                                 "E0335",
-                                "trailing blocks are gone — pass code with `() :>`".to_string(),
+                                "trailing blocks are gone — pass code with `() ->`".to_string(),
                                 "a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)"
                                     .to_string(),
                                 fix,
@@ -343,10 +343,10 @@ impl<'a> Parser<'a> {
                             let bad_span = self.peek().span;
                             return Err(Diagnostic::error(
                                 "E0335",
-                                "trailing blocks are gone — pass code with `() =>`".to_string(),
-                                "a bare `{ }` here is not a call argument; code arguments use `() => { … }` inside a call's parentheses (D-TRAILBLOCK2)"
+                                "trailing blocks are gone — pass code with `() ->`".to_string(),
+                                "a bare `{ }` here is not a call argument; code arguments use `() -> { … }` inside a call's parentheses (D-TRAILBLOCK2)"
                                     .to_string(),
-                                "write `callee(() => { … })` on a call — this expression is not a call"
+                                "write `callee(() -> { … })` on a call — this expression is not a call"
                                     .to_string(),
                                 Some(bad_span),
                             ));

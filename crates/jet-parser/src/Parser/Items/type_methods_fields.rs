@@ -20,12 +20,12 @@ impl<'a> Parser<'a> {
                 _effect_via,
                 _prefix_effect_span,
             ) = self.parse_callable_result_and_prefix_effects()?;
-            // A retired `:> Type` trait signature has no body marker after the
+            // A retired `-> Type` trait signature has no body marker after the
             // result, so the shared callable lookahead cannot distinguish it
             // from a concise body. Trait declarations have no concise-body
             // form; recover that result here so fmt can emit bare `Type`.
             if return_type.is_none() && self.at_unified_arrow() {
-                let arrow = self.bump();
+                let arrow = self.expect_unified_arrow("before a trait result type")?;
                 if self.type_starts_here() {
                     let (ty, _) = self.return_type()?;
                     self.diags.push(Self::retired_signature_shape(arrow.span));
@@ -143,13 +143,13 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::Colon, "after a field name")?;
             let (ty, ty_span) = self.type_()?;
-            // D-FIELDPOL1: `name: T :> expr` — a computed field. `expr` is a
+            // D-FIELDPOL1: `name: T -> expr` — a computed field. `expr` is a
             // single expression (no block); sibling field names inside it are
             // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
             // to `self.<field>` once every field of the struct is known.
             // D-FIELDDEF1=C: `name: T = expr` — absence / construction default.
             let (computed, default) = if self.at_unified_arrow() {
-                self.bump();
+                self.expect_unified_arrow("before a computed field expression")?;
                 (Some(Box::new(self.expr()?)), None)
             } else if matches!(self.peek().kind, TokKind::Eq) {
                 self.bump();

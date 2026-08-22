@@ -37,7 +37,7 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 
 // D-TRAILBLOCK2=A (amends D-TRAILBLOCK1): no new token — code arguments are
-// ordinary `() :> { … }` lambdas inside call parentheses. A bare `{` after a
+// ordinary `() -> { … }` lambdas inside call parentheses. A bare `{` after a
 // call is E0335 (retired trailing-block sugar), not a new lexical form.
 // D-DESTRUCT1: no new token — reuses the D-DOTCTOR1 `.{` sigil in pattern
 // position and `..` (OP_RANGE) as the now-mandatory partial-pattern rest

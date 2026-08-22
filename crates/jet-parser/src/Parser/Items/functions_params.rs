@@ -154,9 +154,9 @@ impl<'a> Parser<'a> {
                     Diagnostic::error(
                         "E0003",
                         "a function return type uses `:`".to_string(),
-                        "Jet uses `:` for parameter and field types; callable results use `:>`"
+                        "Jet uses `:` for parameter and field types; callable bodies use `->`"
                             .to_string(),
-                        "replace `:` with `:>` before the return type".to_string(),
+                        "replace `:` with `->` before the return type".to_string(),
                         Some(colon.span),
                     )
                     .with_edit(crate::Diagnostics::TextEdit {
@@ -171,14 +171,18 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            // D-SIG-SHAPE1=B: `:>` (or the effect ceiling) starts a one-line
+            // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line
             // body. Keep retired `::`/`=` input readable for the migration.
             let effect_body_marker = effect_body_span.is_some();
             let body_marker_span = match effect_body_span {
                 Some(span)
                     if !matches!(
                         self.peek().kind,
-                        TokKind::UnifiedArrow | TokKind::ColonColon | TokKind::Eq
+                        TokKind::UnifiedArrow
+                            | TokKind::Arrow
+                            | TokKind::LambdaArrow
+                            | TokKind::ColonColon
+                            | TokKind::Eq
                     ) => Some(span),
                 _ => self.parse_optional_function_body_marker(),
             };
@@ -389,8 +393,8 @@ impl<'a> Parser<'a> {
         }
     
         /// D-SIG-SHAPE1=B: read the result and any legacy prefix effect row.
-        /// The current result form is bare after `)`. The old `:> T` and
-        /// `:[E]> T` forms stay readable until the corpus migration.
+        /// The current result form is bare after `)`. The old `-> T` and
+        /// `-[E]> T` forms stay readable until the corpus migration.
         pub(super) fn parse_callable_result_and_prefix_effects(
             &mut self,
         ) -> Result<(
@@ -425,20 +429,15 @@ impl<'a> Parser<'a> {
             } else if self.at_unified_arrow() {
                 arrow_return = true;
                 let arrow = self.bump();
-                let canonical_arrow = matches!(arrow.kind, TokKind::UnifiedArrow);
                 if self.legacy_result_type_starts_here() {
                     let (ty, span) = self.return_type()?;
-                    if canonical_arrow {
-                        self.diags.push(Self::retired_signature_shape(arrow.span));
-                    }
+                    self.diags.push(Self::retired_signature_shape(arrow.span));
                     (Some(ty), Some(span))
                 } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    if canonical_arrow {
-                        self.diags.push(Self::retired_signature_shape(arrow.span));
-                    }
+                    self.diags.push(Self::retired_signature_shape(arrow.span));
                     (Some(ty), Some(span))
                 } else {
-                    // `:>` is the body marker when no result type follows.
+                    // `->` is the body marker when no result type follows.
                     // Leave it for the body parser below.
                     self.pos = self.pos.saturating_sub(1);
                     (None, None)
@@ -484,7 +483,11 @@ impl<'a> Parser<'a> {
             let legacy_boundary = parsed_end.is_some_and(|end| {
                 matches!(
                     self.peek().kind,
-                    TokKind::ColonColon | TokKind::Eq | TokKind::UnifiedArrow
+                    TokKind::ColonColon
+                        | TokKind::Eq
+                        | TokKind::UnifiedArrow
+                        | TokKind::Arrow
+                        | TokKind::LambdaArrow
                 ) || (matches!(self.peek().kind, TokKind::LBrace)
                     && end < self.peek().span.start)
                     || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
@@ -500,7 +503,7 @@ impl<'a> Parser<'a> {
 
         /// Lookahead shared by signature parsing. `parse_opt_func_effects`
         /// accepts these old spellings too, so the migration stays readable.
-        pub(super) fn func_effect_starts_here(&self) -> bool {
+        pub(in crate::Parser) fn func_effect_starts_here(&self) -> bool {
             (matches!(self.peek().kind, TokKind::Colon)
                 && matches!(self.peek2().kind, TokKind::LBracket))
                 || (matches!(self.peek().kind, TokKind::Eq)
@@ -515,6 +518,11 @@ impl<'a> Parser<'a> {
         fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
             match self.peek().kind {
                 TokKind::UnifiedArrow => Some(self.bump().span),
+                TokKind::Arrow | TokKind::LambdaArrow => {
+                    let span = self.bump().span;
+                    self.diags.push(Self::retired_unified_arrow(span));
+                    Some(span)
+                }
                 TokKind::ColonColon => {
                     let span = self.bump().span;
                     self.diags.push(Self::retired_function_body(span, "::"));
@@ -529,8 +537,8 @@ impl<'a> Parser<'a> {
             }
         }
 
-        /// D-EFF1 / D-SHAPE8 / D-ARROW-CONTROL1: parse an optional
-        /// `:[Net, DB]>` effect bound.
+        /// D-EFF1 / D-SHAPE8 / D-ARROW-RESPELL1: parse an optional
+        /// `-[Net, DB]>` effect bound.
         /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
         /// dotted effect path (`FS.Read`); sema validates the root against the
         /// known effect vocabulary.
@@ -542,34 +550,37 @@ impl<'a> Parser<'a> {
             Ok(self.parse_opt_func_effects()?.0)
         }
     
-        /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-CONTROL1: parse the decorated
-        /// effect arrow, either a declared bound (`:[Net, DB]>`) or a
-        /// `:[via f]>` pass-through. Returns
+        /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-RESPELL1: parse the effect
+        /// arrow, either a declared bound (`-[Net, DB]>`) or a
+        /// `-[via f]>` pass-through. Returns
         /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
-        /// the cursor is not at `:[`.
+        /// the cursor is not at `-[` or one of the retired effect forms.
         pub(super) fn parse_opt_func_effects(
             &mut self,
         ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
-            let canonical = matches!(self.peek().kind, TokKind::Colon)
+            let canonical = matches!(self.peek().kind, TokKind::Minus)
+                && matches!(self.peek2().kind, TokKind::LBracket);
+            let retired_colon = matches!(self.peek().kind, TokKind::Colon)
                 && matches!(self.peek2().kind, TokKind::LBracket);
             let retired_eq = matches!(self.peek().kind, TokKind::Eq)
                 && matches!(self.peek2().kind, TokKind::LBracket);
             let retired_hash = matches!(self.peek().kind, TokKind::Hash)
                 && matches!(self.peek2().kind, TokKind::LParen);
-            let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
-                && matches!(self.peek2().kind, TokKind::LBracket);
             let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
             if !canonical
+                && !retired_colon
                 && !retired_eq
                 && !retired_double
                 && !retired_hash
-                && !retired_ballot
             {
                 return Ok((None, None));
             }
             let start = self.peek().span;
-            let (open, close, close_arrow) = if canonical {
-                self.bump(); // `:`
+            let (open, close, close_arrow) = if canonical || retired_colon {
+                self.bump(); // `-[` or retired `:[`
+                if retired_colon {
+                    self.diags.push(Self::retired_effect_syntax(start));
+                }
                 (TokKind::LBracket, TokKind::RBracket, TokKind::Gt)
             } else if retired_eq {
                 self.bump(); // `=`
@@ -578,29 +589,19 @@ impl<'a> Parser<'a> {
             } else if retired_hash {
                 self.bump();
                 self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LParen, TokKind::RParen, TokKind::Arrow)
-            } else if retired_ballot {
-                self.bump();
-                self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LBracket, TokKind::RBracket, TokKind::Arrow)
+                (TokKind::LParen, TokKind::RParen, TokKind::UnifiedArrow)
             } else {
                 self.bump(); // `--`
                 self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LBracket, TokKind::RBracket, TokKind::Arrow)
+                (TokKind::LBracket, TokKind::RBracket, TokKind::UnifiedArrow)
             };
             self.expect(open, "to start an effect row")?;
-            // D-EFF2 `:[via f]>`: tight pass-through publishing param `f`'s effects.
+            // D-EFF2 `-[via f]>`: tight pass-through publishing param `f`'s effects.
             if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
                 self.bump(); // `via`
                 let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
                 self.expect(close.clone(), "to close the effect row")?;
-                if retired_hash {
-                    if matches!(self.peek().kind, TokKind::Arrow) {
-                        self.bump();
-                    }
-                } else {
-                    self.expect(close_arrow.clone(), "after the effect row")?;
-                }
+                self.finish_effect_arrow(close_arrow.clone(), retired_hash, canonical, start)?;
                 return Ok((None, Some((param, span))));
             }
             let mut effects = Vec::new();
@@ -628,7 +629,7 @@ impl<'a> Parser<'a> {
                             "E0119",
                             format!("`{name}` is only valid as a memory denial"),
                             "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
-                            format!("write `:[!{name}]>`"),
+                            format!("write `-[!{name}]>`"),
                             Some(span),
                         ));
                     }
@@ -645,22 +646,42 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(close, "to close the effect row")?;
+            self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?;
+            Ok((Some(effects), None))
+        }
+
+        fn finish_effect_arrow(
+            &mut self,
+            close_arrow: TokKind,
+            retired_hash: bool,
+            canonical: bool,
+            start: Span,
+        ) -> Result<(), Diagnostic> {
             if retired_hash {
-                if matches!(self.peek().kind, TokKind::Arrow) {
+                if Self::at_unified_arrow_token(&self.peek().kind) {
                     self.bump();
                 }
-            } else {
-                self.expect(close_arrow, "after the effect row")?;
+                return Ok(());
             }
-            Ok((Some(effects), None))
+            if matches!(self.peek().kind, TokKind::Gt) {
+                self.bump();
+                return Ok(());
+            }
+            if canonical && Self::at_unified_arrow_token(&self.peek().kind) {
+                self.bump();
+                self.diags.push(Self::retired_effect_syntax(start));
+                return Ok(());
+            }
+            self.expect(close_arrow, "after the effect row")?;
+            Ok(())
         }
 
         pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0066",
                 "this function uses the retired effect-arrow spelling".to_string(),
-                "callable results use `:>`, and an explicit effect ceiling uses the same arrow".to_string(),
-                "write `:[Effects]>`; use `:[]>` for an explicit purity bound".to_string(),
+                "callable results use `->`, and an explicit effect ceiling uses the same arrow".to_string(),
+                "write `-[Effects]>`; use `-[]>` for an explicit purity bound".to_string(),
                 Some(span),
             )
         }
@@ -669,32 +690,35 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0068",
                 "This callable uses the retired result-arrow shape.".to_string(),
-                "a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type".to_string(),
-                "write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`".to_string(),
+                "a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type".to_string(),
+                "write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`".to_string(),
                 Some(span),
             )
         }
 
-        // Turned on by the change that closes #2081, once `jet fmt` has
-        // respelled the corpus. See Parser/mod.rs::expect_unified_arrow.
-        #[allow(dead_code)]
+        // D-ARROW-RESPELL1=A: retired callable/control arrows teach the
+        // canonical spelling instead of being accepted silently.
         pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0070",
                 "this uses a retired arrow spelling".to_string(),
-                "callables, arms, and lambdas use one arrow: `:>`".to_string(),
-                "replace `->` or `=>` with `:>`".to_string(),
+                "callables, arms, and lambdas use one arrow: `->`".to_string(),
+                "replace `:>` or `=>` with `->`".to_string(),
                 Some(span),
             )
+            .with_edit(crate::Diagnostics::TextEdit {
+                span,
+                new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
+            })
         }
 
         pub(in crate::Parser) fn retired_function_body(span: Span, marker: &str) -> Diagnostic {
             Diagnostic::error(
                 "E0065",
                 format!("This function uses the retired `{marker}` body marker."),
-                "A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition."
+                "A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition."
                     .to_string(),
-                format!("Replace `{marker}` with `:>`; `jet fmt` applies this fix."),
+                format!("Replace `{marker}` with `->`; `jet fmt` applies this fix."),
                 Some(span),
             )
         }

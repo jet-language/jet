@@ -44,8 +44,8 @@ fn run() {
     env.set("APP_PORT", "not-an-int")
     failed :: env.decode<Settings>(prefix: "APP_", file: path, allow: ["APP_HOST", "APP_PORT", "APP_DEBUG", "APP_DB__URL", "APP_DB__PASSWORD"])
     if failed == {
-        .Ok(_) :> { print("invalid config unexpectedly accepted") }
-        .Err(errors) :> { print("failure: {errors}") }
+        .Ok(_) -> { print("invalid config unexpectedly accepted") }
+        .Err(errors) -> { print("failure: {errors}") }
     }
 
     env.unset("APP_HOST") ?? false

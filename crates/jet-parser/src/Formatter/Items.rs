@@ -120,9 +120,9 @@ impl ModuleBodyEntry<'_> {
     }
 }
 
-/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `:>` one-line function
+/// D-FMT-SIMPLIFY1=A: may this rendered expression be a `->` one-line function
 /// body? The parser reads that body with `expr`, which accepts a headless
-/// record literal after `:>` — a `Type{ … }` construction or a
+/// record literal after `->` — a `Type{ … }` construction or a
 /// block lambda (`Parser/Items/functions_params.rs`,
 /// `Parser/Expressions/primary.rs`). Braces inside `(`/`[` reopen the ordinary
 /// expression grammar, and braces inside text are the lexer's business.
@@ -205,9 +205,14 @@ impl<'a> Fmt<'a> {
         let mut effect_arrows = Vec::new();
 
         for index in 0..tokens.len() {
-            if !matches!(tokens[index].kind, TokKind::Eq)
-                || !matches!(tokens.get(index + 1).map(|token| &token.kind), Some(TokKind::LBracket))
-            {
+            let effect_open = matches!(
+                tokens[index].kind,
+                TokKind::Eq | TokKind::Colon | TokKind::MinusMinus
+            ) && matches!(
+                tokens.get(index + 1).map(|token| &token.kind),
+                Some(TokKind::LBracket)
+            );
+            if !effect_open {
                 continue;
             }
             let Some(close) = (index + 2..tokens.len())
@@ -217,16 +222,18 @@ impl<'a> Fmt<'a> {
             };
             if matches!(
                 tokens.get(close + 1).map(|token| &token.kind),
-                Some(TokKind::LambdaArrow)
+                Some(TokKind::Gt | TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
             ) {
-                edits.push((tokens[index].span.start, tokens[index].span.end, ":"));
+                edits.push((tokens[index].span.start, tokens[index].span.end, "-"));
                 effect_arrows.push(close + 1);
             }
         }
 
         for (index, token) in tokens.iter().enumerate() {
             let replacement = match token.kind {
+                TokKind::Arrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::Arrow => Some(Syntax::OP_UNIFIED_ARROW),
+                TokKind::UnifiedArrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::LambdaArrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::LambdaArrow => Some(Syntax::OP_UNIFIED_ARROW),
                 TokKind::Dot
@@ -327,10 +334,11 @@ impl<'a> Fmt<'a> {
                     // string and any quoted text remain verbatim.
                     let (head, tail) = text.split_once(" = \"").unwrap_or((text, ""));
                     let head = head
-                        .replace("=[", ":[")
+                        .replace("=[", "-[")
+                        .replace(":[", "-[")
                         .replace("]=>", "]>")
-                        .replace("=>", ":>")
-                        .replace("->", ":>");
+                        .replace(":>", "->")
+                        .replace("=>", "->");
                     self.write(&head);
                     if !tail.is_empty() {
                         self.write(" = \"");
@@ -403,7 +411,7 @@ impl<'a> Fmt<'a> {
             // D-ERR-CONV: error conversion declarations are emitted verbatim.
             Item::ErrorConv(ec) => {
                 let text = self.src[ec.body_span.start..ec.body_span.end].to_string();
-                // Re-emit as `impl From :> To { body }` verbatim for now.
+                // Re-emit as `impl From -> To { body }` verbatim for now.
                 self.write("impl ");
                 self.write(&ec.from_ty);
                 self.write(" ");
@@ -1289,7 +1297,8 @@ impl<'a> Fmt<'a> {
         // D-SIG-SHAPE1=B: preserve the canonical concise callable body.
         // The parser desugars the marker plus expression to `return expr`; its
         // synthetic return span starts on the author-written marker. Retired
-        // `::`/`=` input is recovered for the teaching diagnostic and rewritten.
+        // `::`/`=`/arrow input is recovered for the teaching diagnostic and
+        // rewritten.
         if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
             let marker = self.src.get(span.start..span.start.saturating_add(2));
             let retired_marker = self
@@ -1303,16 +1312,18 @@ impl<'a> Fmt<'a> {
                 && self
                     .src
                     .get(span.start..span.start.saturating_add(2))
-                    .is_some_and(|source| source == ":[");
+                    .is_some_and(|source| source == "-[");
             if marker == Some("::")
+                || marker == Some("->")
                 || marker == Some(":>")
+                || marker == Some("=>")
                 || retired_marker
                 || effect_marker
             {
                 if effect_body {
                     self.write(" ");
                 } else {
-                    self.write(" :> ");
+                    self.write(" -> ");
                 }
                 self.fmt_expr(expr, Prec::OrFallback);
                 self.expected_return_type = saved_return_type;
@@ -1320,7 +1331,7 @@ impl<'a> Fmt<'a> {
             }
         }
         // D-FMT-SIMPLIFY1=A / card #1514 criterion 3: a braced body with one
-        // return uses the canonical `:>` one-line body when it fits. Keep
+        // return uses the canonical `->` one-line body when it fits. Keep
         // comments and wide output in the explicit block form.
         if self.simplify {
             if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
@@ -1348,7 +1359,7 @@ impl<'a> Fmt<'a> {
                     if f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure {
                         self.write(" ");
                     } else {
-                        self.write(" :> ");
+                        self.write(" -> ");
                     }
                     self.fmt_expr(expr, Prec::OrFallback);
                     if self.col <= MAX_WIDTH
@@ -2061,7 +2072,7 @@ impl<'a> Fmt<'a> {
         self.write(&field.name);
         self.write(": ");
         self.fmt_decode_type(&field.ty, field.ty_span, derives_decode);
-        // D-FIELDPOL1: `name: T :> expr` — a computed field.
+        // D-FIELDPOL1: `name: T -> expr` — a computed field.
         if let Some(expr) = &field.computed {
             self.write(" ");
             self.write(Syntax::OP_UNIFIED_ARROW);

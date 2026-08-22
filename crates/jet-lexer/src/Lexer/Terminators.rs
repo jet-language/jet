@@ -303,8 +303,8 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                     && matches!(prev.kind, TokKind::RParen)
                 {
                     let spelling = match &cur.kind {
-                        TokKind::UnifiedArrow => ":>",
-                        TokKind::Arrow => "->",
+                        TokKind::UnifiedArrow => "->",
+                        TokKind::Arrow => ":>",
                         TokKind::LambdaArrow => "=>",
                         TokKind::Eq => "=[…]=>",
                         TokKind::MinusMinus => "=[…]=>",

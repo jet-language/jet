@@ -17,9 +17,9 @@ fn run() ! {
     source_text :: "/tmp/jet_crypto_migration_v1.jetc"
     migrated_text :: "/tmp/jet_crypto_migration_v2.jetc"
     restored_text :: "/tmp/jet_crypto_migration_restored"
-    if fs.exists(source_text) :> fs.remove(source_text) ?? return Err("migration cleanup")
-    if fs.exists(migrated_text) :> fs.remove(migrated_text) ?? return Err("migration cleanup")
-    if fs.exists(restored_text) :> fs.remove(restored_text) ?? return Err("migration cleanup")
+    if fs.exists(source_text) -> fs.remove(source_text) ?? return Err("migration cleanup")
+    if fs.exists(migrated_text) -> fs.remove(migrated_text) ?? return Err("migration cleanup")
+    if fs.exists(restored_text) -> fs.remove(restored_text) ?? return Err("migration cleanup")
     source :: Path.from(source_text)
     migrated :: Path.from(migrated_text)
     restored :: Path.from(restored_text)
@@ -27,8 +27,8 @@ fn run() ! {
         box = expert.aes256gcm_seal(key, nonce, msg, []) ?? return Err("seal failed")
         plain = expert.aes256gcm_open(key, nonce, box, []) ?? return Err("open failed")
         v1 := [U8]{0x4a, 0x45, 0x54, 0x43, 1, 2}
-        loop byte, nonce :> v1.push(byte)
-        loop byte, box :> v1.push(byte)
+        loop byte, nonce -> v1.push(byte)
+        loop byte, box -> v1.push(byte)
         historical = expert.open_v1(key, v1) ?? return Err("v1 open failed")
         source.write_atomic(v1) ?? return Err("v1 fixture")
         expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? return Err("v1 migration failed")

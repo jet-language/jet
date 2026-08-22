@@ -545,7 +545,7 @@ impl<'a> Fmt<'a> {
                 self.fmt_effect_loop_body(body, header_end, *arrow_body);
             }
             // D-IF3 / D-IFDIST1: multi-arm dispatch renders as
-            // `if subject OP { head :> body }` (the `Stmt::Switch` IR is shared
+            // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
             // with the retired `when`). The comparison marker enters dispatch;
             // arm heads carry no repeated `subject OP`.
             Stmt::Switch {

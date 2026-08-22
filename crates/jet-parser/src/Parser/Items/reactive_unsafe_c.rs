@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
     
         /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
         /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
-        /// declarations share the `extern_fn` shape (`fn name(args) :> T = "Sym";`).
+        /// declarations share the `extern_fn` shape (`fn name(args) T = "Sym";`).
         pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
             if matches!(

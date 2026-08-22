@@ -13,10 +13,10 @@ impl Resource.Close {
 
 fn run() {
     #Unsafe("the exit callback has no captured state") {
-        os.atexit(() :> print("atexit"))
+        os.atexit(() -> print("atexit"))
     }
-    outer :: scope.guard(() :> print("guard outer"))
-    inner :: scope.guard(() :> print("guard inner"))
+    outer :: scope.guard(() -> print("guard outer"))
+    inner :: scope.guard(() -> print("guard inner"))
     resource := Resource{name: "resource"}
     defer close(^resource)
     print("body")

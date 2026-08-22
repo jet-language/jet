@@ -67,7 +67,7 @@ pub const LAYOUT_HANDLE_TYPE: &str = LAYOUT_TYPE;
 ///
 /// Retired `layout NAME { … }` keyword (D-LAYOUT1) is E2935 only.
 pub const FOREIGN_LAYOUT_KW: &str = "layout";
-/// `use core.term as term` — exposes `term.read_key() :> Key`.
+/// `use core.term as term` — exposes `term.read_key() -> Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";
 
 /// D-TERM1 (ratified 2026-06-22): the key-event type returned by `term.read_key()`.
@@ -82,10 +82,10 @@ pub const TYPE_KEY: &str = "Key";
 /// explicit producers and their handle types — no new keyword or sigil (reactive
 /// values are ordinary values made with library calls, exactly as option B
 /// requires). `use core.reactive as reactive` exposes:
-///   reactive.signal(initial) :> Signal<T>   — a mutable reactive source
-///   reactive.derived(() :> expr) :> Derived<T> — a value recomputed from signals
-///   reactive.computed(() :> expr)            — D-SIGNAL1 alias for `derived`
-///   reactive.effect(() :> { … })             — a side effect re-run on change
+///   reactive.signal(initial) -> Signal<T>   — a mutable reactive source
+///   reactive.derived(() -> expr) -> Derived<T> — a value recomputed from signals
+///   reactive.computed(() -> expr)            — D-SIGNAL1 alias for `derived`
+///   reactive.effect(() -> { … })             — a side effect re-run on change
 /// Methods: `Signal.get()/set(v)`, `Derived.get()`/`Computed.get()`. Dependency
 /// tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes).
 /// `#Reactive { … }` lowers to the effect job (D-REACTCORE1).
@@ -298,7 +298,8 @@ pub const KW_SWITCH: &str = "if";
 /// D-ARROW-UNIFY1=B (ratified 2026-08-19): one arrow for callable results,
 /// function types, lambdas, computed fields, conversions, task bodies, arms,
 /// and loop bodies.
-pub const OP_UNIFIED_ARROW: &str = ":>";
+/// D-ARROW-RESPELL1=A: canonical callable/control arrow.
+pub const OP_UNIFIED_ARROW: &str = "->";
 
 /// S11 (ratified): the two `Bool` literals.
 pub const LIT_TRUE: &str = "true";
@@ -386,7 +387,7 @@ pub const OP_SHR_EQ: &str = ">>=";
 
 /// D-PATW (ratified 2026-06-19): `_` in a variant payload slot ignores that field and binds nothing.
 /// `_` remains a legal identifier character (digit-separator, S34) in all other positions.
-/// No bare `_` arm in a switch — only `else :>` acts as a catch-all.
+/// No bare `_` arm in a switch — only `else ->` acts as a catch-all.
 pub const PAT_WILDCARD_SLOT: &str = "_";
 
 // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
@@ -394,13 +395,13 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 
 // D-PATO (ratified 2026-06-19) and D-SHAPE-PIPE1=C (ratified 2026-07-15):
 // structural or-patterns and choice alternatives use OP_PIPE (single `|`).
-// `Active(id) | Reconnecting(id) :> …`; alternatives must bind the same names at the same types.
+// `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
 // No general single-bar expression or flow operator exists. `||` remains value-or / boolean-or;
 // `|=` remains bitwise-or-assign under S17.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —
-// `if subject == { .Variant(b) :> … }`, `if x == .Variant(b)`, switch arms. The dot reads as
+// `if subject == { .Variant(b) -> … }`, `if x == .Variant(b)`, switch arms. The dot reads as
 // "a member of the inferred enum" and resolves S31's bare-name-vs-variable ambiguity without
 // requiring a qualified `Enum.Variant` spelling. Bare form still accepted; dot form is canonical
 // (the formatter always emits `.` before a Pattern::Variant name). No new keyword or sigil —
@@ -633,7 +634,7 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 pub const BUILTIN_PANIC: &str = "panic";
 /// D-INTBIG1/D-NUMOPS1: default `Int` is exact. Fixed-width per-op overflow
 /// opt-ins wrap one integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around,
-/// `saturating(…)` clamps to the type's range, and `checked(…) :> T?` returns
+/// `saturating(…)` clamps to the type's range, and `checked(…) -> T?` returns
 /// `null` on overflow. Fixed-width receiver methods use the same policy.
 pub const BUILTIN_WRAPPING: &str = "wrapping";
 pub const BUILTIN_SATURATING: &str = "saturating";
@@ -648,11 +649,11 @@ pub const BUILTIN_ASSERT: &str = "assert";
 pub const BUILTIN_ASSERT_EQ: &str = "assert_eq";
 
 /// D-CTIO1 (ratified 2026-06-22): the sanctioned build-time I/O builtins.
-/// `embed_file("path") :> String` bakes a file's UTF-8 text into the binary;
-/// `embed_bytes("path") :> [U8]` bakes its raw bytes (binary-safe). The path
+/// `embed_file("path") -> String` bakes a file's UTF-8 text into the binary;
+/// `embed_bytes("path") -> [U8]` bakes its raw bytes (binary-safe). The path
 /// must be a string literal, resolved relative to the source file, with no
 /// `..`-escape past the project root. Only valid in a `comptime` binding.
-/// D-CTFIND1/2: `find(glob) :> [String]` returns sorted relative file paths and
+/// D-CTFIND1/2: `find(glob) -> [String]` returns sorted relative file paths and
 /// records each matched file hash for `.jet/lock`.
 pub const BUILTIN_EMBED_FILE: &str = "embed_file";
 pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";

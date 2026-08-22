@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
         // D-ONELINE-BODY1=B: an effect-only one-line `if` uses an arrow before
         // its one statement. Braces remain the multi-statement/scoped form.
         if self.at_unified_arrow() {
-            self.bump();
+            self.expect_unified_arrow("after an `if` condition")?;
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
             if matches!(else_branch, Some(ElseBranch::ElseIf(_))) {
@@ -248,7 +248,7 @@ impl<'a> Parser<'a> {
             return Ok(Some(ElseBranch::Else(self.block_stmts())));
         }
         if self.at_unified_arrow() {
-            self.bump();
+            self.expect_unified_arrow("after `else`")?;
             return Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)));
         }
         self.teach_control_braces("else", self.peek().span);
@@ -958,7 +958,7 @@ impl<'a> Parser<'a> {
         // each arm must read it back; a chain that only the first arm could
         // spell made the formatter write source the parser rejected.
         if self.at_unified_arrow() {
-            self.bump();
+            self.expect_unified_arrow("after an `if` condition")?;
             let then_body = self.adjacent_effect_body()?;
             let else_branch = self.adjacent_effect_else()?;
             return Ok(IfStmt {

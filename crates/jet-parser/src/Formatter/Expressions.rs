@@ -1612,7 +1612,7 @@ impl<'a> Fmt<'a> {
         kind: &ForKind,
     ) {
         // D-LOOP-SUBJECT1: the bindingless form writes its subject bare —
-        // `loop words :> .to_upper()`. The parser records the implicit
+        // `loop words -> .to_upper()`. The parser records the implicit
         // binding as `it`, and `it` is a keyword rather than a name, so
         // printing it back emits `loop it, words`, which the parser then
         // refuses. Eliding it is what makes the corpus round-trip.

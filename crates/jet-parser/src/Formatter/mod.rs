@@ -1213,7 +1213,7 @@ impl<'a> Fmt<'a> {
     }
 
     /// The bindingless loop subject has no name and therefore no comma before
-    /// it: `loop words :> .to_upper()`. Only the line break survives from
+    /// it: `loop words -> .to_upper()`. Only the line break survives from
     /// `loop_clause_separator`; the space after `loop` is already written.
     fn maybe_wrap_loop_clause(&mut self, wrap: bool) {
         if wrap {
@@ -2015,7 +2015,7 @@ mod tests {
     y: Int
 }
 
-fn make() Point :> {x: 1, y: 2}
+fn make() Point -> {x: 1, y: 2}
 
 fn accepts(values: [String]) {}
 
@@ -2030,7 +2030,7 @@ fn run() {
 }
 "#;
         let once = format_source(source).expect("inferred braces should format");
-        assert!(once.contains(":> {x: 1, y: 2}"), "{once}");
+        assert!(once.contains("-> {x: 1, y: 2}"), "{once}");
         assert!(once.contains("accepts({\"needle\"})"), "{once}");
         assert!(once.contains("fn block() {"), "{once}");
         assert_eq!(

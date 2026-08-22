@@ -327,7 +327,7 @@ impl<'a> Parser<'a> {
             "prefer an ordered arm table for this branch".to_string(),
             "one ordered arm table is Jet's normal form for multi-line and chained choices"
                 .to_string(),
-            "write `if { condition :> body else :> body }`".to_string(),
+            "write `if { condition -> body else -> body }`".to_string(),
             Some(span),
         ));
     }
@@ -526,15 +526,9 @@ impl<'a> Parser<'a> {
             ));
         }
         let token = self.bump();
-        // D-ARROW-UNIFY1=B retires `=>` and `->`, but the retirement CANNOT be
-        // enforced until `jet fmt` has respelled the corpus: the shipped
-        // examples, fixtures and docs still carry the old arrows, and raising
-        // here made every one of them fail to parse. The migration order is
-        // parser accepts both → formatter emits `:>` → corpus reformatted →
-        // this raise turns on and the old tokens leave the lexer, all in the
-        // change that closes #2081. Until then the old spelling is read
-        // silently. (An earlier attempt also raised at end of file on sources
-        // containing no arrow at all; that span bug is part of the same card.)
+        if !matches!(token.kind, TokKind::UnifiedArrow) {
+            self.diags.push(Self::retired_unified_arrow(token.span));
+        }
         Ok(token)
     }
 
@@ -844,7 +838,7 @@ fn build(b: BuildContext) {
             r#"
 @loop T, [Point] {
     impl T {
-        fn generated(self) String :> "generated"
+        fn generated(self) String -> "generated"
     }
     #Test("generated") {
         .measure {
@@ -996,7 +990,7 @@ fn build(b: BuildContext) {
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-        let src = "#FFI(c) fn add(a: Int, b: Int) :> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
+    let src = "#FFI(c) fn add(a: Int, b: Int) Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1023,7 +1017,7 @@ fn build(b: BuildContext) {
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() :> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1046,7 +1040,7 @@ fn build(b: BuildContext) {
 
     #[test]
     fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
-        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) :> Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
         let p = program(src);
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "add" => Some(func),
@@ -1277,7 +1271,7 @@ fn build(b: BuildContext) {
     #[test]
     fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
         let program = program(
-            "#Extern module c.demo {\n    #ABI(sysv64) fn ping(x: I32) :> I32 = \"ping\"\n}\n",
+            "#Extern module c.demo {\n    #ABI(sysv64) fn ping(x: I32) I32 = \"ping\"\n}\n",
         );
         let function = program
             .items
@@ -1334,8 +1328,8 @@ fn build(b: BuildContext) {
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "#FFI(c) fn add(a: Int, b: Int) :> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() :> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "#FFI(c) fn add(a: Int, b: Int) Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
+            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("FFI("), "formatted output keeps the FFI marker: {once}");
@@ -1427,15 +1421,15 @@ fn run() {
     server: Ready()
 }
 
-fn classify(score: Int) Grade :> if {
-    score >= 90 :> .A
-    score >= 80 :> .B
-    else :> .C
+fn classify(score: Int) Grade -> if {
+    score >= 90 -> .A
+    score >= 80 -> .B
+    else -> .C
 }
 
-fn notify(ready: Bool) :[Net]> {
-    if ready :> send() else :> skip()
-    loop item, items :> audit(item)
+fn notify(ready: Bool) -[Net]> {
+    if ready -> send() else -> skip()
+    loop item, items -> audit(item)
     outer :: loop {
         next(outer)
     }
@@ -1449,11 +1443,11 @@ fn notify(ready: Bool) :[Net]> {
 "#;
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
-        assert!(once.contains("fn classify(score: Int) Grade :> if {"), "{once}");
-        assert!(once.contains("score >= 90 :> .A"), "{once}");
-        assert!(once.contains("fn notify(ready: Bool) :[Net]> {"), "{once}");
-        assert!(once.contains("if ready :> send() else :> skip()"), "{once}");
-        assert!(once.contains("loop item, items :> audit(item)"), "{once}");
+        assert!(once.contains("fn classify(score: Int) Grade -> if {"), "{once}");
+        assert!(once.contains("score >= 90 -> .A"), "{once}");
+        assert!(once.contains("fn notify(ready: Bool) -[Net]> {"), "{once}");
+        assert!(once.contains("if ready -> send() else -> skip()"), "{once}");
+        assert!(once.contains("loop item, items -> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
         assert!(once.contains("#Abilities(caps: FS, Net)"), "{once}");
@@ -1469,8 +1463,8 @@ fn notify(ready: Bool) :[Net]> {
     outer :: loop {
         break
     }
-    values :: loop item; [1, 2] :> item
-    state :: if ready :> 1 else :> 2
+    values :: loop item; [1, 2] -> item
+    state :: if ready -> 1 else -> 2
 }
 "#;
         format_source(src).expect("later value arrows must not reclassify the named effect loop");
@@ -1497,9 +1491,11 @@ fn notify(ready: Bool) :[Net]> {
     #[test]
     fn retired_arrow_control_forms_have_specific_teaching_diagnostics() {
         for (src, code) in [
-            ("fn old() -> Int { return 1 }\n", "E0070"),
+            ("fn old() -> Int { return 1 }\n", "E0068"),
             ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
             ("fn old() :> Int { return 1 }\n", "E0068"),
+            ("fn old() :> 1\n", "E0070"),
+            ("fn old() => 1\n", "E0070"),
             ("fn old() Int :: 1\n", "E0065"),
             ("fn run() { if ready send() }\n", "E0372"),
             ("fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n", "E0077"),
@@ -1526,7 +1522,7 @@ fn notify(ready: Bool) :[Net]> {
                         .find(|diagnostic| diagnostic.code == code)
                         .and_then(|diagnostic| diagnostic.edit.as_ref())
                         .map(|edit| edit.new_text.as_str()),
-                    Some(":>"),
+                    Some("->"),
                     "the retired function-body marker must offer the canonical replacement"
                 );
             }
@@ -1633,7 +1629,7 @@ fn notify(ready: Bool) :[Net]> {
     /// D-ERRSIGIL1: tight `T?` is Optional; `T ! E` is fallible.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() :> Int? { return None }\nfn run() {}\n");
+        let opt = program("fn a() Int? { return None }\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
@@ -1643,7 +1639,7 @@ fn notify(ready: Bool) :[Net]> {
             "tight `Int?` must be Optional"
         );
 
-        let res = program("fn b() :> Int ! { return Ok(1) }\nfn run() {}\n");
+        let res = program("fn b() Int ! { return Ok(1) }\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -1656,7 +1652,7 @@ fn notify(ready: Bool) :[Net]> {
             "`Int !` must be Result"
         );
 
-        let paren = program("fn c() :> (Int?) { return None }\nfn run() {}\n");
+        let paren = program("fn c() (Int?) { return None }\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
@@ -1672,7 +1668,7 @@ fn notify(ready: Bool) :[Net]> {
         let parsed = program(
             "struct Holder { value: Int ! IOError }\n\
              alias Box<T> :: T\n\
-             fn take(value: Int ! IOError) :> Box<Int ! IOError> { return value }\n\
+             fn take(value: Int ! IOError) Box<Int ! IOError> { return value }\n\
              fn run() {}\n",
         );
         assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
@@ -1684,8 +1680,8 @@ fn notify(ready: Bool) :[Net]> {
         let parsed = program(
             "fn save(path: String) ! IOError {}\n\
              fn sync() ! {}\n\
-             fn bounded() :[FS]> ! IOError {}\n\
-             fn load() :> Config ! IOError {}\n",
+             fn bounded() ! IOError -[FS]> {}\n\
+             fn load() Config ! IOError {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {

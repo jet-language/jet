@@ -1,18 +1,18 @@
 // D-ENCSTREAM-SURFACE1=A: shared encoding values reachable from Jet.
 use core.encoding as encoding
 
-fn keep_error(v: ^encoding.EncodingError) encoding.EncodingError :> v
+fn keep_error(v: ^encoding.EncodingError) encoding.EncodingError -> v
 
-fn keep_event(v: ^encoding.DataEvent) encoding.DataEvent :> v
+fn keep_event(v: ^encoding.DataEvent) encoding.DataEvent -> v
 
-fn keep_format(v: ^encoding.EncodingFormat) encoding.EncodingFormat :> v
+fn keep_format(v: ^encoding.EncodingFormat) encoding.EncodingFormat -> v
 
-fn keep_kind(v: ^encoding.EncodingErrorKind) encoding.EncodingErrorKind :> v
+fn keep_kind(v: ^encoding.EncodingErrorKind) encoding.EncodingErrorKind -> v
 
 fn run() {
     limits :: encoding.EncodingLimits.safe()
     print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
-    if limits.max_total_bytes == .None :> print(true) else :> print(false)
+    if limits.max_total_bytes == .None -> print(true) else -> print(false)
     print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
     print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
     cause :: encoding.EncodingCause{kind: "io", os_code: None, message: "nope"}

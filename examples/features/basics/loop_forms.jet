@@ -9,34 +9,34 @@ fn run() {
     n := 0
     loop {
         n += 1
-        if n == 3 :> break
+        if n == 3 -> break
     }
     print("infinite stopped at {n}")
     // 2. Conditional loop.
     c := 0
-    loop c < 3 :> c += 1
+    loop c < 3 -> c += 1
     print("conditional ran to {c}")
     // 3. Iterator loop over a list (item only).
     sum := 0
-    loop x, [10, 20, 30] :> sum += x
+    loop x, [10, 20, 30] -> sum += x
     print("iterator sum {sum}")
     // 4. Two-binding over a list — index comes free, no bounds math.
     items :: [String]{"a", "b"}
-    loop (i, item), items :> print("pair {i}:{item}")
+    loop (i, item), items -> print("pair {i}:{item}")
     // 5. Index-only, always in bounds.
-    loop i, items.indexes() :> print("idx {i}")
+    loop i, items.indexes() -> print("idx {i}")
     // 6. Two-name iteration over a map (sorted by key).
     scores := [String:Int]{}
     scores["ana"] = 1
     scores["bo"] = 2
-    loop (name, s), scores :> print("{name} = {s}")
+    loop (name, s), scores -> print("{name} = {s}")
     // 7. Inclusive `..` (S22) beside exclusive `..<` (D-RANGE-EXCL1=C).
-    loop i, 0..2 :> print("incl {i}")
-    loop i, 0..<3 :> print("excl {i}")
+    loop i, 0..2 -> print("incl {i}")
+    loop i, 0..<3 -> print("excl {i}")
     // 8. Explicit state: initializer; condition; afterthought. `next` still
     // runs the afterthought before testing again.
     loop i, 0..<3 {
-        if i == 1 :> next
+        if i == 1 -> next
         print("counted {i}")
     }
 }

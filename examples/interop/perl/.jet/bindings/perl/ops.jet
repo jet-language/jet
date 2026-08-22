@@ -32,7 +32,7 @@ pub fn close(session: ^Session) { abi.close(session.value) }
 
 pub fn open() Session ! PerlError {
     handle :: abi.open()
-    if abi.take_error() != 0 :> return Err(PerlError.NotRunning)
+    if abi.take_error() != 0 -> return Err(PerlError.NotRunning)
     return Ok(Session{value: handle})
 }
 
@@ -41,41 +41,41 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
 pub fn fail(session: Session, input: DataTree, deadline_ms: Int) DataTree ! PerlError {
     raw :: abi.fail(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 :> return Err(PerlError.NotRunning)
-    if code == 2 :> return Err(PerlError.Timeout)
-    if code == 3 :> return Err(PerlError.Cancelled)
-    if code == 5 :> return Err(PerlError.Limit)
-    if code != 0 :> return Err(PerlError.Protocol)
+    if code == 1 -> return Err(PerlError.NotRunning)
+    if code == 2 -> return Err(PerlError.Timeout)
+    if code == 3 -> return Err(PerlError.Cancelled)
+    if code == 5 -> return Err(PerlError.Limit)
+    if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
     succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded :> return Err(PerlError.CommandFailed)
+    if !succeeded -> return Err(PerlError.CommandFailed)
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
 pub fn sleep(session: Session, input: DataTree, deadline_ms: Int) DataTree ! PerlError {
     raw :: abi.sleep(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 :> return Err(PerlError.NotRunning)
-    if code == 2 :> return Err(PerlError.Timeout)
-    if code == 3 :> return Err(PerlError.Cancelled)
-    if code == 5 :> return Err(PerlError.Limit)
-    if code != 0 :> return Err(PerlError.Protocol)
+    if code == 1 -> return Err(PerlError.NotRunning)
+    if code == 2 -> return Err(PerlError.Timeout)
+    if code == 3 -> return Err(PerlError.Cancelled)
+    if code == 5 -> return Err(PerlError.Limit)
+    if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
     succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded :> return Err(PerlError.CommandFailed)
+    if !succeeded -> return Err(PerlError.CommandFailed)
     return Ok(response.field("value") ?? DataTree.Null)
 }
 
 pub fn transform(session: Session, input: DataTree, deadline_ms: Int) DataTree ! PerlError {
     raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
-    if code == 1 :> return Err(PerlError.NotRunning)
-    if code == 2 :> return Err(PerlError.Timeout)
-    if code == 3 :> return Err(PerlError.Cancelled)
-    if code == 5 :> return Err(PerlError.Limit)
-    if code != 0 :> return Err(PerlError.Protocol)
+    if code == 1 -> return Err(PerlError.NotRunning)
+    if code == 2 -> return Err(PerlError.Timeout)
+    if code == 3 -> return Err(PerlError.Cancelled)
+    if code == 5 -> return Err(PerlError.Limit)
+    if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
     succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
-    if !succeeded :> return Err(PerlError.CommandFailed)
+    if !succeeded -> return Err(PerlError.CommandFailed)
     return Ok(response.field("value") ?? DataTree.Null)
 }

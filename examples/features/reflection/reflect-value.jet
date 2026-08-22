@@ -25,7 +25,7 @@ derive T.Summarize {
     method_track_origin :: info.methods[0].@track_origin.tracked
     method_view_mutable :: info.methods[0].@view_provenance.mutable
     method_maturity :: info.methods[0].@maturity.level
-    fn compile_field_names(self) String :> "{@type_name}: {@first},{@second},{@third} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity == .Experimental}"
+    fn compile_field_names(self) String -> "{@type_name}: {@first},{@second},{@third} range={@range_start} effects={@method_effects} send={@method_sendability} moved={@method_movedness} track={@method_track_origin} view={@method_view_mutable} maturity={@method_maturity == .Experimental}"
 }
 
 // `reflect.of(x)` is legal exactly where `"{x}"` is, so a reflected type owns a
@@ -35,7 +35,7 @@ struct Box<T> {
     value: T
 
     impl Display {
-        fn display(self) String :> "Box"
+        fn display(self) String -> "Box"
     }
 }
 
@@ -45,10 +45,10 @@ struct Point {
     y: Int
     level: Int(0..10)
 
-    fn describe(self) String :> "{self.x},{self.y}"
+    fn describe(self) String -> "{self.x},{self.y}"
 
     impl Display {
-        fn display(self) String :> "({self.x}, {self.y})"
+        fn display(self) String -> "({self.x}, {self.y})"
     }
 }
 
@@ -60,7 +60,7 @@ fn run() {
     print(v.type_name())
     print(v.path())
     print(v.display())
-    loop f, v.fields() :> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
+    loop f, v.fields() -> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
     boxed :: Box<Int>{value: 7}
     boxed_fields :: reflect.of(boxed).fields()
     print("generic {boxed_fields[0].name()}:{boxed_fields[0].value().type_name()}")

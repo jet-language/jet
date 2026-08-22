@@ -15,12 +15,12 @@ fn run() ! HTTPError | NetError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()
-    mux.post("/", (req: HTTPRequest) :> handle_trailers(req))
+    mux.post("/", (req: HTTPRequest) -> handle_trailers(req))
     wire_stream :: net.tcp_connect(addr)?
     raw_request := "".bytes()
     loop line,
         ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
-        loop byte, line.bytes() :> raw_request.push(byte)
+        loop byte, line.bytes() -> raw_request.push(byte)
         raw_request.push(13)
         raw_request.push(10)
     }
@@ -32,7 +32,7 @@ fn run() ! HTTPError | NetError | TaskFailure {
     wire_stream.write_all(raw_request)?
     loop _, 0..32 {
         chunk = wire_stream.read_text(8192)?
-        if chunk == "" :> break
+        if chunk == "" -> break
         raw_response = "{raw_response}{chunk}"
     }
     print(raw_response.contains("Trailer: X-Trace"))

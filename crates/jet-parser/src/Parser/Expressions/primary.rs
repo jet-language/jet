@@ -345,14 +345,14 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Lambda(self.parse_lambda(vec![])?))
                 }
                 // D-LAMBDA-INFER1 (ratified 2026-07-04): a bare single-param
-                // lambda with no parens — `m :> m.hp > 0`. Sema accepts it only
+                // lambda with no parens — `m -> m.hp > 0`. Sema accepts it only
                 // where the expected type fixes the param type (E0801 elsewhere).
                 //
                 // Not inside a control header. `allow_struct_lit` is false
                 // exactly where a trailing arrow introduces a BODY —
-                // `loop x, xs :> f(x)`, `if cond :> stmt`, an arm head. Once
+                // `loop x, xs -> f(x)`, `if cond -> stmt`, an arm head. Once
                 // D-ARROW-UNIFY1 made one arrow serve both roles, a bare
-                // `xs :> f(x)` there read as a lambda and swallowed the body,
+                // `xs -> f(x)` there read as a lambda and swallowed the body,
                 // so the header reported "this loop has no body". A lambda in
                 // that position writes its parameter list in parentheses.
                 TokKind::Ident(_)
@@ -372,8 +372,8 @@ impl<'a> Parser<'a> {
                             Syntax::LANG_NAME,
                             Syntax::FOREIGN_LAMBDA
                         ),
-                        "write a lambda with parentheses and `:>` instead".to_string(),
-                        "e.g. `(x) :> x + 1` instead of `lambda x { ... }`".to_string(),
+                        "write a lambda with parentheses and `->` instead".to_string(),
+                        "e.g. `(x) -> x + 1` instead of `lambda x { ... }`".to_string(),
                         Some(span),
                     ));
                     return self.expr_primary(allow_struct_lit);

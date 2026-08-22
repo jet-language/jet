@@ -1,12 +1,11 @@
 // D-STRUCT-POLICY1=A: a package owns a typed callable-policy setting.
-pub policy audit(topic: String) {
+policy audit(topic: String) {
     wrap(call) {
         return call()
     }
 }
 
-#Policy(audit("users.load"))
-fn load_user() Int :> 7
+#Policy(audit("users.load")) fn load_user() Int -> 7
 
 fn run() {
     selected :: apply(audit("users.load"), load_user)

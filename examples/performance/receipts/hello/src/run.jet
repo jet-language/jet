@@ -1,46 +1,16 @@
 module system.hello { target: linux.x64 }
 
 module perf.receipt {
-    budgets: [
-        Budget{
-            name: "binary",
-            scope: .Target("hello"),
-            metric: .BinarySize,
-            provider: .BuildArtifact("hello"),
-            comparison: .Absolute,
-            limit: .AtMost(1MiB),
-            applies: BudgetApplies{
-                targets: .Only([.Class(.Native)]),
-                profiles: .Only([.Dev]),
-            },
-        },
-        Budget{
-            name: "startup",
-            scope: .Target("hello"),
-            metric: .StartupTime,
-            provider: .BuildArtifact("hello"),
-            comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"),
-            limit: .AtMost(50ms),
-            applies: BudgetApplies{
-                targets: .Only([.Class(.Native)]),
-                profiles: .Only([.Dev]),
-            },
-        },
-        Budget{
-            name: "memory-high-water",
-            scope: .Target("hello"),
-            metric: .MemoryHighWater,
-            provider: .BuildArtifact("hello"),
-            comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"),
-            limit: .AtMost(8MiB),
-            applies: BudgetApplies{
-                targets: .Only([.Class(.Native)]),
-                profiles: .Only([.Dev]),
-            },
-        },
-    ],
+    budgets: [Budget{name: "binary", scope: .Target("hello"), metric: .BinarySize, provider: .BuildArtifact("hello"), comparison: .Absolute, limit: .AtMost(1MiB), applies: BudgetApplies{
+        targets: .Only([.Class(.Native)]),
+        profiles: .Only([.Dev])
+    }}, Budget{name: "startup", scope: .Target("hello"), metric: .StartupTime, provider: .BuildArtifact("hello"), comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"), limit: .AtMost(50ms), applies: BudgetApplies{
+        targets: .Only([.Class(.Native)]),
+        profiles: .Only([.Dev])
+    }}, Budget{name: "memory-high-water", scope: .Target("hello"), metric: .MemoryHighWater, provider: .BuildArtifact("hello"), comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"), limit: .AtMost(8MiB), applies: BudgetApplies{
+        targets: .Only([.Class(.Native)]),
+        profiles: .Only([.Dev])
+    }}]
 }
 
-fn run() {
-    print("hello, world")
-}
+fn run() { print("hello, world") }

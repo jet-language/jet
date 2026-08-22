@@ -431,8 +431,8 @@ fn fn_signature(
     }
     let params = parameter_parts.join(", ");
     // D-SIG-SHAPE1=B: the return type sits bare after the parameter list and
-    // `:>` introduces the body; an effect ceiling rides the body-arrow slot as
-    // `:[IO]>`. The retired `=[…]=>` spelling must not reach a hover or a
+    // `->` introduces the body; an effect ceiling rides the body-arrow slot as
+    // `-[IO]>`. The retired `=[…]=>` spelling must not reach a hover or a
     // completion, which are user-facing surfaces.
     //
     // D-PANICROOT1=A and D-AUTHORITY-MEM1=B make Panic and Mem deny-only: they

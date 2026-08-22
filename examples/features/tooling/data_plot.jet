@@ -9,7 +9,7 @@ struct Sale {
 
 fn run() {
     rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0\nMar,5.0") ?? panic("csv")
-    groups :: data.group_mean(rows, sale :> sale.month, sale :> sale.value) ?? panic("groups")
+    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
     options :: DataLineOptions{
         title: "Sales",
         x_label: "month",
@@ -27,7 +27,7 @@ fn run() {
     invalid_options :: DataLineOptions{title: "Sales", x_label: "month", y_label: "value", markers: false, reference: None, style: "zig", color: "#2f6f73", legend: ""}
     invalid :: data.line_text(groups, invalid_options)
     if invalid == {
-        .Ok(_) :> { print("invalid line: ok") }
-        .Err(error) :> { print("invalid line: {error}") }
+        .Ok(_) -> { print("invalid line: ok") }
+        .Err(error) -> { print("invalid line: {error}") }
     }
 }

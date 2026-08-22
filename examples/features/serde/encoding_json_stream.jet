@@ -28,15 +28,15 @@ fn run() ! EncodingError | IOError {
     read_count := 0
     loop event, reader {
         if event == {
-            .ObjectStart :> { print("event:ObjectStart") }
-            .Key(key) && key == "b" :> { print("event:Key:b") }
-            .Int(value) && value == 2 :> { print("event:Int:2") }
-            .Key(key) && key == "a" :> { print("event:Key:a") }
-            .Int(value) && value == 1 :> { print("event:Int:1") }
-            .ObjectEnd :> { print("event:ObjectEnd") }
+            .ObjectStart -> { print("event:ObjectStart") }
+            .Key(key) && key == "b" -> { print("event:Key:b") }
+            .Int(value) && value == 2 -> { print("event:Int:2") }
+            .Key(key) && key == "a" -> { print("event:Key:a") }
+            .Int(value) && value == 1 -> { print("event:Int:1") }
+            .ObjectEnd -> { print("event:ObjectEnd") }
             // The writer above emits only the five events handled here. Keep
             // the reader total if the event contract gains another variant.
-            else :> { print("event:unexpected") }
+            else -> { print("event:unexpected") }
         }
         read_count++
     }

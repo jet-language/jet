@@ -14,11 +14,11 @@ fn run() {
     choice :: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
     print("choice: {choice}")
     if io.input_secret("Secret: ") == {
-        .Ok(secret) :> { print("secret length: {secret.len()}") }
-        .Err(error) :> {
+        .Ok(secret) -> { print("secret length: {secret.len()}") }
+        .Err(error) -> {
             if error == {
-                .InvalidInput(_) :> { print("secret: non-tty") }
-                else :> { print("secret: other error") }
+                .InvalidInput(_) -> { print("secret: non-tty") }
+                else -> { print("secret: other error") }
             }
         }
     }

@@ -15,7 +15,7 @@ fn run() ! HTTPError | NetError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) :> handle(req))
+    mux.get("/", (req: HTTPRequest) -> handle(req))
     t :: task {
         server.serve_once_listener(listener, mux)?
     }

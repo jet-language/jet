@@ -108,7 +108,7 @@ impl<'a> Parser<'a> {
                     AccessConvention::Write
                 }
                 TokKind::KwMove if false => {
-                    // `take(names) () :>` is a lambda take-prefix, not an arg convention.
+                    // `take(names) () ->` is a lambda take-prefix, not an arg convention.
                     // Only treat bare `take name` as the retired move keyword.
                     let is_lambda_take = matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),

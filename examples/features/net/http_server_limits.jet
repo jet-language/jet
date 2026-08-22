@@ -7,7 +7,7 @@ fn run() ! HTTPError | NetError | TaskFailure {
     listener :: net.tcp_listen("127.0.0.1:0")?
     addr :: listener.local_addr()?
     mux :: http_server.mux()
-    mux.post("/", (req: HTTPRequest) :> Ok(http_server.response(200, "handler ran")))
+    mux.post("/", (req: HTTPRequest) -> Ok(http_server.response(200, "handler ran")))
     server :: task {
         http_server.serve_once_listener(listener, mux)?
         http_server.serve_once_listener(listener, mux)?
@@ -16,7 +16,7 @@ fn run() ! HTTPError | NetError | TaskFailure {
     smuggling_request := "".bytes()
     loop line,
         ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
-        loop byte, line.bytes() :> smuggling_request.push(byte)
+        loop byte, line.bytes() -> smuggling_request.push(byte)
         smuggling_request.push(13)
         smuggling_request.push(10)
     }
@@ -27,7 +27,7 @@ fn run() ! HTTPError | NetError | TaskFailure {
     oversized :: net.tcp_connect(addr)?
     oversized_request := "".bytes()
     loop line, ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {
-        loop byte, line.bytes() :> oversized_request.push(byte)
+        loop byte, line.bytes() -> oversized_request.push(byte)
         oversized_request.push(13)
         oversized_request.push(10)
     }

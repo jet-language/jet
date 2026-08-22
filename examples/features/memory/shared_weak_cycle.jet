@@ -13,10 +13,10 @@ struct Node {
 }
 
 fn peer_label(n: Node) String {
-    if n.peer == .None :> return "none"
+    if n.peer == .None -> return "none"
     if n.peer == .Val(weak) {
-        if weak.upgrade() == .None :> return "gone"
-        if weak.upgrade() == .Val(peer) :> return peer.label
+        if weak.upgrade() == .None -> return "gone"
+        if weak.upgrade() == .Val(peer) -> return peer.label
     }
     return "none"
 }
@@ -41,6 +41,6 @@ fn run() {
     print("strong:{count}")
     // Fresh weak — wa/wb were moved into the back-edges above.
     up := a.downgrade()
-    if up.upgrade() == .Val(_) :> print("upgrade-ok")
-    if up.upgrade() == .None :> print("upgrade-gone")
+    if up.upgrade() == .Val(_) -> print("upgrade-ok")
+    if up.upgrade() == .None -> print("upgrade-gone")
 }

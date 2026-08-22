@@ -281,7 +281,7 @@ impl<'a> Parser<'a> {
             // by D-ARROW-CONTROL1. Accept `->` only to emit its migration error.
             if self.at_unified_arrow() {
                 self.expect_unified_arrow("before a callable result type")?;
-                let (to_ty, to_span) = self.parse_type_path("after `:>` in error conversion")?;
+                let (to_ty, to_span) = self.parse_type_path("after `->` in error conversion")?;
                 // Peek the `{` span before consuming.
                 if !matches!(self.peek().kind, TokKind::LBrace) {
                     return Err(Diagnostic::error(

@@ -8,7 +8,7 @@ struct WorkQueue {
 
 fn produce(queue: Shared<WorkQueue>, changed: Condition) {
     guard :: queue.guard_edit()
-    guard.wait(changed, value :> value.jobs.len() < value.capacity) ?? panic("wait failed")
+    guard.wait(changed, value -> value.jobs.len() < value.capacity) ?? panic("wait failed")
     guard.value.jobs.push(7)
     changed.notify_all()
 }

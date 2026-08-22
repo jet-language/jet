@@ -557,7 +557,7 @@ impl<'a> Checker<'a> {
                     "E0102",
                     "`Group.select()` is retired".to_string(),
                     "readiness waits are subjectless `if` tables on plain endpoints".to_string(),
-                    "write `if { value, receiver :> handle(value) }`".to_string(),
+                    "write `if { value, receiver -> handle(value) }`".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {

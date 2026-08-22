@@ -4,8 +4,8 @@ use core.files as fs
 fn run() {
     root :: "/tmp/jet_files_depth_demo"
     copy_root :: "/tmp/jet_files_depth_demo_copy"
-    if fs.exists(root) :> fs.remove_all(root) ?? return Err("cleanup root failed")
-    if fs.exists(copy_root) :> fs.remove_all(copy_root) ?? return Err("cleanup copy failed")
+    if fs.exists(root) -> fs.remove_all(root) ?? return Err("cleanup root failed")
+    if fs.exists(copy_root) -> fs.remove_all(copy_root) ?? return Err("cleanup copy failed")
     nested :: Path.from(root).join("a/b")
     fs.create_dir_all(nested) ?? return Err("mkdir failed")
     file :: nested.join("data.txt")

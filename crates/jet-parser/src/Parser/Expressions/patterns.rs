@@ -16,13 +16,13 @@ mod tests {
 fn run() {
     text :: "prefix-42-suffix"
     if text == {
-        "prefix-{value}-suffix" :> print(value)
-        else :> print("miss")
+        "prefix-{value}-suffix" -> print(value)
+        else -> print("miss")
     }
     bytes :: [U8]{ 7 }
     if bytes == {
-        [U8]{"{value:U8}"} :> print(value)
-        else :> print("miss")
+        [U8]{"{value:U8}"} -> print(value)
+        else -> print("miss")
     }
 }
 "#;

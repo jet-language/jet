@@ -10,12 +10,12 @@ struct Rect {
 
     fn new(width: Float, height: Float) Rect { return Rect{width: width, height: height} }
 
-    fn area(self) Float :> (self.width * self.height)
+    fn area(self) Float -> (self.width * self.height)
 
     fn scale(self, factor: Float, clamp: Bool = false) Rect {
         scaled_w :: (self.width * factor)
         scaled_h :: (self.height * factor)
-        if clamp :> return Rect{width: 100.0, height: 100.0}
+        if clamp -> return Rect{width: 100.0, height: 100.0}
         return Rect{width: scaled_w, height: scaled_h}
     }
 }
@@ -49,14 +49,14 @@ fn collect(first: ^Int, second: ^Int = first, rest: ...Int) Int {
 // A known API stays cheap to call positionally. The editor renders this as
 // `clamp(value: 12, low: 0, high: 10)` without changing the source.
 fn clamp(value: Int, low: Int, high: Int) Int {
-    if value < low :> return low
-    if value > high :> return high
+    if value < low -> return low
+    if value > high -> return high
     return value
 }
 
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
 // are part of callable identity. `apply` only accepts a labelled call.
-fn apply(action: fn(*, force: Bool) Int) Int :> action(force: true)
+fn apply(action: fn(*, force: Bool) Int) Int -> action(force: true)
 
 fn saver(force: Bool) Int {
     print("saver {force}")

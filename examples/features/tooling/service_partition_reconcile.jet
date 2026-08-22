@@ -25,8 +25,8 @@ fn run() {
     foreign.start() ?? panic("foreign start")
     foreign_route := tree.send(foreign_api, "intrude")
     if foreign_route == {
-        .Ok(_) :> { print("foreign:accepted") }
-        .Err(_) :> { print("foreign:rejected") }
+        .Ok(_) -> { print("foreign:accepted") }
+        .Err(_) -> { print("foreign:rejected") }
     }
     foreign.stop() ?? panic("foreign stop")
 
@@ -34,14 +34,14 @@ fn run() {
     print("drained:ok")
     expired := tree.directory_resolve("drained")
     if expired == {
-        .Ok(_) :> { print("expired:accepted") }
-        .Err(_) :> { print("expired:rejected") }
+        .Ok(_) -> { print("expired:accepted") }
+        .Err(_) -> { print("expired:rejected") }
     }
     tree.partition_worker(api) ?? panic("partition")
     partition_route := api.send("intrude")
     if partition_route == {
-        .Ok(_) :> { print("partition_route:accepted") }
-        .Err(_) :> { print("partition_route:rejected") }
+        .Ok(_) -> { print("partition_route:accepted") }
+        .Err(_) -> { print("partition_route:rejected") }
     }
     print("partitioned:ok")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")

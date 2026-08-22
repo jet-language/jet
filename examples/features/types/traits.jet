@@ -7,9 +7,9 @@ struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) Float :> Float{3.14159} * self.radius * self.radius
+        fn area(self) Float -> Float{3.14159} * self.radius * self.radius
 
-        fn name(self) String :> "circle"
+        fn name(self) String -> "circle"
     }
 }
 
@@ -18,17 +18,17 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) Float :> self.side * self.side
+    fn area(self) Float -> self.side * self.side
 
-    fn name(self) String :> "square"
+    fn name(self) String -> "square"
 }
 
 fn largest<T: Comparable>(xs: [T]) T? {
-    if xs.len() == 0 :> return None
+    if xs.len() == 0 -> return None
     best := ~xs[0]
     i := 1
     loop i < xs.len() {
-        if xs[i] > best :> best = ~xs[i]
+        if xs[i] > best -> best = ~xs[i]
         i += 1
     }
     return Val(best)
@@ -48,10 +48,10 @@ fn run() {
     one :: Circle{radius: 2.0}
     print_area(one)
     print_area(Square{side: 3.0})
-    shapes.each(s :> print_area(s))
+    shapes.each(s -> print_area(s))
     nums :: [3, 1, 4, 1, 5]
     print(largest(nums))
     scores := [Score{points: 10}, Score{points: 20}]
-    scores.sort_by((s: Score) :> s.points)
+    scores.sort_by((s: Score) -> s.points)
     print(scores[0].points)
 }

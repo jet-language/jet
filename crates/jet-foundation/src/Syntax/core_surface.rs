@@ -87,7 +87,7 @@ pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
 /// value (`Type{ … }`) or live on signatures and fields.
 /// D-BODY-LAST1=B and D-SIG-SHAPE1=B retire `::` as a function-body marker:
-/// `:>` introduces a one-expression body, while braces hold statements and a
+/// `->` introduces a one-expression body, while braces hold statements and a
 /// trailing value; `::` keeps its binding meaning and `=` remains for
 /// slot-filling declarations such as extern bindings.
 pub const SIGIL_BIND_IMMUT: &str = "::";
@@ -297,7 +297,7 @@ pub const KW_MUTATE: &str = "mut";
 
 /// S10 (M2) → D-CAP7: the retired move keyword. Bare `take value` is recognized
 /// only for the paused capability teaching path. `.take(n)` stays a valid method
-/// name, while `take(names) () :>` is recognized only to report E0057.
+/// name, while `take(names) () ->` is recognized only to report E0057.
 pub const KW_MOVE: &str = "take";
 
 /// M2: struct definition keyword (construction spelling: S29).

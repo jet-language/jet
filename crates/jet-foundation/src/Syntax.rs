@@ -83,7 +83,7 @@
 // this root; no second configuration spelling is allowed.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
-// Code arguments are ordinary `() :> { … }` lambdas inside call parentheses;
+// Code arguments are ordinary `() -> { … }` lambdas inside call parentheses;
 // a bare `{` after a call is E0335.
 // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
 // `name := value`; types ride values (`Type{ … }`) or live on signatures
@@ -142,8 +142,10 @@
 // ordinary resolution and access rules.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
-// D-ARROW-UNIFY1=B (ratified 2026-08-19): OP_UNIFIED_ARROW (`:>`) defines
+// D-ARROW-UNIFY1=B (ratified 2026-08-19): OP_UNIFIED_ARROW (`->`) defines
 // callable results and control arms/bodies in every position.
+// D-ARROW-RESPELL1=A (ratified 2026-08-21): `->` is canonical; `:>` and `=>`
+// are retired teaching spellings with no alias.
 // D-ERRSIGIL1=A (ratified 2026-08-21) gives fallible types the dedicated
 // TYPE_FALLIBLE_SEP (`!`); `?` remains the optional suffix. Unit-fallible
 // functions use the same separator after their parameters.
@@ -162,18 +164,18 @@
 // and `jet jobs`. Retired spellings have no alias or fallback. Help,
 // completions, diagnostics, docs, examples, and tests use the same word.
 // KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
-// EFFECT_ARROW_OPEN/CLOSE (`:[` / `]>`) add effect ceilings. The unified
+// EFFECT_ARROW_OPEN/CLOSE (`-[` / `]>`) add effect ceilings. The unified
 // arrow selects dispatch/guard values, yields finite-loop items, and marks a
 // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
 // 2026-08-13, card #1453) gives every statement-position loop header this
-// body form. D-BODY-LAST1=B and D-SIG-SHAPE1=B make `:>` the one-expression
+// body form. D-BODY-LAST1=B and D-SIG-SHAPE1=B make `->` the one-expression
 // function-body marker; braces hold statements and a trailing value. `::`
 // remains the name-binding sigil, and `=` remains for slot-filling declarations
 // such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses commas between loop
 // clauses and `(key, value)` for a two-name source binding.
 // D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
-// guards comma-less: `loop name, source if condition :> value`; `, if` is
+// guards comma-less: `loop name, source if condition -> value`; `, if` is
 // E0379, never a stride.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.

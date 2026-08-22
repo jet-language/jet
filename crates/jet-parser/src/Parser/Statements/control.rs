@@ -64,13 +64,10 @@ impl<'a> Parser<'a> {
                 span: Span::new(start.start, end),
             });
         }
-        // The collecting arrow is `:>` (`UnifiedArrow`). This header still
-        // tested the retired `->`, so every bindingless comprehension —
-        // `loop words :> .to_upper()` — was rejected as unbounded.
-        let collect_arrow = TokKind::UnifiedArrow;
+        // The collecting arrow is `->` (`UnifiedArrow`).
         let bindingless_source = matches!(self.peek().kind, TokKind::Ident(_))
-            && (self.peek2().kind == collect_arrow
-                || matches!(self.peek2().kind, TokKind::Arrow | TokKind::KwIf));
+            && (Self::at_unified_arrow_token(&self.peek2().kind)
+                || matches!(self.peek2().kind, TokKind::KwIf));
         // `it` lexes as its own keyword, not an identifier, so a header that
         // names the implicit binding explicitly — `loop it, users` — reaches
         // here too. It is not the ratified spelling (D-LOOP-SUBJECT1 writes
@@ -79,15 +76,10 @@ impl<'a> Parser<'a> {
         let binding_head = matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwIt);
         let finite_header = matches!(self.peek().kind, TokKind::LParen)
             || (binding_head
-                && (self.peek2().kind == collect_arrow
-                    || matches!(
-                        self.peek2().kind,
-                        TokKind::ColonEq
-                            | TokKind::Semi
-                            | TokKind::Comma
-                            | TokKind::Arrow
-                            | TokKind::KwIf
-                    )));
+                && (matches!(
+                    self.peek2().kind,
+                    TokKind::ColonEq | TokKind::Semi | TokKind::Comma | TokKind::KwIf
+                ) || Self::at_unified_arrow_token(&self.peek2().kind)));
         if !finite_header {
             return Err(Diagnostic::error(
                 "E0072",
@@ -95,7 +87,7 @@ impl<'a> Parser<'a> {
                     .to_string(),
                 "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary"
                     .to_string(),
-                "remove `:>`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
+                "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`"
                     .to_string(),
                 Some(start),
             ));
@@ -1583,7 +1575,7 @@ impl<'a> Parser<'a> {
 
     fn effect_loop_body(&mut self) -> Result<(Vec<Stmt>, bool), Diagnostic> {
         if self.at_unified_arrow() {
-            self.bump();
+            self.expect_unified_arrow("after a loop header")?;
             let nested_control = matches!(self.peek().kind, TokKind::KwIf | TokKind::KwLoop)
                 || (matches!(self.peek().kind, TokKind::Ident(_))
                     && matches!(self.peek2().kind, TokKind::ColonColon)

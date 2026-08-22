@@ -17,7 +17,7 @@ fn run() ! [FieldError] {
     raw :: "item,qty\npen,3\nink,5"
     sales :: csv.decode<Sale>(raw)?
     total := 0
-    loop s, sales :> total += s.qty
+    loop s, sales -> total += s.qty
     print("rows: {sales.len()}")
     print("total qty: {total}")
     print(csv.to_string(sales))
@@ -27,7 +27,7 @@ fn run() ! [FieldError] {
     bad_raw :: "item,qty\npen,x\nink,y"
     attempted :: csv.decode<Sale>(bad_raw)
     if attempted == {
-        .Ok(rows) :> { print("decoded {rows.len()} rows") }
-        .Err(errs) :> print("{errs}")
+        .Ok(rows) -> { print("decoded {rows.len()} rows") }
+        .Err(errs) -> { print("{errs}") }
     }
 }

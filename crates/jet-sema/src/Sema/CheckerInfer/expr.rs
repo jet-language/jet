@@ -2809,7 +2809,7 @@ impl<'a> Checker<'a> {
                             "a call is a value only when its function declares a result after the parameter list"
                                 .to_string(),
                             format!(
-                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type :> …`",
+                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
                                 call.name, call.name
                             ),
                             Some(span),

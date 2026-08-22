@@ -12,13 +12,13 @@ pub const KW_PURE: &str = "Pure";
 
 /// D-SHAPE8=A + D-EFFECT-OMIT1=A, amended by D-ARROW-CONTROL1=A on
 /// 2026-08-19: an explicit function effect row lives inside the unified arrow:
-/// `:[FS.Read, ..E]>`. The empty row `:[]>` is an explicit purity bound; an
-/// omitted row leaves ordinary `:>` unchanged while sema still infers its
+/// `-[FS.Read, ..E]>`. The empty row `-[]>` is an explicit purity bound; an
+/// omitted row leaves ordinary `->` unchanged while sema still infers its
 /// complete row. Public metadata and tooling project the normalized inferred
 /// row whether source spells it or not.
 /// These two fragments are the canonical punctuation used by the parser,
 /// formatter, editor grammars, and generated documentation.
-pub const EFFECT_ARROW_OPEN: &str = ":[";
+pub const EFFECT_ARROW_OPEN: &str = "-[";
 pub const EFFECT_ARROW_CLOSE: &str = "]>";
 
 /// D-EFFECT-DECL1=A: package-scoped effect-leaf declaration.
@@ -87,13 +87,13 @@ pub const BUILTIN_TAGS: &[&str] = &["Input", "PII", "Secret", "Credential"];
 pub const KW_STATE: &str = "State";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) :> Reservation`.
+/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) Reservation -> …`.
 /// Declares a function that consumes a value in state `Pending` and yields one in
 /// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
 /// returns the next"). The from-state may be `_` for an **entry** transition (a
 /// constructor that produces the initial state from nothing). Wrong from-state at a
 /// call site is E0150; the call advances the receiver/result to the to-state. The
-/// `:>` inside reuses the callable arrow. Tags erase (I3). Implemented default queued
+/// `->` inside reuses the callable arrow. Tags erase (I3). Implemented default queued
 /// for owner confirmation as D-STATE-TRANS.
 pub const KW_TRANSITION: &str = "Transition";
 
@@ -201,18 +201,18 @@ pub const METHOD_TASK_CANCEL: &str = "cancel";
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an
 /// irreversible effect (Net/FS/Exec) is rejected (E0746, D-TXN2); the fix is to
 /// move it after the block or register it on the handle via
-/// `order.on_commit(() :> { … })` (D-TXN3), which runs Drop-backed on a clean
+/// `order.on_commit(() -> { … })` (D-TXN3), which runs Drop-backed on a clean
 /// commit. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_TRANSACT: &str = "Transact";
 
 /// D-TXN3 (ratified 2026-06-24): the post-commit hook method on a transaction
-/// handle — `order.on_commit(() :> { … })`. Drop-backed (D-DEFER1 model), runs
+/// handle — `order.on_commit(() -> { … })`. Drop-backed (D-DEFER1 model), runs
 /// LIFO on a clean commit and is dropped (not run) on a `?`-failure/rollback.
 /// NO new keyword (library form, I7 untouched).
 pub const TXN_ON_COMMIT: &str = "on_commit";
 
 /// D-TXN-ROLLBACK (ratified 2026-06-25, layer 3): the explicit rollback-hook
-/// method on a transaction handle — `order.on_rollback(() :> { … })`. The exact
+/// method on a transaction handle — `order.on_rollback(() -> { … })`. The exact
 /// mirror of `on_commit`: Drop-backed (D-DEFER1 model), runs LIFO on a
 /// `?`-failure/rollback and is dropped (not run) on a clean commit. A value handled
 /// by an explicit `on_rollback` is the author's to undo, so it is NOT auto-snapshot

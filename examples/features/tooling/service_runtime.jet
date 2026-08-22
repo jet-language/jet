@@ -10,33 +10,33 @@ fn worker_b() {}
 
 fn status_label(status: TaskStatus) String {
     if status == {
-        .Running :> { return "running" }
-        .Paused :> { return "paused" }
-        .CancelRequested :> { return "cancel-requested" }
+        .Running -> { return "running" }
+        .Paused -> { return "paused" }
+        .CancelRequested -> { return "cancel-requested" }
     }
     return "unknown"
 }
 
 fn outcome_label(outcome: TaskOutcome) String {
     if outcome == {
-        .Finished :> { return "finished" }
-        .Panicked(_) :> { return "panicked" }
-        .Cancelled :> { return "cancelled" }
-        .DeadlineBlown :> { return "deadline-blown" }
+        .Finished -> { return "finished" }
+        .Panicked(_) -> { return "panicked" }
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline-blown" }
     }
     return "unknown"
 }
 
 fn status_is_paused(status: TaskStatus) Bool {
     if status == {
-        .Paused :> { return true }
+        .Paused -> { return true }
     }
     return false
 }
 
 fn outcome_is_finished(outcome: TaskOutcome) Bool {
     if outcome == {
-        .Finished :> { return true }
+        .Finished -> { return true }
     }
     return false
 }
@@ -82,13 +82,13 @@ fn run() {
     scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
     print("activity:{status_label(scheduled)}")
     retried :: tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
-    if !status_is_paused(retried) :> panic("typed retry status")
+    if !status_is_paused(retried) -> panic("typed retry status")
     print("retry:{status_label(retried)}")
     completed :: tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
-    if !outcome_is_finished(completed) :> panic("typed completion outcome")
+    if !outcome_is_finished(completed) -> panic("typed completion outcome")
     print("completed:{outcome_label(completed)}")
     workflow_outcome :: tree.workflow_outcome(run_id) ?? panic("outcome")
-    if !outcome_is_finished(workflow_outcome) :> panic("typed workflow outcome")
+    if !outcome_is_finished(workflow_outcome) -> panic("typed workflow outcome")
     print("outcome:{outcome_label(workflow_outcome)}")
     tree.directory_register("front", a) ?? panic("dir")
     resolved :: tree.directory_resolve("front") ?? panic("resolve")
@@ -96,21 +96,21 @@ fn run() {
     tree.drain_worker(a) ?? panic("drain")
     late :: a.send("late")
     if late == {
-        .Ok(_) :> { print("drain_send:accepted") }
-        .Err(_) :> { print("drain_send:rejected") }
+        .Ok(_) -> { print("drain_send:accepted") }
+        .Err(_) -> { print("drain_send:rejected") }
     }
     gen :: tree.handoff_generation() ?? panic("handoff")
     print("gen:{gen}")
     print(tree.upgrade_receipt() ?? panic("upgrade receipt"))
     stale :: a.send("stale")
     if stale == {
-        .Ok(_) :> { print("stale_send:accepted") }
-        .Err(_) :> { print("stale_send:rejected") }
+        .Ok(_) -> { print("stale_send:accepted") }
+        .Err(_) -> { print("stale_send:rejected") }
     }
     blocked :: tree.receive(a)
     if blocked == {
-        .Ok(_) :> { print("handoff_receive:accepted") }
-        .Err(_) :> { print("handoff_receive:rejected") }
+        .Ok(_) -> { print("handoff_receive:accepted") }
+        .Err(_) -> { print("handoff_receive:rejected") }
     }
     print("handoff_depth:{tree.mailbox_depth(a) ?? panic("handoff depth")}")
     chaos :: tree.chaos_fail() ?? panic("chaos")

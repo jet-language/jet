@@ -25,15 +25,15 @@ fn show_values() {
 }
 
 // --- functions & generics ------------------------------------------------
-fn greet(who: String) String :> "hello, {who}"
+fn greet(who: String) String -> "hello, {who}"
 
-fn id<T>(x: ^T) T :> x
+fn id<T>(x: ^T) T -> x
 
 struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) Float :> self.x * self.x + self.y * self.y
+    fn dist_sq(self) Float -> self.x * self.x + self.y * self.y
 
     fn origin() Point { return Point{x: 0.0, y: 0.0} }
 }
@@ -48,16 +48,16 @@ enum Light {
 
 fn next(light: Light) Light {
     if light == {
-        .Red :> { return Light.Yellow }
-        .Yellow :> { return Light.Green }
-        .Green :> { return Light.Red }
+        .Red -> { return Light.Yellow }
+        .Yellow -> { return Light.Green }
+        .Green -> { return Light.Red }
     }
 }
 
 fn day_kind(day: String) String {
     if day == {
-        "sat" | "sun" :> { return "weekend" }
-        else :> { return "weekday" }
+        "sat" | "sun" -> { return "weekend" }
+        else -> { return "weekday" }
     }
 }
 
@@ -67,7 +67,7 @@ enum ParseError {
 }
 
 fn parse_age(raw: String) Int ! ParseError {
-    if raw == "" :> return Err(ParseError.Empty)
+    if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }
 
@@ -86,12 +86,12 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) Float :> self.side * self.side
+    fn area(self) Float -> self.side * self.side
 }
 
 // --- inline module -------------------------------------------------------
 module math {
-    pub fn double(n: Int) Int :> n * 2
+    pub fn double(n: Int) Int -> n * 2
 }
 
 // --- low-level: `Type{ uninit }` sentinel --------------------------------
@@ -106,9 +106,9 @@ fn show_uninit() Int {
 // --- inline contracts: `#Inline` / `#Inline(Always)` ----------------------
 // D-INLINE-PARAM1=A: `#Inline` is a soft hint; `#Inline(Always)` is a checked
 // promise the compiler proves or refuses to build.
-#Inline fn square(x: Int) Int :> x * x
+#Inline fn square(x: Int) Int -> x * x
 
-#Inline(Always) fn twice(x: Int) Int :> x * 2
+#Inline(Always) fn twice(x: Int) Int -> x * 2
 
 // --- typed CLI args: `#CLI` struct + `#Doc(...)` fields -----------------
 // D-CLIFLAG1=A: an entry function's `#CLI` parameter type IS the CLI spec.
@@ -151,7 +151,7 @@ struct Account {
 }
 
 migration Account {
-    rename name :> display_name
+    rename name -> display_name
     add verified: Bool = false
 }
 
@@ -176,7 +176,7 @@ struct LinuxBackend {
 
 #Target(OS.Linux)
 impl LinuxBackend.Backend {
-    fn label(self) String :> "linux: {self.name}"
+    fn label(self) String -> "linux: {self.name}"
 }
 
 // --- `#Test` scope members: `.setup` / `.expect_fail` / `.timeout` / `.skip`
@@ -224,8 +224,8 @@ fn run() {
     print("day: {kind}")
     // errors
     if double_age("42") == {
-        .Ok(n) :> { print("ok: {n}") }
-        .Err(e) :> { print("err: {e}") }
+        .Ok(n) -> { print("ok: {n}") }
+        .Err(e) -> { print("err: {e}") }
     }
 
     fallback :: parse_age("") ?? 0
@@ -234,9 +234,9 @@ fn run() {
     nums := [Int]{3, 1, 2}
     nums.push(4)
     nums.sort()
-    squares :: nums.map((n: Int) :> n * n)
-    big :: squares.filter((n: Int) :> n > 5)
-    total :: nums.reduce(0, (acc: Int, n: Int) :> acc + n)
+    squares :: nums.map((n: Int) -> n * n)
+    big :: squares.filter((n: Int) -> n > 5)
+    total :: nums.reduce(0, (acc: Int, n: Int) -> acc + n)
     print("nums: {nums[0]} {nums[1]} total {total} big {big.len()}")
     // tuple
     pair :: (x: 1, y: 2)
@@ -252,7 +252,7 @@ fn run() {
     print("split: {parts.len()} trimmed: {trimmed}")
     // control flow
     sum := 0
-    loop i, 1..5 :> sum += i
+    loop i, 1..5 -> sum += i
     print("loop_sum: {sum}")
     // low-level: uninit sentinel
     print("uninit: {show_uninit()}")

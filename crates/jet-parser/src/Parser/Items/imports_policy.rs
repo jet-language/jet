@@ -46,6 +46,10 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close `wrap(call)`")?;
             self.expect(TokKind::LBrace, "to open the policy wrapper body")?;
             let body = self.block_stmts();
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            self.expect(TokKind::RBrace, "to close the policy declaration")?;
             let end = self.toks[self.pos.saturating_sub(1)].span.end;
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
@@ -686,7 +690,7 @@ impl<'a> Parser<'a> {
                             "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
                                 .to_string(),
                             format!(
-                                "write: {} {} \"crate@version\" {{ fn name(...) :> T = \"rust::path\"; }}",
+                                "write: {} {} \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}",
                                 Syntax::KW_EXTERN,
                                 Syntax::KW_RUST
                             ),

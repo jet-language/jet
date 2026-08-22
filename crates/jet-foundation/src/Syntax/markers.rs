@@ -23,7 +23,7 @@ pub const MARKER_POST: &str = "Post"; // D-PREPOST1
 /// D-MEMO1=A / D-FIELDMEMO1=A: stores a pure function result or a computed
 /// field result until its checked inputs change. Functions use the bounded
 /// default or `bound: none`; the field form is bare `#Memo` before
-/// `name: T :> expr`.
+/// `name: T -> expr`.
 pub const MARKER_MEMO: &str = "Memo"; // D-MEMO1=A, D-FIELDMEMO1=A
 
 /// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe kernel declaration —
