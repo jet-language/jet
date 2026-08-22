@@ -406,6 +406,37 @@ impl CoreCallSymbol {
     }
 }
 
+/// One marker application carried by an ordinary Core declaration row.
+///
+/// D-STRUCT-LIFE1=A: Core declarations have no Jet source file in which to
+/// write `#Deprecated`, so the canonical declaration row carries the same
+/// marker metadata that user items carry in `AST::Deprecation`. The `member`
+/// is the retiring alias; the row's own `member` remains the replacement
+/// declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoreMarkerApplication {
+    pub member: &'static str,
+    pub since: &'static str,
+    pub replacement: &'static str,
+    pub removed_in: Option<&'static str>,
+}
+
+impl CoreMarkerApplication {
+    pub const fn deprecated(
+        member: &'static str,
+        since: &'static str,
+        replacement: &'static str,
+        removed_in: Option<&'static str>,
+    ) -> Self {
+        Self {
+            member,
+            since,
+            replacement,
+            removed_in,
+        }
+    }
+}
+
 /// One plain Core-call record shared by every engine projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreCallRecord {
@@ -430,6 +461,8 @@ pub struct CoreCallRecord {
     /// Optional resident-JIT symbol when the AOT spelling is not its host
     /// spelling. This keeps the alias in the one record instead of lowering.
     pub jit_symbol: Option<&'static str>,
+    /// Marker metadata attached to this ordinary declaration row.
+    pub marker: Option<CoreMarkerApplication>,
 }
 
 impl CoreCallRecord {
@@ -462,6 +495,7 @@ impl CoreCallRecord {
             aot_direct: true,
             jit_direct: true,
             jit_symbol: None,
+            marker: None,
         }
     }
 
@@ -505,6 +539,7 @@ impl CoreCallRecord {
             aot_direct: false,
             jit_direct: false,
             jit_symbol: None,
+            marker: None,
         }
     }
 
@@ -562,6 +597,11 @@ impl CoreCallRecord {
 
     pub const fn with_jit_symbol(mut self, symbol: &'static str) -> Self {
         self.jit_symbol = Some(symbol);
+        self
+    }
+
+    pub const fn with_marker(mut self, marker: CoreMarkerApplication) -> Self {
+        self.marker = Some(marker);
         self
     }
 
@@ -2171,7 +2211,29 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_enc_cbor_to_bytes",
         true,
         &[true],
-    ),
+    )
+    .with_marker(CoreMarkerApplication::deprecated(
+        "encode",
+        "2027",
+        "cbor.to_bytes",
+        Some("2028"),
+    )),
+    CoreCallRecord::new(
+        "core.encoding.cbor",
+        "parse",
+        "jet_enc_cbor_parse",
+        true,
+        &[true],
+    )
+    .with_max_arity(2)
+    .without_direct_aot()
+    .without_direct_jit()
+    .with_marker(CoreMarkerApplication::deprecated(
+        "decode",
+        "2027",
+        "cbor.parse",
+        Some("2028"),
+    )),
     CoreCallRecord::new(
         "core.encoding.cbor",
         "to_bytes_canonical",
@@ -4124,23 +4186,17 @@ pub fn core_call(module: &str, member: &str) -> Option<&'static CoreCallRecord> 
         .find(|row| row.receiver_types.is_empty() && row.module == module && row.member == member)
 }
 
-/// D-STRUCT-LIFE1=A: Core has no Jet source declaration to carry a marker, so
-/// these two legacy aliases are represented as synthetic ordinary marker
-/// applications. Their payload is the same AST value user declarations carry.
-pub fn core_deprecation(module: &str, member: &str) -> Option<crate::AST::Deprecation> {
-    match (module, member) {
-        ("core.encoding.cbor", "encode") => Some(crate::AST::Deprecation {
-            since: "2027".to_string(),
-            replacement: "cbor.to_bytes".to_string(),
-            removed_in: Some("2028".to_string()),
-        }),
-        ("core.encoding.cbor", "decode") => Some(crate::AST::Deprecation {
-            since: "2027".to_string(),
-            replacement: "cbor.parse".to_string(),
-            removed_in: Some("2028".to_string()),
-        }),
-        _ => None,
-    }
+/// Find marker metadata on an ordinary Core declaration row.
+pub fn core_marker_application(
+    module: &str,
+    member: &str,
+) -> Option<CoreMarkerApplication> {
+    CORE_CALLS.iter().find_map(|row| {
+        (row.module == module
+            && row.receiver_types.is_empty()
+            && row.marker.is_some_and(|marker| marker.member == member))
+            .then(|| row.marker.expect("marker checked above"))
+    })
 }
 
 /// Find one receiver/static-method projection from the same Core registry.

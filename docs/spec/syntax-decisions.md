@@ -139,18 +139,18 @@ beside S17 (owner-chosen I8 exception).
 card #1209; retired split amended by D-ARROW-UNIFY1=B)*:
 
 This row's former split is retired. Every callable result, effect ceiling,
-dispatch arm, loop body, and lambda uses `:>`. An explicit effect ceiling uses
-`:[Effects]>`, with `:[]>` for an empty row and `:[..E]>` for an open row.
+dispatch arm, loop body, and lambda uses `->`. An explicit effect ceiling uses
+`-[Effects]>`, with `-[]>` for an empty row and `-[..E]>` for an open row.
 Braces group multiline bodies. They do not imply a result.
 
 Named functions, methods, function types, lambdas, computed fields, conversion
 implementations, and migration converters use the callable arrow. A concise
-named callable uses `:: expression` after its result type:
+named callable uses `-> expression` after its result type:
 
 ```jet
-fn double(value: Int) :> Int :: value * 2
+fn double(value: Int) Int -> value * 2
 
-fn load(path: String) :[FS]> String {
+fn load(path: String) String -[FS]> {
     text :: core.files.read(path)?
     text.trim()
 }
@@ -158,7 +158,7 @@ fn load(path: String) :[FS]> String {
 
 A returned block uses its final value. `return` remains the explicit early-exit
 form. A unit-returning callable with no explicit effect ceiling needs no arrow.
-`:>` is not a general operator.
+`->` is not a general operator.
 
 **D-VOID1=A — one no-information result spelling** *(ratified 2026-08-04,
 card #1411)*: user-facing no-information results use `()`. The compiler keeps
@@ -263,18 +263,18 @@ the declaration and never rewrites either call spelling.
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).
 
-**S46 — Lambda syntax**: `(params) => expr` / `(params) => { … }`. `=>` is
-the callable arrow; `->` is reserved for selected or yielded control values.
+**S46 — Lambda syntax**: `(params) -> expr` / `(params) -> { … }`. `->` is
+the one callable and control arrow; `:>` and `=>` are retired teaching forms.
 **D-LAMBDAINFER1**:
 a lambda param type may be omitted where the expected type fixes it
-(`xs.filter((i) => i.state == .Open)`); required elsewhere (E0801);
+(`xs.filter((i) -> i.state == .Open)`); required elsewhere (E0801);
 one-directional inference only. **D-LAMBDA-INFER1** *(ratified 2026-07-04)*:
-a single bare param may ALSO drop the parens — `xs.filter(m => m.hp > 0)` —
+a single bare param may ALSO drop the parens — `xs.filter(m -> m.hp > 0)` —
 wherever the expected type fixes it (same E0801/one-directional rule); no
 explicit capture prefix exists. The parenthesized and typed forms stay
 available where the type cannot be inferred.
 
-**S47 — Function types & captures**: fn type `fn(T1, T2) => R`; each unmarked
+**S47 — Function types & captures**: fn type `fn(T1, T2) R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
 values only when every parameter also has plain read access. A named function
 with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
@@ -388,17 +388,17 @@ when a call's final param was a function type, a bare `{ }` after `)` stood in
 for that lambda — `ui.button("Save") { prefs.save() }`. Zero-parameter blocks
 only in v1 (E0334/E0335).
 
-**D-TRAILBLOCK2=A — Explicit `() =>` code arguments** *(ratified 2026-07-28,
+**D-TRAILBLOCK2=A — Explicit `() ->` code arguments** *(ratified 2026-07-28,
 card #1266)*: pass multiline code into a call as an ordinary lambda argument
-inside the parentheses — `twice(() => { print("HI"); print("Hello") })` (each
+inside the parentheses — `twice(() -> { print("HI"); print("Hello") })` (each
 statement on its own line). Multiple code arguments are ordinary
 comma-separated args. Retires D-TRAILBLOCK1 trailing `{ }` sugar; a bare `{ }`
-after a call is E0335 with a fix that shows `callee(() => { … })`.
+after a call is E0335 with a fix that shows `callee(() -> { … })`.
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
 the earlier untyped expression-body form (D-FP2), superseded by
-D-ONELINE-BODY1=B's typed `fn f() => T :: expr`; the earlier general-pipe
+D-ONELINE-BODY1=B's typed `fn f() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
@@ -413,7 +413,7 @@ separately ratified `|=` compound assignment keep their existing meanings.
 **S3 — Blocks** *(amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, D-BRACE1=A, and
 D-ONELINE-BODY1=B)*: curly braces `{ }` give every multi-statement or scoped
 effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
-effect body uses `:>` followed by one statement. Arrow arm bodies remain
+effect body uses `->` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
@@ -442,8 +442,8 @@ Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items.
 
 ```jet
-names :: loop u, users if u.active :> u.name
-names :: loop users if .active :> .name   // bindingless subject, D-LOOP-SUBJECT1
+names :: loop u, users if u.active -> u.name
+names :: loop users if .active -> .name   // bindingless subject, D-LOOP-SUBJECT1
 ```
 
 Multiple source clauses nest left to right and yield one flat List. An inner
@@ -512,7 +512,7 @@ removed; E0115).
 **S68 — `if`: effect, value, and ordered arm tables** *(D-IF1 +
 D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A + D-ARROW-UNIFY1=B + D-IFDIST1=A)*: `if` is the only
 branching keyword. The canonical multi-branch surface is one ordered arm-table
-model. Write `if subject OP { head :> body }` when a named subject improves
+model. Write `if subject OP { head -> body }` when a named subject improves
 clarity (`OP` is any comparison), or `if { head -> body }` without one. A head may be a value or
 structural pattern against the subject, or any `Bool` expression evaluated as
 written; one table may mix unrelated expressions. The first matching or true
@@ -525,10 +525,10 @@ D-BRANCH-TEACH1=A** *(ratified 2026-07-28, card #1259)*: L0507 points
 multi-line braced branches and all `else if` chains at ordered arm tables.
 One-line effect and value forms stay quiet. Fmt does not change branch shape.
 
-- Effect form uses `:>` for one statement: `if ready :> run() else :> wait()`.
+- Effect form uses `->` for one statement: `if ready -> run() else -> wait()`.
   Braces group multiline or scoped bodies. Parentheses around the condition
   are optional and fmt strips them.
-- Value form marks each selected value: `m :: if a > b :> a else :> b`.
+- Value form marks each selected value: `m :: if a > b -> a else -> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
   expression position and yields `()` or one unified value type (D-IFDIST1).
@@ -538,24 +538,24 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
 
 ```jet
 if code == {
-    200 :> print("ok")
-    301 | 302 :> redirect()          // `|` unions distributed atoms
-    .Error(e) && e.fatal :> die(e)   // pattern + boolean guard (== only)
-    code >= 500 :> retry()           // predicate arm
-    else :> log(code)
+    200 -> print("ok")
+    301 | 302 -> redirect()          // `|` unions distributed atoms
+    .Error(e) && e.fatal -> die(e)   // pattern + boolean guard (== only)
+    code >= 500 -> retry()           // predicate arm
+    else -> log(code)
 }
 
 return if n < {
-    16 :> 0
-    48 | 45 && ready :> 2            // `((n < 48 || n < 45) && ready)`
-    else :> 15
+    16 -> 0
+    48 | 45 && ready -> 2            // `((n < 48 || n < 45) && ready)`
+    else -> 15
 }
 ```
 
 Arms: bare values (compared with the table's `OP`), leading-dot enum patterns
 (only with `==`), and any `Bool` expression evaluated as written. `|` binds
 tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
-D-MATCHARM2). Catch-all is `else :>`. Braceless single-expression bodies
+D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
 are allowed. Exhaustive pattern arms may omit `else`.
 
 **D-IFDIST1=A — distributed compare markers + ()-or-value tables** *(ratified
@@ -566,11 +566,11 @@ heads. Pattern heads remain `==`-only. Statement and expression position share
 one table spelling; expression tables unify arm values or yield `()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
-#680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond :> statement` is the one-line
+#680; amended by D-ARROW-CONTROL1, D-ARROW-UNIFY1, and D-ONELINE-BODY1=B)*: `if cond -> statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary
 would be ambiguous. The subjectless spelling is the same ordered arm-table
 model without a named subject, not a separate or lesser branching mechanism.
-It keeps `:>` because each arrow selects one arm, including an arm yielding `()`. Each
+It keeps `->` because each arrow selects one arm, including an arm yielding `()`. Each
 head is an arbitrary `Bool` expression evaluated in order; the first true head
 wins. A value table requires a final `else` and all result types unify. A
 pattern binding under `&&` reaches the rest of that head and its body;
@@ -642,7 +642,7 @@ destructure structs, tuples, and lists:
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
 the route must diverge. Dispatch-arm struct-pattern heads
-(`{ kind: "page", target, .. } :> …`) are source-shipped; #341 owns the
+(`{ kind: "page", target, .. } -> …`) are source-shipped; #341 owns the
 remaining user-facing dispatch/pattern wording audit.
 
 **D-BINPAT1=A — binary patterns** *(ratified by owner 2026-07-12, card
@@ -2383,40 +2383,40 @@ exits — deadline first, then cancel.
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
-erased in codegen. Assert or restrict via `:[Net, DB]>` on a signature and
+erased in codegen. Assert or restrict via `-[Net, DB]>` on a signature and
 `#Abilities(Net) { … }` regions.
 
-**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
+**D-SHAPE8=A — Effect rows outside the arrow** *(ratified 2026-07-14,
 owner-amended by D-ARROW-CONTROL1 on 2026-07-26 and D-ARROW-UNIFY1 on
 2026-08-20; card #543)*: every explicit function effect row uses exactly
-`:[Effects]>` in declarations, trait methods, function values, and callback
-types. `:[]>` explicitly bounds the row empty. Open rows stay inside the
-brackets (`:[Log, ..E]>`). The older
+`-[Effects]>` in declarations, trait methods, function values, and callback
+types. `-[]>` explicitly bounds the row empty. Open rows stay inside the
+brackets (`-[Log, ..E]>`). The older
 `--[Effects]->`, `-[Effects]->`, `#(Effects)`, `#(via f)`, and `#Pure fn`
 spellings are retired; no alias exists.
 
 **S60 — Purity marking** *(surface superseded by D-SHAPE8=A)*: an explicit
-empty effect row `:[]>` is the checked purity signature; violations name the
+empty effect row `-[]>` is the checked purity signature; violations name the
 impure call path. The same empty row works in function-type bounds.
 
 **D-EFF4 / D-EFF5 — Vocabulary**: closed set of thirteen grantable tree ROOTS
 — `Net`, `FS`, `IO`, `DB`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `GPU`, `FFI`,
 `Browser`, `Secret`; unknown root E0119. `FFI` owns the built-in language
 leaves (`FFI.Go`, `FFI.Java`, `FFI.Py`, `FFI.Octave`, and the other supported
-binders), so `:[!FFI]>` prohibits every foreign language at once. `Panic` and
+binders), so `-[!FFI]>` prohibits every foreign language at once. `Panic` and
 `Mem` remain deny-only rows and are not grantable roots. Amended by
 D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 (`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
 are retired. `effect <Name>` user declarations remain reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
-D-EFF4/5 names are tree roots; a signature/`#Abilities`/`=[!…]=>` entry may
+D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
-learned once and reused: `=[FS]=>` accepts any `FS.*` callee; `=[FS.Read]=>`
+learned once and reused: `-[FS]>` accepts any `FS.*` callee; `-[FS.Read]>`
 rejects a sibling `FS.Write` callee; `#Abilities(FS.Read)` doesn't authorize
-`FS.Write`; `=[!FS]=>` prohibits the whole `FS.*` subtree. Reverses E0740 for
+`FS.Write`; `-[!FS]>` prohibits the whole `FS.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat names stay
 valid for the ten non-FFI roots — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
@@ -2432,36 +2432,36 @@ erase before TIR.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
-types (`fn(T) =[]=> U`, `fn(T) =[Net]=> U`; call-site check E0747) and
-`=[via f]=>` pass-through publication (E0748).
+types (`fn(T) U -[]>`, `fn(T) U -[Net]>`; call-site check E0747) and
+`-[via f]>` pass-through publication (E0748).
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
 the impl obligation (E0742) and the dispatch contract for trait objects.
 
 **D-EFFECT-OMIT1=A — inferred effects may stay unwritten** *(ratified
 2026-07-16; implemented 2026-07-17, card #570)*: private and public ordinary
-functions may omit an effect bound. `=>` defines the result and never asserts
-purity. A function is pure when its inferred row is empty, or when `=[]=>`
+functions may omit an effect bound. `->` introduces the body and never asserts
+purity. A function is pure when its inferred row is empty, or when `-[]>`
 bounds it empty. Public API snapshots store the inferred normalized
 row and provenance, and semver rejects row changes; an explicit row is
-always available as an upper bound (`=[FS.Read]=>`). D-EFF3 is unchanged:
+always available as an upper bound (`-[FS.Read]>`). D-EFF3 is unchanged:
 static calls use each implementation's inferred row, while a trait method
 used through dynamic dispatch keeps its declared upper-bound contract.
 
 ```jet
-fn twice(n: Int) => Int :: n * 2
+fn twice(n: Int) Int -> n * 2
 // inferred []: pure
 
-pub fn load(path: String) => String { core.files.read(path)? }
-// API snapshot: load =[FS.Read]=> String
+pub fn load(path: String) String { core.files.read(path)? }
+// API snapshot: load -[FS.Read]> String
 
-pub fn bounded(path: String) =[FS.Read]=> String { core.files.read(path)? }
-fn hash(text: String) =[]=> Int { text.length() }
+pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path)? }
+fn hash(text: String) Int -[]> { text.length() }
 
-trait Renderer { fn render(self) =[GPU]=> Image }
+trait Renderer { fn render(self) Image -[GPU]> }
 ```
 
-**D-PROP1 / D-PROP2 — Prohibition**: `=[!Net]=>` — the fn and every reachable
+**D-PROP1 / D-PROP2 — Prohibition**: `-[!Net]>` — the fn and every reachable
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
@@ -2481,7 +2481,7 @@ lattice. Credential facts spread by dataflow and may not reach `print`, `log`,
 or serialization sinks (E0722); `#Scrub(Credential)` is the exact audited strip
 point. Other tags follow their declared `deny` and optional `from` policy.
 
-**D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `=[]=>` bound implies reproducible —
+**D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `-[]>` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
 pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
@@ -8515,8 +8515,10 @@ They are ratified law; implementation follows on separate cards.
   `boundaries: { deny: [{ from: "app.ui", to: "app.db" }] }`; each side may
   have one trailing `*` subtree wildcard. Rules govern the declaring package's
   own modules, are checked at import resolution, narrow rather than widen,
-  and do nothing at runtime; an absent key preserves today's behavior and a
-  zero-match rule is a liveness warning.
+  and do nothing at runtime. A denied edge is `E0619`; an absent key preserves
+  today's behavior, and a zero-match rule is `L0619` without blocking the
+  build. Checked `Structure.ImportEdge` rows enter the D-STRUCT-PLANE1 gate
+  ledger, then the policy is erased before every execution tier.
 - **D-STRUCT-POLICY1=A — users may author settings.** The declaration form is
   `pub policy audit(topic: String) { wrap(call) { ... } }`; parameters are
   typed/defaulted, the wrapper body receives the callable, observes its

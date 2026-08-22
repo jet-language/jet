@@ -9,7 +9,7 @@
 
 tag Input { deny: [IO] }
 
-#Scrub(Input) fn clean(raw: #Input String) String :> ~raw
+#Scrub(Input) fn clean(raw: #Input String) String -> ~raw
 
 enum ReservationStage {
     Created
@@ -30,8 +30,8 @@ fn unit_value() Float {
 fn state_value() String {
     stage :: ReservationStage.Paid
     if stage == {
-        .Created :> { return "invalid" }
-        .Paid :> { return "state" }
+        .Created -> { return "invalid" }
+        .Paid -> { return "state" }
     }
 }
 

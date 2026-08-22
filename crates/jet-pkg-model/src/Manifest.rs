@@ -465,7 +465,7 @@ fn e1206_unknown_field(field: &str) -> Diagnostic {
         format!(
             "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper."
         ),
-        "use `name:`, `version:`, `deps:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
+        "use `name:`, `version:`, `deps:`, `boundaries:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
         None,
     )
 }

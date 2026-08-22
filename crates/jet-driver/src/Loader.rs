@@ -195,7 +195,12 @@ impl ImportBoundaryPolicy {
             Item::Module(module) => Some(module.name.as_str()),
             _ => None,
         }) {
-            return format!("{}.{}", self.package, name);
+            let package_prefix = format!("{}.", self.package);
+            return if name == self.package || name.starts_with(&package_prefix) {
+                name.to_string()
+            } else {
+                format!("{}.{}", self.package, name)
+            };
         }
         let path = normalize_path(path);
         let root = normalize_path(&self.source_root);
@@ -243,7 +248,9 @@ fn boundary_policy_index(policies: &[ImportBoundaryPolicy], path: &Path) -> Opti
     policies
         .iter()
         .enumerate()
-        .filter(|(_, policy)| path.starts_with(&policy.source_root))
+        .filter(|(_, policy)| {
+            path == policy.source_root || path.strip_prefix(&policy.source_root).is_ok()
+        })
         .max_by_key(|(_, policy)| policy.source_root.components().count())
         .map(|(index, _)| index)
 }
@@ -275,6 +282,46 @@ fn import_boundary_violation(
         Some(span),
     );
     Some((from_index, rule_index, diagnostic))
+}
+
+/// D-STRUCT-EDGE1=A / D-STRUCT-PLANE1=A: preserve the loader's checked edge
+/// observation in the one structure ledger. A package manifest with at least
+/// one boundary rule supplies the written gate; a manifest without the block
+/// keeps the ordinary un-gated resolved-edge fact.
+fn record_import_edge_fact(
+    policies: &[ImportBoundaryPolicy],
+    from_module: &LoadedModule,
+    to_module: &LoadedModule,
+    span: Span,
+    ledger: &mut crate::AST::NameLedger,
+) {
+    let Some(from_index) = boundary_policy_index(policies, &from_module.path) else {
+        return;
+    };
+    let Some(to_index) = boundary_policy_index(policies, &to_module.path) else {
+        return;
+    };
+    let from_policy = &policies[from_index];
+    let from_name = from_policy.module_name(&from_module.path, &from_module.items);
+    let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
+    let policy_checked = !from_policy.deny.is_empty();
+    ledger.record_structure_fact(jet_foundation::Names::StructureFact::new(
+        jet_foundation::Names::StructureFactKind::ImportEdge,
+        format!("{from_name} -> {to_name}"),
+        from_module.display.clone(),
+        span,
+        if policy_checked {
+            "allowed"
+        } else {
+            "resolved"
+        },
+        if policy_checked {
+            "manifest boundary policy checked"
+        } else {
+            "resolved import edge"
+        },
+        policy_checked.then(|| "manifest rule edit".to_string()),
+    ));
 }
 
 /// Build the U17 package resolution from a project's `package.jet` text and the
@@ -1247,6 +1294,13 @@ fn load_entry_with_overlays_mode_on_stack(
                         ));
                     }
                     name_ledger.record_import_target(module_idx, imp.span, target_idx);
+                    record_import_edge_fact(
+                        &boundary_policies,
+                        &modules[module_idx],
+                        &modules[target_idx],
+                        imp.span,
+                        &mut name_ledger,
+                    );
                 }
             }
         }

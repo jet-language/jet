@@ -6,10 +6,18 @@ Error [E0927]: `#Pure` is retired
  Why: the applied-rule registry owns retired spellings and replacements
  Fix: write `=[]=>`
 
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/E0927_retired_pure_trait_oneline.jet:2:16
+    |
+  2 |   #Pure fn a() => Int
+    |                ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/E0927_retired_pure_trait_oneline.jet:2:16
     |
   2 |   #Pure fn a() => Int
     |                ^^
- Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`

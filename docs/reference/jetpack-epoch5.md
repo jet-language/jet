@@ -28,6 +28,26 @@ configs: ["config/dev.jet"]
 members: find("./packages")
 ```
 
+### Import boundaries
+
+The declaring package may narrow its own file/module edges in `package.jet`:
+
+```text
+boundaries: {
+    deny: [
+        { from: "app.ui", to: "app.db" },
+        { from: "app.api.*", to: "app.db.*" },
+    ],
+}
+```
+
+Each side is an exact module name or one trailing `*` subtree wildcard. An
+edge denied at resolution is `E0619`; a rule that matches no loaded edge is
+`L0619` and does not block the build. The policy belongs to the declaring
+package, only narrows its graph, records `Structure.ImportEdge` facts for
+inspection, and is erased before AOT, Cranelift, interpreter, or web runtime
+code. Omitting `boundaries` keeps the existing import behavior.
+
 `Config` files add typed facts to the Package. Equal facts merge. Conflicting
 facts fail before realization. A Config cannot declare `members`.
 Discovery follows the nearest `package.jet` and declared Config roots; a `.jet`

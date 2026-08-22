@@ -1,7 +1,23 @@
-Error [E0335]: trailing blocks are gone — pass code with `() :>`
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/trailing_block_not_function.jet:2:24
+    |
+  2 | fn add(a: Int, b: Int) => Int :: a + b
+    |                        ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
+Error [E0065]: This function uses the retired `::` body marker.
+  --> tests/ui/trailing_block_not_function.jet:2:31
+    |
+  2 | fn add(a: Int, b: Int) => Int :: a + b
+    |                               ^^
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
+
+Error [E0335]: trailing blocks are gone — pass code with `() ->`
   --> tests/ui/trailing_block_not_function.jet:4:12
     |
   4 |     add(1) {
     |            ^
  Why: a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)
- Fix: write `add(…, () :> { … })` — put the block inside the parentheses as `() :> { … }`
+ Fix: write `add(…, () -> { … })` — put the block inside the parentheses as `() -> { … }`

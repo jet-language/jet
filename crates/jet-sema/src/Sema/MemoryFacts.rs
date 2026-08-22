@@ -671,7 +671,7 @@ fn append_signature_denials(
             roots: roots.clone(),
             span: *span,
             source: source.to_string(),
-            provenance: format!("signature denial `:[!{denial}]>` in {source}"),
+            provenance: format!("signature denial `-[!{denial}]>` in {source}"),
         });
     }
 }

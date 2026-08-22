@@ -122,6 +122,15 @@ growing a second registry or analyzer; I9 requires every applicable execution
 tier to consume the same checked result. D-STRUCT-PLANE1 adds no user spelling:
 the existing `_name` and manifest/policy surfaces remain the written controls.
 
+D-STRUCT-LIVE1 gives this plane four liveness verdicts: unused imports, unused
+bindings, unused private functions, and unreachable `pub(package)` or
+application-target exports. The first three are file-local. Export reachability
+uses the package's explicit import graph, while library `pub` remains open to
+external consumers. They warn through D-LINTPOLICY1, so the default stays
+warning-only and `policy.lints.deny` is the existing path to E1293. The repair
+is the existing `_name` form; `jet fix` applies that rename and deletion remains
+valid. No second lint ledger or suppression surface is added.
+
 Two walls stand on purpose. The borrow checker is a **prover**, never a plane:
 alias and flow analysis over places cannot be a fold of per-operation rules, so
 the engine stays its own, and the facts it publishes register as read-only rows
@@ -283,7 +292,7 @@ loved by experts.
   `#Unsafe`. Rust FFI (M7) shipped first. Remaining C ABI correctness
   work is tracked on #180/#436.
 - **Purity is a product feature, not just a comptime detail.** An explicit
-  `=[]=>` effect row marks a function as pure (S60, as respelled by
+  `-[]>` effect row marks a function as pure (S60, as respelled by
   D-SHAPE8=A). This can eventually let Jet replace Nix for declarative
   configuration through `jet eval --pure` (layer 3 post-v1).
 - **Go's territory (networking etc.) is standard-library scope**, built

@@ -2,7 +2,7 @@
 // the conversion for its own error family. A program can write `fn run() !` and
 // pass a Core failure up with `?` without declaring anything, because these
 // declarations already sit on the existing D-ERR-CONV rail. One source; every
-// tier lowers the same `impl <CoreError> => Err` block, the same way
+// tier lowers the same `impl <CoreError> -> Err` block, the same way
 // `Prelude/Units.jet` ships one dimension catalog.
 //
 // Sema injects only the conversions a module actually exercises — the `?`
@@ -15,7 +15,7 @@
 // unnamed form work.
 //
 // D-FAIL-CONV1=A keeps the rest of the rule intact. A user error type still
-// needs its own `impl MyError => Err { … }`; nothing here weakens that. A module
+// needs its own `impl MyError -> Err { … }`; nothing here weakens that. A module
 // that declares its own conversion for one of these pairs wins over the shipped
 // one, so a package can still say how its program reports a Core failure.
 //
@@ -38,62 +38,62 @@
 //   * component types (`DataErrorKind`, `EncodingCause`, `IOContext`,
 //     `NetErrorDetail`, `NetDnsError`, …) — no Core call fails with one.
 
-impl BrowserError => Err {
+impl BrowserError -> Err {
     return Err("{self}")
 }
 
-impl CBORError => Err {
+impl CBORError -> Err {
     return Err("{self}")
 }
 
-impl DBError => Err {
+impl DBError -> Err {
     return Err("{self}")
 }
 
-impl DataError => Err {
+impl DataError -> Err {
     return Err("{self}")
 }
 
-impl EncodingError => Err {
+impl EncodingError -> Err {
     return Err("{self}")
 }
 
-impl EnvError => Err {
+impl EnvError -> Err {
     return Err("{self}")
 }
 
-impl HTTPError => Err {
+impl HTTPError -> Err {
     return Err("{self}")
 }
 
-impl IOError => Err {
+impl IOError -> Err {
     return Err("{self}")
 }
 
-impl JSONError => Err {
+impl JSONError -> Err {
     return Err("{self}")
 }
 
-impl NetError => Err {
+impl NetError -> Err {
     return Err("{self}")
 }
 
-impl RangeError => Err {
+impl RangeError -> Err {
     return Err("{self}")
 }
 
-impl TextError => Err {
+impl TextError -> Err {
     return Err("{self}")
 }
 
-impl UTF8Error => Err {
+impl UTF8Error -> Err {
     return Err("{self}")
 }
 
-impl WsError => Err {
+impl WsError -> Err {
     return Err("{self}")
 }
 
-impl XMLError => Err {
+impl XMLError -> Err {
     return Err("{self}")
 }

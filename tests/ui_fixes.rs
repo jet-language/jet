@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{panic_message, test_worker_count};
+use common::{panic_message, test_worker_count, Scratch};
 
 #[test]
 fn ownership_ui_fixes_compile() {
@@ -118,4 +118,38 @@ fn check_fixed_companion(i: usize, path: &PathBuf, have_rustc: bool, have_cargo:
             name
         );
     }
+}
+
+#[test]
+fn liveness_fix_renames_to_existing_underscore_form() {
+    let scratch = Scratch::new("liveness_fix");
+    let path = scratch.join("liveness.jet");
+    fs::write(
+        &path,
+        "use core.files as files\n\n\
+         pub(package) fn package_export() {}\n\n\
+         fn unused_private(value: Int) {}\n\n\
+         fn run() {\n    unused_binding :: 1\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap()])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "use core.files as _files\n\n\
+         pub(package) fn _package_export() {}\n\n\
+         fn _unused_private(_value: Int) {}\n\n\
+         fn run() {\n    _unused_binding :: 1\n}\n"
+    );
 }

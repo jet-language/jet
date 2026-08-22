@@ -2,22 +2,6 @@
 
 use super::*;
 
-fn is_side_effect_free_literal(expr: &Expr) -> bool {
-    match expr {
-        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::UnitLit { .. } => {
-            true
-        }
-        Expr::Str(parts, _) => parts
-            .iter()
-            .all(|part| matches!(part, crate::AST::StrPart::Lit(_))),
-        Expr::Paren(inner, _) | Expr::Unary(_, inner, _) => is_side_effect_free_literal(inner),
-        Expr::Binary(_, left, right, _) => {
-            is_side_effect_free_literal(left) && is_side_effect_free_literal(right)
-        }
-        _ => false,
-    }
-}
-
 impl<'a> Checker<'a> {
     fn unused_name_is_intentional(name: &str) -> bool {
         name.is_empty()
@@ -39,30 +23,7 @@ impl<'a> Checker<'a> {
             name: name.to_string(),
             span,
             parameter,
-            fix: None,
         });
-    }
-
-    pub(crate) fn note_unused_binding_fix(
-        &mut self,
-        span: Span,
-        init: &Expr,
-        is_comptime: bool,
-        has_metadata: bool,
-    ) {
-        if is_comptime || has_metadata || !is_side_effect_free_literal(init) {
-            return;
-        }
-        let init_span = init.span();
-        if init_span.start <= span.start {
-            return;
-        }
-        if let Some(binding) = self.unused_bindings.iter_mut().find(|binding| binding.span == span) {
-            binding.fix = Some(crate::Diagnostics::TextEdit {
-                span: Span::new(span.start, init_span.start),
-                new_text: String::new(),
-            });
-        }
     }
 
     pub(crate) fn mark_local_write(&mut self, name: &str) {
@@ -113,10 +74,11 @@ impl<'a> Checker<'a> {
             );
             let code = if binding.parameter { "L0102" } else { "L0101" };
             let name = binding.name.as_str();
-            let mut diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span));
-            if let Some(edit) = binding.fix {
-                diagnostic = diagnostic.with_edit(edit);
-            }
+            let diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span))
+                .with_edit(crate::Diagnostics::TextEdit {
+                    span: binding.span,
+                    new_text: format!("_{name}"),
+                });
             self.diags.push(diagnostic);
         }
     }

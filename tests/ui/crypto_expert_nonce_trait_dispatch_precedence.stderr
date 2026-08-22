@@ -1,26 +1,34 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:5:19
+    |
+  5 |     fn area(self) => Int
+    |                   ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:5:19
     |
   5 |     fn area(self) => Int
     |                   ^^
- Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0066]: this function uses the retired effect-arrow spelling
   --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:8:26
     |
   8 | fn protect(shape: Shape) =[]=> Int {
     |                          ^
- Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
- Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+ Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
+ Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
 
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:8:26
     |
   8 | fn protect(shape: Shape) =[]=> Int {
     |                          ^
- Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0743]: dynamic call `Shape::area` has no effect bound
   --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:12:18

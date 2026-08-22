@@ -28656,7 +28656,16 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(values)
             }
-            _ => Err("jit Range expression unsupported".to_string()),
+            _ => {
+                if std::env::var_os("JET_DEBUG_RANGE").is_some() {
+                    eprintln!(
+                        "[range-debug] unsupported ty={:?} kind={:?}",
+                        expr.ty,
+                        std::mem::discriminant(&expr.kind)
+                    );
+                }
+                Err("jit Range expression unsupported".to_string())
+            }
         }
     }
 

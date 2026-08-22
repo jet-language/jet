@@ -1243,12 +1243,6 @@ impl<'a> Checker<'a> {
                 },
                 binding_sendable,
             );
-            self.note_unused_binding_fix(
-                b.name_span,
-                &b.init,
-                b.is_comptime,
-                !b.markers.is_empty() || b.meta.is_some(),
-            );
             if b.track() && matches!(&final_ty, Type::Float) {
                 let depth =
                     self.binding_fact_depth(&b.name).unwrap_or_else(|| self.scope_depth());

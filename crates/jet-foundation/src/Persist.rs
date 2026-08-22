@@ -8,14 +8,16 @@
 //! Not stored inside a Cranelift resident module — survives hot-swap across
 //! both tiers. Cleared on explicit restart.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use crate::AST::{CtFloat, CtValue, Expr, Item, ProgramBundle, StrPart, Type};
 use crate::JSON::json_escape;
 
-thread_local! {
-    static SHARED: RefCell<PersistStore> = RefCell::new(PersistStore::new());
+static SHARED: OnceLock<Mutex<PersistStore>> = OnceLock::new();
+
+fn shared_store() -> &'static Mutex<PersistStore> {
+    SHARED.get_or_init(|| Mutex::new(PersistStore::new()))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,88 +140,84 @@ pub struct PersistPrep {
 
 /// Clone of the process-local shared store (session snapshots, tests).
 pub fn shared_clone() -> PersistStore {
-    SHARED.with(|s| s.borrow().clone())
+    shared_store().lock().expect("persist store lock poisoned").clone()
 }
 
 /// Replace the process-local shared store.
 pub fn shared_replace(store: PersistStore) {
-    SHARED.with(|s| *s.borrow_mut() = store);
+    *shared_store().lock().expect("persist store lock poisoned") = store;
 }
 
 /// Drop all persisted bindings (D-HOTSWAP1 restart / test isolation).
 pub fn shared_clear() {
-    SHARED.with(|s| *s.borrow_mut() = PersistStore::new());
+    *shared_store().lock().expect("persist store lock poisoned") = PersistStore::new();
 }
 
 /// Read a live value by the store's canonical `module::binding` identity.
 /// Execution tiers use this as a marshalling seam; shape checking and reload
 /// policy remain in `prepare_bundle`.
 pub fn shared_read_key(key: &str) -> Option<CtValue> {
-    SHARED.with(|cell| {
-        cell.borrow()
-            .entries
-            .get(key)
-            .and_then(|entry| decode_payload(&entry.payload))
-    })
+    shared_store()
+        .lock()
+        .expect("persist store lock poisoned")
+        .entries
+        .get(key)
+        .and_then(|entry| decode_payload(&entry.payload))
 }
 
 /// Update a live value by the store's canonical `module::binding` identity.
 /// The next `prepare_bundle` observes this payload and carries it across a
 /// compatible hot reload.
 pub fn shared_write_key(key: &str, value: &CtValue) -> bool {
-    SHARED.with(|cell| {
-        let mut store = cell.borrow_mut();
-        let Some(entry) = store.entries.get_mut(key) else {
-            return false;
-        };
-        entry.payload = encode_payload(value);
-        true
-    })
+    let mut store = shared_store().lock().expect("persist store lock poisoned");
+    let Some(entry) = store.entries.get_mut(key) else {
+        return false;
+    };
+    entry.payload = encode_payload(value);
+    true
 }
 
 /// Sync every `#Persist` binding in `bundle` into the shared store and return
 /// the values that should seed this generation's globals / JIT constants.
 pub fn prepare_bundle(bundle: &ProgramBundle) -> PersistPrep {
     let mut prep = PersistPrep::default();
-    SHARED.with(|cell| {
-        let mut store = cell.borrow_mut();
-        for module in &bundle.modules {
-            for item in &module.items {
-                let Item::Const(c) = item else {
-                    continue;
-                };
-                if !c.is_persist {
-                    continue;
-                }
-                let Some(fresh) = const_runtime_value(c) else {
-                    continue;
-                };
-                let shape = shape_fingerprint(c.ty.as_ref(), &fresh);
-                let fresh_payload = encode_payload(&fresh);
-                let outcome = store.migrate(&module.alias, &c.name, &shape, &fresh_payload);
-                let (entry, note) = match outcome {
-                    PersistOutcome::Kept(e) => (e, None),
-                    PersistOutcome::Migrated(e) => (
-                        e,
-                        Some(format!(
-                            "[persist] migrated `{}::{}` to new shape",
-                            module.alias, c.name
-                        )),
-                    ),
-                    PersistOutcome::Reset { reason, entry } => {
-                        (entry, Some(format!("[persist] {reason}")))
-                    }
-                };
-                if let Some(msg) = note {
-                    prep.messages.push(msg);
-                }
-                let value = decode_payload(&entry.payload).unwrap_or(fresh);
-                prep.by_name.insert(c.name.clone(), value.clone());
-                prep.by_key
-                    .insert(format!("{}::{}", module.alias, c.name), value);
+    let mut store = shared_store().lock().expect("persist store lock poisoned");
+    for module in &bundle.modules {
+        for item in &module.items {
+            let Item::Const(c) = item else {
+                continue;
+            };
+            if !c.is_persist {
+                continue;
             }
+            let Some(fresh) = const_runtime_value(c) else {
+                continue;
+            };
+            let shape = shape_fingerprint(c.ty.as_ref(), &fresh);
+            let fresh_payload = encode_payload(&fresh);
+            let outcome = store.migrate(&module.alias, &c.name, &shape, &fresh_payload);
+            let (entry, note) = match outcome {
+                PersistOutcome::Kept(e) => (e, None),
+                PersistOutcome::Migrated(e) => (
+                    e,
+                    Some(format!(
+                        "[persist] migrated `{}::{}` to new shape",
+                        module.alias, c.name
+                    )),
+                ),
+                PersistOutcome::Reset { reason, entry } => {
+                    (entry, Some(format!("[persist] {reason}")))
+                }
+            };
+            if let Some(msg) = note {
+                prep.messages.push(msg);
+            }
+            let value = decode_payload(&entry.payload).unwrap_or(fresh);
+            prep.by_name.insert(c.name.clone(), value.clone());
+            prep.by_key
+                .insert(format!("{}::{}", module.alias, c.name), value);
         }
-    });
+    }
     prep
 }
 

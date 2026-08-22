@@ -1170,6 +1170,47 @@ boundaries: {
 }
 
 #[test]
+fn manifest_parse_import_boundaries_rejects_malformed_patterns() {
+    for (label, pattern) in [
+        ("unquoted", "app.ui"),
+        ("interior wildcard", "app.*.ui"),
+        ("multiple wildcards", "app.**"),
+    ] {
+        let raw = min_manifest("app", "0.1.0") + &format!(
+            "boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n"
+        );
+        let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+            .expect_err("malformed boundary pattern must use E1206");
+        assert_eq!(error.code, "E1206", "{label}");
+        assert!(error.what.contains("package.jet"), "{label}: {}", error.what);
+    }
+
+    for (label, block) in [
+        (
+            "unknown boundary field",
+            "boundaries: { allow: [{ from: \"app.ui\", to: \"app.db\" }] }",
+        ),
+        (
+            "missing from",
+            "boundaries: { deny: [{ to: \"app.db\" }] }",
+        ),
+        (
+            "missing to",
+            "boundaries: { deny: [{ from: \"app.ui\" }] }",
+        ),
+        (
+            "duplicate edge field",
+            "boundaries: { deny: [{ from: \"app.ui\", from: \"app.api\", to: \"app.db\" }] }",
+        ),
+    ] {
+        let raw = min_manifest("app", "0.1.0") + block + "\n";
+        let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+            .expect_err("malformed boundary record must use E1206");
+        assert_eq!(error.code, "E1206", "{label}");
+    }
+}
+
+#[test]
 fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
     let denied = tmp_dir("import_boundary_denied");
     write(
@@ -1178,8 +1219,8 @@ fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
         &(min_manifest("app", "0.1.0")
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
-    write(&denied, "ui.jet", "use db;\nfn run() { }\n");
-    write(&denied, "db.jet", "pub fn value() => Int { return 1 }\n");
+    write(&denied, "ui.jet", "use db;\nfn run() -[IO]> { }\n");
+    write(&denied, "db.jet", "pub fn value() Int -> 1\n");
     let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
         .expect_err("a denied import edge must fail during loading");
     assert_eq!(first_diag_code(&error), "E0619");
@@ -1202,6 +1243,110 @@ fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
         .iter()
         .any(|diagnostic| diagnostic.code == "L0619"));
     fs::remove_dir_all(&unused).unwrap();
+}
+
+#[test]
+fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() {
+    let root = tmp_dir("import_boundary_structure_fact");
+    write(
+        &root,
+        "package.jet",
+        &(min_manifest("app", "0.1.0")
+            + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.hidden.*\" }] }\n"),
+    );
+    write(&root, "ui.jet", "use db;\nfn run() -[IO]> { print(db.value()) }\n");
+    write(&root, "db.jet", "pub fn value() Int -> 1\n");
+    let entry = root.join("ui.jet");
+    let shown = entry.to_str().unwrap();
+    let mut bundle = jet::Loader::load_entry(shown).expect("allowed edge must load");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Lint),
+        "allowed boundary edge diagnostics: {diagnostics:?}"
+    );
+    let edge = bundle
+        .name_ledger
+        .structure_facts()
+        .iter()
+        .find(|fact| fact.kind == jet_foundation::Names::StructureFactKind::ImportEdge)
+        .expect("allowed edge structure fact");
+    assert_eq!(edge.subject, "app.ui -> app.db");
+    assert_eq!(edge.status, "allowed");
+    assert_eq!(edge.gate.as_deref(), Some("manifest rule edit"));
+
+    let gates = jet::Sema::GateLedger::GateLedger::collect(
+        &bundle,
+        jet::Policy::GateSet::default(),
+    );
+    assert!(gates.entries().iter().any(|entry| {
+        entry.kind == jet::Sema::GateLedger::GateKind::Structure
+            && entry.scope == "import-edge"
+            && entry.subject == "app.ui -> app.db"
+    }));
+
+    let inspected = Command::new(jet_bin())
+        .current_dir(&root)
+        .args(["inspect", "structure", shown])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("inspect structure must run");
+    assert!(inspected.status.success(), "inspect failed: {inspected:?}");
+    let inspected = String::from_utf8(inspected.stdout).expect("inspection is UTF-8");
+    assert!(inspected.contains("Structure.ImportEdge"));
+    assert!(inspected.contains("app.ui -> app.db"));
+    assert!(inspected.contains("manifest rule edit"));
+
+    let output = jet::compile_with_path("", shown).expect("allowed edge must codegen");
+    assert!(!output.rust.contains("manifest rule edit"));
+    assert!(!output.rust.contains("app.hidden.*"));
+
+    for (label, args) in [
+        ("aot", vec!["run", "--release", shown]),
+        ("jit", vec!["run", shown]),
+        ("interpreter", vec!["run", "--interpret", shown]),
+        ("dev", vec!["dev", shown, "--watch=off"]),
+    ] {
+        let output = Command::new(jet_bin())
+            .current_dir(&root)
+            .args(args)
+            .env("NO_COLOR", "1")
+            .env("JET_RUN_CACHE_DIR", root.join(".cache").join(label).join("run"))
+            .env("JET_CACHE_DIR", root.join(".cache").join(label).join("build"))
+            .output()
+            .expect("tier command must run");
+        assert!(
+            output.status.success(),
+            "{label} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"1\n", "{label} output");
+    }
+
+    let wasm = Command::new("rustc")
+        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .output()
+        .expect("probe web target");
+    if wasm.status.success() {
+        let output = Command::new(jet_bin())
+            .current_dir(&root)
+            .args(["build", "--target=web", shown])
+            .env("NO_COLOR", "1")
+            .env("JET_CACHE_DIR", root.join(".cache").join("web"))
+            .output()
+            .expect("web command must run");
+        assert!(
+            output.status.success(),
+            "web failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    } else {
+        eprintln!("note: skipping import-boundary web tier proof (wasm target unavailable)");
+    }
+    fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]

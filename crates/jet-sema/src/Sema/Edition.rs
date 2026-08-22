@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use crate::AST::Deprecation;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Syntax;
 
 pub(crate) fn with_package_edition<R>(edition: &str, f: impl FnOnce() -> R) -> R {
@@ -30,6 +30,31 @@ fn version_phrase(label: &str) -> String {
     } else {
         label.to_string()
     }
+}
+
+/// `jet fix` owns the mechanical part of a lifecycle migration: replace the
+/// used member with the final path's leaf. The diagnostic span is the call
+/// member/name, so replacing `encode` with `to_bytes` keeps `cbor.to_bytes`
+/// well-formed while a plain `use: "parse"` remains a plain rename.
+fn replacement_edit(dep: &Deprecation, span: Option<Span>) -> Option<TextEdit> {
+    let span = span?;
+    let replacement = dep.replacement.rsplit('.').next()?.trim();
+    if replacement.is_empty()
+        || !replacement
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| {
+                byte == b'_'
+                    || (byte.is_ascii_alphanumeric()
+                        && (index > 0 || byte.is_ascii_alphabetic() || byte == b'_'))
+            })
+    {
+        return None;
+    }
+    Some(TextEdit {
+        span,
+        new_text: replacement.to_string(),
+    })
 }
 
 pub(crate) fn deprecation_phase(dep: &Deprecation) -> DeprecationPhase {
@@ -58,7 +83,7 @@ pub(crate) enum DeprecationPhase {
 
 pub(crate) fn e2002(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagnostic {
     let removed_in = dep.removed_in.as_deref().unwrap_or("this edition");
-    Diagnostic::error(
+    let diagnostic = Diagnostic::error(
         "E2002",
         format!("`{item}` was removed in {}", version_phrase(removed_in)),
         format!(
@@ -71,7 +96,10 @@ pub(crate) fn e2002(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagno
             Syntax::BINARY_NAME,
         ),
         span,
-    )
+    );
+    replacement_edit(dep, span)
+        .map(|edit| diagnostic.clone().with_edit(edit))
+        .unwrap_or(diagnostic)
 }
 
 pub(crate) fn l2001(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagnostic {
@@ -86,7 +114,7 @@ pub(crate) fn l2001(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagno
             version_phrase(&dep.since),
         ),
     };
-    Diagnostic::lint(
+    let diagnostic = Diagnostic::lint(
         "L2001",
         format!("`{item}` is deprecated"),
         why,
@@ -96,7 +124,10 @@ pub(crate) fn l2001(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagno
             Syntax::BINARY_NAME,
         ),
         span,
-    )
+    );
+    replacement_edit(dep, span)
+        .map(|edit| diagnostic.clone().with_edit(edit))
+        .unwrap_or(diagnostic)
 }
 
 impl<'a> super::Checker<'a> {

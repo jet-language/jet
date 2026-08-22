@@ -139,7 +139,11 @@ impl<'a> Parser<'a> {
                     Syntax::KW_IF,
                     Syntax::KW_IF
                 ),
-                format!("write `{} subject == {{ … }}`", Syntax::KW_IF),
+                format!(
+                    "write `{} subject == {{ value {} body }}`",
+                    Syntax::KW_IF,
+                    Syntax::OP_UNIFIED_ARROW
+                ),
                 Some(span),
             ));
             return self.if_arms(cond, span, BinOp::Eq);

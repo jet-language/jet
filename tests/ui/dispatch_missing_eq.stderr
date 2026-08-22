@@ -1,7 +1,15 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/dispatch_missing_eq.jet:5:24
+    |
+  5 | fn classify(code: Int) => String {
+    |                        ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0992]: a multi-arm `if` needs a comparison between the subject and `{`
   --> tests/ui/dispatch_missing_eq.jet:6:5
     |
   6 |     if code {
     |     ^^
  Why: `if subject == { … }` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `if cond { … }` body is always statements
- Fix: write `if subject == { … }`
+ Fix: write `if subject == { value -> body }`

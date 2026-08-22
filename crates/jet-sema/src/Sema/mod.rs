@@ -7,7 +7,7 @@
 //! view returns, use-after-move, and borrow rules that keep generated Rust
 //! sound without surfacing Rust concepts to users.
 
-use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, CallablePolicyChain, Deprecation, Expr, ExternFn, Func, KnowledgeVector,
@@ -901,7 +901,6 @@ struct UnusedBinding {
     name: String,
     span: Span,
     parameter: bool,
-    fix: Option<TextEdit>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2426,7 +2425,9 @@ pub use PolicyFacts::{
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
-pub(crate) use CheckerMarkers::{check_declared_rule_facts, check_marker_vocabulary};
+pub(crate) use CheckerMarkers::{
+    check_declared_rule_facts, check_deprecated_visibility, check_marker_vocabulary,
+};
 pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
     builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, effect_set_has_root,

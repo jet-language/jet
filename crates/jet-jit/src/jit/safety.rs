@@ -2153,17 +2153,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                 // ANSWERS off this tier — not a reason to refuse raw memory as
                 // a category (I1: an audited region is audited user code).
                 //
-                // These three have resident lowerings (`LowerCtx`'s `core.mem`
-                // arms) that admit only a pointer minted from a real machine
-                // slot in this frame — `real_address_values`, which
-                // `TExprKind::RawOf` and `address_of`-on-a-bare-local are the
-                // only writers of — and refuse every other pointer to the
-                // deopt tier. Inside that set the kernel has nothing to say: an
-                // explicit stack slot is live for the whole frame, it is sized
-                // by the pointee's own ABI, and no arena reset can quarantine
-                // it. `address_of` on a place with no stable address mints the
-                // same synthetic identity `TIR::stable_place_address` gives the
-                // interpreter, so the two non-AOT tiers still agree.
+                // `RawOf`, `Deref`, and `address_of` on a bare local have
+                // resident lowerings for values whose storage is owned by the
+                // current frame. Volatile access is different: its answer is
+                // owned by the shared sentry Prelude, including gate state and
+                // R08xx reporting. Keep those calls on canonical TIR so the
+                // resident engine cannot grow a second memory policy.
                 //
                 // Every raw shape whose answer the kernel DOES own leaves the
                 // admitted set at the pointer instead: `from_addr(<literal>)`
@@ -2185,14 +2180,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             && super::types_meta::clif_ty(&place.ty).is_some()
                             && resident_safe_expr(place, callees)
                     }
-                    ("volatile_read", [pointer]) => {
-                        super::types_meta::clif_ty(&expr.ty).is_some()
-                            && resident_safe_expr(pointer, callees)
-                    }
-                    ("volatile_write", [pointer, value]) => {
-                        resident_safe_expr(pointer, callees)
-                            && resident_safe_expr(value, callees)
-                    }
+                    ("volatile_read", [_]) | ("volatile_write", [_, _]) => false,
                     _ => false,
                 };
             }

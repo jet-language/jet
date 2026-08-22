@@ -1,18 +1,26 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:4:16
+    |
+  4 | fn next_byte() => U8 {
+    |                ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0066]: this function uses the retired effect-arrow spelling
   --> tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:9:14
     |
   9 | fn protect() =[!IO]=> Int {
     |              ^
- Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
- Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+ Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
+ Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
 
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:9:14
     |
   9 | fn protect() =[!IO]=> Int {
     |              ^
- Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0749]: `protect` reaches the `IO` effect, which it prohibits with `=[!IO]=>`
   --> tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:9:17

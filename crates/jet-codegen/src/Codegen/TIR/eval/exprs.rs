@@ -8798,6 +8798,9 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::PtrFromAddr { addr, .. } => {
                 let address = self.eval_expr_child(addr, scope)?;
+                if std::env::var_os("JET_DEBUG_RAW").is_some() {
+                    eprintln!("[raw-debug] from_addr address={address:?} span={:?}", self.span());
+                }
                 let CtValue::Int(address) = address else {
                     return Err(unsupported("raw pointer address", self.span()));
                 };
@@ -8814,6 +8817,9 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Deref(inner) => {
                 let pointer = self.eval_expr_child(inner, scope)?;
+                if std::env::var_os("JET_DEBUG_RAW").is_some() {
+                    eprintln!("[raw-debug] deref pointer={pointer:?} ty={:?} span={:?}", expr.ty, self.span());
+                }
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
                 };

@@ -818,7 +818,7 @@ impl<'a> crate::Sema::Checker<'a> {
                 "E0938",
                 "`#Memo` requires a pure function".to_string(),
                 "memoization reuses a completed result, so the function must have the empty effect row".to_string(),
-                "declare the function with `=[]=>` and keep `#Memo`".to_string(),
+                "declare the function with `-[]>` and keep `#Memo`".to_string(),
                 Some(marker.span),
             ));
             return;
@@ -1008,6 +1008,104 @@ fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
         };
         type_markers.iter().chain(member_markers)
     })
+}
+
+fn check_deprecated_marker_visibility(
+    markers: &[Marker],
+    is_public: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if is_public {
+        return;
+    }
+    for marker in markers {
+        if marker.name == Syntax::MARKER_DEPRECATED {
+            diagnostics.push(Diagnostic::from_row("E0932", &[], Some(marker.span)));
+        }
+    }
+}
+
+/// D-STRUCT-LIFE1=A: the retiring rung is a public-item contract. Keep this
+/// check beside the marker vocabulary pass so every package and every item
+/// family uses the same registry spelling and diagnostic row.
+pub(crate) fn check_deprecated_visibility(items: &[Item]) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for item in items {
+        match item {
+            Item::Func(function) => check_deprecated_marker_visibility(
+                &function.markers,
+                function.is_pub && !function.is_package_pub,
+                &mut diagnostics,
+            ),
+            Item::Struct(definition) => {
+                check_deprecated_marker_visibility(
+                    &definition.type_markers,
+                    definition.is_pub && !definition.is_package_pub,
+                    &mut diagnostics,
+                );
+                for method in &definition.methods {
+                    check_deprecated_marker_visibility(
+                        &method.markers,
+                        method.is_pub && !method.is_package_pub,
+                        &mut diagnostics,
+                    );
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        check_deprecated_marker_visibility(
+                            &method.markers,
+                            method.is_pub && !method.is_package_pub,
+                            &mut diagnostics,
+                        );
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                check_deprecated_marker_visibility(
+                    &definition.type_markers,
+                    definition.is_pub && !definition.is_package_pub,
+                    &mut diagnostics,
+                );
+                for method in &definition.methods {
+                    check_deprecated_marker_visibility(
+                        &method.markers,
+                        method.is_pub && !method.is_package_pub,
+                        &mut diagnostics,
+                    );
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        check_deprecated_marker_visibility(
+                            &method.markers,
+                            method.is_pub && !method.is_package_pub,
+                            &mut diagnostics,
+                        );
+                    }
+                }
+            }
+            Item::Distinct(definition) => check_deprecated_marker_visibility(
+                &definition.type_markers,
+                definition.is_pub && !definition.is_package_pub,
+                &mut diagnostics,
+            ),
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    check_deprecated_marker_visibility(
+                        &method.markers,
+                        method.is_pub && !method.is_package_pub,
+                        &mut diagnostics,
+                    );
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    diagnostics.extend(check_deprecated_visibility(body));
+                }
+            }
+            _ => {}
+        }
+    }
+    diagnostics
 }
 
 /// D-MARK-VOCAB1 (card #518) + D-META-ONE1=A: validate every marker name on

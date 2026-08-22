@@ -188,12 +188,12 @@ impl<'a> Parser<'a> {
                 };
                 if matches!(name.as_str(), "no_alloc" | "zero_rc" | "arena_bounded") {
                     let replacement = match (name.as_str(), limit) {
-                        ("no_alloc", _) => "`:[!Mem.Alloc]>`".to_string(),
-                        ("zero_rc", _) => "`:[!Mem.Rc]>`".to_string(),
+                        ("no_alloc", _) => "`-[!Mem.Alloc]>`".to_string(),
+                        ("zero_rc", _) => "`-[!Mem.Rc]>`".to_string(),
                         ("arena_bounded", Some(bytes)) => {
-                            format!("`:[!Mem.Alloc(above: {bytes})]>`")
+                            format!("`-[!Mem.Alloc(above: {bytes})]>`")
                         }
-                        _ => "`:[!Mem.Alloc(above: N)]>`".to_string(),
+                        _ => "`-[!Mem.Alloc(above: N)]>`".to_string(),
                     };
                     return Err(Diagnostic::error(
                         "E0355",

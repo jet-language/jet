@@ -3,7 +3,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::Func;
 use std::collections::HashMap;
 
-/// Return E3401 if `fn_name` (which declares `=[]=>`) calls an impure function.
+/// Return E3401 if `fn_name` (which declares `-[]>`) calls an impure function.
 /// `funcs` is the full function-signature map; `call_name` is the callee;
 /// `path` is the chain of calls that led here (for the trace message).
 pub fn e3401(
@@ -14,7 +14,7 @@ pub fn e3401(
 ) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
-            "`{}` is impure, but `{}` declares `=[]=>`",
+            "`{}` is impure, but `{}` declares `-[]>`",
             call_name,
             pure_fn_name
         )
@@ -34,7 +34,7 @@ pub fn e3401(
         ),
         why,
         format!(
-            "give `{}` an explicit `=[]=>` bound, or remove the call from `{}`",
+            "give `{}` an explicit `-[]>` bound, or remove the call from `{}`",
             call_name,
             pure_fn_name
         ),
@@ -79,7 +79,7 @@ pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
 /// D-META-EFFECT1 c3: the call-graph walk itself lives in
 /// `jet-comptime/Comptime/Purity.rs` (`jet-sema` depends on `jet-comptime`,
 /// not the other way around, so that is the one home both stages share).
-/// This is the run-time `=[]=>` route: check `f`'s own body for a direct
+/// This is the run-time `-[]>` route: check `f`'s own body for a direct
 /// impure-builtin or extern call. Empty `funcs` map passed to the shared
 /// walker means it never recurses into a callee's body — a callee that
 /// itself turns out impure is instead caught by the whole-program effect

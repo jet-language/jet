@@ -423,10 +423,10 @@ impl<'a> Checker<'a> {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`#Reactive fn` can't also declare `=[]=>`".to_string(),
+                    "`#Reactive fn` can't also declare `-[]>`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
-                    "drop the `=[]=>` bound or use `reactive.effect` inside a plain `fn`".to_string(),
+                    "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`".to_string(),
                     Some(f.name_span),
                 ));
             }

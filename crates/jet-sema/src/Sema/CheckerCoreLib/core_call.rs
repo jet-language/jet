@@ -1227,11 +1227,17 @@ impl<'a> Checker<'a> {
                 }
                 return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
-            if module == "core.encoding.cbor"
-                && matches!(name, "encode" | "decode")
-                && (name != "decode" || type_args.is_empty())
-            {
-                if let Some(dep) = Syntax::core_deprecation(module, name) {
+            // D-STRUCT-LIFE1=A: Core aliases use marker metadata attached to
+            // their ordinary declaration row. This is the same lifecycle
+            // renderer used by user declarations; there is no Core-only
+            // deprecation table or match arm.
+            if type_args.is_empty() {
+                if let Some(marker) = Syntax::core_marker_application(module, name) {
+                    let dep = crate::AST::Deprecation {
+                        since: marker.since.to_string(),
+                        replacement: marker.replacement.to_string(),
+                        removed_in: marker.removed_in.map(str::to_string),
+                    };
                     let item = format!("{}.{}", module_short_name(module), name);
                     self.check_deprecation(&item, &dep, span);
                 }

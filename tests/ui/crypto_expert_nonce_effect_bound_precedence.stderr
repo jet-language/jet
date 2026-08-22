@@ -1,23 +1,31 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:4:16
+    |
+  4 | fn next_byte() => U8 {
+    |                ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0066]: this function uses the retired effect-arrow spelling
   --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:9:14
     |
   9 | fn protect() =[FS]=> Int {
     |              ^
- Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
- Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+ Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
+ Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
 
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:9:14
     |
   9 | fn protect() =[FS]=> Int {
     |              ^
- Why: a return type sits after the parameter list, and `:>` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type :> body`, or `fn name(...) Type :[Effects]> { … }`
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0740]: `protect` uses the effect `IO`, which its signature doesn't allow
   --> tests/ui/crypto_expert_nonce_effect_bound_precedence.jet:9:16
     |
   9 | fn protect() =[FS]=> Int {
     |                ^^
- Why: the signature declares `:[FS]>`, so the body may only use those; `IO` is outside that set
+ Why: the signature declares `-[FS]>`, so the body may only use those; `IO` is outside that set
  Fix: add `IO` to the effect list, or stop using it in `protect`

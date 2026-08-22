@@ -3594,6 +3594,24 @@ Guarantee: **every past and future `jet` can read the identity block of any
 `package.jet`.** New manifest features may only *add* fields/blocks the identity
 reader ignores; the three identity fields keep this exact `key: value` shape.
 
+### Manifest import boundaries (D-STRUCT-EDGE1)
+
+The package manifest may narrow the declaring package's resolved import graph:
+
+```text
+boundaries: {
+    deny: [{ from: "app.ui", to: "app.db" }]
+}
+```
+
+`from` and `to` are quoted exact module names, or names with one trailing `*`
+subtree wildcard. The loader resolves each file/module edge using the owning
+package's module names. A matching denial is `E0619`; a rule matching no loaded
+edge is the non-blocking `L0619` warning. An absent `boundaries` key preserves
+the existing import behavior. The checked edge facts enter the
+`Structure.ImportEdge` registry and GateLedger, while the manifest policy is
+erased before AOT, Cranelift, interpreter, and web runtime lowering.
+
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
 
 Tool families use one noun-then-verb grammar. D-SHAPE6 moved

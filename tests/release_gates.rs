@@ -273,7 +273,7 @@ fn ga_feature_size_budgets() {
 //     UPDATE_EXPECT=1 cargo test --test release_gates
 //
 // E2002 and L2001 are exercised by the encoding edition/UI tests. This gate
-// checks that the two Core aliases resolve through the one marker payload.
+// also pins both Core aliases through the one marker payload.
 // ============================================================================
 
 use jet::Manifest::{self};
@@ -344,12 +344,43 @@ fn no_edition_field_is_accepted() {
 
 #[test]
 fn core_encoding_migrations_use_one_marker_payload() {
-    let encode = jet::Syntax::core_deprecation("core.encoding.cbor", "encode")
+    let encode = jet::Syntax::core_marker_application("core.encoding.cbor", "encode")
         .expect("cbor.encode deprecation");
     assert_eq!(encode.since, "2027");
     assert_eq!(encode.replacement, "cbor.to_bytes");
-    assert_eq!(encode.removed_in.as_deref(), Some("2028"));
-    assert!(jet::Syntax::core_deprecation("core.encoding.cbor", "decode").is_some());
+    assert_eq!(encode.removed_in, Some("2028"));
+    let decode = jet::Syntax::core_marker_application("core.encoding.cbor", "decode")
+        .expect("cbor.decode deprecation");
+    assert_eq!(decode.since, "2027");
+    assert_eq!(decode.replacement, "cbor.parse");
+    assert_eq!(decode.removed_in, Some("2028"));
+}
+
+#[test]
+fn cbor_deprecation_release_fixture() {
+    let root = std::env::temp_dir().join(format!("jet_release_deprecation_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let source = "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree := json.parse(\"{{}}\") ?? panic(\"json\")\n    payload := cbor.encode(tree)\n    print(\"ok\")\n}\n";
+    let mut rendered = String::new();
+    for edition in ["2027", "2028"] {
+        fs::write(
+            root.join("package.jet"),
+            format!("name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"),
+        )
+        .unwrap();
+        let path = root.join("run.jet");
+        fs::write(&path, source).unwrap();
+        let diagnostics = jet::check_with_path(path.to_str().unwrap());
+        rendered.push_str(&format!("edition {edition}\n"));
+        rendered.push_str(&jet::render_diagnostics(
+            &format!("tests/release/cbor_{edition}.jet"),
+            source,
+            &diagnostics,
+        ));
+    }
+    let _ = fs::remove_dir_all(&root);
+    check_fixture("deprecation.txt", &rendered);
 }
 
 #[test]

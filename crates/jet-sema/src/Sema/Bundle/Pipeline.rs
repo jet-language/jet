@@ -1693,6 +1693,7 @@ fn check_bundle_opts_for_output_inner(
             &module.rule_facts,
             &marker_vocabulary,
         ));
+        diags.extend(check_deprecated_visibility(&module.items));
         diags.extend(check_declared_rule_facts(
             &module.rule_facts,
             &marker_vocabulary,

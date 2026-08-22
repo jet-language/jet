@@ -97,7 +97,7 @@ pub fn reject_positive_deny_only_effect(name: &str, span: Span) -> Option<Diagno
             "`Panic` can't be granted, only denied".to_string(),
             "`Panic` is a deny-only effect row; no positive effect bound or ability can grant it"
                 .to_string(),
-            "drop `Panic` from the list, or write `:[!Panic]>`".to_string(),
+            "drop `Panic` from the list, or write `-[!Panic]>`".to_string(),
             Some(span),
         )
     })
@@ -229,10 +229,10 @@ pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectS
     // diagnostics, reachability, and `=[!Panic]=>`, but never requires a
     // positive function bound or a `#Abilities` authority.
     // D-AUTHORITY-MEM1=B: memory is deny-only in the same way. Memory events
-    // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `:[!Mem.Alloc]>`
+    // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `-[!Mem.Alloc]>`
     // and manifest `authority.holds.deny` can match them, but a positive ceiling never
     // has to enumerate them: allocation is not a right you request, it is one
-    // you can be refused. Without this, every `:[IO]>` function that formats a
+    // you can be refused. Without this, every `-[IO]>` function that formats a
     // string reported E0740 for `Mem.Alloc`.
     let deny_only = |effect: &str| {
         let root = effect_root(effect);
@@ -367,7 +367,7 @@ impl<'a> super::Checker<'a> {
     /// - Any **other** function value — a local binding, a parameter passed
     ///   onward, a returned/stored callback — has an origin that isn't statically
     ///   known here, so it defaults to the maximal effect set (D-EFF2, sound).
-    ///   The expert levers `fn(…) =[E]=>` param types and `#(via f)` tighten this.
+    ///   The expert levers `fn(…) -[E]>` param types and `-[via f]>` tighten this.
     /// D-EFF2 (callback param bound): record an obligation that the callback just
     /// walked (whose effect contribution is the delta of `fx_direct`/`fx_edges`/
     /// `fx_maximal` between `before` and now) satisfies the parameter's declared
@@ -548,7 +548,7 @@ pub struct EffectSummary {
     pub regions: Vec<RegionSummary>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
     /// higher-order fn whose function-typed parameter carries an effect bound
-    /// (`fn(…) =[]=>` / `fn(…) =[E]=>`). Checked against the actual callback's
+    /// (`fn(…) -[]>` / `fn(…) -[E]>`). Checked against the actual callback's
     /// resolved effects in the post-pass — E0747.
     pub callback_obligations: Vec<CallbackObligation>,
     /// D-AUTODIFF1: named functions passed to an autodiff transform. Their
@@ -735,7 +735,7 @@ pub struct SemIndexEffectFacts {
 }
 
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed
-/// to a `fn(…) =[]=>` / `fn(…) =[E]=>` parameter satisfies the declared bound. The
+/// to a `fn(…) -[]>` / `fn(…) -[E]>` parameter satisfies the declared bound. The
 /// callback's own effect contribution is captured as the delta of the function's
 /// effect accumulator across the argument walk (its direct effects, its
 /// call-graph edges, and whether it forced the maximal set). Edges are resolved
@@ -979,7 +979,7 @@ mod reachability_tests {
 }
 
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
-/// empty. Callees need not repeat `=[]=>`; their solved row is the authority.
+/// empty. Callees need not repeat `-[]>`; their solved row is the authority.
 /// D-CRYPTO-DIAG1 defers E2702 facts until this solved-effect phase completes.
 pub fn check_inferred_purity(
     items: &[crate::AST::Item],
@@ -1095,7 +1095,7 @@ pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
         "E0743",
         format!("dynamic call `{trait_method}` has no effect bound"),
         "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound".to_string(),
-        format!("declare an effect row on `{trait_method}`, such as `=[]=>` for pure dispatch, or move this dynamic call outside the bounded function"),
+        format!("declare an effect row on `{trait_method}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function"),
         Some(span),
     )
 }
@@ -1202,13 +1202,13 @@ pub fn apply_effect_via(
     }
 }
 
-/// E0748 (D-EFF2/D-SHAPE8): `=[via f]=>` names no callback parameter.
+/// E0748 (D-EFF2/D-SHAPE8): `-[via f]>` names no callback parameter.
 pub fn e0748_unknown_param(fn_name: &str, param: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0748",
-        format!("`=[via {}]=>` on `{}` names no such parameter", param, fn_name),
+        format!("`-[via {}]>` on `{}` names no such parameter", param, fn_name),
         format!(
-            "`=[via f]=>` publishes the effects of a callback parameter `f`; `{}` has no parameter called `{}`",
+            "`-[via f]>` publishes the effects of a callback parameter `f`; `{}` has no parameter called `{}`",
             fn_name, param
         ),
         format!("name one of `{}`'s callback parameters after `via`", fn_name),
@@ -1216,16 +1216,16 @@ pub fn e0748_unknown_param(fn_name: &str, param: &str, span: Span) -> Diagnostic
     )
 }
 
-/// E0748 (D-EFF2/D-SHAPE8): `=[via f]=>` names a non-callback parameter.
+/// E0748 (D-EFF2/D-SHAPE8): `-[via f]>` names a non-callback parameter.
 pub fn e0748_not_callback(fn_name: &str, param: &str, ty: String, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0748",
-        format!("`=[via {}]=>` on `{}` names a parameter that isn't a callback", param, fn_name),
+        format!("`-[via {}]>` on `{}` names a parameter that isn't a callback", param, fn_name),
         format!(
-            "`=[via f]=>` publishes the effects of a *function* parameter; `{}` is `{}`, not a `fn(…)` type",
+            "`-[via f]>` publishes the effects of a *function* parameter; `{}` is `{}`, not a `fn(…)` type",
             param, ty
         ),
-        format!("point `via` at a parameter whose type is a function, or drop the `=[via {}]=>` annotation", param),
+        format!("point `via` at a parameter whose type is a function, or drop the `-[via {}]>` annotation", param),
         Some(span),
     )
 }
@@ -1350,23 +1350,23 @@ pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
 }
 
 /// E0747 (D-EFF2): a callback argument carries an effect the parameter's bound
-/// doesn't allow — a `fn(…) =[]=>` parameter handed an impure callback, or a
-/// `fn(…) =[E]=>` parameter handed one that reaches an effect outside `E`.
+/// doesn't allow — a `fn(…) -[]>` parameter handed an impure callback, or a
+/// `fn(…) -[E]>` parameter handed one that reaches an effect outside `E`.
 pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
-        "the parameter is `fn(…) =[]=>`, so the callback must be pure".to_string()
+        "the parameter is `fn(…) -[]>`, so the callback must be pure".to_string()
     } else {
         format!(
-            "the parameter is `fn(…) =[{}]=>`, so the callback may use only those effects",
+            "the parameter is `fn(…) -[{}]>`, so the callback may use only those effects",
             show_set(bound)
         )
     };
     let fix = if bound.is_empty() {
-        "pass a `fn(…) =[]=>` callback (or a lambda that uses no effects), or widen the parameter's bound".to_string()
+        "pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound".to_string()
     } else {
         format!(
-            "pass a callback within `=[{}]=>`, or add `{}` to the parameter's bound",
+            "pass a callback within `-[{}]>`, or add `{}` to the parameter's bound",
             show_set(bound),
             over_list
         )
@@ -1389,7 +1389,7 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
     let decl = if declared.is_empty() {
         "no effects".to_string()
     } else {
-        format!("`:[{}]>`", show_set(declared))
+        format!("`-[{}]>`", show_set(declared))
     };
     Diagnostic::error(
         "E0740",
@@ -1824,10 +1824,10 @@ pub fn e0742(
 ) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
-        format!("`{}` bounds `{}` to `=[]=>`, so impls must be pure", trait_name, method)
+        format!("`{}` bounds `{}` to `-[]>`, so impls must be pure", trait_name, method)
     } else {
         format!(
-            "`{}` bounds `{}` to `=[{}]=>`, so impls may use only those",
+            "`{}` bounds `{}` to `-[{}]>`, so impls may use only those",
             trait_name,
             method,
             show_set(bound)

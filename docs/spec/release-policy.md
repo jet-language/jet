@@ -51,15 +51,27 @@ Existing editions keep `core.sys.set => ()`; its fallible
 
 ## Deprecation policy + migration window
 
-1. An item is marked **deprecated** as of a specific edition, with a named
-   replacement. While the project's edition is within the migration window, the
-   item still compiles and emits **L2001** (a lint) suggesting `jet fix`.
-2. The item is **removed** in a later edition (the end of the window). Using it
-   then is **E2002**, which names the replacement.
-3. A public declaration carries its lifecycle metadata in the ordinary
-   `#Deprecated(since:, use:, removed_in:)` marker. Core declarations without
-   Jet source use the same marker payload. `removed_in:` stays dormant until
-   editions own removal; without it, the item is warn-only.
+The public lifecycle is one ladder: `_name` is internal, `pub _name` is
+soft-public, `pub` is stable, and `#Deprecated` is the retiring rung for a
+stable public item. A named removal edition is the final delta.
+
+1. A public item is marked **deprecated** with
+   `#Deprecated(since: "1.2", use: "parse", removed_in: "2028")`. `since:` names
+   the deprecation version or edition, `use:` names the replacement, and the
+   optional `removed_in:` names the removal edition.
+2. While the project's edition is before the named removal edition, the item
+   still compiles and emits **L2001** (a lint). The consumer warning carries the
+   replacement and `jet fix` performs the plain replacement rename. For a
+   qualified replacement such as `cbor.to_bytes`, the edit replaces the used
+   member with `to_bytes`.
+3. `removed_in:` is dormant until editions own removal. Before that edition it
+   has no effect beyond the warning text; at or after it, use becomes **E2002**
+   and names the replacement. Without `removed_in:`, the item remains
+   warning-only.
+4. Core declarations without Jet source use the same marker metadata on their
+   ordinary declaration rows. User items and Core migrations therefore share
+   the L2001/E2002 renderer. The former duplicate Core-only deprecation tables
+   are retired; there is one lifecycle source.
 
 ## Migration authority (D-REL5)
 

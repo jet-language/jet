@@ -144,8 +144,9 @@ pub struct NameReference {
     pub semantic_identity: Option<String>,
 }
 
-/// Shared name facts. Loader seeds module and import identities; sema adds
-/// declarations, aliases, visibility, paths, and checked reference origins.
+/// Shared name facts. Loader seeds module/import identities and checked
+/// structure observations; sema adds declarations, aliases, visibility,
+/// paths, and checked reference origins.
 #[derive(Debug, Clone, Default)]
 pub struct NameLedger {
     imports: HashMap<(usize, Span), usize>,
@@ -646,7 +647,11 @@ impl NameLedger {
         self.display_paths.clear();
         self.aliases.clear();
         self.references.clear();
-        self.structure_facts.clear();
+        // The loader owns import-edge observations and sema must not erase
+        // them when it refreshes its declaration/reference facts. Liveness
+        // and lifecycle rows are sema-owned and are rebuilt below.
+        self.structure_facts
+            .retain(|fact| fact.kind == StructureFactKind::ImportEdge);
     }
 }
 

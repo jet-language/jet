@@ -1,0 +1,24 @@
+edition 2027
+Warning [L2001] (deprecated_item): `cbor.encode` is deprecated
+  --> tests/release/cbor_2027.jet:6:21
+    |
+  6 |     payload := cbor.encode(tree)
+    |                     ^^^^^^
+ Why: `cbor.encode` was deprecated in edition 2027 and will be removed in edition 2028; it still works for now but should be migrated.
+ Fix: use `cbor.to_bytes` instead, or run `jet fix` to migrate automatically.
+
+Warning [L0101] (unused_local_binding): local binding `payload` is never read.
+  --> tests/release/cbor_2027.jet:6:5
+    |
+  6 |     payload := cbor.encode(tree)
+    |     ^^^^^^^
+ Why: a binding that no later expression reads adds dead code and may hide a computed result that should have been used.
+ Fix: remove the binding when its initializer is side-effect free, or rename `payload` to `_payload` when the value must be computed.
+edition 2028
+Error [E2002]: `cbor.encode` was removed in edition 2028
+  --> tests/release/cbor_2028.jet:6:21
+    |
+  6 |     payload := cbor.encode(tree)
+    |                     ^^^^^^
+ Why: `cbor.encode` was deprecated in edition 2027 and no longer exists in this edition; it has reached the end of its migration window.
+ Fix: use `cbor.to_bytes` instead, or run `jet fix` to migrate automatically.

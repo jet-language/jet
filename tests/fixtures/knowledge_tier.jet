@@ -12,12 +12,12 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) Reservation :> {guest: ~guest}
+    #Transition(_, Pending) fn book(guest: String) Reservation -> {guest: ~guest}
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation :> self
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation -> self
 }
 
-#Scrub(Input) fn clean(raw: #Input String) String :> ~raw
+#Scrub(Input) fn clean(raw: #Input String) String -> ~raw
 
 @answer :: 40 + 2
 
