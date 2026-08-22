@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 40935,
+    "rev": 40946,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-22T01:02:12.995Z"
+    "completionCursor": "2026-08-22T10:21:23.195Z"
   },
   "epochs": [
     {
@@ -117008,29 +117008,29 @@
         {
           "n": 1,
           "text": "jetpack secrets unset <name> removes one entry and re-encrypts the store; a hostile test proves the value is gone from .jet/secrets.age and get returns not-found.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:34:11.272Z"
+          "evidence": "secrets unset implemented at crates/jetpack/src/Secrets.rs:376; test secrets_unset_reencrypts_store_and_removes_value at tests/secrets.rs:176; real scratch smoke passed. Suite: 12 passed, 0 failed.",
+          "at": "2026-08-22T10:47:18.363Z"
         },
         {
           "n": 2,
           "text": "jetpack secrets list prints declared secret names only; a test proves values never reach stdout or logs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:34:12.148Z"
+          "evidence": "secrets list implemented at crates/jetpack/src/Secrets.rs:392, names-only; test at tests/secrets.rs:227; two-value scratch smoke passed.",
+          "at": "2026-08-22T10:47:18.875Z"
         },
         {
           "n": 3,
           "text": "jetpack secrets import seeds the vault from an existing .env file, reports imported names, and leaves the source file untouched with printed cleanup advice; test covers a real .env fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:34:12.999Z"
+          "evidence": ".env import implemented at crates/jetpack/src/Secrets.rs:402; test at tests/secrets.rs:265; source preservation and cleanup advice verified.",
+          "at": "2026-08-22T10:47:19.654Z"
         },
         {
           "n": 4,
@@ -117078,8 +117078,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T13:33:58.730Z",
-      "updated": "2026-08-19T13:28:05.371Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-22T10:47:19.654Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0v6buo8",
@@ -135784,13 +135784,41 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-package-model",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet new scaffolds a toolchain pin that jet itself accepts: no contradiction between the written pin and the running toolchain.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "crates/jet-pkg-model/src/Package/Convert.rs:98 writes jet: \"1.0.0\", a pin the running toolchain accepts; the live probe reports pin: jet 1.0.0.",
+          "at": "2026-08-22T10:48:28.330Z"
+        },
+        {
+          "n": 2,
+          "text": "jet status and jet update agree on the pin for a freshly scaffolded project.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet update jet exits 0 and writes .jet/lock against a freshly scaffolded project; the live probe confirms status and update agree.",
+          "at": "2026-08-22T10:48:28.833Z"
+        },
+        {
+          "n": 3,
+          "text": "An end-to-end regression covers fresh jet new followed by jet update jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "tests/pkg.rs:2897 covers fresh jet new then update jet: 1 passed, 0 failed.",
+          "at": "2026-08-22T10:48:29.358Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "tooling"
@@ -135798,8 +135826,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:02:09.587Z",
-      "updated": "2026-08-19T13:49:15.749Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-22T10:48:30.362Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T10:48:30.362Z"
     },
     {
       "id": "c02ozs3u",
@@ -189292,6 +189321,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T10:48:30.362Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tilidq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T10:48:29.359Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tilidq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T10:48:28.834Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tilidq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T10:48:28.331Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tilidq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T10:48:27.830Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tilidq",
+      "note": "#3 An end-to-end regression covers fresh jet new followed by je"
+    },
+    {
+      "at": "2026-08-22T10:48:27.343Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tilidq",
+      "note": "#2 jet status and jet update agree on the pin for a freshly sca"
+    },
+    {
+      "at": "2026-08-22T10:48:26.465Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tilidq",
+      "note": "#1 jet new scaffolds a toolchain pin that jet itself accepts: n"
+    },
+    {
+      "at": "2026-08-22T10:47:19.654Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gq3vxb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T10:47:18.875Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gq3vxb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T10:47:18.364Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gq3vxb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T10:21:23.195Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-22T10:21:23.195Z"
+    },
+    {
       "at": "2026-08-22T04:34:51.041Z",
       "by": "Main",
       "action": "card.update",
@@ -192713,83 +192819,6 @@
       "action": "card.criteria-meet",
       "ref": "c0bs6efw",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-21T05:18:44.149Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0bs6efw",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T05:18:43.672Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05uuzek",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T05:18:43.202Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05uuzek",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-21T05:18:42.677Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05uuzek",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-21T05:18:42.143Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c05uuzek",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-21T05:18:41.638Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-21T05:18:41.169Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-21T05:18:40.661Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-21T05:18:40.133Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-21T05:18:39.656Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-21T05:18:39.134Z",
-      "by": "fable-e3-burndown",
-      "action": "card.criteria-meet",
-      "ref": "c0mantyc",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
