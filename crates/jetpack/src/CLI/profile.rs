@@ -194,9 +194,21 @@ const PROFILE_ROOTFS_DIR: &str = "root";
 const PROFILE_COMPLETE_FILE: &str = "complete";
 const PROFILE_CURRENT_FILE: &str = "current";
 const PROFILE_CURRENT_PARTIAL: &str = "current.partial";
+const PROFILE_STAGE_PREFIX: &str = ".generation-";
+const PROFILE_STAGE_SUFFIX: &str = ".partial";
 const PROFILE_SCHEMA: &str = "jet-package-generation-v1";
 const PROFILE_POINTER_SCHEMA: &str = "jet-package-generation-pointer-v1";
 const MAX_PROFILE_NODES: usize = 100_000;
+const PROFILE_LOCK_PREFIX: &str = "package-profile-";
+
+fn with_profile_lock<T>(
+    project_dir: &Path,
+    profile: &str,
+    action: impl FnOnce() -> io::Result<T>,
+) -> io::Result<T> {
+    let scope = format!("{PROFILE_LOCK_PREFIX}{profile}");
+    crate::RuntimePolicy::with_project_lock(project_dir, &scope, action)
+}
 
 fn profile_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(name) = one_profile_name(theme, parsed, Syntax::PROFILE_VERB_BUILD) else {
@@ -205,7 +217,9 @@ fn profile_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some((project_dir, _source, plan)) = load_profile_plan(theme, &name) else {
         return 2;
     };
-    match build_generation(theme, parsed, &project_dir, &plan) {
+    match with_profile_lock(&project_dir, &plan.name, || {
+        build_generation(theme, parsed, &project_dir, &plan)
+    }) {
         Ok(generation) => {
             if parsed.flags.json {
                 println!(
@@ -234,28 +248,25 @@ fn profile_switch(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some((project_dir, _source, plan)) = load_profile_plan(theme, &name) else {
         return 2;
     };
-    let state = profile_state_dir(&project_dir, &plan.name);
-    let generation = match read_generations(&state) {
-        Ok(records) => records
+    let result = with_profile_lock(&project_dir, &plan.name, || {
+        let state = profile_state_dir(&project_dir, &plan.name);
+        let generation = read_generations(&state)?
             .iter()
             .rev()
             .find(|record| record.fingerprint == plan.fingerprint)
-            .map(|record| record.generation),
-        Err(error) => return report_generation_error(theme, &error),
-    };
-    let generation = match generation {
-        Some(generation) => generation,
-        None => match build_generation(theme, parsed, &project_dir, &plan) {
-            Ok(generation) => generation,
-            Err(error) => return report_generation_error(theme, &error),
-        },
-    };
-    match activate_generation(
-        &project_dir,
-        &plan.name,
-        generation,
-        Some(&plan.fingerprint),
-    ) {
+            .map(|record| record.generation);
+        let generation = match generation {
+            Some(generation) => generation,
+            None => build_generation(theme, parsed, &project_dir, &plan)?,
+        };
+        activate_generation(
+            &project_dir,
+            &plan.name,
+            generation,
+            Some(&plan.fingerprint),
+        )
+    });
+    match result {
         Ok(record) => {
             if parsed.flags.json {
                 println!(
@@ -318,39 +329,29 @@ fn profile_rollback(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
-    let state = profile_state_dir(&project_dir, &name);
-    let records = match read_generations(&state) {
-        Ok(records) => records,
-        Err(error) => return report_generation_error(theme, &error),
-    };
-    let current = match read_current_pointer(&state) {
-        Ok(Some(pointer)) => Some(pointer.generation),
-        Ok(None) => None,
-        Err(error) => return report_generation_error(theme, &error),
-    };
-    let generation = match target {
-        Some(target) => target,
-        None => {
-            let Some(current) = current else {
-                return report_generation_error(
-                    theme,
-                    &io::Error::other("profile has no current generation to roll back"),
-                );
-            };
-            let Some(previous) = records
-                .iter()
-                .filter(|record| record.generation < current)
-                .max_by_key(|record| record.generation)
-            else {
-                return report_generation_error(
-                    theme,
-                    &io::Error::other("profile has no older generation to roll back to"),
-                );
-            };
-            previous.generation
-        }
-    };
-    match activate_generation(&project_dir, &name, generation, None) {
+    let result = with_profile_lock(&project_dir, &name, || {
+        let state = profile_state_dir(&project_dir, &name);
+        let records = read_generations(&state)?;
+        let current = read_current_pointer(&state)?.map(|pointer| pointer.generation);
+        let generation = match target {
+            Some(target) => target,
+            None => {
+                let current = current.ok_or_else(|| {
+                    io::Error::other("profile has no current generation to roll back")
+                })?;
+                records
+                    .iter()
+                    .filter(|record| record.generation < current)
+                    .max_by_key(|record| record.generation)
+                    .map(|record| record.generation)
+                    .ok_or_else(|| {
+                        io::Error::other("profile has no older generation to roll back to")
+                    })?
+            }
+        };
+        activate_generation(&project_dir, &name, generation, None)
+    });
+    match result {
         Ok(record) => {
             if parsed.flags.json {
                 println!(
@@ -378,13 +379,12 @@ fn profile_generations(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
-    let state = profile_state_dir(&project_dir, &name);
-    let records = match read_generations(&state) {
-        Ok(records) => records,
-        Err(error) => return report_generation_error(theme, &error),
-    };
-    let current = match read_current_pointer(&state) {
-        Ok(pointer) => pointer.map(|pointer| pointer.generation),
+    let result = with_profile_lock(&project_dir, &name, || {
+        let state = profile_state_dir(&project_dir, &name);
+        Ok((read_generations(&state)?, read_current_pointer(&state)?))
+    });
+    let (records, current) = match result {
+        Ok((records, pointer)) => (records, pointer.map(|pointer| pointer.generation)),
         Err(error) => return report_generation_error(theme, &error),
     };
     if parsed.flags.json {
@@ -552,6 +552,51 @@ struct CurrentPointer {
     witness: String,
 }
 
+struct GenerationStage {
+    path: PathBuf,
+    published: bool,
+}
+
+impl GenerationStage {
+    fn create(generations: &Path, generation: u64) -> io::Result<Self> {
+        let path = generations.join(format!(
+            "{PROFILE_STAGE_PREFIX}{generation}{PROFILE_STAGE_SUFFIX}"
+        ));
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::other("profile generation stage is a symlink"));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(io::Error::other(
+                    "profile generation stage is not a directory",
+                ));
+            }
+            Ok(_) => fs::remove_dir_all(&path)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        fs::create_dir(&path)?;
+        Ok(Self {
+            path,
+            published: false,
+        })
+    }
+
+    fn publish(mut self, destination: &Path) -> io::Result<()> {
+        fs::rename(&self.path, destination)?;
+        self.published = true;
+        Ok(())
+    }
+}
+
+impl Drop for GenerationStage {
+    fn drop(&mut self) {
+        if !self.published {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 fn build_generation(
     theme: &Theme,
     parsed: &Parsed,
@@ -563,7 +608,9 @@ fn build_generation(
     fs::create_dir_all(&generations)?;
     let previous = read_generations(&state)?;
     let generation = next_generation(&state)?;
-    let generation_dir = generations.join(generation.to_string());
+    let stage = GenerationStage::create(&generations, generation)?;
+    let generation_dir = stage.path.clone();
+    let final_generation_dir = generations.join(generation.to_string());
     let rootfs = generation_dir.join(PROFILE_ROOTFS_DIR);
 
     let roots = Store::resolve();
@@ -633,7 +680,8 @@ fn build_generation(
         package.lease.validate()?;
     }
 
-    let metadata = format_generation_metadata(generation, plan, &realized, &groups, &roots);
+    let metadata =
+        format_generation_metadata(generation, plan, &realized, &groups, &roots, &rootfs)?;
     let target_hashes = realized
         .iter()
         .map(|package| package.entry.envelope.output_hash.clone())
@@ -659,6 +707,8 @@ fn build_generation(
         format!("{witness}\n").as_bytes(),
     )?;
     Store::sync_store_directory(&generation_dir)?;
+    Store::sync_store_directory(&generations)?;
+    stage.publish(&final_generation_dir)?;
     Store::sync_store_directory(&generations)?;
     Ok(generation)
 }
@@ -878,7 +928,8 @@ fn format_generation_metadata(
     realized: &[RealizedProfilePackage],
     groups: &BTreeMap<String, Vec<OutputNode>>,
     roots: &Store::Roots,
-) -> String {
+    rootfs: &Path,
+) -> io::Result<String> {
     let packages = realized
         .iter()
         .map(|package| {
@@ -941,18 +992,21 @@ fn format_generation_metadata(
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"schema\":{},\"profile\":{},\"generation\":{},\"fingerprint\":{},\"selected_profiles\":[{}],\"applied\":[{}],\"sources\":[{}],\"collisions\":{{{}}},\"packages\":[{}]}}\n",
+    let root_hash =
+        crate::Envelope::try_output_hash_of(&rootfs.to_string_lossy()).map_err(io::Error::other)?;
+    Ok(format!(
+        "{{\"schema\":{},\"profile\":{},\"generation\":{},\"fingerprint\":{},\"root_hash\":{},\"selected_profiles\":[{}],\"applied\":[{}],\"sources\":[{}],\"collisions\":{{{}}},\"packages\":[{}]}}\n",
         JSON::quote(PROFILE_SCHEMA),
         JSON::quote(&plan.name),
         generation,
         JSON::quote(&plan.fingerprint),
+        JSON::quote(&root_hash),
         quote_strings(&plan.selected_profiles),
         quote_strings(&plan.applied),
         quote_strings(&plan.sources),
         collisions,
         packages,
-    )
+    ))
 }
 
 fn collect_output_nodes(root: &Path, package: &str) -> io::Result<Vec<OutputNode>> {
@@ -1131,9 +1185,90 @@ fn generations_dir(state: &Path) -> PathBuf {
     state.join(PROFILE_GENERATIONS_DIR)
 }
 
+fn cleanup_generation_stages(directory: &Path) -> io::Result<()> {
+    let mut removed = false;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(number) = name
+            .strip_prefix(PROFILE_STAGE_PREFIX)
+            .and_then(|name| name.strip_suffix(PROFILE_STAGE_SUFFIX))
+        else {
+            continue;
+        };
+        if number
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .is_none()
+        {
+            return Err(io::Error::other("profile generation stage name is invalid"));
+        }
+        let metadata = entry.file_type()?;
+        if metadata.is_symlink() || !metadata.is_dir() {
+            return Err(io::Error::other(
+                "profile generation stage is not a real directory",
+            ));
+        }
+        fs::remove_dir_all(entry.path())?;
+        removed = true;
+    }
+    if removed {
+        Store::sync_store_directory(directory)?;
+    }
+    Ok(())
+}
+
 fn profile_owner(project_dir: &Path) -> String {
     let digest = SHA256::sha256_hex(project_dir.to_string_lossy().as_bytes());
     format!("project-{}", &digest[..16])
+}
+
+/// Return the immutable `profile.dev` projection used by the project shell.
+/// The active generation is selected by the existing `profile switch` pointer;
+/// the shell never rebuilds a profile or adds its source outputs directly.
+pub(super) fn dev_shell_projection(
+    project_dir: &Path,
+    environment: &jet_env_model::ModuleEval::EnvironmentFacts,
+) -> io::Result<Option<PathBuf>> {
+    let name = environment.active_environment.as_deref().unwrap_or("dev");
+    if !environment
+        .package_profiles
+        .iter()
+        .any(|profile| profile.name == name)
+    {
+        return Ok(None);
+    }
+    let state = profile_state_dir(project_dir, name);
+    let current = read_current_pointer(&state)?.ok_or_else(|| {
+        io::Error::other(format!(
+            "package profile `{name}` has no active generation; run `jet profile build {name}` then `jet profile switch {name}`"
+        ))
+    })?;
+    let record = read_generation_record(&state, current.generation)?;
+    if record.witness != current.witness {
+        return Err(io::Error::other(
+            "package profile current pointer disagrees with its generation",
+        ));
+    }
+    let bin = generations_dir(&state)
+        .join(current.generation.to_string())
+        .join(PROFILE_ROOTFS_DIR)
+        .join("bin");
+    let metadata = match fs::symlink_metadata(&bin) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::other(
+            "package profile shell projection is not a real bin directory",
+        ));
+    }
+    Ok(Some(bin))
 }
 
 fn next_generation(state: &Path) -> io::Result<u64> {
@@ -1171,6 +1306,7 @@ fn read_generations(state: &Path) -> io::Result<Vec<GenerationRecord>> {
             "profile generations path is not a real directory",
         ));
     }
+    cleanup_generation_stages(&directory)?;
     let mut numbers = fs::read_dir(&directory)?
         .map(|entry| {
             let entry = entry?;
@@ -1223,10 +1359,24 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation metadata schema is unsupported",
         ));
     }
+    let recorded_profile = object
+        .get("profile")
+        .ok_or_else(|| io::Error::other("profile generation metadata lacks profile"))?
+        .as_str()
+        .map_err(io::Error::other)?;
+    let expected_profile = state
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::other("profile state path has no valid name"))?;
+    if recorded_profile != expected_profile {
+        return Err(io::Error::other(
+            "profile generation metadata profile disagrees with its path",
+        ));
+    }
     let actual_generation = object
         .get("generation")
         .and_then(|value| match value {
-            crate::JSON::JSONValue::Number(value) => Some(*value as u64),
+            crate::JSON::JSONValue::Number(value) if *value > 0 => Some(*value as u64),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile generation metadata lacks generation"))?;
@@ -1247,6 +1397,16 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
     if !valid_digest(&fingerprint) {
         return Err(io::Error::other(
             "profile generation fingerprint is not canonical",
+        ));
+    }
+    let root_hash = object
+        .get("root_hash")
+        .ok_or_else(|| io::Error::other("profile generation metadata lacks root hash"))?
+        .as_str()
+        .map_err(io::Error::other)?;
+    if !valid_digest(root_hash) {
+        return Err(io::Error::other(
+            "profile generation root hash is not canonical",
         ));
     }
     let packages = object
@@ -1292,6 +1452,36 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation provider facts digest disagrees with its record",
             ));
         }
+        let raw = package
+            .get("raw")
+            .ok_or_else(|| io::Error::other("profile generation package lacks raw ref"))?
+            .as_str()
+            .map_err(io::Error::other)?;
+        if parsed_facts.reference != raw {
+            return Err(io::Error::other(
+                "profile generation provider reference disagrees with its raw ref",
+            ));
+        }
+        let target = package
+            .get("target")
+            .ok_or_else(|| io::Error::other("profile generation package lacks target"))?
+            .as_str()
+            .map_err(io::Error::other)?;
+        if parsed_facts.target != target {
+            return Err(io::Error::other(
+                "profile generation provider target disagrees with its package target",
+            ));
+        }
+        let provider = package
+            .get("provider")
+            .ok_or_else(|| io::Error::other("profile generation package lacks provider"))?
+            .as_str()
+            .map_err(io::Error::other)?;
+        if parsed_facts.provider != provider {
+            return Err(io::Error::other(
+                "profile generation provider identity disagrees with its package provider",
+            ));
+        }
         let facts = facts.as_object().map_err(io::Error::other)?;
         for key in [
             "schema",
@@ -1324,12 +1514,36 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
         ));
     }
     let root = directory.join(PROFILE_ROOTFS_DIR);
-    let root_metadata = fs::symlink_metadata(root)?;
+    let root_metadata = fs::symlink_metadata(&root)?;
     if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
         return Err(io::Error::other(
             "profile generation root is not a real directory",
         ));
     }
+    let actual_root_hash =
+        crate::Envelope::try_output_hash_of(&root.to_string_lossy()).map_err(io::Error::other)?;
+    if actual_root_hash != root_hash {
+        return Err(io::Error::other(
+            "profile generation root hash disagrees with its lock",
+        ));
+    }
+    let project_dir = state
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| io::Error::other("profile generation state has no project root"))?;
+    let profile = state
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::other("profile generation state has no profile name"))?;
+    Store::validate_profile_generation_root(
+        &Store::resolve(),
+        &profile_owner(project_dir),
+        profile,
+        generation,
+        marker,
+        &targets,
+    )?;
     Ok(GenerationRecord {
         generation,
         fingerprint,
@@ -1366,7 +1580,7 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
     let generation = object
         .get("generation")
         .and_then(|value| match value {
-            crate::JSON::JSONValue::Number(value) => Some(*value as u64),
+            crate::JSON::JSONValue::Number(value) if *value > 0 => Some(*value as u64),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile current pointer lacks generation"))?;
@@ -1379,6 +1593,12 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
     if !valid_digest(&witness) {
         return Err(io::Error::other(
             "profile current pointer witness is invalid",
+        ));
+    }
+    let record = read_generation_record(state, generation)?;
+    if record.witness != witness {
+        return Err(io::Error::other(
+            "profile current pointer witness disagrees with its generation",
         ));
     }
     Ok(Some(CurrentPointer {
@@ -1414,14 +1634,17 @@ fn activate_generation(
         fs::remove_file(&partial)?;
     }
     super::tool::write_synced(&partial, pointer.as_bytes())?;
-    fs::rename(&partial, state.join(PROFILE_CURRENT_FILE))?;
+    super::tool::finalize_profile_pointer(&partial, &state.join(PROFILE_CURRENT_FILE))?;
     Store::sync_store_directory(&state)?;
-    if let Some(current) = read_current_pointer(&state)? {
-        if current.generation != generation || current.witness != record.witness {
-            return Err(io::Error::other(
-                "profile current pointer failed post-write verification",
-            ));
-        }
+    let Some(current) = read_current_pointer(&state)? else {
+        return Err(io::Error::other(
+            "profile current pointer disappeared after publication",
+        ));
+    };
+    if current.generation != generation || current.witness != record.witness {
+        return Err(io::Error::other(
+            "profile current pointer failed post-write verification",
+        ));
     }
     Ok(record)
 }

@@ -1089,7 +1089,7 @@ fn atomic_write_current_pointer(bytes: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
+pub(super) fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
     const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
@@ -1115,7 +1115,7 @@ fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()
 }
 
 #[cfg(not(windows))]
-fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
+pub(super) fn finalize_profile_pointer(partial: &Path, destination: &Path) -> io::Result<()> {
     fs::rename(partial, destination)
 }
 

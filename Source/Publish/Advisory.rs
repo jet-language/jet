@@ -546,6 +546,16 @@ pub fn advisory_key_id(public_key: &str) -> Option<String> {
     Some(format!("sha256-{}", crate::SHA256::sha256_hex(&bytes)))
 }
 
+fn is_sha256_digest(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256-") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'))
+}
+
 fn hex_nibble(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -745,7 +755,14 @@ pub fn parse_advisory_trust(text: &str) -> Result<AdvisoryTrustRoot, Diagnostic>
                 })?;
             }
             "accepted_digest" if root.accepted_digest.is_none() => {
-                root.accepted_digest = Some(value.trim().to_string())
+                let digest = value.trim();
+                if !is_sha256_digest(digest) {
+                    return Err(e2607(
+                        "advisory trust root",
+                        &format!("line {line_number} has an invalid accepted digest"),
+                    ));
+                }
+                root.accepted_digest = Some(digest.to_string())
             }
             "revoked_key" => {
                 let revoked = value.trim();
@@ -798,9 +815,7 @@ pub fn audit_advisory_feed(
     }
     let mut maturity = Vec::new();
     for package in &lock.packages {
-        let Some(version) = SemVer::parse(&package.version) else {
-            continue;
-        };
+        let version = locked_package_version(package)?;
         let Some(release) = feed
             .releases
             .iter()
@@ -839,7 +854,7 @@ pub fn audit_advisory_feed(
     }
     Ok(PolicyAudit {
         receipt,
-        matches: audit_lockfile(lock, &feed.advisories),
+        matches: audit_lockfile(lock, &feed.advisories)?,
         maturity,
     })
 }
@@ -915,15 +930,27 @@ pub struct AuditMatch {
     pub diagnostic: Diagnostic,
 }
 
+fn locked_package_version(package: &LockedPackage) -> Result<SemVer, Diagnostic> {
+    SemVer::parse(&package.version).ok_or_else(|| {
+        e2610(
+            "lockfile",
+            &format!(
+                "locked package `{}` has an invalid version `{}`",
+                package.name, package.version
+            ),
+        )
+    })
+}
+
 /// Check a set of locked packages against verified advisory records.
 /// Returns one match (severity + E2603) per advisory that applies.
-pub fn audit_lockfile(lock: &LockFile, advisories: &[Advisory]) -> Vec<AuditMatch> {
+pub fn audit_lockfile(
+    lock: &LockFile,
+    advisories: &[Advisory],
+) -> Result<Vec<AuditMatch>, Diagnostic> {
     let mut matches = Vec::new();
     for pkg in &lock.packages {
-        let ver = match SemVer::parse(&pkg.version) {
-            Some(v) => v,
-            None => continue,
-        };
+        let ver = locked_package_version(pkg)?;
         for adv in advisories {
             if adv.package == pkg.name && adv.affects(&ver) {
                 matches.push(AuditMatch {
@@ -940,7 +967,7 @@ pub fn audit_lockfile(lock: &LockFile, advisories: &[Advisory]) -> Vec<AuditMatc
             }
         }
     }
-    matches
+    Ok(matches)
 }
 
 /// E2603 — advisory match.

@@ -25,9 +25,23 @@ function fail(message) {
   throw new Error(message);
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key])]),
+    );
+  }
+  return value;
+}
+
 function equal(actual, expected, label) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  const actualJson = JSON.stringify(canonicalize(actual));
+  const expectedJson = JSON.stringify(canonicalize(expected));
+  if (actualJson !== expectedJson) {
+    fail(`${label}: expected ${expectedJson}, got ${actualJson}`);
   }
 }
 
@@ -99,6 +113,28 @@ for (const test of fixture.authority_values || []) {
   }
 }
 
+for (const test of fixture.authority_derivations || []) {
+  equal(evaluate(test.nix_expression), test.nix_value, `${test.name} authority derivation value`);
+  for (const seed of fixture.fuzz_seeds) {
+    equal(
+      evaluate(mutate(test.nix_expression, seed)),
+      test.nix_value,
+      `${test.name} seed ${seed} authority derivation value`,
+    );
+  }
+}
+
+for (const test of fixture.derivations || []) {
+  equal(evaluate(test.nix_expression), test.nix_value, `${test.name} derivation value`);
+  for (const seed of fixture.fuzz_seeds) {
+    equal(
+      evaluate(mutate(test.nix_expression, seed)),
+      test.nix_value,
+      `${test.name} seed ${seed} derivation value`,
+    );
+  }
+}
+
 execFileSync(
   process.execPath,
   [path.join(root, "scripts/agent/verify-nix-eval-fixture.js"), "breadth.json"],
@@ -106,5 +142,5 @@ execFileSync(
 );
 
 console.log(
-  `verified Nix ${fixture.oracle.nix_version} breadth fixture: ${fixture.values.length} values, ${fixture.errors.length} errors, ${fixture.locks?.length || 0} locks, ${fixture.authority_values?.length || 0} authority values, ${fixture.fuzz_seeds.length} seeds`,
+  `verified Nix ${fixture.oracle.nix_version} breadth fixture: ${fixture.values.length} values, ${fixture.errors.length} errors, ${fixture.locks?.length || 0} locks, ${fixture.authority_values?.length || 0} authority values, ${fixture.authority_derivations?.length || 0} authority derivations, ${fixture.derivations?.length || 0} derivations, ${fixture.fuzz_seeds.length} seeds`,
 );

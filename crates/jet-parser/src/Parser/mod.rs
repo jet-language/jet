@@ -1924,6 +1924,42 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
+    fn bare_default_error_does_not_consume_the_next_struct_field() {
+        let parsed = program(
+            "struct Holder {\n\
+                 first: Int !\n\
+                 callback: fn() !\n\
+                 fn value(self) Int -> 1\n\
+                 second: String\n\
+             }\n\
+             fn run() {}\n",
+        );
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
+        assert_eq!(holder.fields.len(), 3);
+        assert_eq!(holder.methods.len(), 1);
+        assert!(matches!(
+            holder.fields[0].ty,
+            crate::AST::Type::Result { ref ok, ref err }
+                if matches!(ok.as_ref(), crate::AST::Type::Int)
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
+        ));
+        assert!(matches!(
+            holder.fields[1].ty,
+            crate::AST::Type::Fn { ref ret, .. }
+                if matches!(ret.as_deref(), Some(crate::AST::Type::Result { ref ok, ref err })
+                    if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                        && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR))
+        ));
+    }
+
+    #[test]
     fn optional_infix_failure_spelling_teaches_suffix_zone() {
         let source = "alias Old :: Int? ! IOError\n";
         let (tokens, lex_diagnostics) = lex(source);

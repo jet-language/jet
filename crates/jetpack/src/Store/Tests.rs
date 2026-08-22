@@ -840,6 +840,79 @@ mod tests {
     }
 
     #[test]
+    fn nix_store_projection_maps_each_verified_named_output() {
+        let (roots, _g) = temp_roots();
+        let snapshot = roots.root.join("lease-snapshot");
+        fs::create_dir_all(snapshot.join("bin")).unwrap();
+        fs::write(snapshot.join("bin/tool"), "out").unwrap();
+        seal_local_output(&snapshot).unwrap();
+        let out_digest = crate::Envelope::try_output_hash_of(&snapshot.to_string_lossy()).unwrap();
+
+        let dev = roots.root.join("external-dev-output");
+        fs::create_dir_all(&dev).unwrap();
+        fs::write(dev.join("headers"), "dev").unwrap();
+        seal_local_output(&dev).unwrap();
+        let dev_digest = crate::Envelope::try_output_hash_of(&dev.to_string_lossy()).unwrap();
+        let dev_object = project_external_output_unlocked(&roots, &dev, &dev_digest).unwrap();
+
+        let drv = "/nix/store/projection.drv";
+        let producer = ProducerRecord::new(
+            "nix",
+            drv,
+            crate::SHA256::sha256_hex(drv.as_bytes()),
+            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
+                ("nix.drv_path".into(), drv.into()),
+                ("nix.output.out".into(), "/nix/store/projection-out".into()),
+                ("nix.output.dev".into(), "/nix/store/projection-dev".into()),
+            ]))
+            .unwrap(),
+            "nix-derivation:projection",
+            "policy=test\nplatform=test",
+            BTreeMap::from([
+                ("nix.drv_path".into(), drv.into()),
+                ("nix.output.out".into(), "/nix/store/projection-out".into()),
+                ("nix.output.dev".into(), "/nix/store/projection-dev".into()),
+            ]),
+        )
+        .unwrap();
+        let entry = StoreEntry {
+            id: "projection".into(),
+            name: "projection".into(),
+            version: "1".into(),
+            reference: "projection@nixpkgs".into(),
+            out: snapshot.to_string_lossy().into_owned(),
+            bin: snapshot.join("bin").to_string_lossy().into_owned(),
+            rlib: String::new(),
+            envelope: crate::Envelope::Envelope::for_output(
+                &snapshot.to_string_lossy(),
+                "projection@nixpkgs",
+                "nix",
+            ),
+            cache_identity: CacheIdentity::default(),
+            references: Vec::new(),
+            named_outputs: BTreeMap::from([
+                ("out".into(), out_digest),
+                ("dev".into(), dev_digest),
+            ]),
+            platform_artifact_kind: String::new(),
+            producer_record: producer.encode(),
+            receipt: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let projection = nix_store_projection_for_entry(&roots, &entry, &snapshot);
+        let projection = projection.into_iter().collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            projection.get("/nix/store/projection-out"),
+            Some(&snapshot)
+        );
+        assert_eq!(
+            projection.get("/nix/store/projection-dev"),
+            Some(&PathBuf::from(dev_object))
+        );
+    }
+
+    #[test]
     fn hostile_out_pointer_never_quarantines_another_object() {
         let (roots, _g) = temp_roots();
         let survivor = roots.hangar_dir().join("survivor-output");

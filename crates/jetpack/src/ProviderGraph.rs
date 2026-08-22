@@ -367,6 +367,49 @@ fn add_metadata_facts(shared: &mut ProviderFacts, facts: &MetadataFacts) {
     }
 }
 
+fn add_typed_json_fact(facts: &mut MetadataFacts, key: impl Into<String>, value: &JSONValue) {
+    facts.typed.insert(key.into(), vec![json_value_json(value)]);
+}
+
+/// Keep every native top-level field in the typed projection as well as in the
+/// byte-for-byte native document. Provider-specific consumers can use the
+/// namespaced projection without forcing the shared model to grow a field for
+/// every ecosystem release.
+fn add_json_projection(
+    facts: &mut MetadataFacts,
+    namespace: &str,
+    object: &std::collections::BTreeMap<String, JSONValue>,
+) {
+    for (key, value) in object {
+        add_typed_json_fact(facts, format!("{namespace}.{key}"), value);
+    }
+}
+
+fn add_typed_text_fact(facts: &mut MetadataFacts, key: impl Into<String>, value: &str) {
+    facts.typed.insert(key.into(), vec![value.to_string()]);
+}
+
+fn json_string_list(value: &JSONValue) -> Option<Vec<String>> {
+    match value {
+        JSONValue::String(value) => Some(vec![value.clone()]),
+        JSONValue::Array(values) => values
+            .iter()
+            .map(|value| match value {
+                JSONValue::String(value) => Some(value.clone()),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+fn json_bool(value: Option<&JSONValue>) -> Option<bool> {
+    match value {
+        Some(JSONValue::Bool(value)) => Some(*value),
+        _ => None,
+    }
+}
+
 fn metadata_identity_selector(facts: &MetadataFacts) -> (&'static str, String) {
     if facts.family == ProviderFamily::SwiftPM {
         if let Some(revision) = facts
@@ -627,42 +670,450 @@ fn npm_report(document: &str) -> ProviderFactReport {
     let Some(JSONValue::Object(object)) = parsed else {
         return empty_report(ProviderFamily::Npm, "npm", "package.json is not valid JSON");
     };
-    let name = json_string(&object, "name");
-    let mut facts = MetadataFacts::empty(ProviderFamily::Npm, name.clone().unwrap_or_default());
-    facts.version = json_string(&object, "version").unwrap_or_default();
-    facts.license = json_string(&object, "license").unwrap_or_default();
-    facts.dependencies = json_keys(&object, "dependencies");
-    facts.dev_dependencies = json_keys(&object, "devDependencies");
-    facts.scripts = json_keys(&object, "scripts");
-    facts.bins = json_keys(&object, "bin");
-    facts.source_identity = format!("npm:{}@{}", facts.name, facts.version);
-    let mut report = report_with_identity(facts);
-    if object.contains_key("optionalDependencies") {
-        report
-            .losses
-            .push("optionalDependencies need an explicit platform projection".to_string());
+    let mut facts = MetadataFacts::empty(
+        ProviderFamily::Npm,
+        json_string(&object, "name").unwrap_or_default(),
+    );
+    let mut metadata = object.clone();
+    let mut losses = Vec::new();
+    if facts.name.is_empty() {
+        losses.push("npm metadata has no package name".to_string());
     }
+    facts.version = json_string(&object, "version").unwrap_or_default();
+    if facts.version.is_empty() {
+        match object.get("versions") {
+            Some(JSONValue::Object(versions)) if versions.len() == 1 => {
+                if let Some((version, JSONValue::Object(package))) = versions.iter().next() {
+                    facts.version = version.clone();
+                    metadata = package.clone();
+                    add_json_projection(
+                        &mut facts,
+                        &format!("provider.npm.version.{version}"),
+                        package,
+                    );
+                }
+            }
+            Some(JSONValue::Object(versions)) if versions.len() > 1 => losses.push(
+                "npm packument contains multiple versions; select one exact version before realization"
+                    .to_string(),
+            ),
+            Some(_) => losses.push("npm `versions` must be an object".to_string()),
+            None => {}
+        }
+    }
+    facts.license = json_string(&metadata, "license").unwrap_or_default();
+    facts.dependencies = json_keys(&metadata, "dependencies");
+    facts.dev_dependencies = json_keys(&metadata, "devDependencies");
+    facts.scripts = json_keys(&metadata, "scripts");
+    facts.bins = match metadata.get("bin") {
+        Some(JSONValue::Object(_)) => json_keys(&metadata, "bin"),
+        Some(JSONValue::String(_)) => vec![facts.name.clone()],
+        Some(_) => {
+            losses.push("npm `bin` must be a string or object".to_string());
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
+    if facts.name.is_empty() {
+        facts.name = json_string(&metadata, "name").unwrap_or_default();
+    }
+    facts.source_identity = format!("npm:{}@{}", facts.name, facts.version);
+    add_json_projection(&mut facts, "provider.npm.native", &object);
+    if metadata != object {
+        add_json_projection(&mut facts, "provider.npm.package", &metadata);
+    }
+
+    let dependency_sets = [
+        ("dependencies", "runtime"),
+        ("devDependencies", "dev"),
+        ("optionalDependencies", "optional"),
+        ("peerDependencies", "peer"),
+        ("bundledDependencies", "bundled"),
+    ];
+    for (field, kind) in dependency_sets {
+        let Some(value) = metadata.get(field) else {
+            continue;
+        };
+        match value {
+            JSONValue::Object(values) if field != "bundledDependencies" => {
+                for (name, requirement) in values {
+                    add_typed_json_fact(
+                        &mut facts,
+                        format!("provider.npm.dependency.{kind}.{name}"),
+                        requirement,
+                    );
+                    if !matches!(requirement, JSONValue::String(_)) {
+                        losses.push(format!(
+                            "npm `{field}.{name}` must retain a string requirement"
+                        ));
+                    }
+                }
+            }
+            JSONValue::Array(values) if field == "bundledDependencies" => {
+                for (index, value) in values.iter().enumerate() {
+                    add_typed_json_fact(
+                        &mut facts,
+                        format!("provider.npm.dependency.bundled.{index}"),
+                        value,
+                    );
+                    if !matches!(value, JSONValue::String(_)) {
+                        losses.push(format!(
+                            "npm `bundledDependencies[{index}]` must be a package name"
+                        ));
+                    }
+                }
+            }
+            _ => losses.push(format!("npm `{field}` must be an object")),
+        }
+    }
+    if let (Some(JSONValue::Object(dependencies)), Some(JSONValue::Object(optional))) = (
+        metadata.get("dependencies"),
+        metadata.get("optionalDependencies"),
+    ) {
+        for (name, dependency) in dependencies {
+            if let Some(optional_requirement) = optional.get(name) {
+                if dependency != optional_requirement {
+                    losses.push(format!(
+                        "npm dependency `{name}` has different runtime and optional requirements"
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(JSONValue::Object(scripts)) = metadata.get("scripts") {
+        for (name, command) in scripts {
+            add_typed_json_fact(&mut facts, format!("provider.npm.hook.{name}"), command);
+            if !matches!(command, JSONValue::String(_)) {
+                losses.push(format!("npm script `{name}` must be a string command"));
+            }
+        }
+    } else if metadata.contains_key("scripts") {
+        losses.push("npm `scripts` must be an object".to_string());
+    }
+    for key in ["os", "cpu"] {
+        if let Some(value) = metadata.get(key) {
+            match json_string_list(value) {
+                Some(values) => {
+                    facts
+                        .platforms
+                        .extend(values.iter().map(|value| format!("{key}:{value}")));
+                    add_typed_json_fact(&mut facts, format!("provider.npm.platform.{key}"), value);
+                }
+                None => losses.push(format!("npm `{key}` must be a string or string array")),
+            }
+        }
+    }
+    if let Some(JSONValue::Object(engines)) = metadata.get("engines") {
+        for (engine, requirement) in engines {
+            add_typed_json_fact(
+                &mut facts,
+                format!("provider.npm.variant.engine.{engine}"),
+                requirement,
+            );
+        }
+    } else if metadata.contains_key("engines") {
+        losses.push("npm `engines` must be an object".to_string());
+    }
+    for (field, target) in [
+        ("deprecated", "provider.npm.advisory.deprecated"),
+        ("repository", "provider.npm.source.repository"),
+        ("publishConfig", "provider.npm.source.publish_config"),
+        ("author", "provider.npm.source.author"),
+        ("maintainers", "provider.npm.source.maintainers"),
+        ("dist-tags", "provider.npm.channel.dist_tags"),
+    ] {
+        if let Some(value) = metadata.get(field) {
+            add_typed_json_fact(&mut facts, target, value);
+        }
+    }
+    if let Some(value) = metadata.get("yanked") {
+        if json_bool(Some(value)).is_some() {
+            add_typed_json_fact(&mut facts, "provider.npm.yanked", value);
+        } else {
+            losses.push("npm `yanked` must be a boolean".to_string());
+        }
+    }
+    if let Some(JSONValue::Object(dist)) = metadata.get("dist") {
+        for key in ["integrity", "shasum", "tarball"] {
+            if let Some(value) = dist.get(key) {
+                add_typed_json_fact(&mut facts, format!("provider.npm.dist.{key}"), value);
+            }
+        }
+        facts.integrity_hash = json_string(dist, "integrity")
+            .or_else(|| json_string(dist, "shasum"))
+            .unwrap_or_default();
+    } else if metadata.contains_key("dist") {
+        losses.push("npm dist metadata must be an object".to_string());
+    }
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
     report
 }
 
 fn cargo_report(document: &str) -> ProviderFactReport {
+    let assignments = toml_assignments(document);
+    let package_values = assignments
+        .iter()
+        .filter(|entry| !entry.array_table && entry.section == "package")
+        .collect::<Vec<_>>();
     let mut facts = MetadataFacts::empty(
         ProviderFamily::Cargo,
-        toml_string(document, "name").unwrap_or_default(),
+        first_toml_value(&package_values, "name").unwrap_or_default(),
     );
-    facts.version = toml_string(document, "version").unwrap_or_default();
-    facts.license = toml_string(document, "license").unwrap_or_default();
-    facts.dependencies = dependency_keys(document, "[dependencies]");
-    facts.dev_dependencies = dependency_keys(document, "[dev-dependencies]");
-    facts.build_dependencies = dependency_keys(document, "[build-dependencies]");
-    if document
-        .lines()
-        .any(|line| line.trim_start().starts_with("build ="))
-    {
-        facts.scripts.push("build.rs".to_string());
+    facts.version = first_toml_value(&package_values, "version").unwrap_or_default();
+    facts.license = first_toml_value(&package_values, "license").unwrap_or_default();
+    let mut conflicts = Vec::new();
+    for key in ["name", "version", "license"] {
+        let values = package_values
+            .iter()
+            .filter(|entry| entry.key == key)
+            .map(|entry| entry.value.clone())
+            .collect::<Vec<_>>();
+        if values.windows(2).any(|pair| pair[0] != pair[1]) {
+            conflicts.push(format!("Cargo package declares conflicting `{key}` values"));
+        }
+    }
+    let mut losses = Vec::new();
+    let mut native_values = std::collections::BTreeMap::new();
+    for entry in &assignments {
+        let native_namespace = if entry.array_table {
+            "lock"
+        } else {
+            "manifest"
+        };
+        let native_key = format!(
+            "provider.cargo.native.{native_namespace}.{}.{}",
+            entry.section, entry.key
+        );
+        if let Some(previous) = native_values.insert(native_key.clone(), entry.value.clone()) {
+            if previous != entry.value {
+                conflicts.push(format!(
+                    "Cargo native field {} has conflicting values",
+                    native_key
+                ));
+            }
+        }
+        add_typed_text_fact(&mut facts, native_key, &entry.value);
+        if let Some(kind) = cargo_dependency_kind(&entry.section) {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.cargo.dependency.{kind}.{}", entry.key),
+                &entry.value,
+            );
+            match kind {
+                "runtime" => facts.dependencies.push(entry.key.clone()),
+                "dev" => facts.dev_dependencies.push(entry.key.clone()),
+                "build" => facts.build_dependencies.push(entry.key.clone()),
+                _ => {}
+            }
+            if let Some(target) = entry.section.strip_prefix("target.") {
+                let target = target
+                    .strip_suffix(".dependencies")
+                    .or_else(|| target.strip_suffix(".dev-dependencies"))
+                    .or_else(|| target.strip_suffix(".build-dependencies"))
+                    .unwrap_or(target);
+                facts.platforms.push(target.to_string());
+            }
+        }
+        if entry.section == "features" {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.cargo.variant.feature.{}", entry.key),
+                &entry.value,
+            );
+        }
+        if entry.section == "package" && entry.key == "build" {
+            if entry.value != "false" {
+                facts.scripts.push(toml_value_text(&entry.value));
+                add_typed_text_fact(&mut facts, "provider.cargo.hook.build", &entry.value);
+            }
+        }
+        if entry.section == "package"
+            && matches!(
+                entry.key.as_str(),
+                "repository" | "homepage" | "authors" | "publish" | "links"
+            )
+        {
+            add_typed_text_fact(
+                &mut facts,
+                format!("provider.cargo.source.{}", entry.key),
+                &entry.value,
+            );
+        }
+    }
+    facts.dependencies.sort();
+    facts.dependencies.dedup();
+    facts.dev_dependencies.sort();
+    facts.dev_dependencies.dedup();
+    facts.build_dependencies.sort();
+    facts.build_dependencies.dedup();
+    facts.platforms.sort();
+    facts.platforms.dedup();
+    let lock_records = cargo_lock_records(&assignments);
+    if !package_values.iter().any(|entry| entry.key == "name") && !lock_records.is_empty() {
+        if lock_records.len() == 1 {
+            facts.name = lock_records[0]
+                .get("name")
+                .map(|value| toml_value_text(value))
+                .unwrap_or_default();
+            facts.version = lock_records[0]
+                .get("version")
+                .map(|value| toml_value_text(value))
+                .unwrap_or_default();
+        } else {
+            facts.name = "cargo-lock".to_string();
+            facts.version = "set".to_string();
+            facts.dependencies = lock_records
+                .iter()
+                .filter_map(|record| record.get("name").map(|value| toml_value_text(value)))
+                .collect();
+            losses.push(
+                "Cargo.lock contains multiple package identities; lock each package separately"
+                    .to_string(),
+            );
+        }
+    }
+    for record in &lock_records {
+        let Some(name) = record.get("name").map(|value| toml_value_text(value)) else {
+            losses.push("Cargo.lock package has no name".to_string());
+            continue;
+        };
+        for key in ["version", "source", "checksum", "dependencies"] {
+            if let Some(value) = record.get(key) {
+                let projection_key = format!("provider.cargo.lock.{name}.{key}");
+                if let Some(previous) = facts
+                    .typed
+                    .get(&projection_key)
+                    .and_then(|values| values.first())
+                {
+                    if previous != value {
+                        conflicts.push(format!(
+                            "Cargo.lock field {} has conflicting values",
+                            projection_key
+                        ));
+                    }
+                }
+                add_typed_text_fact(&mut facts, projection_key, value);
+            }
+        }
+        if name == facts.name {
+            if let Some(checksum) = record.get("checksum") {
+                facts.integrity_hash = toml_value_text(checksum);
+            }
+        }
     }
     facts.source_identity = format!("cargo:{}@{}", facts.name, facts.version);
-    report_with_identity(facts)
+    let mut report = report_with_identity(facts);
+    report.losses.extend(losses);
+    report.conflicts.extend(conflicts);
+    report
+}
+
+#[derive(Debug, Clone)]
+struct TomlAssignment {
+    section: String,
+    array_table: bool,
+    key: String,
+    value: String,
+}
+
+fn toml_assignments(document: &str) -> Vec<TomlAssignment> {
+    let mut section = String::new();
+    let mut array_table = false;
+    let mut assignments = Vec::new();
+    for line in document.lines() {
+        let line = line.trim();
+        if line.starts_with("[[") && line.ends_with("]]") {
+            section = line[2..line.len() - 2].trim().to_string();
+            array_table = true;
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            array_table = false;
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        assignments.push(TomlAssignment {
+            section: section.clone(),
+            array_table,
+            key: key.to_string(),
+            value: value.trim().to_string(),
+        });
+    }
+    assignments
+}
+
+fn first_toml_value(entries: &[&TomlAssignment], key: &str) -> Option<String> {
+    entries
+        .iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| toml_value_text(&entry.value))
+}
+
+fn toml_value_text(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2
+        && matches!(
+            (value.as_bytes().first(), value.as_bytes().last()),
+            (Some(b'"'), Some(b'"')) | (Some(b'\''), Some(b'\''))
+        )
+    {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn cargo_dependency_kind(section: &str) -> Option<&'static str> {
+    let section = section.strip_prefix("target.").unwrap_or(section);
+    match section {
+        "dependencies" => Some("runtime"),
+        "dev-dependencies" => Some("dev"),
+        "build-dependencies" => Some("build"),
+        value if value.ends_with(".dependencies") => Some("runtime"),
+        value if value.ends_with(".dev-dependencies") => Some("dev"),
+        value if value.ends_with(".build-dependencies") => Some("build"),
+        _ => None,
+    }
+}
+
+fn cargo_lock_records(
+    assignments: &[TomlAssignment],
+) -> Vec<std::collections::BTreeMap<String, String>> {
+    let mut records = Vec::new();
+    let mut current = None;
+    for entry in assignments {
+        if !entry.array_table || entry.section != "package" {
+            continue;
+        }
+        if current.is_none() {
+            current = Some(std::collections::BTreeMap::new());
+        }
+        if entry.key == "name"
+            && current
+                .as_ref()
+                .is_some_and(|record| record.contains_key("name"))
+        {
+            records.push(current.take().unwrap_or_default());
+            current = Some(std::collections::BTreeMap::new());
+        }
+        if let Some(record) = current.as_mut() {
+            record.insert(entry.key.clone(), entry.value.clone());
+        }
+    }
+    if let Some(record) = current {
+        if !record.is_empty() {
+            records.push(record);
+        }
+    }
+    records
 }
 
 fn pypi_report(document: &str) -> ProviderFactReport {
@@ -1042,10 +1493,17 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
 }
 
 fn jet_registry_report(document: &str) -> ProviderFactReport {
-    let line = document
+    let lines = document
         .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or_default();
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let Some(line) = lines.first() else {
+        return empty_report(
+            ProviderFamily::JetRegistry,
+            "jet-registry",
+            "registry metadata is not valid JSON",
+        );
+    };
     let parsed = JSON::parse(line).ok();
     let Some(JSONValue::Object(object)) = parsed else {
         return empty_report(
@@ -1059,13 +1517,91 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
         json_string(&object, "name").unwrap_or_default(),
     );
     facts.version = json_string(&object, "version").unwrap_or_default();
-    facts.integrity_hash = json_string(&object, "content_hash").unwrap_or_default();
+    facts.integrity_hash = json_string(&object, "content_hash")
+        .or_else(|| json_string(&object, "sha256"))
+        .unwrap_or_default();
+    facts.license = json_string(&object, "license").unwrap_or_default();
+    facts.dependencies = json_keys(&object, "dependencies");
+    facts.platforms = json_array_strings(&object, "platforms");
+    add_json_projection(&mut facts, "provider.registry.native", &object);
+    let mut losses = Vec::new();
+    if let Some(value) = object.get("dependencies") {
+        if let JSONValue::Object(dependencies) = value {
+            for (name, requirement) in dependencies {
+                add_typed_json_fact(
+                    &mut facts,
+                    format!("provider.registry.dependency.{name}"),
+                    requirement,
+                );
+            }
+        } else {
+            losses.push("registry dependencies must be an object".to_string());
+        }
+    }
+    if let Some(value) = object.get("platforms") {
+        if !matches!(
+            value,
+            JSONValue::Array(values)
+                if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+        ) {
+            losses.push("registry platforms must be an array of strings".to_string());
+        }
+    }
+    for (field, target) in [
+        ("content_hash", "provider.registry.content_hash"),
+        ("fingerprint", "provider.registry.fingerprint"),
+        ("yanked", "provider.registry.yanked"),
+        ("tier", "provider.registry.tier"),
+        ("gate_status", "provider.registry.gate_status"),
+        ("public_key", "provider.registry.publisher_key"),
+        ("signature", "provider.registry.signature"),
+        ("owner", "provider.registry.owner"),
+        ("source", "provider.registry.source"),
+        ("advisories", "provider.registry.advisories"),
+        ("variants", "provider.registry.variants"),
+        ("hooks", "provider.registry.hooks"),
+    ] {
+        if let Some(value) = object.get(field) {
+            add_typed_json_fact(&mut facts, target, value);
+        }
+    }
     facts.source_identity = format!("jet-registry:{}@{}", facts.name, facts.version);
     let mut report = report_with_identity(facts);
+    report.losses.append(&mut losses);
     if report.facts.integrity_hash.is_empty() {
         report
             .losses
             .push("registry entry has no content hash".to_string());
+    }
+    if let Some(value) = object.get("yanked") {
+        if json_bool(Some(value)).is_none() {
+            report
+                .losses
+                .push("registry `yanked` must be a boolean".to_string());
+        }
+    }
+    for (index, line) in lines.iter().enumerate().skip(1) {
+        match JSON::parse(line) {
+            Ok(JSONValue::Object(other))
+                if json_string(&other, "name") == json_string(&object, "name")
+                    && json_string(&other, "version") == json_string(&object, "version") =>
+            {
+                if other != object {
+                    report.conflicts.push(format!(
+                        "registry identity on line {} has conflicting native facts",
+                        index + 1
+                    ));
+                }
+            }
+            Ok(JSONValue::Object(_)) => report.losses.push(format!(
+                "registry metadata contains multiple package identities; line {} needs its own lock record",
+                index + 1
+            )),
+            Ok(_) | Err(_) => report.losses.push(format!(
+                "registry metadata line {} is not a JSON object",
+                index + 1
+            )),
+        }
     }
     report
 }
@@ -1523,5 +2059,130 @@ mod tests {
         .expect("locked provider facts JSON");
         assert_eq!(locked, shared);
         assert_eq!(lock.rationales[0].source_ref, "web#1.0.0@npm".to_string());
+    }
+
+    #[test]
+    fn npm_conformance_retains_native_and_typed_provider_facts() {
+        let native = r#"{"name":"web","version":"2.0.0","license":"MIT","dependencies":{"vite":"5.4.0"},"devDependencies":{"typescript":"5.5.0"},"optionalDependencies":{"fsevents":"2.3.3"},"peerDependencies":{"react":"18.3.1"},"scripts":{"build":"vite build"},"bin":{"web":"bin/web.js"},"os":["linux","darwin"],"cpu":"x64","engines":{"node":">=20"},"repository":{"type":"git","url":"https://example.invalid/web.git"},"dist":{"integrity":"sha512-abc"}}"#;
+        let report = normalize_provider_document(ProviderFamily::Npm, native);
+        report.validate().expect("npm provider facts are lossless");
+        assert_eq!(report.native_format, "json");
+        assert_eq!(report.native_document, native);
+        assert_eq!(report.facts.dependencies, vec!["vite".to_string()]);
+        assert_eq!(
+            report.facts.dev_dependencies,
+            vec!["typescript".to_string()]
+        );
+        assert!(report.facts.platforms.contains(&"os:linux".to_string()));
+        assert!(report.facts.typed.contains_key("provider.npm.hook.build"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.npm.variant.engine.node"));
+        assert!(report
+            .shared_facts()
+            .facts
+            .contains_key("provider.npm.native.repository"));
+    }
+
+    #[test]
+    fn cargo_conformance_retains_lock_variants_hooks_and_source_ownership() {
+        let native = r#"[package]
+name = "app"
+version = "1.0.0"
+license = "MIT"
+repository = "https://example.invalid/app.git"
+build = "build.rs"
+
+[dependencies]
+serde = "1.0"
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+cc = "1.0"
+
+[features]
+default = ["serde"]
+
+[[package]]
+name = "app"
+version = "1.0.0"
+
+[[package]]
+name = "serde"
+version = "1.0.200"
+source = "registry+https://example.invalid"
+checksum = "abc123"
+"#;
+        let report = normalize_provider_document(ProviderFamily::Cargo, native);
+        report
+            .validate()
+            .expect("Cargo provider facts are lossless");
+        assert!(report.facts.dependencies.contains(&"serde".to_string()));
+        assert!(report.facts.dependencies.contains(&"cc".to_string()));
+        assert!(report.facts.scripts.contains(&"build.rs".to_string()));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.cargo.variant.feature.default"));
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.cargo.lock.serde.checksum"));
+        assert!(report
+            .shared_facts()
+            .facts
+            .contains_key("provider.cargo.source.repository"));
+    }
+
+    #[test]
+    fn jet_registry_conformance_retains_attestation_and_yank_facts() {
+        let native = r#"{"name":"web","version":"1.0.0","content_hash":"sha256-web","license":"MIT","platforms":["linux"],"yanked":true,"tier":"trusted","gate_status":"passed","public_key":"pk","signature":"sig","owner":"team-web","source":{"kind":"git","url":"https://example.invalid/web.git"},"advisories":["CVE-0000-0000"],"variants":{"debug":{"features":["trace"]}},"hooks":{"build":{"digest":"hook-digest"}}}"#;
+        let report = normalize_provider_document(ProviderFamily::JetRegistry, native);
+        report.validate().expect("Jet registry facts are lossless");
+        assert_eq!(report.facts.integrity_hash, "sha256-web");
+        assert!(report
+            .facts
+            .typed
+            .contains_key("provider.registry.signature"));
+        assert!(report.facts.typed.contains_key("provider.registry.yanked"));
+        assert!(report
+            .shared_facts()
+            .facts
+            .contains_key("provider.registry.native.source"));
+    }
+
+    #[test]
+    fn provider_conformance_reports_ambiguous_and_conflicting_native_facts() {
+        let packument = r#"{"name":"web","versions":{"1.0.0":{"name":"web","version":"1.0.0"},"2.0.0":{"name":"web","version":"2.0.0"}}}"#;
+        let report = normalize_provider_document(ProviderFamily::Npm, packument);
+        assert!(report.validate().is_err());
+        assert!(report
+            .losses
+            .iter()
+            .any(|loss| loss.contains("multiple versions")));
+
+        let registry = concat!(
+            r#"{"name":"web","version":"1.0.0","content_hash":"sha256-a"}"#,
+            "\n",
+            r#"{"name":"web","version":"2.0.0","content_hash":"sha256-b"}"#
+        );
+        let report = normalize_provider_document(ProviderFamily::JetRegistry, registry);
+        assert!(report.validate().is_err());
+        assert!(report
+            .losses
+            .iter()
+            .any(|loss| loss.contains("multiple package identities")));
+
+        let conflicting_registry = concat!(
+            r#"{"name":"web","version":"1.0.0","content_hash":"sha256-a"}"#,
+            "\n",
+            r#"{"name":"web","version":"1.0.0","content_hash":"sha256-b"}"#
+        );
+        let report = normalize_provider_document(ProviderFamily::JetRegistry, conflicting_registry);
+        assert!(report.validate().is_err());
+        assert!(report
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.contains("conflicting native facts")));
     }
 }

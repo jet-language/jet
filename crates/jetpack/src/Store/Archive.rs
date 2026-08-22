@@ -184,6 +184,9 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
     }
     let objects = roots.hangar_dir().join("objects");
     super::Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
+    let mut permissions = super::Ingest::MovePathPermissions::default();
+    permissions.make_writable(&quarantine, &roots.hangar_dir())?;
+    permissions.make_writable(&objects, &roots.hangar_dir())?;
     let mut recovered = 0;
     for item in fs::read_dir(&quarantine)? {
         let item = item?;
@@ -247,6 +250,7 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
                 remove_tree(&backup)?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                make_tree_writable(&backup)?;
                 fs::rename(&backup, &destination)?;
                 if let Err(error) = seal_tree(&destination) {
                     let restored = make_tree_writable(&destination)
@@ -264,6 +268,7 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
         }
         recovered += 1;
     }
+    permissions.restore()?;
     Ok(recovered)
 }
 
@@ -462,17 +467,31 @@ fn repair_archive_unlocked(
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
+    let mut permissions = super::Ingest::MovePathPermissions::default();
+    let writable_source = if had_object {
+        object_path.as_path()
+    } else {
+        object_path.parent().unwrap_or(hangar.as_path())
+    };
+    permissions.make_writable(writable_source, &hangar)?;
+    permissions.make_writable(&quarantine, &hangar)?;
     if had_object {
         fs::rename(&object_path, &backup)?;
+        permissions.renamed(&object_path, &backup);
         super::sync_store_directory(&quarantine)?;
         super::sync_store_directory(object_path.parent().unwrap_or(hangar.as_path()))?;
     }
     let report = archive.report();
     let imported = import_archive_unlocked(roots, archive);
-    match imported {
+    let result = match imported {
         Ok(_) => {
             if had_object {
-                let _ = remove_tree(&backup);
+                if let Err(error) = remove_tree(&backup) {
+                    return Err(io::Error::other(format!(
+                        "repair committed; quarantined backup remains at `{}`: {error}",
+                        backup.display()
+                    )));
+                }
             }
             Ok(report)
         }
@@ -493,10 +512,13 @@ fn repair_archive_unlocked(
                 if rollback_errors.is_empty() {
                     if let Err(rollback) = fs::rename(&backup, &object_path) {
                         rollback_errors.push(format!("restoring quarantined output: {rollback}"));
-                    } else if let Err(rollback) = super::sync_store_directory(
-                        object_path.parent().unwrap_or(hangar.as_path()),
-                    ) {
-                        rollback_errors.push(format!("syncing restored output: {rollback}"));
+                    } else {
+                        permissions.renamed(&backup, &object_path);
+                        if let Err(rollback) = super::sync_store_directory(
+                            object_path.parent().unwrap_or(hangar.as_path()),
+                        ) {
+                            rollback_errors.push(format!("syncing restored output: {rollback}"));
+                        }
                     }
                 } else {
                     rollback_errors.push(format!(
@@ -513,6 +535,16 @@ fn repair_archive_unlocked(
             }
             Err(error)
         }
+    };
+    match (result, permissions.restore()) {
+        (Ok(report), Ok(())) => Ok(report),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(io::Error::other(format!(
+            "repair succeeded; restoring Hangar permissions failed: {error}"
+        ))),
+        (Err(error), Err(restore)) => Err(io::Error::other(format!(
+            "{error}; restoring Hangar permissions failed: {restore}"
+        ))),
     }
 }
 

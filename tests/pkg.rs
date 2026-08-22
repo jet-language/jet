@@ -153,9 +153,15 @@ fn install_closed_status_crypto_helper(home: &Path) {
 
     // The sidecar sits beside the artifacts it blesses, one row per file, each
     // row's path relative to that shared release dir — i.e. a bare file name.
-    let crate_name = crate_stem.strip_prefix("lib").expect("bridge rlib is `lib*`");
+    let crate_name = crate_stem
+        .strip_prefix("lib")
+        .expect("bridge rlib is `lib*`");
     let mut manifest = String::from("jet-ffi-artifacts-v2\n");
-    for (bytes, path) in [(&rlib_bytes, &rlib), (&cdylib_bytes, &cdylib), (&helper_bytes, &helper)] {
+    for (bytes, path) in [
+        (&rlib_bytes, &rlib),
+        (&cdylib_bytes, &cdylib),
+        (&helper_bytes, &helper),
+    ] {
         let relative = path.file_name().unwrap().to_str().unwrap();
         manifest.push_str(&format!("{} {relative}\n", jet::SHA256::sha256_hex(bytes)));
     }
@@ -185,7 +191,13 @@ fn seed_core_review(dir: &Path, package: &str, version: &str) {
     let work = dir.with_extension(format!("review-{}", std::process::id()));
     let url = format!("file://{}", dir.to_str().unwrap());
     Command::new("git")
-        .args(["--git-dir", dir.to_str().unwrap(), "symbolic-ref", "HEAD", "refs/heads/main"])
+        .args([
+            "--git-dir",
+            dir.to_str().unwrap(),
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ])
         .status()
         .unwrap();
     Command::new("git")
@@ -305,11 +317,7 @@ fn graph_with_app() -> jetpack::PackageGraph::PackageGraph {
     graph
 }
 
-fn semantic_record(
-    owner: &str,
-    key: &str,
-    exact: &str,
-) -> jetpack::SemanticLock::SemanticRecord {
+fn semantic_record(owner: &str, key: &str, exact: &str) -> jetpack::SemanticLock::SemanticRecord {
     use jetpack::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
     SemanticRecord::new(
         LockIdentity {
@@ -400,10 +408,7 @@ fn strict_graph_accepts_direct_dep() {
         .check_visible("app", "ui")
         .expect("direct dep visible");
     assert_eq!(edge.dependency, "ui");
-    assert_eq!(
-        edge.kind,
-        jetpack::PackageGraph::VisibleEdgeKind::DirectDep
-    );
+    assert_eq!(edge.kind, jetpack::PackageGraph::VisibleEdgeKind::DirectDep);
 }
 
 #[test]
@@ -468,9 +473,8 @@ fn missing_dep_fix_prefers_direct_add_for_single_package() {
 #[test]
 fn missing_dep_fix_does_not_catalog_without_hidden_use_evidence() {
     let mut graph = graph_with_app();
-    graph.add_package(
-        jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]),
-    );
+    graph
+        .add_package(jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]));
     let err = graph.check_visible("app", "shared").unwrap_err();
     assert!(matches!(
         err.fix,
@@ -719,7 +723,9 @@ fn cargo_import_preserves_locked_versions() {
     );
     assert_eq!(plan.deps[0].locked_version, "1.0.200");
     assert_eq!(plan.deps[0].provider_ref, "serde#version=1.0.200@cargo");
-    assert!(plan.emit_pkg_jet().contains("serde: serde#version=1.0.200@cargo"));
+    assert!(plan
+        .emit_pkg_jet()
+        .contains("serde: serde#version=1.0.200@cargo"));
     assert!(plan.provider_facts["serde#version=1.0.200@cargo"]
         .validate()
         .is_ok());
@@ -732,14 +738,47 @@ fn npm_import_turns_scripts_into_legacy_build_actions() {
         r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"},"scripts":{"build":"vite build"}}"#,
     );
     assert!(plan.deps.iter().any(|d| d.name == "vite"));
+    assert_eq!(plan.deps[0].provider_ref, "vite@npm");
+    assert!(!plan.emit_pkg_jet().contains("vite: vite@npm"));
     assert!(plan
         .todos
         .iter()
         .any(|t| t.message.contains("legacy build action")));
+    assert!(plan.provider_facts.values().any(|facts| facts
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("not an exact lock"))));
+}
+
+#[test]
+fn npm_import_emits_exact_provider_refs_and_retains_requests() {
+    let plan = jetpack::MigrationImport::import_npm(
+        r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5.4.0"}}"#,
+    );
+    assert_eq!(plan.deps[0].provider_ref, "vite#version=5.4.0@npm");
+    assert_eq!(plan.deps[0].locked_version, "5.4.0");
+    assert!(plan.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"));
+    assert!(plan.provider_facts["vite#version=5.4.0@npm"]
+        .validate()
+        .is_ok());
+}
+
+#[test]
+fn cargo_import_reports_missing_lock_without_generating_mutable_ref() {
+    let plan = jetpack::MigrationImport::import_cargo(
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+        "",
+    );
+    assert_eq!(plan.deps[0].provider_ref, "serde@cargo");
+    assert!(!plan.emit_pkg_jet().contains("serde: serde@cargo"));
     assert!(plan
-        .provider_facts
-        .values()
-        .any(|facts| facts.losses.iter().any(|loss| loss.reason.contains("not an exact lock"))));
+        .todos
+        .iter()
+        .any(|todo| todo.message.contains("unresolved")));
+    assert!(plan.provider_facts["serde@cargo"]
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("no exact version")));
 }
 
 #[test]
@@ -752,7 +791,10 @@ fn python_import_marks_dynamic_metadata_todo() {
 #[test]
 fn swiftpm_import_emits_provider_refs() {
     let plan = jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
-    assert_eq!(plan.deps[0].provider_ref, "swift-log#revision=abc123@swiftpm");
+    assert_eq!(
+        plan.deps[0].provider_ref,
+        "swift-log#revision=abc123@swiftpm"
+    );
     assert_eq!(plan.deps[0].locked_version, "abc123");
     assert!(plan.provider_facts["swift-log#revision=abc123@swiftpm"]
         .validate()
@@ -875,7 +917,10 @@ fn provider_report_surfaces_missing_identity_as_loss() {
     let report = normalize_provider_document(ProviderFamily::Npm, r#"{"name":"web"}"#);
     assert!(!report.is_lossless());
     let error = report.validate().expect_err("missing provider version");
-    assert!(error.contains("lossy") || error.contains("exact"), "{error}");
+    assert!(
+        error.contains("lossy") || error.contains("exact"),
+        "{error}"
+    );
     let shared = report.shared_facts_for("web@npm");
     assert!(shared
         .losses
@@ -893,7 +938,10 @@ fn swiftpm_v2_report_keeps_revision_and_native_bytes() {
     let report = normalize_provider_document(ProviderFamily::SwiftPM, &native);
     report.validate().expect("SwiftPM v2 pin is lossless");
     let shared = report.shared_facts();
-    assert_eq!(shared.qualified_reference(), format!("swift-log#revision={revision}@swiftpm"));
+    assert_eq!(
+        shared.qualified_reference(),
+        format!("swift-log#revision={revision}@swiftpm")
+    );
     assert_eq!(shared.native_document, native);
     assert!(shared
         .facts
@@ -904,10 +952,11 @@ fn swiftpm_v2_report_keeps_revision_and_native_bytes() {
 #[test]
 fn homebrew_report_reads_stable_version_and_dependencies() {
     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
-    let native =
-        r#"{"name":"jq","versions":{"stable":"1.7.1"},"license":"MIT","dependencies":["oniguruma"]}"#;
+    let native = r#"{"name":"jq","versions":{"stable":"1.7.1"},"license":"MIT","dependencies":["oniguruma"]}"#;
     let report = normalize_provider_document(ProviderFamily::Homebrew, native);
-    report.validate().expect("Homebrew formula identity is lossless");
+    report
+        .validate()
+        .expect("Homebrew formula identity is lossless");
     assert_eq!(report.facts.version, "1.7.1");
     assert_eq!(report.facts.dependencies, vec!["oniguruma".to_string()]);
     assert_eq!(report.shared_facts().native_document, native);
@@ -917,11 +966,11 @@ fn homebrew_report_reads_stable_version_and_dependencies() {
 fn binary_report_uses_digest_identity_without_fabricating_a_version() {
     use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
     let digest = "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    let native = format!(
-        "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
-    );
+    let native = format!("{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}");
     let report = normalize_provider_document(ProviderFamily::Binary, &native);
-    report.validate().expect("binary digest is an exact identity");
+    report
+        .validate()
+        .expect("binary digest is an exact identity");
     assert_eq!(
         report.shared_facts().qualified_reference(),
         format!("tool#digest={digest}@binary")
@@ -979,9 +1028,7 @@ fn binary_provider_requires_hash_and_platform() {
 
 #[test]
 fn provider_fetch_denied_under_offline_without_lock() {
-    use jetpack::ProviderGraph::{
-        AuthorityGraph, FetchDecision, ProviderFamily, ProviderRequest,
-    };
+    use jetpack::ProviderGraph::{AuthorityGraph, FetchDecision, ProviderFamily, ProviderRequest};
     let decision = AuthorityGraph::default().fetch_allowed(&ProviderRequest {
         family: ProviderFamily::Cargo,
         ref_key: "serde".to_string(),
@@ -1252,12 +1299,8 @@ fn replacement_lock_merge_conflict_names_owners() {
 #[test]
 fn replacement_lock_keys_are_platform_specific() {
     let candidate = replacement_passed_candidate();
-    let linux = jetpack::Replacement::replacement_lock_record(
-        &candidate,
-        "app",
-        "x86_64-linux",
-        "policy",
-    );
+    let linux =
+        jetpack::Replacement::replacement_lock_record(&candidate, "app", "x86_64-linux", "policy");
     let macos = jetpack::Replacement::replacement_lock_record(
         &candidate,
         "app",
@@ -1331,13 +1374,16 @@ fn manifest_parse_import_boundaries_rejects_malformed_patterns() {
         ("interior wildcard", "app.*.ui"),
         ("multiple wildcards", "app.**"),
     ] {
-        let raw = min_manifest("app", "0.1.0") + &format!(
-            "boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n"
-        );
+        let raw = min_manifest("app", "0.1.0")
+            + &format!("boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n");
         let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
             .expect_err("malformed boundary pattern must use E1206");
         assert_eq!(error.code, "E1206", "{label}");
-        assert!(error.what.contains("package.jet"), "{label}: {}", error.what);
+        assert!(
+            error.what.contains("package.jet"),
+            "{label}: {}",
+            error.what
+        );
     }
 
     for (label, block) in [
@@ -1345,14 +1391,8 @@ fn manifest_parse_import_boundaries_rejects_malformed_patterns() {
             "unknown boundary field",
             "boundaries: { allow: [{ from: \"app.ui\", to: \"app.db\" }] }",
         ),
-        (
-            "missing from",
-            "boundaries: { deny: [{ to: \"app.db\" }] }",
-        ),
-        (
-            "missing to",
-            "boundaries: { deny: [{ from: \"app.ui\" }] }",
-        ),
+        ("missing from", "boundaries: { deny: [{ to: \"app.db\" }] }"),
+        ("missing to", "boundaries: { deny: [{ from: \"app.ui\" }] }"),
         (
             "duplicate edge field",
             "boundaries: { deny: [{ from: \"app.ui\", from: \"app.api\", to: \"app.db\" }] }",
@@ -1409,7 +1449,11 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
         &(min_manifest("app", "0.1.0")
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.hidden.*\" }] }\n"),
     );
-    write(&root, "ui.jet", "use db;\nfn run() -[IO]> { print(db.value()) }\n");
+    write(
+        &root,
+        "ui.jet",
+        "use db;\nfn run() -[IO]> { print(db.value()) }\n",
+    );
     write(&root, "db.jet", "pub fn value() Int -> 1\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
@@ -1431,10 +1475,8 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
     assert_eq!(edge.status, "allowed");
     assert_eq!(edge.gate.as_deref(), Some("manifest rule edit"));
 
-    let gates = jet::Sema::GateLedger::GateLedger::collect(
-        &bundle,
-        jet::Policy::GateSet::default(),
-    );
+    let gates =
+        jet::Sema::GateLedger::GateLedger::collect(&bundle, jet::Policy::GateSet::default());
     assert!(gates.entries().iter().any(|entry| {
         entry.kind == jet::Sema::GateLedger::GateKind::Structure
             && entry.scope == "import-edge"
@@ -1467,8 +1509,14 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
             .current_dir(&root)
             .args(args)
             .env("NO_COLOR", "1")
-            .env("JET_RUN_CACHE_DIR", root.join(".cache").join(label).join("run"))
-            .env("JET_CACHE_DIR", root.join(".cache").join(label).join("build"))
+            .env(
+                "JET_RUN_CACHE_DIR",
+                root.join(".cache").join(label).join("run"),
+            )
+            .env(
+                "JET_CACHE_DIR",
+                root.join(".cache").join(label).join("build"),
+            )
             .output()
             .expect("tier command must run");
         assert!(
@@ -1481,7 +1529,12 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
     }
 
     let wasm = Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .expect("probe web target");
     if wasm.status.success() {
@@ -1552,7 +1605,8 @@ fn denied_import_boundary_fact_reaches_structure_inspection() {
 #[test]
 fn manifest_parse_dep_path() {
     let raw = manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,");
-    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("path dep should parse");
+    let mf =
+        jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
     assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
 }
@@ -1564,8 +1618,8 @@ fn manifest_parse_dep_git_tag() {
         "0.1.0",
         "    parsekit: { git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" },",
     );
-    let mf =
-        jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("git tag dep should parse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect("git tag dep should parse");
     let dep = mf.dependencies.get("parsekit").expect("missing parsekit");
     assert!(matches!(
         dep,
@@ -1613,7 +1667,8 @@ fn manifest_parse_e1209_reserved_nonempty() {
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
         + "\nauthority: .{\n    holds: { allow: [FS, Time], deny: [Net, Panic] },\n}\n";
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority holds should parse");
+    let pm =
+        jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority holds should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
@@ -1627,8 +1682,7 @@ fn manifest_parse_effects_block() {
 
 #[test]
 fn manifest_panic_budget_names_the_dependency_stop_site() {
-    let raw = min_manifest("app", "0.1.0")
-        + "\nauthority: .{ holds: { deny: [Panic] } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { deny: [Panic] } }\n";
     let manifest = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect("Panic should be a manifest effect root");
     let entries = [jetpack::EffectBudget::PackageEffects {
@@ -1644,14 +1698,17 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
     assert!(diagnostics[0].what.contains("parse_port"));
     assert!(diagnostics[0].fix.contains("fallible result"));
     assert!(diagnostics[0].fix.contains("#Pre"));
-    assert_eq!(diagnostics[0].span, Some(jet::Diagnostics::Span::new(4, 12)));
+    assert_eq!(
+        diagnostics[0].span,
+        Some(jet::Diagnostics::Span::new(4, 12))
+    );
 }
 
 #[test]
 fn manifest_parse_grants_block() {
-    let raw = min_manifest("app", "0.1.0")
-        + "\nauthority: .{ grants: { \"pdf-lib\": [Net] } }\n";
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
+    let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ grants: { \"pdf-lib\": [Net] } }\n";
+    let pm =
+        jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
     assert_eq!(
         pm.grants,
         vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
@@ -1684,10 +1741,7 @@ authority: .{
     assert_eq!(pm.effects_allow, pm.authority.holds.allow);
     assert_eq!(pm.effects_deny, pm.authority.holds.deny);
     assert_eq!(
-        pm.authority
-            .trust
-            .as_ref()
-            .and_then(|trust| trust.default),
+        pm.authority.trust.as_ref().and_then(|trust| trust.default),
         Some(jetpack::Package::TrustDecision::Prompt)
     );
     assert_eq!(pm.authority.providers.len(), 1);
@@ -1703,8 +1757,12 @@ authority: .{
 fn manifest_parse_authority_trust_block() {
     let raw = min_manifest("app", "0.1.0")
         + "\nauthority: .{ trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt }, require: attested } }\n";
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("authority.trust block should parse");
-    let policy = pm.authority.trust.expect("authority trust policy should be stored");
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test")
+        .expect("authority.trust block should parse");
+    let policy = pm
+        .authority
+        .trust
+        .expect("authority trust policy should be stored");
     assert_eq!(
         policy.default,
         Some(jetpack::Package::TrustDecision::Prompt)
@@ -1729,8 +1787,8 @@ fn manifest_parse_authority_trust_block() {
 #[test]
 fn manifest_authority_trust_rejects_unknown_decision() {
     let raw = min_manifest("app", "0.1.0") + "\nauthority: .{ trust: { default: maybe } }\n";
-    let err =
-        jetpack::Package::PackageFacts::parse(&raw, "test").expect_err("unknown trust decision should fail");
+    let err = jetpack::Package::PackageFacts::parse(&raw, "test")
+        .expect_err("unknown trust decision should fail");
     assert!(matches!(
         err,
         jetpack::Package::PackageParseError::BadEffectsBlock(_)
@@ -1740,7 +1798,8 @@ fn manifest_authority_trust_rejects_unknown_decision() {
 #[test]
 fn manifest_no_effects_block_disables_enforcement() {
     let raw = min_manifest("app", "0.1.0");
-    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("valid manifest should parse");
+    let pm =
+        jetpack::Package::PackageFacts::parse(&raw, "test").expect("valid manifest should parse");
     assert!(!pm.effects_enabled);
     assert_eq!(pm.effects_allow, None);
 }
@@ -1889,8 +1948,7 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
     write(
         &tmp,
         "package.jet",
-        &(min_manifest("app", "0.1.0")
-            + "\nauthority: .{ holds: { allow: [FS.Raed] } }\n"),
+        &(min_manifest("app", "0.1.0") + "\nauthority: .{ holds: { allow: [FS.Raed] } }\n"),
     );
     write(&tmp, "run.jet", "fn run() {}\n");
 
@@ -2018,8 +2076,14 @@ fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
         warning.status.success(),
         "default warning must not block the build:\n{warning_stderr}"
     );
-    assert!(warning_stderr.contains("L0101"), "expected unused-local warning:\n{warning_stderr}");
-    assert!(warning_stderr.contains("effects:"), "default build did not pass the lint gate:\n{warning_stderr}");
+    assert!(
+        warning_stderr.contains("L0101"),
+        "expected unused-local warning:\n{warning_stderr}"
+    );
+    assert!(
+        warning_stderr.contains("effects:"),
+        "default build did not pass the lint gate:\n{warning_stderr}"
+    );
     assert!(
         !warning_stderr.contains("E1293"),
         "default warning must not be denied:\n{warning_stderr}"
@@ -2033,7 +2097,10 @@ fn cli_build_unused_lint_warns_by_default_and_denies_by_policy() {
     );
     let denied = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let denied_stderr = String::from_utf8_lossy(&denied.stderr);
-    assert!(!denied.status.success(), "denied lint must fail:\n{denied_stderr}");
+    assert!(
+        !denied.status.success(),
+        "denied lint must fail:\n{denied_stderr}"
+    );
     assert!(
         denied_stderr.contains("E1293") && denied_stderr.contains("L0101"),
         "expected E1293 to name unused_local_binding/L0101:\n{denied_stderr}"
@@ -2070,7 +2137,10 @@ fn cli_build_rejects_lint_code_policy_value_with_complete_diagnostic() {
 
     let out = jet_cmd(&["build", "run.jet"], &tmp, &store);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "a lint code is not a policy value:\n{stderr}");
+    assert!(
+        !out.status.success(),
+        "a lint code is not a policy value:\n{stderr}"
+    );
     assert!(
         stderr.contains("Error [E1206]: `package.jet` has a manifest shape error."),
         "missing diagnostic what:\n{stderr}"
@@ -2100,8 +2170,7 @@ fn manifest_toolchain_ok() {
 
 #[test]
 fn manifest_toolchain_e1208_future_version() {
-    let raw =
-        "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n";
+    let raw = "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n";
     let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), raw).unwrap();
     let err = jet::Manifest::check_toolchain(&mf, "package.jet").expect_err("E1208");
     assert_eq!(err.code, "E1208");
@@ -2114,8 +2183,8 @@ fn manifest_toolchain_e1208_future_version() {
 #[test]
 fn manifest_template_plain_parses() {
     let raw = jet::Manifest::new_template("myapp", false);
-    let mf =
-        jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("plain template should parse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect("plain template should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "0.1.0");
     assert!(
@@ -2133,7 +2202,8 @@ fn manifest_template_annotated_has_dep_comments() {
         raw
     );
     // Must still parse cleanly.
-    jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("annotated template should parse");
+    jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect("annotated template should parse");
 }
 
 // ─────────────────────────────────────────────
@@ -2595,7 +2665,11 @@ fn path_dep_compiles_ok() {
     let tmp = tmp_dir("pd_compile");
 
     // Greeter library.
-    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &tmp,
+        "greeter/package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -2661,7 +2735,11 @@ fn version_conflict_emits_e1201() {
 fn stale_lock_emits_e1202() {
     let tmp = tmp_dir("stale_lock");
 
-    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &tmp,
+        "greeter/package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -2773,13 +2851,16 @@ fn registry_dependency_reports_transport_failure() {
     let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
         .expect_err("registry dependency must report its verified transport diagnostic");
     assert_eq!(first_diag_code(&diags), "E1207");
-    let rendered = jet::Diagnostics::render_all(
-        &tmp.join("package.jet").to_string_lossy(),
-        &raw,
-        &diags,
+    let rendered =
+        jet::Diagnostics::render_all(&tmp.join("package.jet").to_string_lossy(), &raw, &diags);
+    assert!(
+        rendered.contains("Error [E1207]:"),
+        "unexpected diagnostic:\n{rendered}"
     );
-    assert!(rendered.contains("Error [E1207]:"), "unexpected diagnostic:\n{rendered}");
-    assert!(rendered.contains("Why:"), "missing E1207 reason:\n{rendered}");
+    assert!(
+        rendered.contains("Why:"),
+        "missing E1207 reason:\n{rendered}"
+    );
     assert!(rendered.contains("Fix:"), "missing E1207 fix:\n{rendered}");
     let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/jetpack-diagnostics/E1207.stderr");
@@ -3118,7 +3199,10 @@ fn cli_jet_new_creates_project_structure() {
         "new project toolchain pin must update:\n{}",
         String::from_utf8_lossy(&update.stderr)
     );
-    assert!(proj.join(".jet/lock").is_file(), "toolchain update must write .jet/lock");
+    assert!(
+        proj.join(".jet/lock").is_file(),
+        "toolchain update must write .jet/lock"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -3170,7 +3254,11 @@ fn cli_vendor_dir_flag_relocates() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &tmp,
+        "greeter/package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -3182,7 +3270,11 @@ fn cli_vendor_dir_flag_relocates() {
         &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
     );
 
-    let out = jet_cmd(&["registry", "vendor", "--vendor-dir", "third_party"], &tmp, &store);
+    let out = jet_cmd(
+        &["registry", "vendor", "--vendor-dir", "third_party"],
+        &tmp,
+        &store,
+    );
     assert!(
         out.status.success(),
         "jet registry vendor --vendor-dir failed:\n{}",
@@ -3542,12 +3634,10 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         current_path.to_str().unwrap(),
         "physics",
     );
-    let mut bundle = jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true)
-        .unwrap();
-    let (_, facts) = jet::Sema::check_bundle_with_effect_facts(
-        &mut bundle,
-        jet::Sema::CompileMode::Check,
-    );
+    let mut bundle =
+        jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true).unwrap();
+    let (_, facts) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
         &entry.items,
@@ -3556,7 +3646,10 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         Some(&facts.solved),
         Some(&entry.alias),
     );
-    assert_eq!(frozen.api_version, jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION);
+    assert_eq!(
+        frozen.api_version,
+        jet::Publish::ApiFreeze::API_SNAPSHOT_VERSION
+    );
     let frozen_api: Vec<ApiItem> = frozen
         .funcs
         .iter()
@@ -3604,8 +3697,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
 
     let length_generic =
         "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }\n";
-    let time_generic =
-        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) => Q { return value }\n";
+    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) => Q { return value }\n";
     let length_path = dir.join("length_generic.jet");
     let time_path = dir.join("time_generic.jet");
     fs::write(&length_path, length_generic).unwrap();
@@ -3700,8 +3792,8 @@ fn inferred_inline_module_effects_are_published() {
 
 #[test]
 fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
-    use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
     use jet::Publish::ApiFreeze::{legacy_api_name, legacy_api_signature, ApiSnapshot};
+    use jet::Publish::{diff_public_api, extract_public_api, ApiItem};
 
     let dir = tmp_dir("v2_inline_api_upgrade");
     let path = dir.join("current.jet");
@@ -3751,7 +3843,11 @@ fn public_effect_metadata_preserves_symbolic_rows() {
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
-    assert!(api[0].signature.contains("=[..E]=>"), "{}", api[0].signature);
+    assert!(
+        api[0].signature.contains("=[..E]=>"),
+        "{}",
+        api[0].signature
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -3810,10 +3906,8 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
         .expect("trait source bundle");
-    let (_, facts) = jet::Sema::check_bundle_with_effect_facts(
-        &mut bundle,
-        jet::Sema::CompileMode::Check,
-    );
+    let (_, facts) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
         &entry.items,
@@ -3876,7 +3970,11 @@ fn vendored_offline_locked_build() {
     fs::create_dir_all(&store).unwrap();
 
     // Create a simple library.
-    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &tmp,
+        "greeter/package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -4041,7 +4139,7 @@ fn audit_e2603_on_vulnerable_dep() {
         title: "Timing side-channel in AES-GCM".into(),
         severity: Severity::Critical,
     }];
-    let matches = audit_lockfile(&lock, &advisories);
+    let matches = audit_lockfile(&lock, &advisories).unwrap();
 
     assert_eq!(matches.len(), 1, "one advisory match expected");
     let d = &matches[0].diagnostic;
@@ -4073,7 +4171,7 @@ fn audit_non_critical_is_advisory() {
         title: "Minor info leak in debug logs".into(),
         severity: Severity::Low,
     }];
-    let matches = audit_lockfile(&lock, &advisories);
+    let matches = audit_lockfile(&lock, &advisories).unwrap();
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].severity, Severity::Low);
     assert!(matches.iter().all(|m| m.severity != Severity::Critical));
@@ -4426,7 +4524,10 @@ fn cli_concurrent_publish_keeps_one_immutable_version() {
     let right_output = right_child.wait_with_output().unwrap();
     let outputs = [&left_output, &right_output];
     assert_eq!(
-        outputs.iter().filter(|output| output.status.success()).count(),
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
         1,
         "exactly one concurrent immutable publish may win: left={:?}, right={:?}",
         left_output.status,
@@ -4587,6 +4688,41 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         "Hangar provenance must retain the immutable registry package identity"
     );
 
+    let update_opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: true,
+        update_dep: Some("textkit".to_string()),
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    with_store(&store, || {
+        let previous = [
+            ("JET_REGISTRY_URL", std::env::var_os("JET_REGISTRY_URL")),
+            (
+                "JET_REGISTRY_CACHE_DIR",
+                std::env::var_os("JET_REGISTRY_CACHE_DIR"),
+            ),
+            ("JET_KEYS_DIR", std::env::var_os("JET_KEYS_DIR")),
+            ("JETPACK_ROOT", std::env::var_os("JETPACK_ROOT")),
+        ];
+        std::env::set_var("JET_REGISTRY_URL", &url);
+        std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+        std::env::set_var("JET_KEYS_DIR", &keys);
+        std::env::set_var("JETPACK_ROOT", &hangar_root);
+        let result = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &update_opts);
+        for (key, value) in previous {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+        result.expect("targeted registry update should preserve the verified package")
+    });
+    let semantic_lock = fs::read_to_string(consumer.join(".jet/lock")).unwrap();
+    assert!(semantic_lock.contains("adapter-id = \"registry.pubgrub\""));
+    assert!(semantic_lock.contains("update-command = \"jet update textkit\""));
+    assert!(semantic_lock.contains("exact = \"textkit#1.2.0\""));
+
     let locked_opts = jet::Fetch::FetchOptions {
         locked: true,
         update: false,
@@ -4623,6 +4759,24 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
         locked_dirs.get("textkit"),
         Some(installed),
         "locked consumption must resolve the same immutable Hangar object"
+    );
+
+    let offline_registry_url = format!("file://{}/must-not-be-read.git", tmp.display());
+    let offline = jet_cmd_env(
+        &["fetch", "--offline"],
+        &consumer,
+        &[
+            ("JET_REGISTRY_URL", offline_registry_url.as_str()),
+            ("JET_REGISTRY_CACHE_DIR", cache.to_str().unwrap()),
+            ("JET_STORE_DIR", store.to_str().unwrap()),
+            ("JET_KEYS_DIR", keys.to_str().unwrap()),
+            ("JETPACK_ROOT", hangar_root.to_str().unwrap()),
+        ],
+    );
+    assert!(
+        offline.status.success(),
+        "offline registry fetch must use the verified local lock path:\n{}",
+        String::from_utf8_lossy(&offline.stderr)
     );
 
     common::make_tree_writable(&tmp);
@@ -4737,7 +4891,11 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
 
         let immature = jet::Fetch::fetch(&consumer, &manifest, None, &opts)
             .expect_err("an immature registry candidate must be rejected");
-        assert_eq!(first_diag_code(&immature), "E2609", "diagnostics: {immature:?}");
+        assert_eq!(
+            first_diag_code(&immature),
+            "E2609",
+            "diagnostics: {immature:?}"
+        );
         assert!(immature[0].what.contains("freshlib#1.2.0"));
         assert!(
             !consumer.join(".jet-build/deps/freshlib").exists(),
@@ -4748,13 +4906,19 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         let (lock, dep_dirs) = jet::Fetch::fetch(&consumer, &manifest, None, &opts)
             .expect("a mature, verified candidate should resolve and ingest");
         assert!(dep_dirs.contains_key("freshlib"));
-        assert!(lock.packages.iter().any(|package| package.name == "freshlib"));
+        assert!(lock
+            .packages
+            .iter()
+            .any(|package| package.name == "freshlib"));
         let entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
             .into_iter()
             .find(|entry| entry.name == "freshlib" && entry.version == "1.2.0")
             .expect("mature candidate must produce a Hangar entry");
         assert!(
-            entry.envelope.provenance.contains("advisory-feed=sequence=1"),
+            entry
+                .envelope
+                .provenance
+                .contains("advisory-feed=sequence=1"),
             "verified advisory receipt must be visible in Hangar provenance: {}",
             entry.envelope.provenance
         );
@@ -4764,8 +4928,11 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         stale.expires_at = 150;
         stale.signature =
             jet::Publish::sign_advisory_feed(&stale, &seed).expect("stale feed should sign");
-        fs::write(&consumer.join(".jet/advisories.db"), jet::Publish::advisory_feed_text(&stale))
-            .unwrap();
+        fs::write(
+            &consumer.join(".jet/advisories.db"),
+            jet::Publish::advisory_feed_text(&stale),
+        )
+        .unwrap();
         std::env::set_var("JET_ADVISORY_NOW", "200");
         let (_same_lock, locked_dirs) = jet::Fetch::fetch(&consumer, &manifest, Some(&lock), &opts)
             .expect("an exact lock must remain usable when advisory metadata expires");
@@ -4779,7 +4946,10 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
             .find(|entry| entry.name == "freshlib" && entry.version == "1.2.0")
             .expect("exact-lock reuse must keep the Hangar entry");
         assert!(
-            reused_entry.envelope.provenance.contains("advisory-feed=sequence=1"),
+            reused_entry
+                .envelope
+                .provenance
+                .contains("advisory-feed=sequence=1"),
             "exact-lock reuse must not erase the verified advisory receipt"
         );
 
@@ -4835,7 +5005,22 @@ fn cli_yank_flips_index_entry() {
         String::from_utf8_lossy(&pubd.stderr)
     );
 
-    let yanked = jet_cmd_env(&["registry", "yank", "2.0.0", "--message", "regression"], &proj, envs);
+    // Publishing records the API snapshot as a durable project contract. The
+    // generated test harness is also local build output, so commit the
+    // release boundary before exercising yank and immutable-version reuse.
+    for cmd_args in &[vec!["add", "."], vec!["commit", "-m", "snapshot api"]] {
+        Command::new("git")
+            .args(cmd_args)
+            .current_dir(&proj)
+            .output()
+            .unwrap();
+    }
+
+    let yanked = jet_cmd_env(
+        &["registry", "yank", "2.0.0", "--message", "regression"],
+        &proj,
+        envs,
+    );
     assert!(
         yanked.status.success(),
         "yank should succeed:\n{}",
@@ -4884,14 +5069,89 @@ fn registry_transport_rejects_and_redacts_embedded_credentials() {
         jet::Publish::redact_registry_url(&registry.url),
         "https://example.invalid/registry.git"
     );
+    assert_eq!(
+        jet::Publish::redact_registry_url(
+            "https://example.invalid/registry.git?access_token=super-secret#fragment"
+        ),
+        "https://example.invalid/registry.git"
+    );
     let diagnostic = jet::Publish::ensure_index_clone(&registry)
         .expect_err("registry transport must reject embedded credentials");
     let rendered = jet::Diagnostics::render_all("package.jet", "", &[diagnostic]);
-    assert!(rendered.contains("E1235"), "unexpected diagnostic:\n{rendered}");
+    assert!(
+        rendered.contains("E1235"),
+        "unexpected diagnostic:\n{rendered}"
+    );
     assert!(
         !rendered.contains("super-secret"),
         "registry credential leaked in diagnostic:\n{rendered}"
     );
+    let query_registry = jet::Publish::RegistryConfig::private(
+        "scratch",
+        "https://example.invalid/registry.git?access_token=super-secret",
+        false,
+    );
+    let query_diagnostic = jet::Publish::ensure_index_clone(&query_registry)
+        .expect_err("registry transport must reject credential-bearing URL parameters");
+    let query_rendered = jet::Diagnostics::render_all("package.jet", "", &[query_diagnostic]);
+    assert!(
+        query_rendered.contains("E1235"),
+        "unexpected diagnostic:\n{query_rendered}"
+    );
+    assert!(
+        !query_rendered.contains("super-secret"),
+        "registry credential leaked in query diagnostic:\n{query_rendered}"
+    );
+}
+
+#[test]
+fn registry_refresh_failure_preserves_previous_cache() {
+    if !have_git() {
+        eprintln!(
+            "note: skipping registry_refresh_failure_preserves_previous_cache (git not found)"
+        );
+        return;
+    }
+
+    let tmp = tmp_dir("registry_stale_cache");
+    let bare = tmp.join("registry.git");
+    let url = bare_registry(&bare);
+    seed_core_review(&bare, "stale-kit", "1.0.0");
+    let cache = tmp.join("cache");
+    let registry = jet::Publish::RegistryConfig::private("scratch", &url, false);
+
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let previous_cache = std::env::var_os("JET_REGISTRY_CACHE_DIR");
+    std::env::set_var("JET_REGISTRY_CACHE_DIR", &cache);
+    let repo = jet::Publish::ensure_index_clone(&registry).expect("initial registry clone");
+    let before = fs::read(repo.join("reviews/stale-kit/1.0.0.review")).unwrap();
+
+    fs::remove_dir_all(&bare).unwrap();
+    let error = jet::Publish::ensure_index_clone(&registry)
+        .expect_err("a failed refresh must not replace the existing cache");
+    assert_eq!(error.code, "E1235");
+    assert_eq!(
+        fs::read(repo.join("reviews/stale-kit/1.0.0.review")).unwrap(),
+        before
+    );
+    let parent = repo.parent().unwrap();
+    let leftovers = fs::read_dir(parent)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".partial-") || name.contains(".backup-"))
+        .collect::<Vec<_>>();
+    assert!(
+        leftovers.is_empty(),
+        "failed refresh left staging paths: {leftovers:?}"
+    );
+
+    match previous_cache {
+        Some(value) => std::env::set_var("JET_REGISTRY_CACHE_DIR", value),
+        None => std::env::remove_var("JET_REGISTRY_CACHE_DIR"),
+    }
+    drop(_guard);
+    let _ = fs::remove_dir_all(&tmp);
 }
 
 #[test]
@@ -4924,24 +5184,19 @@ fn registry_interrupted_artifact_stage_leaves_no_partial() {
     symlink("package.jet", source.join("linked.jet")).unwrap();
     let expected_hash = jet::SHA256::tree_hash(&source);
 
-    let error = jet::Publish::publish_artifact(
-        &repo,
-        &source,
-        "atomic-kit",
-        "1.0.0",
-        &expected_hash,
-    )
-    .expect_err("unsupported source nodes must abort the staged publication");
+    let error =
+        jet::Publish::publish_artifact(&repo, &source, "atomic-kit", "1.0.0", &expected_hash)
+            .expect_err("unsupported source nodes must abort the staged publication");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     let destination = jet::Publish::artifact_path(&repo, "atomic-kit", "1.0.0").unwrap();
-    assert!(!destination.exists(), "failed publication installed an artifact");
+    assert!(
+        !destination.exists(),
+        "failed publication installed an artifact"
+    );
     let package_dir = repo.join("artifacts").join("atomic-kit");
     if package_dir.is_dir() {
         assert!(
-            fs::read_dir(package_dir)
-                .unwrap()
-                .next()
-                .is_none(),
+            fs::read_dir(package_dir).unwrap().next().is_none(),
             "failed publication left a staging directory"
         );
     }
@@ -5002,7 +5257,10 @@ fn cli_yank_requires_version_arg() {
     write(&tmp, "package.jet", &min_manifest("mypkg", "1.0.0"));
 
     let out = jet_cmd(&["registry", "yank"], &tmp, &store);
-    assert!(!out.status.success(), "jet registry yank with no version must fail");
+    assert!(
+        !out.status.success(),
+        "jet registry yank with no version must fail"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2606"), "must cite E2606:\n{stderr}");
 
@@ -5059,6 +5317,10 @@ fn resolver_selects_highest_compatible() {
     let err = select_highest_compatible("log", &[&c1, &c3], &candidates)
         .expect_err("incompatible constraints must fail");
     assert_eq!(err.code, "E2602", "conflict must be E2602");
+    let detail = err.detail.as_deref().unwrap_or_default();
+    assert!(detail.contains("PubGrub proof tree:"));
+    assert!(detail.contains("Smallest fixes:"));
+    assert!(detail.contains("app") && detail.contains("other"));
 }
 
 #[test]
@@ -5074,6 +5336,11 @@ fn resolver_no_candidates_returns_e2602() {
     let err = select_highest_compatible("missing", &[&c], &[])
         .expect_err("no candidates must be an error");
     assert_eq!(err.code, "E2602");
+    assert!(err
+        .detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("PubGrub proof tree:"));
 }
 
 // ============================================================================
@@ -5290,11 +5557,7 @@ fn cli_signed_advisory_feed_receipt_and_tamper_fail_closed() {
         weakened.maturity_seconds = 1;
         weakened.signature = jet::Publish::sign_advisory_feed(&weakened, &seed)
             .expect("weakened feed signing should succeed");
-        fs::write(
-            &feed_path,
-            jet::Publish::advisory_feed_text(&weakened),
-        )
-        .unwrap();
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&weakened)).unwrap();
         let weakened_result = audit();
         assert_eq!(weakened_result.status.code(), Some(1));
         assert!(
@@ -5518,7 +5781,11 @@ fn cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free() {
         ],
     );
     assert_eq!(out.status.code(), Some(1));
-    assert!(out.stdout.is_empty(), "stdout must stay empty: {:?}", out.stdout);
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty: {:?}",
+        out.stdout
+    );
     assert_eq!(
         String::from_utf8(out.stderr).unwrap(),
         include_str!("fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
@@ -5562,20 +5829,26 @@ fn cli_publish_auto_keygen_entropy_failure_mutates_nothing() {
         ],
     );
     assert_eq!(out.status.code(), Some(1));
-    assert!(out.stdout.is_empty(), "stdout must stay empty: {:?}", out.stdout);
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty: {:?}",
+        out.stdout
+    );
     assert_eq!(
         String::from_utf8(out.stderr).unwrap(),
         include_str!("fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
     );
     assert!(!keys.exists(), "auto-keygen failure created key artifacts");
-    assert!(!registry_cache.exists(), "auto-keygen failure cloned an index");
+    assert!(
+        !registry_cache.exists(),
+        "auto-keygen failure cloned an index"
+    );
     assert!(
         read_index_file(&bare, "entropyfail").is_none(),
         "auto-keygen failure mutated the registry index"
     );
     assert!(
-        !project.join(".jet/cache/api").exists()
-            && !project.join(".jet/cache/schema").exists(),
+        !project.join(".jet/cache/api").exists() && !project.join(".jet/cache/schema").exists(),
         "auto-keygen failure created package snapshots"
     );
 
@@ -5712,7 +5985,10 @@ fn cli_community_publish_refuses_until_all_named_gates_pass() {
     assert!(!out.status.success(), "community publish must stay closed");
     let stderr = String::from_utf8_lossy(&out.stderr);
     for gate in ["#935", "#431", "#1912", "#1913"] {
-        assert!(stderr.contains(gate), "missing {gate} in refusal:\n{stderr}");
+        assert!(
+            stderr.contains(gate),
+            "missing {gate} in refusal:\n{stderr}"
+        );
     }
     assert!(read_index_file(&bare, "communitykit").is_none());
     fs::remove_dir_all(tmp).unwrap();

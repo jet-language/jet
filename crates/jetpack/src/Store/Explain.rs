@@ -183,7 +183,7 @@ pub fn explain_package(
     let entry = find_entry(&entries, query)?;
     if entry.is_none() {
         let package = package_name(query);
-        let attempt = match BuildDebug::latest(&roots.hangar_dir(), package) {
+        let attempt = match BuildDebug::latest(&roots.hangar_dir(), &package) {
             Ok(attempt) => attempt,
             Err(error) => {
                 return Err(std::io::Error::other(format!(
@@ -295,12 +295,17 @@ fn ambiguous_query(query: &str, entries: &[StoreEntry]) -> std::io::Error {
     ))
 }
 
-fn package_name(query: &str) -> &str {
+fn package_name(query: &str) -> String {
+    let target = ProviderFacts::for_reference("", query).target;
+    if target != query {
+        return target;
+    }
     query
         .split_once(':')
         .map(|(_, value)| value)
         .or_else(|| query.split_once('.').map(|(_, value)| value))
         .unwrap_or(query)
+        .to_string()
 }
 
 fn entry_projection(entry: &StoreEntry) -> ExplainEntry {

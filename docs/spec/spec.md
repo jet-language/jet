@@ -993,7 +993,7 @@ impl Circle {
   **Decode-time migration transparency (D-MIGRATE3=A, retired by
   D-VALIDATE-DECODE1=B):** the separate migration-report result was removed.
   Every codec's typed `decode<T>` is the one canonical contract,
-  `Result<T, [FieldError]>` (or `Result<[T], [FieldError]>` for CSV). Published
+  `T [FieldError]!` (or `[T] [FieldError]!` for CSV). Published
   schema migration remains silent inside that call; no second decoder or
   compatibility wrapper exists.
 
@@ -4250,7 +4250,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
+fn build(b: BuildContext) BuildPlan! -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?

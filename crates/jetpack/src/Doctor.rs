@@ -3,8 +3,7 @@
 use super::{FFI, JSON, Store};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -160,35 +159,17 @@ fn check_registry(online: bool) -> Check {
 }
 
 fn endpoint_reachable(url: &str, online: bool) -> Result<bool, &'static str> {
+    if registry_url_has_credentials(url) {
+        return Err("embedded registry credentials or URL parameters are not allowed");
+    }
     if let Some(path) = url.strip_prefix("file://") { return if Path::new(path).exists() { Ok(true) } else { Err("local index missing") }; }
     if !url.contains("://") { return if Path::new(url).exists() { Ok(true) } else { Err("local index missing") }; }
     if !online { return Ok(false); }
-    if url.starts_with("https://") { return git_registry_probe(url).map(|_| true); }
-    let (default_port, rest) = if let Some(v) = url.strip_prefix("http://") { (80, v) } else { return Err("unsupported URL scheme") };
-    let raw_authority = rest.split('/').next().unwrap_or("");
-    let (credentials, authority) = raw_authority.rsplit_once('@')
-        .map(|(credentials, authority)| (Some(credentials), authority))
-        .unwrap_or((None, raw_authority));
-    let (host, port) = authority.rsplit_once(':').and_then(|(h,p)| p.parse().ok().map(|p| (h,p))).unwrap_or((authority, default_port));
-    if host.is_empty() { return Err("missing host"); }
-    let addrs = (host, port).to_socket_addrs().map_err(|_| "name lookup failed")?;
-    let path = format!("/{}", rest.split_once('/').map(|(_, p)| p).unwrap_or(""));
-    for addr in addrs {
-        let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else { continue };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let authorization = credentials.map(|value| format!("Authorization: Basic {}\r\n", base64(value.as_bytes()))).unwrap_or_default();
-        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n{authorization}Connection: close\r\n\r\n");
-        if stream.write_all(request.as_bytes()).is_err() { continue; }
-        let mut response = [0u8; 256];
-        let Ok(n) = stream.read(&mut response) else { continue };
-        let status = std::str::from_utf8(&response[..n]).ok().and_then(|s| s.split_whitespace().nth(1)).and_then(|s| s.parse::<u16>().ok());
-        return match status { Some(200..=399) => Ok(true), Some(_) => Err("HTTP status rejected"), None => Err("malformed HTTP response") };
-    }
-    Err("connection failed")
+    git_registry_probe(url).map(|_| true)
 }
 
 fn git_registry_probe(url: &str) -> Result<(), &'static str> {
-    let mut child = Command::new("git").args(["ls-remote", url, "HEAD"])
+    let mut child = Command::new("git").args(["-c", "credential.useHttpPath=true", "ls-remote", url, "HEAD"])
         .env("GIT_TERMINAL_PROMPT", "0").stdout(Stdio::null()).stderr(Stdio::null())
         .spawn().map_err(|_| "git registry client unavailable")?;
     let deadline = Instant::now() + Duration::from_secs(4);
@@ -202,17 +183,17 @@ fn git_registry_probe(url: &str) -> Result<(), &'static str> {
     }
 }
 
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = ((chunk[0] as u32) << 16) | ((chunk.get(1).copied().unwrap_or(0) as u32) << 8) | chunk.get(2).copied().unwrap_or(0) as u32;
-        out.push(TABLE[((n >> 18) & 63) as usize] as char);
-        out.push(TABLE[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[(n & 63) as usize] as char } else { '=' });
-    }
-    out
+fn registry_url_has_credentials(value: &str) -> bool {
+    let Some(separator) = value.find("://") else {
+        return false;
+    };
+    let authority_start = separator + 3;
+    let authority_end = value[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|offset| authority_start + offset)
+        .unwrap_or(value.len());
+    value[authority_start..authority_end].contains('@')
+        || value[authority_end..].contains(['?', '#'])
 }
 
 fn check_locks(project: &Path, roots: &Store::Roots) -> Check {

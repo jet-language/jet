@@ -270,6 +270,26 @@ module profile.dev {
     }
 
     #[test]
+    fn package_profile_named_source_retains_resolved_external_selector() {
+        let source = r#"
+module app {
+    sources: { catalog: widget#version=1.2.3@cran }
+}
+module profile.dev {
+    packages: [catalog.widget]
+}
+"#;
+        let plan = evaluate_package_profile(&source, &base_dir(), "dev").unwrap();
+        let facts = &plan.packages[0].provider_facts;
+        assert_eq!(facts.reference, "widget@catalog");
+        assert_eq!(facts.provider, "cran");
+        assert_eq!(facts.resolved_source, "cran:widget#version=1.2.3");
+        assert_eq!(facts.qualified_reference(), "widget#version=1.2.3@catalog");
+        assert!(facts.is_lossless());
+        assert!(facts.facts.contains_key("provider.resolved_selector"));
+    }
+
+    #[test]
     fn package_profile_cycles_are_rejected_before_planning() {
         let source = r#"
 module profile.a { extends: ["b"] }

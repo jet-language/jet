@@ -1,10 +1,10 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
-    atomic_restore_file, ensure_real_directory, remote_execution_identity, secure_read_file,
-    ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
-    ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason, ContentDigest,
-    FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
-    RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
+    atomic_restore_file, ensure_real_directory, remote_execution_identity, remote_policy_digest,
+    secure_read_file, ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey,
+    ActionOutcome, ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason,
+    ContentDigest, FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError,
+    RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest,
 };
 use super::errors_keys::BuildError;
 use super::execution_helpers::action_pools;
@@ -447,7 +447,7 @@ fn execute_one_action(
                         &record,
                         super::cache_cas::RemoteActionRequest::CacheRead,
                     ) {
-                        Ok(()) => {
+                        Ok(restored) => {
                             write_last_rebuild_record(
                                 project_root,
                                 action,
@@ -455,6 +455,7 @@ fn execute_one_action(
                                 ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
                                 None,
                             )?;
+                            restored.commit();
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
                         Err(_detail)
@@ -793,7 +794,7 @@ fn execute_remote_attempt(
     )?;
     match result.outcome {
         ActionOutcome::Succeeded { exit_code } => {
-            restore_remote_outputs(
+            let restored = restore_remote_outputs(
                 transport,
                 policy,
                 project_root,
@@ -834,6 +835,7 @@ fn execute_remote_attempt(
             }
             write_last_rebuild_record(project_root, action, key, rebuild_status, None)
                 .map_err(RemoteAttemptFailure::terminal)?;
+            restored.commit();
             Ok(ActionOutcome::Succeeded { exit_code })
         }
         ActionOutcome::Failed { exit_code } => {
@@ -957,7 +959,7 @@ fn remote_attempt_policy(
             ),
             attempt_id,
             key.as_str(),
-            toolchain_provenance_digest(plan, action.toolchain),
+            remote_provenance_digest(plan, action),
         )
         .map_err(|detail| remote_action(action, detail))?;
     Ok(RemoteCachePolicy::with_grants(
@@ -1033,14 +1035,14 @@ fn wait_remote_execution_result(
     }
 }
 
-fn restore_remote_outputs(
+fn restore_remote_outputs<'a>(
     transport: &RemoteCacheTransport,
     policy: &RemoteCachePolicy,
-    project_root: &Path,
+    project_root: &'a Path,
     action: &BuildAction,
     record: &ActionResultRecord,
     blob_request: super::cache_cas::RemoteActionRequest,
-) -> Result<(), String> {
+) -> Result<RemoteOutputRestore<'a>, String> {
     if record.outputs.len() != action.outputs.len()
         || record
             .outputs
@@ -1091,7 +1093,31 @@ fn restore_remote_outputs(
             return Err(error.to_string());
         }
     }
-    Ok(())
+    Ok(RemoteOutputRestore {
+        project_root,
+        backups,
+        committed: false,
+    })
+}
+
+struct RemoteOutputRestore<'a> {
+    project_root: &'a Path,
+    backups: Vec<(PathBuf, Option<Vec<u8>>)>,
+    committed: bool,
+}
+
+impl RemoteOutputRestore<'_> {
+    fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for RemoteOutputRestore<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            rollback_output_restore(self.project_root, &self.backups);
+        }
+    }
 }
 
 fn rollback_output_restore(project_root: &Path, backups: &[(PathBuf, Option<Vec<u8>>)]) {
@@ -1555,6 +1581,17 @@ fn toolchain_provenance_digest(plan: &BuildPlan, toolchain: ToolchainHandle) -> 
     ContentDigest::from_bytes(identity.as_bytes())
 }
 
+fn remote_provenance_digest(plan: &BuildPlan, action: &BuildAction) -> ContentDigest {
+    let toolchain = toolchain_provenance_digest(plan, action.toolchain);
+    let policy = remote_policy_digest(action.caps.iter().cloned());
+    let statement = format!(
+        "jet.remote-provenance.v1\ntoolchain={toolchain}\npolicy={policy}\n",
+        toolchain = toolchain.as_str(),
+        policy = policy.as_str(),
+    );
+    ContentDigest::from_bytes(statement.as_bytes())
+}
+
 fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<()> {
     let mut text = format!("{}\n", record.key.as_str());
     for output in &record.outputs {
@@ -1634,5 +1671,43 @@ fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {
     BuildExecutionError::IO {
         action: action.name.clone(),
         detail: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_output_restore_rolls_back_until_committed() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-remote-restore-guard-{}-{}",
+            std::process::id(),
+            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("build/out");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"old").unwrap();
+
+        fs::write(&path, b"new").unwrap();
+        {
+            let _restore = RemoteOutputRestore {
+                project_root: &root,
+                backups: vec![(path.clone(), Some(b"old".to_vec()))],
+                committed: false,
+            };
+        }
+        assert_eq!(fs::read(&path).unwrap(), b"old");
+
+        fs::write(&path, b"new").unwrap();
+        let restore = RemoteOutputRestore {
+            project_root: &root,
+            backups: vec![(path.clone(), Some(b"old".to_vec()))],
+            committed: false,
+        };
+        restore.commit();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        let _ = fs::remove_dir_all(root);
     }
 }

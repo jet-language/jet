@@ -157,7 +157,7 @@ impl<'a> Parser<'a> {
         }
         let sigil = self.bump().span;
         let start = sigil.start;
-        let err = if self.type_starts_here() {
+        let err = if self.type_starts_here() && !self.next_field_starts_here() {
             self.type_()?.0
         } else {
             Type::Named(Syntax::TYPE_ERR.to_string())
@@ -957,7 +957,7 @@ impl<'a> Parser<'a> {
                     // spelling and must take the teaching path.
                     if matches!(self.peek().kind, TokKind::Bang) {
                         let bang = self.bump().span;
-                        if self.type_starts_here() {
+                        if self.type_starts_here() && !self.next_field_starts_here() {
                             let err = self.type_()?.0;
                             self.diags.push(Diagnostic::from_row(
                                 "E-ERR-SIGIL",
@@ -978,7 +978,7 @@ impl<'a> Parser<'a> {
                         self.parse_error_suffix(success)?
                     }
                 } else {
-                    let err = if self.type_starts_here() {
+                    let err = if self.type_starts_here() && !self.next_field_starts_here() {
                         self.type_()?.0
                     } else {
                         Type::Named(Syntax::TYPE_ERR.to_string())
@@ -1001,7 +1001,7 @@ impl<'a> Parser<'a> {
                         ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                         err: Box::new(base),
                     }
-                } else if self.type_starts_here() {
+                } else if self.type_starts_here() && !self.next_field_starts_here() {
                     let err = self.type_()?.0;
                     self.diags.push(Diagnostic::from_row(
                         "E-ERR-SIGIL",
@@ -1032,6 +1032,13 @@ impl<'a> Parser<'a> {
             ));
         }
         Ok((member, start))
+    }
+
+    fn next_field_starts_here(&self) -> bool {
+        (matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::Colon))
+            || (matches!(self.peek().kind, TokKind::KwFn)
+                && matches!(self.peek2().kind, TokKind::Ident(_)))
     }
 
     /// Parse a function type `fn(T1, …) R -[E]>`, the cursor at `fn`.

@@ -1780,7 +1780,7 @@ fn main() {
                 run_lock(Some(script), mode);
                 return;
             }
-            run_fetch(locked);
+            run_fetch(locked || jet_argv.iter().any(|a| a == "--offline"));
             return;
         }
         "update" => {

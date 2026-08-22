@@ -675,8 +675,23 @@ fn breadth_fixture_matches_native_projection_for_every_seed() {
         let system = value.get("system").unwrap().as_str().unwrap();
         let packages = fixture_strings(value.get("jet_packages").unwrap());
         let unsupported = fixture_strings(value.get("jet_unsupported").unwrap());
+        let nix_value = value.get("nix_value").unwrap().as_object().unwrap();
+        assert_eq!(
+            fixture_strings(nix_value.get("packages").unwrap()),
+            packages,
+            "{} Nix package projection drifted",
+            value.get("name").unwrap().as_str().unwrap()
+        );
+        let output = value
+            .get("output")
+            .and_then(|value| value.as_str().ok())
+            .unwrap_or("default");
         for seed in &seeds {
-            let evaluated = evaluate_devshell(&breadth_variant(source, *seed), system)
+            let evaluated = evaluate_devshell_output(
+                &breadth_variant(source, *seed),
+                system,
+                output,
+            )
                 .expect("seeded breadth value must evaluate");
             assert_eq!(evaluated.packages(), packages.as_slice());
             assert_eq!(evaluated.unsupported(), unsupported.as_slice());
@@ -1205,6 +1220,23 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
         let expected_packages = fixture_strings(case.get("jet_packages").unwrap());
         let expected_cross_packages = fixture_strings(case.get("jet_cross_packages").unwrap());
         let expected_unsupported = fixture_strings(case.get("jet_unsupported").unwrap());
+        let nix_value = case.get("nix_value").unwrap().as_object().unwrap();
+        assert_eq!(
+            fixture_strings(nix_value.get("packages").unwrap()),
+            expected_packages,
+            "{} Nix package projection drifted",
+            case.get("name").unwrap().as_str().unwrap()
+        );
+        let nix_cross_packages = nix_value
+            .get("cross_packages")
+            .map(fixture_strings)
+            .unwrap_or_default();
+        assert_eq!(
+            nix_cross_packages,
+            expected_cross_packages,
+            "{} Nix cross-package projection drifted",
+            case.get("name").unwrap().as_str().unwrap()
+        );
         let seeds = root
             .get("fuzz_seeds")
             .unwrap()
@@ -1229,7 +1261,7 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
     }
 
     for case in root
-        .get("derivations")
+        .get("authority_derivations")
         .expect("breadth derivation fixtures")
         .as_array()
         .expect("breadth derivation fixture array")
@@ -1266,5 +1298,55 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
             evaluated.input_sources(),
             &fixture_strings(case.get("jet_input_sources").unwrap())
         );
+        let nix_value = case.get("nix_value").unwrap().as_object().unwrap();
+        assert_eq!(
+            evaluated.input_sources(),
+            &fixture_strings(nix_value.get("input_sources").unwrap())
+        );
+    }
+}
+
+#[test]
+fn breadth_derivation_fixture_matches_native_multi_output_request() {
+    let fixture = JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
+    let root = fixture.as_object().expect("breadth fixture root object");
+    for case in root
+        .get("derivations")
+        .expect("breadth derivation values")
+        .as_array()
+        .expect("breadth derivation value array")
+    {
+        let case = case.as_object().expect("breadth derivation value object");
+        let source = case.get("source").unwrap().as_str().unwrap();
+        let system = case.get("system").unwrap().as_str().unwrap();
+        let evaluated = evaluate_derivation(source, system)
+            .expect("breadth derivation must evaluate natively");
+        assert_eq!(
+            evaluated.input_sources(),
+            &fixture_strings(case.get("jet_input_sources").unwrap())
+        );
+        let expected_outputs = case
+            .get("jet_outputs")
+            .expect("breadth derivation output declarations")
+            .as_array()
+            .expect("breadth derivation output array");
+        assert_eq!(evaluated.outputs().len(), expected_outputs.len());
+        for expected in expected_outputs {
+            let expected = expected.as_object().expect("breadth output object");
+            let name = expected.get("name").unwrap().as_str().unwrap();
+            let actual = evaluated
+                .outputs()
+                .iter()
+                .find(|output| output.name() == name)
+                .expect("breadth output name");
+            assert_eq!(
+                actual.method_algo(),
+                expected.get("method_algo").unwrap().as_str().unwrap()
+            );
+            assert_eq!(
+                actual.hash_hex(),
+                expected.get("hash_hex").unwrap().as_str().unwrap()
+            );
+        }
     }
 }

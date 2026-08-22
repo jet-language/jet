@@ -65,33 +65,27 @@ pub fn select_highest_compatible<'a>(
         for i in 0..constraints.len() {
             for j in (i + 1)..constraints.len() {
                 if !constraints[i].req.intersects(&constraints[j].req) {
-                    return Err(e2602(
+                    return Err(proof_diagnostic_refs(
                         package,
-                        constraints[i].req.display(),
-                        &constraints[i].from,
-                        constraints[j].req.display(),
-                        &constraints[j].from,
+                        constraints,
+                        "two requirements have no overlapping version",
                     ));
                 }
             }
         }
         // All intersect syntactically but no candidate available — report first two.
-        return Err(e2602(
+        return Err(proof_diagnostic_refs(
             package,
-            constraints[0].req.display(),
-            &constraints[0].from,
-            constraints[1].req.display(),
-            &constraints[1].from,
+            constraints,
+            "the registry has no candidate in the overlapping range",
         ));
     }
 
     // Single constraint with no candidates (empty registry).
-    Err(e2602(
+    Err(proof_diagnostic_refs(
         package,
-        constraints.first().map(|c| c.req.display()).unwrap_or("*"),
-        constraints.first().map(|c| c.from.as_str()).unwrap_or(""),
-        "(no versions available)",
-        "registry",
+        constraints,
+        "the registry has no published candidate",
     ))
 }
 
@@ -128,6 +122,253 @@ pub struct VersionConstraint {
     pub req: VersionReq,
     /// Where this constraint comes from (package name and version).
     pub from: String,
+}
+
+/// Candidate data passed from the registry loader to the graph solver. The
+/// loader owns artifacts; the solver only owns versions and dependency edges.
+#[derive(Debug, Clone)]
+pub(crate) struct SolverCandidate {
+    pub(crate) version: SemVer,
+    pub(crate) dependencies: Vec<VersionConstraint>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SolverState {
+    constraints: BTreeMap<String, Vec<VersionConstraint>>,
+    assignments: BTreeMap<String, SemVer>,
+}
+
+/// Resolve one registry graph with PubGrub-style incompatibility backtracking.
+///
+/// This is deliberately small: registry metadata already gives us concrete
+/// candidates, so there is no need for a second package model or a dependency
+/// solver crate. The returned assignments are stable for a given candidate
+/// set, and failed branches retain their causal proof in E2602 detail.
+pub(crate) fn solve_registry(
+    roots: &[VersionConstraint],
+    candidates: &BTreeMap<String, Vec<SolverCandidate>>,
+    locked: &BTreeMap<String, String>,
+    update_scope: &std::collections::BTreeSet<String>,
+    mode: ResolveMode,
+    direct: &std::collections::BTreeSet<String>,
+) -> Result<BTreeMap<String, SemVer>, Diagnostic> {
+    let mut state = SolverState::default();
+    for root in roots {
+        state
+            .constraints
+            .entry(root.package.clone())
+            .or_default()
+            .push(root.clone());
+    }
+    solve_registry_state(&state, candidates, locked, update_scope, mode, direct)
+}
+
+fn solve_registry_state(
+    state: &SolverState,
+    candidates: &BTreeMap<String, Vec<SolverCandidate>>,
+    locked: &BTreeMap<String, String>,
+    update_scope: &std::collections::BTreeSet<String>,
+    mode: ResolveMode,
+    direct: &std::collections::BTreeSet<String>,
+) -> Result<BTreeMap<String, SemVer>, Diagnostic> {
+    for (package, version) in &state.assignments {
+        let requirements = state
+            .constraints
+            .get(package)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if !requirements
+            .iter()
+            .all(|constraint| constraint.req.matches(version))
+        {
+            return Err(proof_diagnostic(
+                package,
+                requirements,
+                "the selected version is incompatible with a later dependency",
+            ));
+        }
+    }
+
+    let Some(package) = state
+        .constraints
+        .keys()
+        .find(|package| !state.assignments.contains_key(*package))
+        .cloned()
+    else {
+        return Ok(state.assignments.clone());
+    };
+
+    let requirements = state
+        .constraints
+        .get(&package)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut viable = candidates
+        .get(&package)
+        .into_iter()
+        .flatten()
+        .filter(|candidate| {
+            requirements
+                .iter()
+                .all(|constraint| constraint.req.matches(&candidate.version))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let low_first = matches!(mode, ResolveMode::Lowest)
+        || matches!(mode, ResolveMode::LowestDirect) && direct.contains(&package);
+    let preserve_lock = matches!(mode, ResolveMode::Conservative);
+    viable.sort_by(|left, right| {
+        let left_locked = locked.get(&package).is_some_and(|version| {
+            preserve_lock
+                && !update_scope.contains(&package)
+                && version == &left.version.to_string()
+        });
+        let right_locked = locked.get(&package).is_some_and(|version| {
+            preserve_lock
+                && !update_scope.contains(&package)
+                && version == &right.version.to_string()
+        });
+        right_locked
+            .cmp(&left_locked)
+            .then_with(|| {
+                if low_first {
+                    left.version.cmp(&right.version)
+                } else {
+                    right.version.cmp(&left.version)
+                }
+            })
+            .then_with(|| left.version.to_string().cmp(&right.version.to_string()))
+    });
+
+    if viable.is_empty() {
+        return Err(proof_diagnostic(
+            &package,
+            requirements,
+            "no published candidate satisfies every requirement",
+        ));
+    }
+
+    let mut branch_details = Vec::new();
+    for candidate in viable {
+        let mut next = state.clone();
+        next.assignments
+            .insert(package.clone(), candidate.version.clone());
+        for dependency in candidate.dependencies {
+            next.constraints
+                .entry(dependency.package.clone())
+                .or_default()
+                .push(dependency);
+        }
+        match solve_registry_state(&next, candidates, locked, update_scope, mode, direct) {
+            Ok(assignments) => return Ok(assignments),
+            Err(error) => {
+                let detail = error.detail.clone().unwrap_or_else(|| error.why.clone());
+                branch_details.push(format!(
+                    "  tried `{}` {}:\n{}",
+                    package,
+                    candidate.version,
+                    indent_proof(&detail)
+                ));
+            }
+        }
+    }
+
+    let mut diagnostic = proof_diagnostic(
+        &package,
+        requirements,
+        "every candidate led to an incompatible dependency",
+    );
+    if !branch_details.is_empty() {
+        let mut detail = diagnostic.detail.take().unwrap_or_default();
+        if !detail.is_empty() {
+            detail.push('\n');
+        }
+        detail.push_str("PubGrub branches:\n");
+        detail.push_str(&branch_details.join("\n"));
+        diagnostic.detail = Some(detail);
+    }
+    Err(diagnostic)
+}
+
+fn proof_diagnostic(
+    package: &str,
+    requirements: &[VersionConstraint],
+    reason: &str,
+) -> Diagnostic {
+    let (first, second) = conflicting_pair(requirements);
+    let mut diagnostic = match (first, second) {
+        (Some(a), Some(b)) => e2602(
+            package,
+            a.req.display(),
+            &a.from,
+            b.req.display(),
+            &b.from,
+        ),
+        (Some(a), None) => e2602(
+            package,
+            a.req.display(),
+            &a.from,
+            "(no compatible candidate)",
+            "registry",
+        ),
+        (None, _) => e2602(
+            package,
+            "*",
+            "root",
+            "(no compatible candidate)",
+            "registry",
+        ),
+    };
+    let mut detail = format!("PubGrub proof tree:\n- {package}: {reason}");
+    for constraint in requirements {
+        detail.push_str(&format!(
+            "\n  - `{}` requires `{}`",
+            constraint.from,
+            constraint.req.display()
+        ));
+    }
+    if let (Some(a), Some(b)) = (first, second) {
+        detail.push_str(&format!(
+            "\nSmallest fixes: change `{}` or `{}` so their `{package}` requirements overlap.",
+            a.from, b.from
+        ));
+    }
+    diagnostic.detail = Some(detail);
+    diagnostic
+}
+
+fn proof_diagnostic_refs(
+    package: &str,
+    requirements: &[&VersionConstraint],
+    reason: &str,
+) -> Diagnostic {
+    let requirements = requirements
+        .iter()
+        .map(|constraint| (*constraint).clone())
+        .collect::<Vec<_>>();
+    proof_diagnostic(package, &requirements, reason)
+}
+
+fn conflicting_pair<'a>(
+    requirements: &'a [VersionConstraint],
+) -> (Option<&'a VersionConstraint>, Option<&'a VersionConstraint>) {
+    for (index, left) in requirements.iter().enumerate() {
+        if let Some(right) = requirements[index + 1..]
+            .iter()
+            .find(|right| !left.req.intersects(&right.req))
+        {
+            return (Some(left), Some(right));
+        }
+    }
+    (requirements.first(), requirements.get(1))
+}
+
+fn indent_proof(detail: &str) -> String {
+    detail
+        .lines()
+        .map(|line| format!("    {line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// E2602 — resolver cannot satisfy two conflicting constraints.
@@ -181,12 +422,10 @@ pub fn check_conflicts(
                     .any(|v| r.req.matches(v) && a.req.matches(v))
             });
             if let Some(b) = b {
-                diags.push(e2602(
+                diags.push(proof_diagnostic_refs(
                     pkg,
-                    a.req.display(),
-                    &a.from,
-                    b.req.display(),
-                    &b.from,
+                    &[a, b],
+                    "available versions cannot satisfy both requirements",
                 ));
             }
         }
@@ -195,12 +434,10 @@ pub fn check_conflicts(
             for i in 0..reqs.len() {
                 for j in (i + 1)..reqs.len() {
                     if !reqs[i].req.intersects(&reqs[j].req) {
-                        diags.push(e2602(
+                        diags.push(proof_diagnostic_refs(
                             pkg,
-                            reqs[i].req.display(),
-                            &reqs[i].from,
-                            reqs[j].req.display(),
-                            &reqs[j].from,
+                            &reqs,
+                            "two requirements have no overlapping version",
                         ));
                     }
                 }
@@ -208,4 +445,87 @@ pub fn check_conflicts(
         }
     }
     diags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn version(value: &str) -> SemVer {
+        SemVer::parse(value).expect("test version is valid")
+    }
+
+    #[test]
+    fn registry_solver_backtracks_and_keeps_a_causal_proof() {
+        let roots = vec![VersionConstraint {
+            package: "app".to_string(),
+            req: VersionReq::parse("^1.0").expect("test requirement is valid"),
+            from: "root".to_string(),
+        }];
+        let mut candidates = BTreeMap::new();
+        candidates.insert(
+            "app".to_string(),
+            vec![
+                SolverCandidate {
+                    version: version("1.1.0"),
+                    dependencies: vec![VersionConstraint {
+                        package: "shared".to_string(),
+                        req: VersionReq::parse("^2.0").expect("test requirement is valid"),
+                        from: "app 1.1.0".to_string(),
+                    }],
+                },
+                SolverCandidate {
+                    version: version("1.0.0"),
+                    dependencies: vec![VersionConstraint {
+                        package: "shared".to_string(),
+                        req: VersionReq::parse("^1.0").expect("test requirement is valid"),
+                        from: "app 1.0.0".to_string(),
+                    }],
+                },
+            ],
+        );
+        candidates.insert(
+            "shared".to_string(),
+            vec![SolverCandidate {
+                version: version("1.0.0"),
+                dependencies: Vec::new(),
+            }],
+        );
+
+        let selected = solve_registry(
+            &roots,
+            &candidates,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            ResolveMode::Latest,
+            &BTreeSet::from(["app".to_string()]),
+        )
+        .expect("the lower app candidate should satisfy the graph");
+        assert_eq!(selected["app"], version("1.0.0"));
+        assert_eq!(selected["shared"], version("1.0.0"));
+
+        let mut impossible = candidates;
+        impossible.insert(
+            "shared".to_string(),
+            vec![SolverCandidate {
+                version: version("3.0.0"),
+                dependencies: Vec::new(),
+            }],
+        );
+        let error = solve_registry(
+            &roots,
+            &impossible,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            ResolveMode::Latest,
+            &BTreeSet::from(["app".to_string()]),
+        )
+        .expect_err("the graph has no compatible shared version");
+        let detail = error.detail.expect("conflict must carry its proof tree");
+        assert!(detail.contains("PubGrub proof tree:"));
+        assert!(detail.contains("PubGrub branches:"));
+        assert!(detail.contains("app 1.1.0"));
+        assert!(detail.contains("Smallest fixes:"));
+    }
 }

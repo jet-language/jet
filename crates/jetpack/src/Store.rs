@@ -1658,7 +1658,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .flatten();
     let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
     let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
-    let nix_store_projection = nix_store_projection_for_entry(entry, &snapshot_root);
+    let nix_store_projection = nix_store_projection_for_entry(roots, entry, &snapshot_root);
     Ok(CacheLease {
         files,
         executables,
@@ -1677,23 +1677,43 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     })
 }
 
-fn nix_store_projection_for_entry(entry: &StoreEntry, snapshot_root: &Path) -> Vec<(String, PathBuf)> {
+fn nix_store_projection_for_entry(
+    roots: &Roots,
+    entry: &StoreEntry,
+    snapshot_root: &Path,
+) -> Vec<(String, PathBuf)> {
     let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
         return Vec::new();
     };
     if producer.provider != "nix" {
         return Vec::new();
     }
-    let Some(path) = producer.facts.get("nix.output.out") else {
-        return Vec::new();
-    };
-    let Some(name) = path.strip_prefix("/nix/store/") else {
-        return Vec::new();
-    };
-    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-        return Vec::new();
-    }
-    vec![(path.clone(), snapshot_root.to_path_buf())]
+    producer
+        .facts
+        .iter()
+        .filter_map(|(key, path)| {
+            let name = key.strip_prefix("nix.output.")?;
+            let store_name = path.strip_prefix("/nix/store/")?;
+            if store_name.is_empty()
+                || store_name.contains('/')
+                || store_name == "."
+                || store_name == ".."
+            {
+                return None;
+            }
+            let source = if name == "out" {
+                snapshot_root.to_path_buf()
+            } else {
+                let digest = entry.named_outputs.get(name)?;
+                let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+                fs::symlink_metadata(&object)
+                    .ok()
+                    .filter(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())?;
+                object
+            };
+            Some((path.clone(), source))
+        })
+        .collect()
 }
 
 struct ExecWrappers {
@@ -2797,6 +2817,49 @@ pub(crate) fn commit_profile_generation_root(
         &prepared.witness,
         Lifecycle::LifecycleTimestamp::from_unix_seconds(at),
     )?;
+    Ok(())
+}
+
+/// Check that a package-generation record still owns the exact committed GC
+/// root that its completion witness names. Listing and activation use this
+/// gate so a missing or rebound lifecycle root cannot look like a live profile.
+pub(crate) fn validate_profile_generation_root(
+    roots: &Roots,
+    owner: &str,
+    profile: &str,
+    generation: u64,
+    witness: &str,
+    targets: &BTreeSet<String>,
+) -> std::io::Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let id = Lifecycle::RootId::new(format!(
+        "profile-generation:{owner}:{profile}:{generation}"
+    ))?;
+    let snapshot = Lifecycle::snapshot(roots)?;
+    let root = snapshot.roots.get(&id).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "profile generation lifecycle root is missing",
+        )
+    })?;
+    if root.phase != Lifecycle::RootPhase::Committed {
+        return Err(std::io::Error::other(
+            "profile generation lifecycle root is not committed",
+        ));
+    }
+    if root.identity.kind != Lifecycle::RootKind::ProfileGeneration
+        || root.identity.producer.as_str() != "jetpack-profile-generation"
+        || root.identity.incarnation.get() != 1
+        || root.identity.witness.as_str() != witness
+        || root.targets != *targets
+        || root.protected_targets != *targets
+    {
+        return Err(std::io::Error::other(
+            "profile generation lifecycle root disagrees with its record",
+        ));
+    }
     Ok(())
 }
 

@@ -76,8 +76,9 @@ public root-key file; the repository cannot establish its own first trust.
 The source tree hash is checked before the index changes. `jet fetch` selects
 the highest non-yanked version that satisfies the declared requirement, checks
 the publisher signature and source hash, then records the registry, exact
-reference, source authority, and Hangar output in `.jet/lock`. Locked fetches
-use only the local registry clone and fail if its artifact is missing.
+reference, source authority, and Hangar output in `.jet/lock`. Locked and
+offline fetches (`jet fetch --locked` or `jet fetch --offline`) use only the local registry clone,
+verify that its remote identity matches the lock, and fail if its artifact is missing.
 
 Provider importers lower Jet registry, npm, Cargo, PyPI, SwiftPM, Maven,
 NuGet, Conan, vcpkg, Homebrew, GitHub, and binary metadata into one fact
@@ -154,6 +155,13 @@ jet profile generations dev    # inspect retained history
 jet profile rollback dev       # activate the previous retained generation
 jet profile rollback dev 3     # activate one exact retained generation
 ```
+
+When `profile.dev` is declared, its switched generation is the dev-shell
+projection. `jet enter`, `jet dev`, and shell-hook activation prepend that
+generation's immutable `root/bin` directory. They do not rebuild the profile
+or add each source output directly to `PATH`. If `profile.dev` has no active
+generation, the shell reports the missing activation and gives the build and
+switch commands.
 
 Each generation is an immutable record under
 `.jet/profiles/<name>/generations/<number>/`. Its `meta.json` is the profile

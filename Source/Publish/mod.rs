@@ -408,7 +408,7 @@ mod tests {
             title: "XSS in template engine".into(),
             severity: Severity::Medium,
         }];
-        let matches = audit_lockfile(&lock, &advisories);
+        let matches = audit_lockfile(&lock, &advisories).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].diagnostic.code, "E2603");
         // No explicit severity field → defaults to Medium (advisory, exit 0).
@@ -427,7 +427,7 @@ mod tests {
             severity: Severity::Critical,
         }];
         assert_eq!(advisories[0].severity, Severity::Critical);
-        let matches = audit_lockfile(&lock, &advisories);
+        let matches = audit_lockfile(&lock, &advisories).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].severity, Severity::Critical);
     }
@@ -474,11 +474,26 @@ mod tests {
         assert_eq!(parse_advisory_trust(duplicate).unwrap_err().code, "E2607");
         let revoked = parse_advisory_trust("public_key=00\nrevoked_key=00\n").unwrap();
         assert!(revoked.revoked_keys.contains("00"));
+        assert_eq!(
+            parse_advisory_trust("public_key=00\nmin_sequence=1\naccepted_digest=bad\n")
+                .unwrap_err()
+                .code,
+            "E2607"
+        );
 
         let diagnostic = e2609("mylib", "1.0.3", 86_500, SourceClass::ThirdParty);
         assert_eq!(diagnostic.code, "E2609");
         assert!(diagnostic.what.contains("mylib#1.0.3"));
         assert!(diagnostic.fix.contains("package#version"));
+    }
+
+    #[test]
+    fn audit_lockfile_rejects_invalid_locked_versions() {
+        let lock = make_lock(vec![make_lock_pkg("mylib", "not-semver", "sha256-aabb")]);
+        let error = audit_lockfile(&lock, &[]).expect_err("invalid lock versions must fail closed");
+        assert_eq!(error.code, "E2610");
+        assert!(error.what.contains("mylib"));
+        assert!(error.what.contains("not-semver"));
     }
 
     #[test]

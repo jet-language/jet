@@ -296,17 +296,33 @@ impl<'a> Fmt<'a> {
 
     /// Print a value-dispatch arm head, stripping `subject table_op` atoms.
     fn fmt_dispatch_value_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr) {
+        let grouped = self.expr_was_parenthesized(cond);
+        if self.src.contains("fn hex_nibble") {
+            let start = Self::expr_start(cond);
+            eprintln!(
+                "[DEBUG-arrow-group] cond {:?}..{:?} source={:?} grouped={grouped}",
+                start,
+                cond.span().end,
+                self.src.get(start..cond.span().end)
+            );
+        }
+        if grouped {
+            self.write("(");
+        }
         if self.is_all_value_alts(subject, table_op, cond) {
             self.fmt_value_alts(subject, table_op, cond);
+            if grouped {
+                self.write(")");
+            }
             return;
         }
         match cond {
             Expr::Binary(op @ (BinOp::And | BinOp::Or), lhs, rhs, _) => {
-                self.fmt_dispatch_value_cond(subject, table_op, lhs);
+                self.fmt_dispatch_value_operand(subject, table_op, lhs);
                 self.write(" ");
                 self.write(op.spell());
                 self.write(" ");
-                self.fmt_dispatch_value_cond(subject, table_op, rhs);
+                self.fmt_dispatch_value_operand(subject, table_op, rhs);
             }
             Expr::Binary(op, lhs, rhs, _)
                 if *op == table_op && self.same_dispatch_subject(lhs, subject) =>
@@ -324,6 +340,64 @@ impl<'a> Fmt<'a> {
             }
             _ => self.fmt_expr(cond, Prec::OrFallback),
         }
+        if grouped {
+            self.write(")");
+        }
+    }
+
+    fn fmt_dispatch_value_operand(&mut self, subject: &Expr, table_op: BinOp, expr: &Expr) {
+        let grouped = self.expr_was_parenthesized(expr);
+        if grouped {
+            self.write("(");
+        }
+        self.fmt_dispatch_value_cond(subject, table_op, expr);
+        if grouped {
+            self.write(")");
+        }
+    }
+
+    fn expr_was_parenthesized(&self, expr: &Expr) -> bool {
+        if !matches!(expr, Expr::Binary(BinOp::And | BinOp::Or, ..)) {
+            return false;
+        }
+        let end = expr.span().end;
+        let next_index = self.source_toks.iter().position(|token| {
+            token.span.start >= end
+                && !matches!(
+                    token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+        });
+        let grouped = next_index
+            .filter(|&index| matches!(self.source_toks[index].kind, TokKind::RParen))
+            .is_some_and(|index| {
+                let mut depth = 1;
+                for token in self.source_toks[..index].iter().rev() {
+                    if matches!(token.kind, TokKind::LineComment(_) | TokKind::BlockComment(_)) {
+                        continue;
+                    }
+                    match token.kind {
+                        TokKind::RParen => depth += 1,
+                        TokKind::LParen => {
+                            depth -= 1;
+                            if depth == 0 {
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            });
+        if self.src.contains("fn hex_nibble") {
+            eprintln!(
+                "[DEBUG-arrow-group] paren end={:?} source={:?} next={:?} grouped={grouped}",
+                end,
+                self.src.get(end.saturating_sub(40)..end),
+                next_index.map(|index| &self.source_toks[index].kind)
+            );
+        }
+        grouped
     }
 
     fn is_all_value_alts(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {

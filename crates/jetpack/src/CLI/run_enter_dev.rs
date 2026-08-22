@@ -11,7 +11,7 @@ use super::services_secrets_config::{
     validate_declared_secrets,
     wait_for_services_ready,
 };
-use super::trust_env_build::compose_env;
+use super::trust_env_build::{compose_env, validate_integration_facts};
 use super::workspace_sources::{
     cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
@@ -1774,6 +1774,15 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
+    if let Err(error) = validate_integration_facts(&plan) {
+        theme.error_coded(
+            "E1335",
+            "environment integration facts are not executable",
+            &error,
+            "use the supported integration preset and keep its typed package, host, task, and grant facts intact",
+        );
+        return 2;
+    }
     let preset = plan
         .environment
         .selected_preset

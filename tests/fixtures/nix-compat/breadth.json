@@ -84,6 +84,25 @@
       "nix_value": {"packages": ["fd"]},
       "jet_packages": ["fd"],
       "jet_unsupported": []
+    },
+    {
+      "name": "overlay_and_unknown_field_projection",
+      "system": "x86_64-linux",
+      "source": "let overlay = final: prev: { custom = prev.fd; }; in { devShells.x86_64-linux.default = (import pkgs { overlays = [ overlay ]; }).mkShell { packages = [ (import pkgs { overlays = [ overlay ]; }).custom ]; inputsFrom = []; }; }",
+      "nix_expression": "let pkgs = { fd = \"fd\"; }; overlay = final: prev: { custom = prev.fd; }; in { packages = [ (overlay pkgs pkgs).custom ]; inputsFrom = []; }",
+      "nix_value": {"inputsFrom": [], "packages": ["fd"]},
+      "jet_packages": ["fd"],
+      "jet_unsupported": ["inputsFrom"]
+    },
+    {
+      "name": "named_devshell_projection",
+      "system": "x86_64-linux",
+      "output": "debug",
+      "source": "{ outputs = { devShells.x86_64-linux.debug = pkgs.mkShell { packages = [ pkgs.ripgrep ]; }; }; }",
+      "nix_expression": "let pkgs = { ripgrep = \"ripgrep\"; }; in { packages = [ pkgs.ripgrep ]; }",
+      "nix_value": {"packages": ["ripgrep"]},
+      "jet_packages": ["ripgrep"],
+      "jet_unsupported": []
     }
   ],
   "authority_values": [
@@ -110,14 +129,35 @@
       "jet_unsupported": []
     }
   ],
-  "derivations": [
+  "authority_derivations": [
     {
       "name": "fixed_output_fetcher_context",
       "system": "x86_64-linux",
       "source": "builtins.derivationStrict { name = \"fetched\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo $src > $out\" ]; src = builtins.fetchurl { url = \"file:./source.txt\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; }",
-      "nix_value": {"input_sources": ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"]},
-      "authority": {"@fetch:fetchurl\nfile:./source.txt\n03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\nsource.txt\n": "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"},
-      "jet_input_sources": ["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.txt"]
+      "nix_expression": "let source = builtins.toFile \"source.txt\" \"fixed-output\\n\"; fetched = builtins.fetchurl { url = builtins.unsafeDiscardStringContext \"file://${source}\"; sha256 = \"03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\"; name = \"source.txt\"; }; in { fetched = fetched; input_sources = builtins.attrNames (builtins.getContext fetched); }",
+      "nix_value": {"fetched": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt", "input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]},
+      "authority": {"@fetch:fetchurl\nfile:./source.txt\n03e21237b264daa4b7dc6bc5ada1c24ba9d646a29720c31d1c0ab09cc5b03867\nsource.txt\n": "/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"},
+      "jet_input_sources": ["/nix/store/m9jjdy80fknb1x0b3innmz5ljf61dfca-source.txt"]
+    }
+  ],
+  "derivations": [
+    {
+      "name": "multi_output_package_identities",
+      "system": "x86_64-linux",
+      "source": "builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }",
+      "nix_expression": "let d = builtins.derivationStrict { name = \"many\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; outputs = [ \"out\" \"dev\" \"doc\" ]; }; in { drvPath = d.drvPath; out = d.out; dev = d.dev; doc = d.doc; }",
+      "nix_value": {
+        "dev": "/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev",
+        "doc": "/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc",
+        "drvPath": "/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv",
+        "out": "/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many"
+      },
+      "jet_input_sources": [],
+      "jet_outputs": [
+        {"name": "out", "method_algo": "", "hash_hex": ""},
+        {"name": "dev", "method_algo": "", "hash_hex": ""},
+        {"name": "doc", "method_algo": "", "hash_hex": ""}
+      ]
     }
   ],
   "errors": [

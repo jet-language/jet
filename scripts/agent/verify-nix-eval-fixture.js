@@ -22,9 +22,23 @@ function fail(message) {
   throw new Error(message);
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key])]),
+    );
+  }
+  return value;
+}
+
 function equal(actual, expected, label) {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    fail(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  const actualJson = JSON.stringify(canonicalize(actual));
+  const expectedJson = JSON.stringify(canonicalize(expected));
+  if (actualJson !== expectedJson) {
+    fail(`${label}: expected ${expectedJson}, got ${actualJson}`);
   }
 }
 

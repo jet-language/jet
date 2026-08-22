@@ -977,7 +977,10 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     let metadata = fs::read_to_string(generation_dir.join("meta.json")).unwrap();
     assert!(metadata.contains("jet-package-generation-v1"));
     assert!(metadata.contains("\"raw\":\"greet@default\""));
+    assert!(metadata.contains("\"target\":\""));
+    assert!(metadata.contains("\"provider\":\"nix\""));
     assert!(metadata.contains("\"provider_facts\":{"));
+    assert!(metadata.contains("\"root_hash\":\"sha256-"));
     assert!(metadata.contains("\"output_hash\":\"sha256-"));
     assert!(!project.join(".jet/profiles/dev/current").exists());
 
@@ -1023,6 +1026,7 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         assert!(stdout.contains(&format!("\"lens\":\"{lens}\"")), "{stdout}");
     }
 
+    let hook_before_switch = jetpack::EnvHook::definition_fingerprint(&project.path, None);
     let switched = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
     assert!(
         switched.status.success(),
@@ -1032,6 +1036,30 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
         .unwrap()
         .contains("\"generation\":1"));
+    let hook_after_switch = jetpack::EnvHook::definition_fingerprint(&project.path, None);
+    assert_ne!(hook_before_switch, hook_after_switch);
+
+    let entered = run([
+        "enter",
+        "--no-color",
+        "--trust",
+        "--offline",
+        "--",
+        "/bin/sh",
+        "-c",
+        "command -v greet",
+    ].as_slice());
+    assert!(
+        entered.status.success(),
+        "dev-shell projection stderr: {}",
+        String::from_utf8_lossy(&entered.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&entered.stdout).trim(),
+        project
+            .join(".jet/profiles/dev/generations/1/root/bin/greet")
+            .to_string_lossy()
+    );
 
     let rebuilt = run(["profile", "build", "dev", "--no-color", "--offline"].as_slice());
     assert!(
@@ -1067,6 +1095,36 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
             .contains("\"generation\":1")
     );
 
+    let switched_again = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+    assert!(
+        switched_again.status.success(),
+        "switch after rollback stderr: {}",
+        String::from_utf8_lossy(&switched_again.stderr)
+    );
+    assert!(
+        fs::read_to_string(project.join(".jet/profiles/dev/current"))
+            .unwrap()
+            .contains("\"generation\":2")
+    );
+
+    let generation_one_root = project.join(".jet/profiles/dev/generations/1/root");
+    let generation_one_binary = generation_one_root.join("bin/greet");
+    let generation_one_original = fs::read(&generation_one_binary).unwrap();
+    fs::write(&generation_one_binary, "tampered generation\n").unwrap();
+    let failed_rollback = run(["profile", "rollback", "dev", "1", "--no-color"].as_slice());
+    assert_eq!(failed_rollback.status.code(), Some(2));
+    let failed_rollback_stderr = String::from_utf8_lossy(&failed_rollback.stderr);
+    assert!(
+        failed_rollback_stderr.contains("root hash"),
+        "{failed_rollback_stderr}"
+    );
+    assert!(
+        fs::read_to_string(project.join(".jet/profiles/dev/current"))
+            .unwrap()
+            .contains("\"generation\":2")
+    );
+    fs::write(generation_one_binary, generation_one_original).unwrap();
+
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),
         dev_mode: false,
@@ -1094,6 +1152,15 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
     assert!(rebuild_stdout.contains("stored output digest differs"));
+
+    fs::remove_dir_all(root.join("lifecycle-db")).unwrap();
+    let missing_root = run(["profile", "generations", "dev", "--json"].as_slice());
+    assert_eq!(missing_root.status.code(), Some(2));
+    let missing_root_stderr = String::from_utf8_lossy(&missing_root.stderr);
+    assert!(
+        missing_root_stderr.contains("profile generation lifecycle root is missing"),
+        "{missing_root_stderr}"
+    );
 }
 
 fn seed_profile_fixture(root: &Path, fixtures: &Path, package: &str, setup: impl FnOnce(&Path)) {
@@ -1325,23 +1392,21 @@ fn doctor_checks_real_state_and_is_read_only() {
     let project = Scratch::new("doctor-project");
     let root = Scratch::new("doctor-root");
     let keys = Scratch::new("doctor-keys");
+    let registry = project.join("registry.git");
+    let registry_init = Command::new("git")
+        .args(["init", "--bare", registry.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        registry_init.status.success(),
+        "registry init: {}",
+        String::from_utf8_lossy(&registry_init.stderr)
+    );
     let keygen = jet().args(["registry", "keygen"])
         .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
     assert!(keygen.status.success(), "keygen: {}", String::from_utf8_lossy(&keygen.stderr));
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = std::thread::spawn(move || {
-        for stream in listener.incoming().take(3) {
-            let mut stream = stream.unwrap();
-            use std::io::{Read, Write};
-            let mut request = [0u8; 1024];
-            let n = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..n]);
-            assert!(request.contains("Authorization: Basic dXNlcjpzdXBlci1zZWNyZXQ=\r\n"), "{request}");
-            stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-        }
-    });
-    let registry_url = format!("http://user:super-secret@{addr}/index");
+    let registry_url = format!("file://{}", registry.display());
+    let credentialed_registry_url = "http://user:super-secret@example.invalid/index";
     let helper = jetpack::FFI::cached_crypto_helper_path();
     let helper_before = fs::metadata(&helper).unwrap();
     // #2075: that directory is the Cargo target dir SHARED by every bridge key,
@@ -1379,12 +1444,14 @@ fn doctor_checks_real_state_and_is_read_only() {
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JET_KEYS_DIR", &keys.path)
-        .env("JET_REGISTRY_URL", &registry_url)
+        .env("JET_REGISTRY_URL", credentialed_registry_url)
         .output().unwrap();
-    assert_eq!(degraded.status.code(), Some(1));
+    assert_eq!(degraded.status.code(), Some(2));
     let degraded_text = String::from_utf8(degraded.stderr).unwrap();
+    assert!(degraded_text.contains("[fail] registry"), "{degraded_text}");
+    assert!(degraded_text.contains("embedded registry credentials"), "{degraded_text}");
     assert!(degraded_text.contains("[warn] signing"), "{degraded_text}");
-    assert!(degraded_text.ends_with("result: degraded\n"), "{degraded_text}");
+    assert!(degraded_text.ends_with("result: broken\n"), "{degraded_text}");
     assert!(!degraded_text.contains("super-secret"), "credential leaked: {degraded_text}");
     let keygen = jet().args(["registry", "keygen", "--force"])
         .current_dir(&project.path).env("JET_KEYS_DIR", &keys.path).output().unwrap();
@@ -1396,14 +1463,13 @@ fn doctor_checks_real_state_and_is_read_only() {
     fs::write(&public_path, &mismatched_public).unwrap();
     let mismatch = jetpack().args(["doctor", "--online"])
         .current_dir(&project.path).env("JETPACK_ROOT", &root.path)
-        .env("JET_KEYS_DIR", &keys.path).env("JET_REGISTRY_URL", &registry_url)
+        .env("JET_KEYS_DIR", &keys.path).env("JET_REGISTRY_URL", credentialed_registry_url)
         .output().unwrap();
     let mismatch_text = String::from_utf8(mismatch.stderr).unwrap();
     assert_eq!(mismatch.status.code(), Some(2), "{mismatch_text}");
     assert!(mismatch_text.contains("does not match its public key"), "{mismatch_text}");
     assert!(!mismatch_text.contains("super-secret"), "credential leaked: {mismatch_text}");
     fs::write(&public_path, matching_public).unwrap();
-    server.join().unwrap();
 
     let output = root.join("owned-output");
     fs::create_dir_all(&output).unwrap();
@@ -1620,6 +1686,44 @@ fn build_resolves_fixture_ref() {
     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
     assert!(rebuild_stdout.contains("stored output digest differs"));
+}
+
+#[test]
+fn package_explain_matches_failed_provider_reference_target() {
+    let root = Scratch::new("package-explain-failed-provider-ref");
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let mut attempt = jetpack::BuildDebug::Attempt::new(
+        "left-pad",
+        "left-pad#version=2.0.17@npm",
+        "npm",
+        "sha256-recipe",
+        "sha256-source",
+    );
+    attempt.push_step(jetpack::BuildDebug::StepLog {
+        index: 1,
+        total: 1,
+        name: "fetch".to_string(),
+        command: "fetch left-pad".to_string(),
+        cwd: root.path.display().to_string(),
+        status: "failed".to_string(),
+        stdout: String::new(),
+        stderr: "network unavailable".to_string(),
+    });
+    attempt.persist(&roots.hangar_dir()).unwrap();
+
+    let explanation = jetpack::Store::explain_package(
+        &roots,
+        "left-pad#version=2.0.17@npm",
+        jetpack::Store::ExplainLens::Rebuild,
+    )
+    .unwrap()
+    .expect("failed provider reference should explain its build attempt");
+    assert!(explanation.entry.is_none());
+    assert_eq!(explanation.rebuild.decision, "rebuild-required");
+    assert_eq!(explanation.rebuild.attempt.unwrap().package, "left-pad");
 }
 
 #[test]
@@ -3669,10 +3773,10 @@ fn env_info_json_discloses_selected_preset_and_language_projection() {
     fs::write(
         project.join("env.jet"),
         r#"module env.dev {
-    presets: [
-        "host": { hostname: "epoch5-host", variables: { "MODE": "dev" } },
-        "user": { user: "epoch5-user" }
-    ]
+    presets: {
+        host: { hostname: "epoch5-host", variables: [String:String]{ "MODE": "dev" } }
+        user: { user: "epoch5-user" }
+    }
     services: {
         redis: { enable: true, ports: [6379], after: ["database"] }
     }
@@ -3688,7 +3792,7 @@ module env.full {
 "#,
     )
     .unwrap();
-    fs::write(project.join("main.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
     let output = jetpack()
         .args(["enter", "info", "--json", "--no-color"])
         .current_dir(&project.path)
@@ -3791,7 +3895,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
 "#,
     )
     .unwrap();
-    fs::write(project.join("main.jet"), "#Job\nfn lint() {}\n").unwrap();
+    fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
 
     let output = jetpack()
         .args(["enter", "info", "--json", "--no-color"])
@@ -3913,6 +4017,7 @@ fn env_info_json_discloses_typed_integration_projection() {
     let output = jetpack()
         .args(["enter", "info", "--json", "--no-color"])
         .current_dir(&project.path)
+        .env("JET_TARGET", "x86_64-linux-darwin")
         .output()
         .unwrap();
     assert!(
@@ -6421,16 +6526,17 @@ outputs: .{
     );
     assert_eq!(first.stdout, second.stdout);
     let json = String::from_utf8_lossy(&first.stdout);
-    assert!(json.contains("\"host\":\"workstation\""), "{json}");
-    assert!(json.contains("\"target\":\"linux.x64\""), "{json}");
-    assert!(json.contains("\"graph_identity\":\""), "{json}");
-    assert!(json.contains("\"ref\":\"ripgrep@nixpkgs\""), "{json}");
-    assert!(json.contains("\"name\":\"ssh\""), "{json}");
+    let compact: String = json.chars().filter(|ch| !ch.is_ascii_whitespace()).collect();
+    assert!(compact.contains("\"host\":\"workstation\""), "{json}");
+    assert!(compact.contains("\"target\":\"linux.x64\""), "{json}");
+    assert!(compact.contains("\"graph_identity\":\""), "{json}");
+    assert!(compact.contains("\"ref\":\"ripgrep@nixpkgs\""), "{json}");
+    assert!(compact.contains("\"name\":\"ssh\""), "{json}");
     assert!(
-        json.contains("\"fields\":[{\"key\":\"ports\",\"value\":\"[22]\"}]"),
+        compact.contains("\"fields\":[{\"key\":\"ports\",\"value\":\"[22]\"}]"),
         "{json}"
     );
-    assert!(json.contains("\"key\":\"network.hostName\""), "{json}");
+    assert!(compact.contains("\"key\":\"network.hostName\""), "{json}");
     assert!(
         !project.join("jet-root/systems/generations").exists(),
         "plan must not create a generation"

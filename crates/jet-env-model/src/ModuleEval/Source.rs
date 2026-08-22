@@ -166,11 +166,11 @@ pub fn evaluate_package_profile(
                     ProviderFactValue::Text(upstream.clone()),
                     "env.source",
                 );
-                if is_external_provider(&provider)
-                    && !ProviderFacts::for_reference(&provider, upstream)
-                        .selector
-                        .is_exact()
-                {
+                let resolved_reference = provider_reference_from_upstream(upstream, &provider);
+                let resolved = ProviderFacts::for_reference(&provider, &resolved_reference);
+                if resolved.selector.is_exact() {
+                    facts.set_resolved_selector(&resolved.selector.raw, "env.source");
+                } else if is_external_provider(&provider) {
                     facts.add_loss(
                         "provider.upstream",
                         &format!(
@@ -251,6 +251,18 @@ fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTabl
             .map(str::to_string)
             .unwrap_or_else(|| table.provider(source_name).label().to_string()),
     }
+}
+
+/// Convert the source table's provider-first upstream back to the shared
+/// package-reference shape before extracting selector facts. The table keeps
+/// `provider:target` so the resolver can pass it to its native backend; the
+/// shared carrier uses `target#selector@provider` so identity and selectors
+/// remain parseable and comparable.
+fn provider_reference_from_upstream(upstream: &str, provider: &str) -> String {
+    upstream
+        .split_once(Syntax::REF_SEPARATOR)
+        .map(|(_, target)| format!("{target}{}{provider}", Syntax::REF_PROVIDER_AT))
+        .unwrap_or_else(|| upstream.to_string())
 }
 
 fn is_external_provider(provider: &str) -> bool {
@@ -1091,6 +1103,11 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
         // `…@github` can't be classified offline-and-free; defer to a realize-time
         // `pkg.jet` peek (U9).
         Source::Github => ProviderKind::Infer,
+        Source::Cran => ProviderKind::Cran,
+        Source::LuaRocks => ProviderKind::LuaRocks,
+        Source::RubyGems => ProviderKind::RubyGems,
+        Source::Cpan => ProviderKind::Cpan,
+        Source::Packagist => ProviderKind::Packagist,
         // `…@nixpkgs` is always the nix collection; never probed. (`Named` can't
         // appear in a `target@provider` ref.)
         _ => ProviderKind::Nix,

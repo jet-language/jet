@@ -483,7 +483,8 @@ fn certify_registration_unlocked_mode(
             } else {
                 (&candidate, entry, &candidate_producer, &producer)
             };
-        let difference = compare_entries(roots, left, roots, right)?;
+        let difference =
+            compare_registration_entries(roots, left, right, left_producer, right_producer)?;
         if let Some(difference) = difference {
             let report = report_json(
                 &action_key,
@@ -507,6 +508,125 @@ fn certify_registration_unlocked_mode(
         }
     }
     Ok(())
+}
+
+/// Nix records may arrive one named output at a time while they are being
+/// folded into one derivation action. Compare only the shared output names at
+/// this gate; the closure graph performs the complete disjoint-output merge
+/// after certification. A primary-payload comparison here would reject valid
+/// `out` + `dev` records before that merge can happen.
+fn compare_registration_entries(
+    left_roots: &Roots,
+    left: &StoreEntry,
+    right: &StoreEntry,
+    left_producer: &ProducerRecord,
+    right_producer: &ProducerRecord,
+) -> io::Result<Option<FirstDifference>> {
+    if left_producer.provider != "nix" || right_producer.provider != "nix" {
+        return compare_entries(left_roots, left, left_roots, right);
+    }
+
+    if left.references != right.references {
+        return Ok(Some(FirstDifference {
+            path: "references".to_string(),
+            kind: "references".to_string(),
+            left: format!("{:?}", left.references),
+            right: format!("{:?}", right.references),
+        }));
+    }
+    for (kind, left_value, right_value) in [
+        (
+            "recipe-fingerprint",
+            left.cache_identity.recipe_fingerprint.clone(),
+            right.cache_identity.recipe_fingerprint.clone(),
+        ),
+        (
+            "policy-fingerprint",
+            left.cache_identity.policy_fingerprint.clone(),
+            right.cache_identity.policy_fingerprint.clone(),
+        ),
+        (
+            "platform",
+            left.cache_identity.platform.clone(),
+            right.cache_identity.platform.clone(),
+        ),
+        (
+            "platform-artifact-kind",
+            left.platform_artifact_kind.clone(),
+            right.platform_artifact_kind.clone(),
+        ),
+    ] {
+        if left_value != right_value {
+            return Ok(Some(FirstDifference {
+                path: ".".to_string(),
+                kind: kind.to_string(),
+                left: left_value,
+                right: right_value,
+            }));
+        }
+    }
+
+    let left_outputs = nix_action_outputs(left, left_producer);
+    let right_outputs = nix_action_outputs(right, right_producer);
+    for name in left_outputs
+        .keys()
+        .chain(right_outputs.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+    {
+        let (Some((left_digest, left_path)), Some((right_digest, right_path))) =
+            (left_outputs.get(&name), right_outputs.get(&name))
+        else {
+            continue;
+        };
+        if left_digest != right_digest {
+            return Ok(Some(FirstDifference {
+                path: format!("output/{name}"),
+                kind: "named-output".to_string(),
+                left: left_digest.clone(),
+                right: right_digest.clone(),
+            }));
+        }
+        if left_path != right_path {
+            return Ok(Some(FirstDifference {
+                path: format!("output-path/{name}"),
+                kind: "named-output-path".to_string(),
+                left: left_path.clone(),
+                right: right_path.clone(),
+            }));
+        }
+    }
+
+    let left_provenance = producer_provenance_facts(left_producer);
+    let right_provenance = producer_provenance_facts(right_producer);
+    if left_provenance != right_provenance {
+        return Ok(Some(FirstDifference {
+            path: ".".to_string(),
+            kind: "producer-provenance".to_string(),
+            left: json_map(&left_provenance),
+            right: json_map(&right_provenance),
+        }));
+    }
+    Ok(None)
+}
+
+fn nix_action_outputs(
+    entry: &StoreEntry,
+    producer: &ProducerRecord,
+) -> BTreeMap<String, (String, String)> {
+    producer
+        .facts
+        .iter()
+        .filter_map(|(key, path)| {
+            let name = key.strip_prefix("nix.output.")?;
+            let digest = entry
+                .named_outputs
+                .get(name)
+                .cloned()
+                .or_else(|| (name == "out").then(|| entry.envelope.output_hash.clone()))?;
+            Some((name.to_string(), (digest, path.clone())))
+        })
+        .collect()
 }
 
 /// A durable report blocks trusted cache use for the action until a fresh,
@@ -876,8 +996,7 @@ fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, Stri
         ("policy_facts".to_string(), producer.policy_facts.clone()),
     ]);
     for (key, value) in &producer.facts {
-        if !is_output_fact(key)
-            && key != "cache.reproducibility"
+        if !is_action_ignored_fact(&producer.provider, key)
             && key != "provider-facts"
             && key != "provider-facts-digest"
         {
@@ -885,7 +1004,7 @@ fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, Stri
         }
     }
     for (key, value) in producer.plan.facts() {
-        if !is_output_fact(key) && key != "cache.reproducibility" {
+        if !is_action_ignored_fact(&producer.provider, key) {
             facts.insert(format!("plan.{key}"), value.clone());
         }
     }
@@ -894,6 +1013,12 @@ fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, Stri
 
 fn is_output_fact(key: &str) -> bool {
     key.starts_with("output.") || key.starts_with("nix.output.") || key == "cache.output"
+}
+
+fn is_action_ignored_fact(provider: &str, key: &str) -> bool {
+    is_output_fact(key)
+        || key == "cache.reproducibility"
+        || (provider == "nix" && key == "nix.reference")
 }
 
 fn report_json(

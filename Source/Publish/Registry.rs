@@ -105,10 +105,11 @@ pub fn resolve_publish_registry() -> RegistryConfig {
     }
 }
 
-/// Remove embedded user information before a registry endpoint reaches any
-/// user-visible diagnostic. Credentials belong in a provider, never in a git
-/// URL or Jet output.
+/// Remove embedded user information and URL parameters before a registry
+/// endpoint reaches any user-visible diagnostic. Credentials belong in the
+/// host Git credential provider, never in a git URL or Jet output.
 pub fn redact_registry_url(value: &str) -> String {
+    let value = value.split(['?', '#']).next().unwrap_or(value);
     let Some(separator) = value.find("://") else {
         return value.to_string();
     };
@@ -139,13 +140,14 @@ fn registry_url_has_credentials(value: &str) -> bool {
         .map(|offset| authority_start + offset)
         .unwrap_or(value.len());
     value[authority_start..authority_end].contains('@')
+        || value[authority_end..].contains(['?', '#'])
 }
 
 fn validate_registry_transport(registry: &RegistryConfig) -> Result<(), Diagnostic> {
     if registry_url_has_credentials(&registry.url) {
         return Err(e1235(
             &registry.url,
-            "registry URLs must not contain embedded credentials",
+            "registry URLs must not contain embedded credentials or query/fragment parameters",
         ));
     }
     Ok(())
@@ -153,6 +155,10 @@ fn validate_registry_transport(registry: &RegistryConfig) -> Result<(), Diagnost
 
 fn git_command() -> Command {
     let mut command = Command::new("git");
+    // Git's configured credential helper is the host-owned provider. Keep its
+    // request scoped to this repository path; the secret crosses only Git's
+    // helper pipe and never becomes a Jet argument or environment value.
+    command.args(["-c", "credential.useHttpPath=true"]);
     command.env("GIT_TERMINAL_PROMPT", "0");
     command.env_remove("JET_REGISTRY_URL");
     for (key, _) in std::env::vars_os() {
@@ -233,34 +239,104 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
         ));
     }
     std::fs::create_dir_all(parent)?;
-    let mut file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            let existing = std::fs::read_to_string(&path)?;
-            if existing.trim() != public_key {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "registry root key pin changed",
-                ));
-            }
-            return Ok(path);
+    ensure_real_directory(parent, "registry root-key directory")?;
+    let _lock = acquire_registry_root_key_lock(&path)?;
+
+    // Re-check after taking the lock. A concurrent publisher may have
+    // installed the pin while this process waited. The old create_new/write
+    // sequence exposed an empty final file to that publisher, which looked
+    // like a changed root key instead of the one shared immutable pin.
+    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry root key is not a regular file",
+            ));
         }
-        Err(error) => return Err(error),
-    };
-    use std::io::Write;
-    file.write_all(public_key.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        let existing = std::fs::read_to_string(&path)?;
+        if existing.trim() != public_key {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "registry root key pin changed",
+            ));
+        }
+        return Ok(path);
     }
+
+    let partial = parent.join(format!(
+        ".{}.partial-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("root"),
+        unique_suffix(),
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        use std::io::Write;
+        file.write_all(public_key.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::rename(&partial, &path)?;
+        Ok::<_, io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result?;
     Ok(path)
+}
+
+struct RegistryRootKeyLock(PathBuf);
+
+impl Drop for RegistryRootKeyLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn acquire_registry_root_key_lock(path: &Path) -> io::Result<RegistryRootKeyLock> {
+    let lock_path = path.with_extension("lock");
+    for _ in 0..100 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => {
+                if let Err(error) = file.sync_all() {
+                    drop(file);
+                    let _ = std::fs::remove_file(&lock_path);
+                    return Err(error);
+                }
+                return Ok(RegistryRootKeyLock(lock_path));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let stale = std::fs::metadata(&lock_path)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .and_then(|modified| modified.elapsed().ok())
+                    .is_some_and(|age| age > std::time::Duration::from_secs(300));
+                if stale {
+                    let _ = std::fs::remove_file(&lock_path);
+                    continue;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "registry root-key pin is busy",
+    ))
 }
 
 pub fn read_registry_root_key(registry_name: &str) -> io::Result<String> {
@@ -448,11 +524,10 @@ fn install_registry_clone(
     Ok(dir.to_path_buf())
 }
 
-fn ensure_index_clone_locked(
+fn validate_existing_index_clone(
     registry: &RegistryConfig,
     dir: &Path,
-    parent: &Path,
-) -> Result<PathBuf, Diagnostic> {
+) -> Result<bool, Diagnostic> {
     let existing = match std::fs::symlink_metadata(dir) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(e1235(
@@ -497,6 +572,16 @@ fn ensure_index_clone_locked(
         }
     }
 
+    Ok(existing)
+}
+
+fn ensure_index_clone_locked(
+    registry: &RegistryConfig,
+    dir: &Path,
+    parent: &Path,
+) -> Result<PathBuf, Diagnostic> {
+    let existing = validate_existing_index_clone(registry, dir)?;
+
     let partial = parent.join(format!(
         ".{}.partial-{}",
         registry_cache_component(&registry.name),
@@ -529,6 +614,21 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
     let _lock = acquire_registry_cache_lock(parent, &registry.name)
         .map_err(|error| e1235(&registry.url, &error.to_string()))?;
     ensure_index_clone_locked(registry, &dir, parent)
+}
+
+/// Return the already-installed registry clone without contacting its remote.
+/// Locked and offline consumers must validate the cache's real git origin
+/// before trusting its index, metadata, or artifacts.
+pub fn ensure_local_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
+    validate_registry_transport(registry)?;
+    let dir = index_repo_path(registry);
+    if !validate_existing_index_clone(registry, &dir)? {
+        return Err(e1235(
+            &registry.url,
+            "the local registry cache is unavailable; locked mode never downloads a new index",
+        ));
+    }
+    Ok(dir)
 }
 
 /// A short-lived clean checkout used for one registry mutation. The ordinary

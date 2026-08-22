@@ -378,14 +378,24 @@ Shipped slice evidence:
 - `jet build --builder <bound-name>` enters the canonical build executor. It
   uploads missing action inputs to the authenticated CAS, submits the exact
   action identity (including argv, input snapshots, outputs, and effective
-  resource pools), checks the returned execution identity against that exact
+  resource pools), carries a deterministic policy/provenance digest in the
+  worker proof, checks the returned execution identity against that exact
   request, and restores only digest- and length-verified outputs. Local action
   publication re-hashes the restored outputs before recording or re-uploading
   them.
-- The transport rejects unauthenticated, malformed, mismatched, stale, or
-  replayed records. Cancellation and result publication share one commit lock;
-  result publication is idempotent only when a duplicate statement agrees
-  exactly with the existing record.
+- The result statement is an HMAC-SHA256-authenticated envelope over the exact
+  action, named output digests and lengths, stdout/stderr digests, worker proof,
+  provenance signer, and execution identity. The transport rejects unsigned,
+  corrupt, unauthenticated, malformed, mismatched, stale, replayed, or
+  malicious-worker records before visibility. Cancellation and result
+  publication share one commit lock; result publication is idempotent only when
+  a duplicate statement agrees exactly with the existing record.
+- A missing result is a retryable worker loss only after the host commits its
+  authenticated cancellation tombstone; each retry receives a fresh attempt
+  identity, and explicit local fallback runs only after remote attempts are
+  exhausted. Remote output restoration rolls back staged files if later local
+  cache or provenance publication fails, so a failed attempt cannot leave a
+  partial output.
 
 ### E4-JP8 — Nix derivation compatibility
 
@@ -546,8 +556,15 @@ and exact artifact, including an exact yanked version, while fresh resolution
 excludes yanked entries. A verified source is ingested into the canonical
 Jetpack Hangar before project linking, and the lock keeps the registry identity
 while the resolved output points at that immutable Hangar object. Registry git
-transport rejects embedded credentials and redacts endpoint details in
-diagnostics.
+transport rejects embedded credentials and URL parameters, then delegates
+authentication to the host Git credential provider with path-scoped helper
+requests. Secrets never enter Jet argv, environment, locks, provenance, or
+diagnostics; endpoint details are redacted before errors are rendered.
+The resolver loads the verified registry graph, backtracks incompatible
+candidate branches, and records an E2602 PubGrub proof tree with smallest
+fixes. `jet update <pkg>` moves only that package's locked dependency closure;
+unrelated machine and semantic lock records stay byte-stable, and the update
+rationale is committed with the new lock in one atomic write.
 
 ### E4-JP13 — one semantic lock, catalogs, overlays, and source maps
 
@@ -580,10 +597,18 @@ diagnostics.
 The source-backed package-generation slice now implements the package view of
 this law. `profile.<name>` resolves through `PackageProfilePlan`, and
 `jet profile build|switch|rollback|generations` records or activates the same
-project-local generation history. The generation lock preserves raw refs,
-provider facts, output digests, and exact-path collision contenders; the
-existing Store lifecycle root protects each realized output. JetOS/user
-composition and exact dev-shell projection are separate delivery slices.
+project-local generation history. Each generation build, switch, rollback, and
+history read holds the project profile lock. Builds write metadata, the
+provider-fact lock, and the Store lifecycle root in a hidden generation stage,
+then publish the complete stage by rename; switching replaces the current
+pointer atomically. History and rollback revalidate the generation witness,
+projected-root digest, and Store lifecycle root before activation. The
+generation lock preserves raw refs,
+provider facts, output digests, and exact-path collision contenders. A
+switched `profile.dev` generation projects its immutable `root/bin` into
+`jet enter`, `jet dev`, and shell-hook activation. The shell does not add
+source outputs directly or rebuild a profile. JetOS/user composition remains a
+separate delivery slice.
 
 ### E4-JP15 — typed variants and cross compilation
 
@@ -619,6 +644,20 @@ each producer record. Store registration and Nix lock refreshes recompute its
 digest after cache and lock facts are added; explain reads that carrier and
 reports a loss or conflict when it is absent, malformed, or changed.
 
+Shipped slice evidence:
+
+- `normalize_provider_document` preserves native JSON/TOML bytes and lowers
+  npm, Cargo, and Jet registry dependency kinds, hooks, variants, platforms,
+  source ownership, lock checksums, signatures, yanks, and advisory facts into
+  the shared typed carrier.
+- `import_npm` and `import_cargo` emit exact provider refs only when the source
+  contains an exact identity. Mutable requests, missing locks, ambiguous locks,
+  malformed fields, and conflicting native records remain explicit loss,
+  conflict, or migration findings.
+- Provider graph unit tests and package importer tests exercise both
+  lossless lock/explain projection and the failure path that refuses a mutable
+  generated ref.
+
 ### E4-JP18 — reproducibility certification
 
 - Build the same action on independent roots/builders with different cwd, UID,
@@ -651,6 +690,9 @@ reports a loss or conflict when it is absent, malformed, or changed.
   verifies the realized output digest against its Store identity. Missing,
   malformed, stale, or conflicting provider/profile facts remain explicit
   reports in text and JSON; they are never replaced with defaults.
+- Provider-qualified refs use the shared typed target identity for explain and
+  persisted build-attempt lookup, so selector and source-authority spellings
+  do not hide the same package's failure record.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
 - Repair is one locked Hangar transaction: a signed archive is staged and
   re-hashed, a corrupt object is quarantined, and failed import restores the
@@ -666,8 +708,10 @@ reports a loss or conflict when it is absent, malformed, or changed.
 - `jet inspect audit` reads only the project `.jet/lock`, signed
   `.jet/advisories.db`, and pinned `.jet/advisory-trust`; it prints the verified
   feed receipt and fails with E2611 when the lock or advisory database is
-  absent. A configured feed is verified before a new registry candidate can be
-  installed; existing exact locks remain unchanged by freshness policy. The
+  absent. Malformed locked package versions fail closed instead of becoming
+  unaudited results. A configured feed is verified before a new registry
+  candidate can be installed; existing exact locks remain unchanged by
+  freshness policy. The
   accepted sequence, digest, key, and maturity window are carried into the
   Hangar provenance for explain/audit output.
 - SPDX license expression policy, source mapping, yanks/retractions, release

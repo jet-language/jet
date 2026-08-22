@@ -8,12 +8,12 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
-use crate::Publish::{self, ResolveMode, VersionReq};
 use crate::Publish::SemVer::SemVer;
+use crate::Publish::{self, ResolveMode, SolverCandidate, VersionConstraint, VersionReq};
 use crate::Store;
 use crate::Syntax;
 use crate::SHA256::tree_hash;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -90,6 +90,15 @@ pub fn fetch(
     }
     Lock::ensure_build_stamp(project_root, &mut new_lock);
 
+    let semantic_update = if opts.update {
+        Some(
+            registry_update_rationales(project_root, &new_lock, manifest, opts)
+                .map_err(|diagnostic| vec![diagnostic])?,
+        )
+    } else {
+        None
+    };
+
     // Write the lock file, inside the project's `.jet/` managed folder (U2).
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     if let Some(parent) = lock_path.parent() {
@@ -104,7 +113,22 @@ pub fn fetch(
         })?;
     }
     let lock_str = Lock::write(&new_lock);
-    write_lock_atomically(&lock_path, lock_str.as_bytes()).map_err(|e| {
+    let lock_bytes = match semantic_update.as_ref() {
+        Some(semantic)
+            if !semantic.records.is_empty()
+                || !semantic.inputs.is_empty()
+                || !semantic.source_maps.is_empty() =>
+        {
+            format!(
+                "{}\n\n{}",
+                lock_str.trim_end(),
+                jetpack::SemanticLock::write(semantic)
+            )
+            .into_bytes()
+        }
+        _ => lock_str.into_bytes(),
+    };
+    write_lock_atomically(&lock_path, &lock_bytes).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
             format!("couldn't write {}", Syntax::UNIFIED_LOCK_FILE),
@@ -197,6 +221,10 @@ struct Resolver<'a> {
     resolved: BTreeMap<String, ResolvedPkg>,
     /// name → Vec<chain> — for E1201 blame chains.
     version_seen: HashMap<String, (String, Vec<String>)>,
+    /// Selected registry entries from the graph solver.
+    registry_plan: BTreeMap<String, Publish::IndexEntry>,
+    /// Packages allowed to move during `jet update <package>`.
+    update_scope: BTreeSet<String>,
 }
 
 struct ResolvedPkg {
@@ -223,6 +251,8 @@ impl<'a> Resolver<'a> {
             advisory_policy: None,
             resolved: BTreeMap::new(),
             version_seen: HashMap::new(),
+            registry_plan: BTreeMap::new(),
+            update_scope: compute_update_scope(existing_lock, opts),
         }
     }
 
@@ -230,6 +260,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         manifest: &Manifest,
     ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
+        self.registry_plan = self.prepare_registry_plan(manifest)?;
         let root_deps: Vec<String> = manifest.dependencies.keys().cloned().collect();
 
         // Resolve each direct dep recursively.
@@ -285,7 +316,7 @@ impl<'a> Resolver<'a> {
             });
         }
 
-        let new_lock = LockFile {
+        let mut new_lock = LockFile {
             version: Lock::LOCK_VERSION,
             packages,
             root_dependencies: root_deps,
@@ -320,6 +351,7 @@ impl<'a> Resolver<'a> {
                 .map(|lock| lock.build_contributions.clone())
                 .unwrap_or_default(),
         };
+        self.preserve_unrelated_records(&mut new_lock);
 
         // Build dep_dirs map.
         let mut dep_dirs = HashMap::new();
@@ -328,6 +360,183 @@ impl<'a> Resolver<'a> {
         }
 
         Ok((new_lock, dep_dirs))
+    }
+
+    fn prepare_registry_plan(
+        &self,
+        manifest: &Manifest,
+    ) -> Result<BTreeMap<String, Publish::IndexEntry>, Vec<Diagnostic>> {
+        let mut roots = Vec::new();
+        let mut direct = BTreeSet::new();
+        let mut pending = BTreeSet::new();
+        for (name, spec) in &manifest.dependencies {
+            let DepSpec::Registry(requirement) = spec else {
+                continue;
+            };
+            let req = VersionReq::parse(requirement).ok_or_else(|| {
+                vec![registry_diagnostic(
+                    name,
+                    &format!("invalid version requirement `{requirement}`"),
+                    "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`",
+                )]
+            })?;
+            roots.push(VersionConstraint {
+                package: name.clone(),
+                req,
+                from: format!("{} (root)", manifest.package.name),
+            });
+            direct.insert(name.clone());
+            pending.insert(name.clone());
+        }
+        if roots.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
+        let mut visited = BTreeSet::new();
+        let mut candidate_map: BTreeMap<String, Vec<SolverCandidate>> = BTreeMap::new();
+        let mut entry_map: BTreeMap<(String, String), Publish::IndexEntry> = BTreeMap::new();
+        while let Some(name) = pending.pop_first() {
+            if !visited.insert(name.clone()) {
+                continue;
+            }
+            let update_requested = self.registry_update_requested(&name);
+            let registry = if update_requested {
+                Publish::resolve_publish_registry()
+            } else {
+                self.locked_registry_config(&name)
+                    .unwrap_or_else(Publish::resolve_publish_registry)
+            };
+            let (all, _warnings) = Publish::resolve_and_verify_all(&registry, &name)
+                .map_err(|diagnostic| {
+                    vec![registry_diagnostic(
+                        &name,
+                        &diagnostic.what,
+                        &diagnostic.fix,
+                    )]
+                })?;
+            let locked_version = (!update_requested)
+                .then(|| self.find_locked_registry_version(&name))
+                .flatten();
+            let mut solver_candidates = Vec::new();
+            for entry in all {
+                if entry.yanked && locked_version.as_deref() != Some(entry.version.as_str()) {
+                    continue;
+                }
+                let version = SemVer::parse(&entry.version).ok_or_else(|| {
+                    vec![registry_diagnostic(
+                        &name,
+                        &format!("registry entry has invalid SemVer `{}`", entry.version),
+                        "publish a new immutable version with a valid SemVer identity",
+                    )]
+                })?;
+                let repo = Publish::index_repo_path(&registry);
+                let artifact = Publish::verify_artifact(&repo, &entry).map_err(|error| {
+                    vec![registry_diagnostic(
+                        &name,
+                        &format!("published artifact is unavailable or corrupt: {error}"),
+                        "refresh the registry mirror or publish the immutable source artifact",
+                    )]
+                })?;
+                let dep_manifest = self.load_dep_manifest(&artifact, &name)?;
+                if dep_manifest.package.name != name || dep_manifest.package.version != entry.version {
+                    return Err(vec![registry_diagnostic(
+                        &name,
+                        "published source metadata disagrees with its registry index entry",
+                        "republish a new immutable version with matching payload identity",
+                    )]);
+                }
+                let mut dependencies = Vec::new();
+                for (dependency, spec) in &dep_manifest.dependencies {
+                    let DepSpec::Registry(requirement) = spec else {
+                        continue;
+                    };
+                    let req = VersionReq::parse(requirement).ok_or_else(|| {
+                        vec![registry_diagnostic(
+                            dependency,
+                            &format!(
+                                "invalid version requirement `{requirement}` in {name} {entry}",
+                                entry = entry.version
+                            ),
+                            "publish a package with a valid SemVer dependency requirement",
+                        )]
+                    })?;
+                    dependencies.push(VersionConstraint {
+                        package: dependency.clone(),
+                        req,
+                        from: format!("{} {}", name, entry.version),
+                    });
+                    pending.insert(dependency.clone());
+                }
+                entry_map.insert((name.clone(), entry.version.clone()), entry);
+                solver_candidates.push(SolverCandidate {
+                    version,
+                    dependencies,
+                });
+            }
+            candidate_map.insert(name, solver_candidates);
+        }
+
+        let locked = self
+            .existing_lock
+            .into_iter()
+            .flat_map(|lock| lock.packages.iter())
+            .filter_map(|package| {
+                matches!(&package.source, LockSource::Registry { .. })
+                    .then(|| (package.name.clone(), package.version.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let selected = Publish::solve_registry(
+            &roots,
+            &candidate_map,
+            &locked,
+            &self.update_scope,
+            self.opts.resolution,
+            &direct,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
+        let mut plan = BTreeMap::new();
+        for (name, version) in selected {
+            let entry = entry_map
+                .iter()
+                .find(|((candidate_name, _), candidate)| {
+                    candidate_name == &name
+                        && SemVer::parse(&candidate.version)
+                            .is_some_and(|candidate_version| candidate_version == version)
+                })
+                .map(|(_, entry)| entry.clone())
+                .ok_or_else(|| {
+                    vec![registry_diagnostic(
+                        &name,
+                        "resolver selected a registry candidate with no immutable index entry",
+                        "refresh the registry checkpoint and retry resolution",
+                    )]
+                })?;
+            plan.insert(name, entry);
+        }
+        Ok(plan)
+    }
+
+    fn preserve_unrelated_records(&self, lock: &mut LockFile) {
+        let Some(target) = self.opts.update_dep.as_deref() else {
+            return;
+        };
+        let Some(previous) = self.existing_lock else {
+            return;
+        };
+        let mut related = lock_closure(previous, target);
+        related.extend(lock_closure(lock, target));
+        for package in &mut lock.packages {
+            if related.contains(&package.name) {
+                continue;
+            }
+            if let Some(previous_package) = previous
+                .packages
+                .iter()
+                .find(|candidate| candidate.name == package.name)
+            {
+                *package = previous_package.clone();
+            }
+        }
     }
 
     fn resolve_dep(
@@ -570,11 +779,7 @@ impl<'a> Resolver<'a> {
                     self.locked_registry_config(dep_name)
                         .unwrap_or_else(Publish::resolve_publish_registry)
                 };
-                let (available, _warnings) = if update_requested {
-                    Publish::resolve_and_verify(&registry, dep_name)
-                } else {
-                    Publish::resolve_and_verify_all(&registry, dep_name)
-                }
+                let (available, _warnings) = Publish::resolve_and_verify_all(&registry, dep_name)
                     .map_err(|diagnostic| {
                         vec![registry_diagnostic(
                             dep_name,
@@ -601,8 +806,15 @@ impl<'a> Resolver<'a> {
                     })
                     .and_then(|version| available.iter().find(|entry| entry.version == version))
                     .cloned();
-                let reused_exact_lock = locked_candidate.is_some();
-                let selected = locked_candidate.or_else(|| {
+                let planned = self
+                    .registry_plan
+                    .get(dep_name)
+                    .filter(|entry| {
+                        SemVer::parse(&entry.version)
+                            .is_some_and(|version| requirement.matches(&version))
+                    })
+                    .cloned();
+                let selected = planned.or(locked_candidate).or_else(|| {
                         let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
                             .into_iter()
                             .filter(|entry| !entry.yanked)
@@ -644,6 +856,8 @@ impl<'a> Resolver<'a> {
                         "the configured registry has no compatible non-yanked artifact",
                     )]);
                 };
+                let reused_exact_lock = !update_requested
+                    && locked_version.as_deref() == Some(selected.version.as_str());
                 if !reused_exact_lock {
                     if let Some(policy) = self.load_advisory_policy()? {
                         Publish::authorize_registry_candidate(
@@ -856,8 +1070,7 @@ impl<'a> Resolver<'a> {
 
     fn registry_update_requested(&self, dep_name: &str) -> bool {
         self.opts.update
-            && (self.opts.update_dep.is_none()
-                || self.opts.update_dep.as_deref() == Some(dep_name))
+            && (self.opts.update_dep.is_none() || self.update_scope.contains(dep_name))
     }
 
     fn load_advisory_policy(
@@ -930,6 +1143,130 @@ impl<'a> Resolver<'a> {
             .and_then(|p| p.locked.as_ref())
             .map(|l| l.rev.clone())
     }
+}
+
+fn compute_update_scope(
+    existing_lock: Option<&LockFile>,
+    opts: &FetchOptions,
+) -> BTreeSet<String> {
+    if !opts.update {
+        return BTreeSet::new();
+    }
+    match opts.update_dep.as_deref() {
+        None => existing_lock
+            .into_iter()
+            .flat_map(|lock| lock.packages.iter().map(|package| package.name.clone()))
+            .collect(),
+        Some(target) => {
+            let mut scope = existing_lock
+                .map(|lock| lock_closure(lock, target))
+                .unwrap_or_default();
+            scope.insert(target.to_string());
+            scope
+        }
+    }
+}
+
+fn lock_closure(lock: &LockFile, target: &str) -> BTreeSet<String> {
+    let mut scope = BTreeSet::new();
+    let mut pending = vec![target.to_string()];
+    while let Some(name) = pending.pop() {
+        if !scope.insert(name.clone()) {
+            continue;
+        }
+        if let Some(package) = lock.packages.iter().find(|package| package.name == name) {
+            pending.extend(package.dependencies.iter().cloned());
+        }
+    }
+    scope
+}
+
+fn registry_update_rationales(
+    project_root: &Path,
+    lock: &LockFile,
+    manifest: &Manifest,
+    opts: &FetchOptions,
+) -> Result<jetpack::SemanticLock::SemanticLockFile, Diagnostic> {
+    let mut packages = lock
+        .packages
+        .iter()
+        .filter(|package| matches!(&package.source, LockSource::Registry { .. }))
+        .collect::<Vec<_>>();
+    let mut semantic = jetpack::SemanticLock::load(project_root).unwrap_or_default();
+    if packages.is_empty() {
+        return Ok(semantic);
+    }
+    if let Some(target) = opts.update_dep.as_deref() {
+        let scope = lock_closure(lock, target);
+        packages.retain(|package| scope.contains(&package.name));
+    }
+    if packages.is_empty() {
+        return Ok(semantic);
+    }
+
+    for package in packages {
+        let LockSource::Registry {
+            registry,
+            reference,
+            output,
+            source_hash,
+            repository,
+            ..
+        } = &package.source
+        else {
+            continue;
+        };
+        let key = format!("registry:{registry}:{}", package.name);
+        let record = jetpack::SemanticLock::SemanticRecord::new(
+            jetpack::SemanticLock::LockIdentity {
+                kind: jetpack::SemanticLock::LockRecordKind::Package,
+                key,
+                exact: reference.clone(),
+                hash: source_hash.clone(),
+                platform: jetpack::Envelope::host_platform(),
+            },
+            jetpack::SemanticLock::LockRationale {
+                owner_package: manifest.package.name.clone(),
+                reason: format!(
+                    "selected `{}` with {} resolution; registry subtree update",
+                    package.version,
+                    opts.resolution.label()
+                ),
+                source_ref: format!(
+                    "registry:{registry};repository={}",
+                    Publish::redact_registry_url(repository)
+                ),
+                provider: "jet-registry".to_string(),
+                channel_input: opts.resolution.label().to_string(),
+                exact_output: output.clone(),
+                policy_fingerprint: String::new(),
+                recipe_id: String::new(),
+                adapter_id: "registry.pubgrub".to_string(),
+                signature: String::new(),
+                cache_provenance: "verified-registry".to_string(),
+                update_command: opts
+                    .update_dep
+                    .as_deref()
+                    .map(|name| format!("jet update {name}"))
+                    .unwrap_or_else(|| "jet update".to_string()),
+            },
+        );
+        jetpack::SemanticLock::selective_update(&mut semantic, record);
+    }
+    jetpack::SemanticLock::revalidate(&semantic).map_err(|issues| {
+        Diagnostic::error(
+            "E1206",
+            "couldn't record the registry resolution rationale".to_string(),
+            "the package lock was resolved, but its update explanation failed semantic lock validation".to_string(),
+            issues
+                .iter()
+                .map(jetpack::SemanticLock::ValidationIssue::message)
+                .collect::<Vec<_>>()
+                .join("; "),
+            None,
+        )
+    })?;
+    Ok(semantic)
 }
 
 fn registry_diagnostic(name: &str, what: &str, fix: &str) -> Diagnostic {
@@ -1090,6 +1427,13 @@ fn build_dep_dirs_from_lock(
                 } = &locked.source else {
                     unreachable!("registry package predicate guarantees registry source")
                 };
+                if crate::Publish::redact_registry_url(repository) != *repository {
+                    return Err(vec![registry_diagnostic(
+                        dep_name,
+                        "locked registry repository contains embedded credentials",
+                        "regenerate the lock from a credential-free registry endpoint; credentials never belong in `.jet/lock`",
+                    )]);
+                }
                 let config = crate::Publish::RegistryConfig {
                     name: registry.clone(),
                     url: repository.clone(),
@@ -1098,7 +1442,8 @@ fn build_dep_dirs_from_lock(
                     tier: crate::Publish::RegistryTier::parse(tier)
                         .unwrap_or(crate::Publish::RegistryTier::Core),
                 };
-                let repo = crate::Publish::index_repo_path(&config);
+                let repo = crate::Publish::ensure_local_index_clone(&config)
+                    .map_err(|diagnostic| vec![diagnostic])?;
                 let entry = crate::Publish::Index::find_entry(&repo, dep_name, &locked.version)
                     .map_err(|error| {
                         vec![registry_diagnostic(

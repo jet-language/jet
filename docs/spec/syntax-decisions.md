@@ -2994,7 +2994,7 @@ no heap allocation, mutable static or thread-local state, scheduler access, or
 panic-capable path. Its pointer is stable for the program lifetime and may be
 called concurrently or reentrantly. There is no hidden context pointer,
 nullable callback, or alternate callback ABI. Unsupported cases are E3203.
-Generic `Result<T, E>` remains illegal in C declarations: expose a raw C status
+Generic fallible returns remain illegal in C declarations: expose a raw C status
 plus out-pointer function and write an ordinary Jet wrapper that initializes
 the out value and maps the status. The compiler invents no error adapter.
 `#ABI(name)` is a per-function marker with no module inheritance. Omission means
@@ -3353,8 +3353,8 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
-  `encode(self) DataTree` and `decode(tree: DataTree) Result<T,
-[FieldError]>` to own its wire form (e.g. a validated newtype serializing as a
+  `encode(self) DataTree` and `decode(tree: DataTree) T [FieldError]!` to own
+  its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
 (R11, D-META-CODE1) — no compiler-synthesized Rust, no R11 carve-out.
@@ -3758,7 +3758,7 @@ index, not a substitute for that law.
   applies the same claims policy. Optional `nbf` is checked with the same
   signed NumericDate policy; `iat`, `nbf`, and `exp` remain exact integer
   claims, while `clock_skew` keeps exact nanoseconds. Unknown algorithms,
-  versions, and purposes fail closed. Both return `Result<Claims, AuthError>`;
+  versions, and purposes fail closed. Both return `Claims AuthError!`;
   `Claims.audience` preserves the validated audience for downstream
   authorization. Future `app.auth` reuses these functions rather than
   creating another mechanism.
@@ -3918,7 +3918,7 @@ parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
 **D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (`{ path, reason }`). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `#Pre`/`#Post` stay call-site contracts, outside the validation story.
 
-**D-VALIDATE-DECODE1=B — one accumulated typed-decode error contract** *(ratified 2026-08-03, owner ballot; cards #1158/#1161)*: every `Decode` implementation and every format adapter returns `Result<T, [FieldError]>`. A `FieldError` is `{ path, reason }`; nested decoders prefix every error in the list with their field or index segment. This is the same list used by `validate` blocks. The retired single `DecodeError` envelope has no alias, bridge, fallback, compatibility flag, or second decoder API. XML/CBOR/native adapters may project the list into their format-specific error type only at that boundary; typed Jet callers always receive `[FieldError]`.
+**D-VALIDATE-DECODE1=B — one accumulated typed-decode error contract** *(ratified 2026-08-03, owner ballot; cards #1158/#1161)*: every `Decode` implementation and every format adapter returns `T [FieldError]!`. A `FieldError` is `{ path, reason }`; nested decoders prefix every error in the list with their field or index segment. This is the same list used by `validate` blocks. The retired single `DecodeError` envelope has no alias, bridge, fallback, compatibility flag, or second decoder API. XML/CBOR/native adapters may project the list into their format-specific error type only at that boundary; typed Jet callers always receive `[FieldError]`.
 
 **D-CORE-SECRETS1=A — one secrets home** *(ratified by owner
 2026-07-12, card #509)*: `core.vault` owns secret storage AND lifecycle
@@ -4590,7 +4590,7 @@ expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
 **Decode-time migration transparency** *(D-MIGRATE3=A, retired by
 D-VALIDATE-DECODE1=B)*: the separate migration-report result is retired.
 Every codec's typed `decode<T>` has the one canonical result,
-`Result<T, [FieldError]>` (or `Result<[T], [FieldError]>` for CSV). Migration
+`T [FieldError]!` (or `[T] [FieldError]!` for CSV). Migration
 steps run silently inside that call; no second decoder or compatibility wrapper
 exists.
 **D-MIGRATE4 (=A, ratified 2026-07-03, c105migrate4; shipped)**: the runtime

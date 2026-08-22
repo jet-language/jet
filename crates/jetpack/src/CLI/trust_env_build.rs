@@ -188,7 +188,25 @@ pub(super) fn compose_env(
         );
         return Err(2);
     }
-    let mut bin_dirs = Vec::new();
+    let profile_bin = match super::profile::dev_shell_projection(
+        &plan.project_root,
+        &plan.environment,
+    ) {
+        Ok(profile_bin) => profile_bin,
+        Err(error) => {
+            theme.error_coded(
+                "E1335",
+                "the active package profile cannot project into the dev shell",
+                &error.to_string(),
+                "build and switch the named package profile, then retry the shell",
+            );
+            return Err(2);
+        }
+    };
+    let mut bin_dirs = profile_bin
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
     let mut provider_vars: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
     let mut nix_vars = std::collections::BTreeMap::new();
@@ -388,7 +406,7 @@ pub(super) fn compose_env(
     })
 }
 
-fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
+pub(super) fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
     plan.environment.integration_facts.validate()?;
     let target = std::env::var("JET_TARGET").unwrap_or_else(|_| {
         let os = if cfg!(target_os = "macos") {
@@ -479,7 +497,13 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
             }
         }
         for check in &task.host_checks {
-            validate_integration_host_check(check, &target)?;
+            if let Err(error) = validate_integration_host_check(check, &target) {
+                return Err(format!(
+                    "{} integration `{}` failed: {error}",
+                    task.integration.as_str(),
+                    task.name
+                ));
+            }
         }
     }
     if plan

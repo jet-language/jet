@@ -897,7 +897,7 @@ secret := vault.ExpiringSecret.new(^key, ttl, clock)
 result := secret.with((borrowed) -> borrowed.public_key())
 ```
 
-`.with` returns `Result<R, Expired>`. Its parameter is a compiler-owned,
+`.with` returns `R Expired!`. Its parameter is a compiler-owned,
 non-escaping read loan: it cannot be moved, copied, stored, returned, or
 captured. Expiry and wrapper drop destroy the owned credential through its
 audited zeroizing `Drop`. A wrapper backed by `Clock.system()` observes time
@@ -2579,8 +2579,8 @@ items := tree.field("items")?.decode<[LineItem]>()?
 ```
 
 **Decode migration (D-MIGRATE3=A, retired by D-VALIDATE-DECODE1=B):** every
-codec's typed `decode<T>` has one canonical result, `Result<T, [FieldError]>`
-(or `Result<[T], [FieldError]>` for CSV). Published-schema migration runs
+codec's typed `decode<T>` has one canonical result, `T [FieldError]!`
+(or `[T] [FieldError]!` for CSV). Published-schema migration runs
 silently inside that call. There is no second decoder or migration-report
 wrapper.
 
@@ -2614,8 +2614,8 @@ struct Signup {
 errs :: Signup.validate(bad_signup) // Signup [FieldError]!
 ```
 
-`Type.validate(value)` runs the block standalone, returning `value !
-[FieldError]` — `FieldError` carries `.path`/`.reason`, the same shape as
+`Type.validate(value)` runs the block standalone, returning `value
+[FieldError]!` — `FieldError` carries `.path`/`.reason`, the same shape as
 typed decode failures. Rule expressions are purity-checked (S60/E3401): a `check`'s
 condition and message may reference only the struct's own fields and pure
 calls, never Net/DB/IO. Derived decoders invoke this validator after shape

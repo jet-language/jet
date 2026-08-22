@@ -340,11 +340,10 @@ fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
 
     let quarantine = root.path.join("hangar").join("quarantine");
     fs::create_dir_all(&quarantine).unwrap();
-    fs::rename(
-        &entry.out,
-        quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash)),
-    )
-    .unwrap();
+    make_tree_writable(Path::new(&entry.out));
+    let crash_backup = quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash));
+    fs::rename(&entry.out, &crash_backup).unwrap();
+    seal_tree(&crash_backup);
     let recovered = jet()
         .args(["hangar", "recover", "--no-color"])
         .current_dir(&project.path)
@@ -377,6 +376,34 @@ fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
         &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
     )
     .unwrap();
+}
+
+#[cfg(unix)]
+fn seal_tree(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let metadata = fs::symlink_metadata(path).unwrap();
+    if metadata.is_dir() {
+        for child in fs::read_dir(path).unwrap() {
+            seal_tree(&child.unwrap().path());
+        }
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(permissions.mode() & !0o222);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(not(unix))]
+fn seal_tree(path: &Path) {
+    let metadata = fs::metadata(path).unwrap();
+    if metadata.is_dir() {
+        for child in fs::read_dir(path).unwrap() {
+            seal_tree(&child.unwrap().path());
+        }
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 #[test]

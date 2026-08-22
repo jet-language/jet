@@ -323,21 +323,42 @@ pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) 
     out_dir
 }
 
-/// Write a fixture containing the native test binary itself. This exercises
-/// executable lease handoff on every tier-1 host without depending on `sh` or
-/// a platform-specific script format.
+/// Write a small native executable fixture. This exercises executable lease
+/// handoff on every tier-1 host without hashing the multi-hundred-megabyte
+/// debug `jetpack` binary on every store verification.
 pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
     let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
     let executable = bin.join(&name);
-    fs::copy(jetpack_bin(), &executable).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let source = staging_dir
+        .parent()
+        .unwrap_or(staging_dir)
+        .join("native-jetpack-fixture.rs");
+    fs::write(
+        &source,
+        r#"fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--help") {
+        println!("jetpack platform fixture");
     }
+}
+"#,
+    )
+    .unwrap();
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(rustc)
+        .args(["--edition=2021", "-C", "debuginfo=0", "-C", "opt-level=0"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap_or_else(|error| panic!("could not compile native platform fixture: {error}"));
+    assert!(
+        output.status.success(),
+        "native platform fixture compilation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out_dir = seed_hangar_object(root, staging_dir);
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",

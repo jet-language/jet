@@ -250,7 +250,16 @@ fn check_lsp() -> Check {
 
 fn check_registry() -> Check {
     let registry = crate::Publish::resolve_publish_registry();
-    let safe_url = redact_registry_url(&registry.url);
+    let safe_url = crate::Publish::redact_registry_url(&registry.url);
+    if safe_url != registry.url {
+        return Check::problem(
+            "registry",
+            registry.name,
+            format!("{safe_url} (embedded credentials or URL parameters are not allowed)"),
+            "remove credentials and query parameters from JET_REGISTRY_URL; configure the host Git credential provider instead",
+            false,
+        );
+    }
     if registry.url.starts_with("file://") {
         let path = registry.url.trim_start_matches("file://");
         return if PathBuf::from(path).exists() {
@@ -266,7 +275,8 @@ fn check_registry() -> Check {
         };
     }
     match Command::new("git")
-        .args(["ls-remote", &registry.url])
+        .args(["-c", "credential.useHttpPath=true", "ls-remote", &registry.url])
+        .env("GIT_TERMINAL_PROMPT", "0")
         .output()
     {
         Ok(output) if output.status.success() => {
@@ -275,7 +285,10 @@ fn check_registry() -> Check {
         Ok(output) => Check::problem(
             "registry",
             registry.name,
-            format!("{safe_url} (unreachable: {})", redact_registry_url(&String::from_utf8_lossy(&output.stderr))),
+            format!(
+                "{safe_url} (unreachable: {})",
+                crate::Publish::redact_registry_url(&String::from_utf8_lossy(&output.stderr)),
+            ),
             "check JET_REGISTRY_URL, credentials, and network access, then retry",
             false,
         ),
@@ -287,19 +300,6 @@ fn check_registry() -> Check {
             false,
         ),
     }
-}
-
-fn redact_registry_url(value: &str) -> String {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return value.to_string();
-    };
-    let authority_end = rest.find('/').unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
-    let safe_authority = authority
-        .rsplit_once('@')
-        .map(|(_, host)| format!("***@{host}"))
-        .unwrap_or_else(|| authority.to_string());
-    format!("{scheme}://{}{suffix}", safe_authority, suffix = &rest[authority_end..])
 }
 
 fn check_ffi() -> Vec<Check> {

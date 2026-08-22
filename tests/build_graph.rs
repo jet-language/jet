@@ -17,6 +17,7 @@ use jet::Comptime::Build::{
     execute_build_plan_with_front_end_and_compiler,
     execute_build_plan_with_front_end_and_remote,
     remote_execution_identity,
+    remote_policy_digest,
     read_packaged_file_bounded,
 };
 use std::fs;
@@ -1446,6 +1447,26 @@ fn remote_driver_consumes_authenticated_worker_result() {
             &[],
         )
         .unwrap();
+    let expected_policy = remote_policy_digest(
+        plan.action(action)
+            .unwrap()
+            .caps
+            .iter()
+            .cloned(),
+    );
+    let toolchain_identity = plan
+        .toolchain(plan.action(action).unwrap().toolchain)
+        .map(|value| format!("{value:?}"))
+        .unwrap_or_else(|| "missing-toolchain".to_string());
+    let toolchain_digest = ContentDigest::from_bytes(toolchain_identity.as_bytes());
+    let expected_remote_provenance = ContentDigest::from_bytes(
+        format!(
+            "jet.remote-provenance.v1\ntoolchain={}\npolicy={}\n",
+            toolchain_digest.as_str(),
+            expected_policy.as_str(),
+        )
+        .as_bytes(),
+    );
     let binding = RemoteBuildBinding::new("builder-a", &remote_root, b"driver-worker-key")
         .unwrap()
         .with_trust_domain("trusted")
@@ -1463,6 +1484,11 @@ fn remote_driver_consumes_authenticated_worker_result() {
         loop {
             match transport.read_execution_request(&worker_key) {
                 Ok(request) => {
+                    assert_eq!(
+                        request.sandbox.provenance_digest,
+                        expected_remote_provenance,
+                        "remote worker proof must bind toolchain and declared capabilities"
+                    );
                     let policy = RemoteCachePolicy::with_grants(
                         false,
                         false,
@@ -1538,6 +1564,153 @@ fn remote_driver_consumes_authenticated_worker_result() {
         fs::read(project_root.join("build/remote-app")).unwrap(),
         b"remote worker output"
     );
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn remote_execution_retries_after_worker_loss() {
+    let project_root = std::env::temp_dir().join(format!(
+        "jet_remote_retry_{}_{}",
+        std::process::id(),
+        "worker-loss"
+    ));
+    let _ = fs::remove_dir_all(&project_root);
+    fs::create_dir_all(project_root.join("src")).unwrap();
+    fs::write(project_root.join("src/input"), b"retry input").unwrap();
+    let remote_root = project_root.join("remote-transport");
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "remote-retry",
+            ActionSpec::cached(["remote-tool"])
+                .with_inputs(["src/input"])
+                .with_outputs(["build/retried"])
+                .with_cap(BuildCapability::Net),
+        )
+        .unwrap();
+    let target = b
+        .add_executable("retried", TargetSpec::new().with_action(action))
+        .unwrap();
+    let plan = b.plan_with_default(target).unwrap();
+    let grants = [BuildCapability::Net].into_iter().collect();
+    let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
+    let snapshots = cas
+        .snapshot_declared_inputs(&project_root, plan.action(action).unwrap())
+        .unwrap();
+    let key = plan
+        .effective_action_key(
+            action,
+            &snapshots,
+            &grants,
+            std::path::Path::new("remote-tool"),
+            &ContentDigest::from_bytes(b"remote-tool"),
+            &[],
+        )
+        .unwrap();
+    let binding = RemoteBuildBinding::new("builder-retry", &remote_root, b"retry-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_worker_id("worker-retry")
+        .with_platform(format!(
+            "{}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ))
+        .with_abi("native")
+        .with_execute(true)
+        .with_timeout_ms(250);
+
+    let worker_key = key.clone();
+    let worker_binding = binding.clone();
+    let worker = std::thread::spawn(move || {
+        let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut lost_attempt = None;
+        loop {
+            match transport.read_execution_request(&worker_key) {
+                Ok(request) if lost_attempt.is_none() => {
+                    lost_attempt = Some(request.attempt_id);
+                }
+                Ok(request)
+                    if lost_attempt
+                        .as_ref()
+                        .is_some_and(|attempt| attempt == &request.attempt_id) =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Ok(request) => {
+                    let policy =
+                        RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
+                    let bytes = b"retried output";
+                    let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+                    let (stdout_digest, stderr_digest) =
+                        remote_empty_log_digests(&transport, &policy);
+                    transport
+                        .publish_execution_result(
+                            &RemoteExecutionResult {
+                                key: request.key.clone(),
+                                attempt_id: request.attempt_id.clone(),
+                                execution_id: remote_execution_identity(&request),
+                                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+                                outputs: vec![ActionOutputRecord {
+                                    path: request.outputs[0].clone(),
+                                    digest,
+                                    byte_len: bytes.len() as u64,
+                                }],
+                                toolchain_digest: request.toolchain_digest.clone(),
+                                sandbox: request.sandbox.clone(),
+                                stdout_digest,
+                                stderr_digest,
+                                provenance_signer: request.sandbox.worker_id.clone(),
+                            },
+                            &policy,
+                        )
+                        .unwrap();
+                    return;
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("remote retry worker could not read request: {error}"),
+            }
+        }
+    });
+
+    let execution = execute_build_plan_with_front_end_and_remote(
+        &plan,
+        &project_root,
+        &grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap();
+    worker.join().unwrap();
+    assert!(execution.report.events.iter().any(|event| {
+        matches!(
+            event,
+            BuildExecutionEvent::Finished {
+                action: finished,
+                outcome: ActionOutcome::Succeeded { exit_code: 0 },
+            } if *finished == action.id()
+        )
+    }));
+    assert_eq!(
+        fs::read(project_root.join("build/retried")).unwrap(),
+        b"retried output"
+    );
+    let cancellation_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+    let cancellation_hex = cancellation_digest
+        .as_str()
+        .strip_prefix("sha256:")
+        .unwrap();
+    assert!(remote_root
+        .join("execution/cancelled")
+        .join(&cancellation_hex[..2])
+        .join(&cancellation_hex[2..])
+        .is_file());
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -1838,6 +2011,50 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     };
     worker.publish_execution_result(&result, &policy).unwrap();
     assert_eq!(client.download_execution_result(&key, &policy).unwrap(), result);
+
+    let result_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
+    let result_hex = result_digest.as_str().strip_prefix("sha256:").unwrap();
+    let result_path = root
+        .join("execution/results")
+        .join(&result_hex[..2])
+        .join(&result_hex[2..]);
+    let signed = fs::read(&result_path).unwrap();
+    let mut unsigned = signed.clone();
+    let mac_start = unsigned
+        .windows(4)
+        .position(|window| window == b"mac=")
+        .unwrap();
+    let mac_end = mac_start
+        + unsigned[mac_start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .unwrap()
+        + 1;
+    unsigned.drain(mac_start..mac_end);
+    fs::write(&result_path, unsigned).unwrap();
+    assert!(matches!(
+        client.download_execution_result(&key, &policy),
+        Err(RemoteCacheError::InvalidRecord(message))
+            if message.contains("no MAC")
+    ));
+
+    let mut corrupt = signed;
+    let payload_offset = corrupt
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .unwrap()
+        + 2;
+    corrupt[payload_offset] = if corrupt[payload_offset] == b'v' {
+        b'w'
+    } else {
+        b'v'
+    };
+    fs::write(&result_path, corrupt).unwrap();
+    assert!(matches!(
+        client.download_execution_result(&key, &policy),
+        Err(RemoteCacheError::InvalidRecord(message))
+            if message.contains("authentication failed")
+    ));
 
     // A second submission for the same action is a new remote attempt. The
     // old result is removed before the new request is visible, so a delayed

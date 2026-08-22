@@ -64,6 +64,19 @@ pub fn definition_fingerprint_with_selections(
                 file.fingerprint().into_bytes(),
             ));
         }
+        let profile_name = plan.active_environment.as_deref().unwrap_or("dev");
+        if plan
+            .package_profiles
+            .iter()
+            .any(|profile| profile.name == profile_name)
+        {
+            add_input(
+                root,
+                &format!("{}/profiles/{profile_name}/current", Syntax::SOURCE_ROOT_DIR),
+                "package-profile-current",
+                &mut entries,
+            );
+        }
         entries.push((
             "lifecycle".to_string(),
             plan.lifecycle.fingerprint().into_bytes(),

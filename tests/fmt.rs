@@ -32,7 +32,7 @@ fn package_transition_surface_formats_canonically_and_idempotently() {
 
 #[test]
 fn type_alias_binding_sigils_are_canonical_and_idempotent() {
-    let source = "alias Result<T> :: T Int!\nfn run() {}\n";
+    let source = "alias Result<T> :: T Int!;\nfn run() {}\n";
     let once = jet::format_source(source).expect("canonical alias spelling should format");
     assert!(once.contains("alias Result<T> :: T Int!"), "{once}");
     assert!(!once.contains("alias Result<T> ="), "{once}");
@@ -1091,7 +1091,7 @@ fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() Int -> { return 1 }"), "{once}");
     assert!(once.contains("fn concise() Int -> 1"), "{once}");
-    assert!(once.contains("fn record() Rect -> { width: 1, height: 2 }"), "{once}");
+    assert!(once.contains("fn record() Rect -> {width: 1, height: 2}"), "{once}");
     assert!(once.contains("fn impure() { print(1) }"), "{once}");
     assert!(once.contains("fn explicit() () { print(1) }"), "{once}");
     assert!(once.contains("fn fail() ! {}"), "{once}");
@@ -2695,7 +2695,6 @@ fn fmt_unified_loop_headers_and_next_stability() {
     assert_eq!(once, twice, "unified loop formatting must be stable");
 
     for retired in [
-        "fn run() { loop x in [1] {} }\n",
         "fn run() { loop i in 0..2 step 1 {} }\n",
         "fn run() { loop { continue } }\n",
         "fn run() { loop i :: 0, true {} }\n",
@@ -3048,7 +3047,7 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["level: Int(0..100)", "Int(0..100) {", "Int(0..100).from_int(12)"],
+        &["level: Int(0..100)", "Int(0..100) -> {", "Int(0..100).from_int(12)"],
         "inline range type positions",
     );
 }

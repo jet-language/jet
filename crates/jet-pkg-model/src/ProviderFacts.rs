@@ -516,7 +516,61 @@ impl ProviderFacts {
         );
     }
 
+    /// Retain the exact selector resolved by a named source authority while
+    /// keeping the user's intentionally unpinned reference unchanged.
+    pub fn set_resolved_selector(&mut self, selector: &str, source: &str) {
+        let resolved = ProviderSelector::parse(selector);
+        self.add_fact(
+            "provider.resolved_selector",
+            ProviderFactValue::Text(selector.to_string()),
+            source,
+        );
+        if !resolved.is_exact() {
+            self.add_loss(
+                "provider.resolved_selector",
+                "resolved provider selector is not an exact version, revision, or digest",
+                source,
+            );
+            return;
+        }
+        if self.selector.is_exact()
+            && canonical_selector(&self.selector) != canonical_selector(&resolved)
+        {
+            self.add_conflict(
+                "provider.selector",
+                &canonical_selector(&self.selector),
+                &canonical_selector(&resolved),
+                source,
+            );
+            return;
+        }
+        self.losses.retain(|loss| {
+            !(loss.source == "reference.selector"
+                && loss.key == "provider.selector"
+                && loss.reason
+                    == "external provider references must retain an exact version, revision, or digest")
+        });
+    }
+
     pub fn set_native_document(&mut self, format: &str, document: &str) {
+        if !self.native_format.is_empty() || !self.native_document.is_empty() {
+            if self.native_format != format || self.native_document != document {
+                self.add_conflict(
+                    "provider.native_document",
+                    &format!(
+                        "{}:sha256-{}",
+                        self.native_format,
+                        SHA256::sha256_hex(self.native_document.as_bytes())
+                    ),
+                    &format!(
+                        "{format}:sha256-{}",
+                        SHA256::sha256_hex(document.as_bytes())
+                    ),
+                    "provider.native_document",
+                );
+            }
+            return;
+        }
         self.native_format = format.to_string();
         self.native_document = document.to_string();
     }
@@ -592,6 +646,25 @@ impl ProviderFacts {
                 "external provider `{}` requires an exact version, revision, or digest",
                 self.provider
             ));
+        }
+        if let Some(value) = self.facts.get("provider.resolved_selector") {
+            let ProviderFactValue::Text(raw) = value else {
+                return Err("resolved provider selector fact must be text".to_string());
+            };
+            let resolved = ProviderSelector::parse(raw);
+            if !resolved.is_exact() {
+                return Err(
+                    "resolved provider selector must be an exact version, revision, or digest"
+                        .to_string(),
+                );
+            }
+            if self.selector.is_exact()
+                && canonical_selector(&self.selector) != canonical_selector(&resolved)
+            {
+                return Err(
+                    "resolved provider selector conflicts with the requested selector".to_string(),
+                );
+            }
         }
         for key in self.facts.keys() {
             if !self.provenance.contains_key(key) {
@@ -1093,5 +1166,48 @@ mod tests {
         let conflict = ProviderFacts::for_reference("npm", "left-pad#1.0.0@cargo");
         assert!(conflict.conflicts.iter().any(|item| item.key == "provider"));
         assert!(conflict.validate().is_err());
+    }
+
+    #[test]
+    fn resolved_selector_makes_an_unpinned_source_explicit() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad@catalog");
+        facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog");
+        facts.set_resolved_source("left-pad#version=2.0.17@npm");
+        facts
+            .validate()
+            .expect("resolved source selector is lossless");
+        assert_eq!(
+            facts.qualified_reference(),
+            "left-pad#version=2.0.17@catalog"
+        );
+        let round_trip = ProviderFacts::from_json(&facts.to_json()).expect("carrier round trip");
+        assert_eq!(round_trip, facts);
+        assert!(facts
+            .explain_lines()
+            .iter()
+            .any(|line| line.contains("provider.resolved_selector")));
+    }
+
+    #[test]
+    fn conflicting_native_documents_are_reported() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad#1.0.0@npm");
+        facts.set_native_document("package.json", "one");
+        facts.set_native_document("package.json", "two");
+        assert!(facts
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.key == "provider.native_document"));
+        assert!(facts.validate().is_err());
+    }
+
+    #[test]
+    fn resolved_selector_does_not_hide_unsupported_requested_facts() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad#channel=next@catalog");
+        facts.set_resolved_selector("#version=2.0.17", "policy.providers.catalog");
+        assert!(facts
+            .losses
+            .iter()
+            .any(|loss| loss.reason.contains("unsupported selector fact")));
+        assert!(facts.validate().is_err());
     }
 }

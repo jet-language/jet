@@ -1106,6 +1106,7 @@ impl<'a> Fmt<'a> {
         self.fmt_type_params(&a.type_params);
         self.write(" :: ");
         self.fmt_type(&a.target);
+        self.write(";");
     }
 
     fn fmt_type_params(&mut self, params: &[TypeParam]) {
