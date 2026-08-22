@@ -35,7 +35,7 @@ struct Point {
 
     fn dist_sq(self) Float -> self.x * self.x + self.y * self.y
 
-    fn origin() Point { return Point{x: 0.0, y: 0.0} }
+    fn origin() Point -> { return Point{x: 0.0, y: 0.0} }
 }
 
 // --- enums & pattern matching --------------------------------------------
@@ -46,7 +46,7 @@ enum Light {
     Green
 }
 
-fn next(light: Light) Light {
+fn next(light: Light) Light -> {
     if light == {
         .Red -> { return Light.Yellow }
         .Yellow -> { return Light.Green }
@@ -54,7 +54,7 @@ fn next(light: Light) Light {
     }
 }
 
-fn day_kind(day: String) String {
+fn day_kind(day: String) String -> {
     if day == {
         "sat" | "sun" -> { return "weekend" }
         else -> { return "weekday" }
@@ -66,12 +66,12 @@ enum ParseError {
     Empty
 }
 
-fn parse_age(raw: String) Int ParseError! {
+fn parse_age(raw: String) Int ParseError! -> {
     if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn double_age(raw: String) Int ParseError! {
+fn double_age(raw: String) Int ParseError! -> {
     n :: parse_age(raw)?
     return Ok(n * 2)
 }
@@ -97,7 +97,7 @@ module math {
 // --- low-level: `Type{ uninit }` sentinel --------------------------------
 // Opts a binding out of automatic zero-fill; sema proves every read happens
 // after a write on all paths (E0420, D-UNINIT-SENTINEL2). Gated by `use core.mem`.
-fn show_uninit() Int {
+fn show_uninit() Int -> {
     n := Int{ uninit }
     n = 99
     return n
@@ -123,7 +123,7 @@ struct ServeArgs {
 // --- stream parsing: `Reader.over` / `Cursor.over` / `take_pattern` -------
 // D-SHIFT1: the "shift" kernel for linear stream parsing — every read
 // advances position and returns `? Err`, never panics or truncates silently.
-fn parse_packet() String {
+fn parse_packet() String -> {
     packet :: [U8]{42, 0, 0, 0, 3, 0, 16, 32, 48}
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
@@ -132,7 +132,7 @@ fn parse_packet() String {
     return "magic={magic} count={count} payload_len={payload.len()}"
 }
 
-fn parse_incident(line: String) String {
+fn parse_incident(line: String) String -> {
     c :: Cursor.over(line)
     c.skip_ws()
     matched :: c.take_pattern("inc-{id:Int} sev {sev:Int}: ") ?? panic("bad incident line")
@@ -155,7 +155,7 @@ migration Account {
     add verified: Bool = false
 }
 
-fn decode_account(raw: String) String {
+fn decode_account(raw: String) String -> {
     account :: json.decode<Account>(raw) ?? panic("bad account")
     return "id={account.id} verified={account.verified}"
 }

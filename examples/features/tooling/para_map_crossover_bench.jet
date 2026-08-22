@@ -11,13 +11,13 @@
 // Reference (2026-08-03, Linux x86_64, Ryzen 9 7950X3D, 32 logical CPUs,
 // three invocations): para_map first beat map at 256 items × cost 256; cost 1
 // and cost 32 never won in this matrix, and 64 × cost 256 still lost.
-fn input(count: Int) [Int] {
+fn input(count: Int) [Int] -> {
     values := [Int]{}
     loop index in 0..<count -> values.push(index)
     return values
 }
 
-fn work(item: Int, cost: Int) Int {
+fn work(item: Int, cost: Int) Int -> {
     value := item + 1
     loop step in 0..<cost -> value = (value * 31 + step + item) % 1000003
     return value
@@ -25,13 +25,13 @@ fn work(item: Int, cost: Int) Int {
 
 // The checksum consumes every mapped value, so an optimizer cannot discard
 // interior callback work while retaining only a first/last sentinel.
-fn map_case(count: Int, cost: Int) Int {
+fn map_case(count: Int, cost: Int) Int -> {
     values :: input(count)
     mapped :: values.map((item: Int) -> work(item, cost))
     return mapped.sum()
 }
 
-fn para_map_case(count: Int, cost: Int) Int {
+fn para_map_case(count: Int, cost: Int) Int -> {
     values :: input(count)
     mapped :: values.para_map((item: Int) -> work(item, cost))
     return mapped.sum()

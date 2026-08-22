@@ -37,6 +37,13 @@ Strong foundations already exist:
 - hangar metadata, basic GC/optimization, build logs, shell-on-fail;
 - one-shot rootless default and Linux/macOS/Windows product intent.
 
+The tier-1 platform gate drives a native package through the production
+provider, lease, Hangar, offline, and clean paths in
+`tests/jetpack_platform.rs`. The same focused test runs on Linux, macOS, and
+Windows CI. Missing offline output fails with E1315 without leaving a partial
+Hangar entry. The private lease snapshot is the non-Linux executable handoff;
+hostile child confinement remains Epoch 8 card #398.
+
 JP0 stop-line now enforces three truth boundaries:
 
 - cache reuse verifies output existence, current canonical digest, platform,
@@ -46,21 +53,24 @@ JP0 stop-line now enforces three truth boundaries:
   signing key, allowlist the provenance-bound builder, and reject revoked or
   changed identities. Invalid Jet-owned candidates are quarantined and E2604
   stops the command; repair is never silent. Unsigned reuse is limited to an
-  exact Hangar-owned local output. Nix compatibility outputs always re-enter
-  Nix; Jetpack does not claim an early cache hit from spelling-only identity;
-- every existing Nix compatibility output recorded in Hangar gets a durable
-  `nix-store --add-root --indirect` root protecting its transitive closure;
+  exact Hangar-owned local output. Nix compatibility outputs need pinned output
+  identity and verified store authority; Jetpack does not invoke an installed
+  Nix executable as a cache or package fallback;
+- direct `/nix/store` outputs fail closed until a native store authority proves
+  and retains their closure. Jetpack does not create host GC roots through
+  `nix-store`;
 - canonical output archives hash node type, mode, bytes, symlink target, empty
   directories, and complete hardlink identity; reject outside aliases, escapes,
   cycles, concurrent mutation, and special files. Directory snapshots bind
   child names, types, metadata, and ctime before and after traversal. Local
   outputs are copied into per-realization sealed private snapshots. Executable
   files and executable symlink targets use lease-owned inherited file
-  descriptors. Lease-owned `PATH` wrappers live on a read-only private mount
+  descriptors on Linux; macOS and Windows use the sealed private snapshot
+  path. Linux lease-owned `PATH` wrappers live on a read-only private mount
   pinned by an inherited directory descriptor and are revalidated before
-  handoff. Nested shell execution resolves to exact executable descriptors, so
-  wrapper chmod/replacement or a same-UID rename/symlink swap cannot redirect
-  execution. Every realization
+  handoff. Nested shell execution resolves to exact leased executable members,
+  so wrapper chmod/replacement or a same-UID rename/symlink swap cannot
+  redirect execution. Every realization
   carries a mandatory typed lease: missing outputs are explicitly
   non-consumable and cannot fall back to raw paths. Leases hold no object lock.
   JetOS retains original provider/output provenance alongside the snapshot,
@@ -74,10 +84,9 @@ Production blockers after that stop-line:
 
 - recipes still execute as ordinary host processes; every platform reports
   fallback/unsandboxed until JP3 supplies an enforced jail;
-- remote builders and remote execution do not exist. The native binary-cache
-  slice now provides signed NAR/narinfo publication, ordered host-owned mirror
-  lookup, verified substitution, and resumable local/file transfer; cache
-  repair remains a separate closure operation;
+- the native binary-cache slice provides signed NAR/narinfo publication,
+  ordered host-owned mirror lookup, verified substitution, and resumable
+  local/file transfer; cache repair remains a separate closure operation;
 - registry dependencies have sparse signed metadata, checkpoint, and inclusion
   verification on the fetch path; complete consumer delivery still stops at
   E1207;
@@ -86,8 +95,8 @@ Production blockers after that stop-line:
 - source-backed package profile planning and immutable project-local
   generations now exist through the shared package/provider fact path;
   JetOS/user composition and dev-shell projection remain follow-on slices;
-- Nix package realization and direct foreign-shell entry still require
-  installed Nix; the bounded literal devShell bridge is native;
+- direct Nix package refs need a pinned compatibility output or verified store
+  authority; bounded foreign-shell projection is native;
 - optional package-author TOFU remains separate from registry/cache authority;
   cache roles now fail closed on first-use key changes, rollback/freeze
   evidence, mix-and-match provenance, and revoked builders;
@@ -124,7 +133,7 @@ These are integrity and isolation defects. They precede ecosystem breadth.
 
 | Ability | Nix bar | Jetpack audited state | Epoch closure |
 |---|---|---|---|
-| Package language | lazy evaluator produces derivations | typed Jet build/env model; installed Nix for Nix inputs | native compatibility evaluator plus one Jet action IR |
+| Package language | lazy evaluator produces derivations | typed Jet build/env model; pinned compatibility outputs for Nix inputs | native compatibility evaluator plus one Jet action IR |
 | Derivations | builder, args, env, inputs, platforms, named outputs | linear recipes plus separate build-plan models | every package path lowers to one finite action graph |
 | Immutable store | objects, refs/referrers, atomic registration | metadata dirs plus some owned output trees | canonical Hangar v2 objects and closure DB |
 | Addressing | derivation identity, fixed outputs, CA outputs | incomplete output hash; mixed meanings | separate complete action and canonical output digests |
@@ -132,14 +141,14 @@ These are integrity and isolation defects. They precede ecosystem breadth.
 | Substitution | ordered caches, miss builds locally | envelope only | native read/write cache plus NAR adapter |
 | Cache trust | signed store metadata and trusted keys | empty cache signature slot; author TOFU | threshold metadata, builder provenance, rotation/revocation |
 | Sandbox | enforced filesystem/process/network isolation | policy/status only; ordinary child execution | real Linux/macOS/Windows isolation backends |
-| Remote builds | heterogeneous builders and distributed scheduling | scheduler model only | verified remote action execution and failover |
+| Remote builds | heterogeneous builders and distributed scheduling | host-bound capability model, deterministic scheduler, authenticated CAS exchange | verified remote action execution and failover |
 | Flakes/locks | transitive inputs, follows, registries, selective update | native semantic locks; shallow foreign bridge | no-Nix flake evaluator/import and one semantic lock |
 | Profiles | atomic per-user generations and rollback | project envs only | source-backed named package profiles |
 | GC | closure roots and generations protect transitive objects | nearest project lock and age-based metadata GC | root/lease graph, why-live, crash-safe mark/sweep |
 | Cross compilation | build/host/target roles | platform facts, host envelope | typed roles and variant-aware resolution/action keys |
 | Explain | derivations, logs, why-depends, diff closures | good rationale/log substrate | file-edge closure, cache, rebuild, trust, GC explanations |
 | Multi-user | secure shared store/build identities | per-user one-shot process | owner-selected optional shared-store architecture |
-| Nixpkgs access | evaluator, `.drv`, NAR caches, local builds | installed-Nix shell-outs | native compatibility pipeline and differential corpus |
+| Nixpkgs access | evaluator, `.drv`, NAR caches, local builds | pinned outputs and bounded evaluator; no installed-Nix shell-out | native compatibility pipeline and differential corpus |
 | Dynamic planning | IFD/dynamic derivations | absent | owner-selected finite typed staged planning or explicit rejection |
 
 Primary Nix references:
@@ -292,6 +301,9 @@ live acceptance, and documentation. Work order is binding.
 - Atomic root update, the ratified plan-before-apply mutation UX for `jet clean`,
   why-live/why-dead, and stale-lease recovery.
 - Verify, quarantine, repair from ordered caches, then deterministic rebuild.
+- Hangar receipt substrate: immutable connected package-realization objects,
+  lock digest projections, atomic publication, and fail-closed corruption/path
+  repair that keeps the live closure intact.
 
 ### E4-JP5 — native binary cache and Nix cache interoperability
 
@@ -332,7 +344,9 @@ live acceptance, and documentation. Work order is binding.
   closed with the existing signed provenance and recovery explanation.
 - Native cache entries carry a signed, time-bounded admission receipt. The host
   pins the accepted receipt version and digest per cache role and output, so a
-  replayed older receipt or same-version replacement cannot become usable.
+  replayed older receipt or same-version replacement cannot become usable. The
+  transfer report and explain JSON expose the accepted receipt version and
+  expiry alongside the provenance decision.
 
 ### E4-JP7 — remote builders and execution
 
@@ -345,6 +359,23 @@ live acceptance, and documentation. Work order is binding.
 - Result statement binds action digest, named output digests, platform/worker
   rights, policy/sandbox class, stdout/stderr digests, exit status,
   provenance signer, and immutable execution identity.
+
+Shipped slice evidence:
+
+- `jetpack::Remote::RemoteBuildRequest` contains the requested maximum action
+  capabilities, features, resource pools, platform, trust domain, separate
+  cache/execution grants, and explicit local-fallback choice.
+- `RemoteBuilderCapabilities` records platform, features, pools, concurrency,
+  priority, trust domain, and cache/execution access. `RemoteScheduler` orders
+  eligible host-owned bindings by priority and builder name, then advances to
+  the next candidate only for a retryable worker loss.
+- `jet build --builder <bound-name>` enters the canonical build executor. It
+  uploads missing action inputs to the authenticated CAS, submits the exact
+  action identity, and restores only digest- and length-verified outputs.
+- The transport rejects unauthenticated, malformed, mismatched, stale, or
+  replayed records. Cancellation and result publication share one commit lock;
+  result publication is idempotent only when a duplicate statement agrees
+  exactly with the existing record.
 
 ### E4-JP8 — Nix derivation compatibility
 
@@ -478,6 +509,15 @@ live acceptance, and documentation. Work order is binding.
   protocol. Credentials never enter dynamic repo URLs, argv, environment, logs,
   locks, or provenance.
 
+The registry delivery slice now publishes the index line, source artifact,
+sparse package metadata, signed checkpoint, and transparency log as one git
+transaction. Local clones and artifact trees are built in private staging
+paths and installed by rename; duplicate versions remain reserved after a
+yank. Locked resolution verifies the recorded registry source and exact
+artifact, including an exact yanked version, while fresh resolution excludes
+yanked entries. Registry git transport rejects embedded credentials and
+redacts endpoint details in diagnostics.
+
 ### E4-JP13 — one semantic lock, catalogs, overlays, and source maps
 
 - Fold machine lock and semantic rationale into one forward-compatible schema.
@@ -497,6 +537,11 @@ live acceptance, and documentation. Work order is binding.
 - Profiles lower through the shared provider-fact carrier. Raw refs, provider
   identity, provenance, native documents, stable fingerprints, and explicit
   loss/conflict reports survive plan, lock, explain, and generated output.
+- The carrier accepts the ratified direct-root forms (`#version=<exact>` and
+  its bare-version shorthand), canonicalizes lock refs, and retains resolved
+  source selectors separately from an intentionally unpinned source spelling.
+  Unknown, mutable, duplicate, or mismatched selector facts are explicit loss
+  or conflict records.
 - Unsupported, lossy, ambiguous, or conflicting provider facts fail with an
   explicit diagnostic; planning never supplies a silent provider default.
 - Power-loss tests permit old or new only; GC protects retained generations.
@@ -532,6 +577,9 @@ composition and exact dev-shell projection are separate delivery slices.
   Conan/vcpkg, Homebrew, GitHub, binary, and Nix providers.
 - Normalize dependency kinds, yanks, licenses, hooks, variants, signatures,
   platforms, advisories, and source ownership without erasing provider facts.
+- Each importer lowers its native bytes and typed projection into the shared
+  provider-fact carrier. A missing exact identity remains a source-linked
+  migration finding; it never becomes a generated mutable provider ref.
 - Importers prove behavior on real representative projects; TODOs are explicit
   source-linked migration findings, never fake generated implementations.
 
@@ -546,6 +594,11 @@ composition and exact dev-shell projection are separate delivery slices.
   action key. A divergent registration writes deterministic evidence to
   `private/unreproducible/<action-key>.json` and does not commit a closure fact;
   trusted cache publication, verification, and substitution reject that action.
+- The production source-build path certifies uncached candidates in two
+  fresh Hangar subroots. It promotes the first result only after the action,
+  output tree, named outputs, and producer facts agree; retries and
+  cancellation discard both private roots, and a mismatch remains untrusted
+  evidence until a later fresh agreeing certification replaces it.
 
 ### E4-JP19 — explain and store-operation parity-plus
 
@@ -553,13 +606,23 @@ composition and exact dev-shell projection are separate delivery slices.
   what-depends, closure, referrers, why-live,
   cache decision, rebuild reason, action/derivation, environment origin,
   overlay winner, trust chain, repair source.
+- Card #430 ships the package slice through `jet explain`: the default view
+  joins Store identity, provider facts, dependency/closure edges, liveness
+  roots, and rebuild checks. `why-depends`, `what-depends`, `closure`,
+  `why-live`, and `rebuild` select one causal view. JSON keeps the same fact
+  model and reports loss or conflict instead of filling missing facts.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
+- Repair is one locked Hangar transaction: a signed archive is staged and
+  re-hashed, a corrupt object is quarantined, and failed import restores the
+  prior object; crash leftovers are recoverable through `hangar recover`.
 - Failed-build shell recreates the exact sandbox and declared closure.
 - Stable JSON and LSP use the same fact engine.
 
 ### E4-JP20 — advisory, license, SBOM, provenance policy
 
-- OSV-compatible advisory feeds with freshness/offline bundles and exceptions.
+- OSV-compatible advisory feeds with signed offline bundles, monotonic sequence
+  and expiry checks, 24-hour third-party release maturity, exact
+  `package#version` exceptions, and trust-evidence no-downgrade.
 - SPDX license expression policy, source mapping, yanks/retractions, release
   maturity, and trust-evidence no-downgrade.
 - OCI referrers bind SBOM, signature, provenance, and reproducibility proof.
@@ -567,10 +630,20 @@ composition and exact dev-shell projection are separate delivery slices.
 
 ### E4-JP21 — explicit finite staged planning
 
-- If ratified, a sandboxed plan action emits a typed BuildPlan fragment.
-- Canonical hash, sema, authority, acyclicity, and finite-stage checks run before
-  merging stage two.
-- No arbitrary evaluator filesystem read or recursive package-manager call.
+- A sandboxed plan action emits a typed `BuildPlan` fragment through the
+  production `jetpack::Recipe::run_staged_plan_action` seam.
+- The package model binds the finite stage, exact input digests, realized tools,
+  effects, platform, outputs, dependencies, canonical fragment digest, and lock
+  identity before the fragment enters the ordinary `BuildPlan` graph.
+- `PlanSandbox` exposes only declared source inputs. Store reads and package
+  resolution are denied. Cycles, undeclared inputs, unauthorized tools/effects,
+  platform mismatches, overlapping/escaping outputs, cancellation, and failed
+  callbacks publish no artifact.
+- Publication writes the canonical fragment, lock, and plan fingerprint to a
+  scratch directory, then renames it atomically. Repeating the same action
+  returns the same identity and artifact directory.
+- Production-path proof: `tests/jetpack_engine.rs` covers deterministic
+  success, undeclared access, failed stages, cycles, and invalid outputs.
 
 ### E4-JP22 — world-class acceptance and scale gate
 
@@ -614,7 +687,8 @@ JP9 follows JP8; JP10 follows JP9; JP11 follows JP4–JP5 + JP8–JP10 + JP13.
 1. **Truth lane:** tamper/delete outputs, locks, cache metadata, and roots;
    cached/sandboxed/reproducible labels remain impossible without proof.
 2. **No-installed-Nix lane:** PATH and filesystem expose no `nix` binary;
-   representative nixpkgs packages/flakes/devShells resolve and realize.
+   pinned package fixtures and bounded flakes/devShells resolve natively;
+   unsupported package refs fail with E1272.
 3. **Canonical-store lane:** modes, symlinks, empty dirs, Unicode, hardlinks,
    xattrs, deep trees, corruption, partial ingest, and concurrent registration.
 4. **Cache adversary lane:** wrong hashes/platform/refs, stale/forged metadata,

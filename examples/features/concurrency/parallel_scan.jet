@@ -7,13 +7,13 @@ use core.sys as env
 
 fn count_lines(text: String) Int -> text.lines().len()
 
-fn scan_one(file_path: String) String {
+fn scan_one(file_path: String) String -> {
     text :: fs.read(~file_path) ?? return "{file_path}: unreadable"
     lines :: count_lines(text)
     return "{file_path}: {lines} lines, {text.len()} chars"
 }
 
-fn default_paths() [String] {
+fn default_paths() [String] -> {
     // Self-contained fixtures under /tmp so the golden does not depend on CWD.
     a :: Path.from("/tmp").join("jet_parallel_scan_a.txt").to_string()
     b :: Path.from("/tmp").join("jet_parallel_scan_b.txt").to_string()
@@ -24,7 +24,7 @@ fn default_paths() [String] {
 
 fn paths_from_args() [String] -> process.argv().skip(1).to_list()
 
-fn gather_paths() [String] {
+fn gather_paths() [String] -> {
     from_args :: paths_from_args()
     if from_args.len() > 0 -> return from_args
     if (env.get("INTERACTIVE") ?? "") == "1" {
@@ -33,7 +33,7 @@ fn gather_paths() [String] {
     return default_paths()
 }
 
-fn scan_parallel(paths: [String]) [String] {
+fn scan_parallel(paths: [String]) [String] -> {
     results := paths.para_map((file_path: String) -> scan_one(file_path))
     results.sort()
     return results

@@ -9,6 +9,7 @@
 use crate::TrustRoot::{Signature as TrustSignature, TrustKey};
 use crate::SHA256;
 use std::collections::BTreeSet;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -229,6 +230,9 @@ impl NarInfo {
         if text.len() > MAX_INFO_BYTES {
             return Err(invalid("narinfo is too large"));
         }
+        if !text.ends_with('\n') {
+            return Err(invalid("narinfo is missing its final newline"));
+        }
         let mut info = NarInfo {
             store_path: String::new(),
             url: String::new(),
@@ -250,7 +254,7 @@ impl NarInfo {
             let (key, value) = raw
                 .split_once(':')
                 .ok_or_else(|| invalid("narinfo contains a malformed line"))?;
-            if value.starts_with(' ') {
+            if value.starts_with(' ') && !value[1..].starts_with(' ') {
                 // Canonical narinfo uses exactly one separator space.
                 let value = &value[1..];
                 if !seen.insert(key.to_string()) && key != "Sig" {
@@ -278,6 +282,20 @@ impl NarInfo {
                 }
             } else {
                 return Err(invalid("narinfo field is missing its separator"));
+            }
+        }
+        for field in [
+            "StorePath",
+            "URL",
+            "Compression",
+            "FileHash",
+            "FileSize",
+            "NarHash",
+            "NarSize",
+            "References",
+        ] {
+            if !seen.contains(field) {
+                return Err(invalid(&format!("narinfo has no {field} field")));
             }
         }
         info.validate()?;
@@ -359,6 +377,7 @@ fn verify_nar_info_bytes(info: &NarInfo, nar: &[u8]) -> io::Result<()> {
     if info.nar_size != nar.len() as u64 || !hash_matches(&info.nar_hash, nar) {
         return Err(invalid("NAR bytes do not match signed narinfo"));
     }
+    validate_nar(nar)?;
     Ok(())
 }
 
@@ -390,17 +409,15 @@ fn encode_node(
         put_string(out, "type")?;
         put_string(out, "symlink")?;
         let target = fs::read_link(path)?;
-        let target = target
-            .to_str()
-            .ok_or_else(|| invalid("NAR symlink target is not UTF-8"))?;
-        validate_symlink_target(target)?;
-        if target.starts_with('/') {
-            validate_absolute_symlink_target(target)?;
+        let target = os_bytes(target.as_os_str());
+        validate_symlink_target(&target)?;
+        if target.starts_with(b"/") {
+            validate_absolute_symlink_target(&target)?;
         } else {
-            validate_relative_symlink_target(path, root, target)?;
+            validate_relative_symlink_target(path, root, &target)?;
         }
         put_string(out, "target")?;
-        put_string(out, target)?;
+        put_bytes(out, &target)?;
         put_string(out, ")")?;
     } else if metadata.is_dir() {
         put_string(out, "(")?;
@@ -410,16 +427,18 @@ fn encode_node(
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .map(|child| {
-                let name = child
-                    .file_name()
-                    .to_str()
-                    .ok_or_else(|| invalid("NAR filename is not UTF-8"))?
-                    .to_string();
+                let name = os_bytes(&child.file_name());
                 validate_name(&name)?;
                 Ok((name, child))
             })
             .collect::<io::Result<Vec<_>>>()?;
         children.sort_by(|(left, _), (right, _)| left.cmp(right));
+        validate_sibling_names(
+            &children
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>(),
+        )?;
         let mut names = BTreeSet::new();
         for (name, child) in children {
             if !names.insert(name.clone()) {
@@ -428,7 +447,7 @@ fn encode_node(
             put_string(out, "entry")?;
             put_string(out, "(")?;
             put_string(out, "name")?;
-            put_string(out, &name)?;
+            put_bytes(out, &name)?;
             put_string(out, "node")?;
             encode_node(&child.path(), root, out, state, depth + 1)?;
             put_string(out, ")")?;
@@ -463,9 +482,9 @@ struct DecodeState {
 
 #[derive(Debug)]
 enum NarNode {
-    Directory(Vec<(String, NarNode)>),
+    Directory(Vec<(Vec<u8>, NarNode)>),
     Regular { executable: bool, bytes: Vec<u8> },
-    Symlink(String),
+    Symlink(Vec<u8>),
 }
 
 fn decode_node(
@@ -489,28 +508,33 @@ fn decode_node(
         "directory" => {
             let mut entries = Vec::new();
             let mut names = BTreeSet::new();
+            let mut sibling_names = Vec::new();
             let mut previous_name = None;
             loop {
                 match reader.string()?.as_str() {
-                    ")" => break NarNode::Directory(entries),
+                    ")" => {
+                        validate_sibling_names(&sibling_names)?;
+                        break NarNode::Directory(entries);
+                    }
                     "entry" => {
                         if reader.string()? != "(" || reader.string()? != "name" {
                             return Err(invalid("NAR directory entry is malformed"));
                         }
-                        let name = reader.string()?;
+                        let name = reader.bytes()?;
                         validate_name(&name)?;
                         if !names.insert(name.clone()) {
                             return Err(invalid("NAR directory contains duplicate names"));
                         }
                         if previous_name
                             .as_deref()
-                            .is_some_and(|previous| previous >= name.as_str())
+                            .is_some_and(|previous| previous >= name.as_slice())
                         {
                             return Err(invalid(
                                 "NAR directory entries are not in canonical name order",
                             ));
                         }
                         previous_name = Some(name.clone());
+                        sibling_names.push(name.clone());
                         if reader.string()? != "node" {
                             return Err(invalid("NAR directory entry has no node"));
                         }
@@ -555,9 +579,9 @@ fn decode_node(
             if reader.string()? != "target" {
                 return Err(invalid("NAR symlink has no target"));
             }
-            let target = reader.string()?;
+            let target = reader.bytes()?;
             validate_symlink_target(&target)?;
-            if target.starts_with('/') {
+            if target.starts_with(b"/") {
                 validate_absolute_symlink_target(&target)?;
             } else {
                 if relative_depth == 0 {
@@ -607,7 +631,7 @@ fn write_decoded_node(node: &NarNode, path: &Path, root: &Path) -> io::Result<()
         NarNode::Directory(entries) => {
             fs::create_dir(path)?;
             for (name, child) in entries {
-                write_decoded_node(child, &path.join(name), root)?;
+                write_decoded_node(child, &path.join(os_string(name)?), root)?;
             }
         }
         NarNode::Regular { executable, bytes } => {
@@ -619,12 +643,13 @@ fn write_decoded_node(node: &NarNode, path: &Path, root: &Path) -> io::Result<()
     Ok(())
 }
 
-fn create_symlink(target: &str, path: &Path, root: &Path) -> io::Result<()> {
-    if target.starts_with('/') {
+fn create_symlink(target: &[u8], path: &Path, root: &Path) -> io::Result<()> {
+    let target_path = path_from_bytes(target)?;
+    if target.starts_with(b"/") {
         validate_absolute_symlink_target(target)?;
     } else {
         let parent = path.parent().unwrap_or(root);
-        let candidate = parent.join(target);
+        let candidate = parent.join(&target_path);
         let relative = candidate
             .strip_prefix(root)
             .map_err(|_| invalid("NAR relative symlink escapes its output root"))?;
@@ -646,21 +671,57 @@ fn create_symlink(target: &str, path: &Path, root: &Path) -> io::Result<()> {
     }
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(target, path)
+        use std::os::unix::ffi::OsStrExt as _;
+        std::os::unix::fs::symlink(OsStr::from_bytes(target), path)
     }
     #[cfg(windows)]
     {
-        if target.starts_with('/') {
-            std::os::windows::fs::symlink_dir(target, path)
+        if target.starts_with(b"/") {
+            std::os::windows::fs::symlink_dir(&target_path, path)
         } else {
-            std::os::windows::fs::symlink_file(target, path)
+            std::os::windows::fs::symlink_file(&target_path, path)
         }
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (target, path);
+        let _ = (target, target_path, path);
         Err(invalid("this host cannot materialize NAR symlinks"))
     }
+}
+
+fn os_bytes(value: &OsStr) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        value.as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        value.to_string_lossy().as_bytes().to_vec()
+    }
+}
+
+fn os_string(value: &[u8]) -> io::Result<OsString> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt as _;
+        Ok(OsString::from_vec(value.to_vec()))
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8(value.to_vec())
+            .map(OsString::from)
+            .map_err(|_| invalid("NAR path bytes are not representable on this host"))
+    }
+}
+
+fn path_from_bytes(value: &[u8]) -> io::Result<PathBuf> {
+    Ok(PathBuf::from(os_string(value)?))
+}
+
+fn validate_sibling_names(names: &[Vec<u8>]) -> io::Result<()> {
+    crate::Envelope::reject_casefold_collisions(names)
+        .map_err(|error| invalid(&format!("NAR path law rejected: {}", error.detail)))
 }
 
 fn executable(metadata: &fs::Metadata) -> bool {
@@ -684,13 +745,21 @@ fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> io::Result<()> {
     if bytes.len() > MAX_NODE_BYTES as usize {
         return Err(invalid("NAR field exceeds the 512 MiB limit"));
     }
-    out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-    out.extend_from_slice(bytes);
     let padding = (8 - (bytes.len() % 8)) % 8;
-    out.extend(std::iter::repeat(0).take(padding));
-    if out.len() > MAX_NAR_BYTES {
+    let total = 8usize
+        .checked_add(bytes.len())
+        .and_then(|size| size.checked_add(padding))
+        .ok_or_else(|| invalid("NAR field length overflows"))?;
+    if out
+        .len()
+        .checked_add(total)
+        .map_or(true, |length| length > MAX_NAR_BYTES)
+    {
         return Err(invalid("NAR exceeds the 1 GiB limit"));
     }
+    out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    out.extend_from_slice(bytes);
+    out.extend(std::iter::repeat(0).take(padding));
     Ok(())
 }
 
@@ -744,40 +813,42 @@ impl<'a> NarReader<'a> {
     }
 }
 
-fn validate_name(value: &str) -> io::Result<()> {
+fn validate_name(value: &[u8]) -> io::Result<()> {
     if value.is_empty()
         || value.len() > MAX_NAME_BYTES
-        || value == "."
-        || value == ".."
-        || value.contains('/')
-        || value.contains('\\')
-        || value.bytes().any(|byte| byte.is_ascii_control())
+        || value == b"."
+        || value == b".."
+        || value.contains(&b'/')
+        || value.contains(&b'\\')
+        || value.iter().any(|byte| byte.is_ascii_control())
     {
         return Err(invalid("NAR name is not one safe path component"));
     }
+    crate::Envelope::validate_path_component(value)
+        .map_err(|error| invalid(&format!("NAR path law rejected: {}", error.detail)))?;
     Ok(())
 }
 
-fn validate_symlink_target(value: &str) -> io::Result<()> {
+fn validate_symlink_target(value: &[u8]) -> io::Result<()> {
     if value.is_empty()
         || value.len() > MAX_NAME_BYTES * 4
         || value
-            .bytes()
-            .any(|byte| byte == 0 || byte.is_ascii_control())
+            .iter()
+            .any(|byte| *byte == 0 || *byte == b'\\' || byte.is_ascii_control())
     {
         return Err(invalid("NAR symlink target is invalid"));
     }
     Ok(())
 }
 
-fn validate_absolute_symlink_target(value: &str) -> io::Result<()> {
-    if !value.starts_with("/nix/store/") {
+fn validate_absolute_symlink_target(value: &[u8]) -> io::Result<()> {
+    if !value.starts_with(b"/nix/store/") {
         return Err(invalid("NAR absolute symlink must point into /nix/store"));
     }
-    validate_store_path(value)
+    validate_store_path_bytes(value)
 }
 
-fn validate_relative_symlink_target(path: &Path, root: &Path, target: &str) -> io::Result<()> {
+fn validate_relative_symlink_target(path: &Path, root: &Path, target: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("NAR symlink has no parent"))?;
@@ -791,8 +862,9 @@ fn validate_relative_symlink_target(path: &Path, root: &Path, target: &str) -> i
     validate_relative_symlink_depth(target, depth)
 }
 
-fn validate_relative_symlink_depth(target: &str, mut depth: usize) -> io::Result<()> {
-    for component in Path::new(target).components() {
+fn validate_relative_symlink_depth(target: &[u8], mut depth: usize) -> io::Result<()> {
+    let target = path_from_bytes(target)?;
+    for component in target.components() {
         match component {
             Component::CurDir => {}
             Component::Normal(_) => depth = depth.saturating_add(1),
@@ -809,15 +881,19 @@ fn validate_relative_symlink_depth(target: &str, mut depth: usize) -> io::Result
 }
 
 fn validate_store_path(value: &str) -> io::Result<()> {
-    let mut parts = value.split('/');
-    let safe = value.starts_with('/')
-        && value != "/"
-        && parts.next() == Some("")
-        && parts.all(|part| !part.is_empty() && part != "." && part != "..")
-        && !value.contains('\\')
-        && !value.contains('\n')
-        && !value.contains('\r')
-        && !value.contains('\0');
+    validate_store_path_bytes(value.as_bytes())
+}
+
+fn validate_store_path_bytes(value: &[u8]) -> io::Result<()> {
+    let mut parts = value.split(|byte| *byte == b'/');
+    let safe = value.starts_with(b"/")
+        && value != b"/"
+        && parts.next() == Some(&[][..])
+        && parts.all(|part| !part.is_empty() && part != b"." && part != b"..")
+        && !value.contains(&b'\\')
+        && !value.contains(&b'\n')
+        && !value.contains(&b'\r')
+        && !value.contains(&b'\0');
     if !safe {
         return Err(invalid("narinfo has an unsafe store path"));
     }
@@ -989,7 +1065,7 @@ fn narinfo_name(store_path: &str) -> io::Result<String> {
         .rsplit('/')
         .next()
         .ok_or_else(|| invalid("narinfo store path has no name"))?;
-    validate_name(name)?;
+    validate_name(name.as_bytes())?;
     Ok(format!("{name}.narinfo"))
 }
 
@@ -1013,6 +1089,10 @@ fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 }
 
 fn write_or_match(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("binary-cache destination has no parent"))?;
+    validate_destination_parent(parent)?;
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() {
             return Err(invalid("binary-cache destination cannot be a symlink"));
@@ -1033,9 +1113,11 @@ fn write_or_match(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("binary-cache destination has no parent"))?;
+    validate_destination_parent(parent)?;
+    fs::create_dir_all(parent)?;
     if fs::symlink_metadata(path).is_ok() {
         return Err(invalid("binary-cache destination already exists"));
     }
@@ -1184,5 +1266,49 @@ mod tests {
         signed.verify(&key).unwrap();
         let text = signed.to_text().unwrap();
         NarInfo::parse(&text).unwrap().verify(&key).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nar_roundtrip_preserves_opaque_posix_names() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let root = std::env::temp_dir().join(format!("jet-nar-opaque-{}", std::process::id()));
+        let destination = root.with_extension("out");
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&destination);
+        fs::create_dir_all(&root).unwrap();
+        let name = OsString::from_vec(b"opaque-\xff".to_vec());
+        fs::write(root.join(&name), b"opaque bytes").unwrap();
+
+        let (nar, _) = write_nar(&root).unwrap();
+        read_nar(&nar, &destination).unwrap();
+        assert_eq!(fs::read(destination.join(&name)).unwrap(), b"opaque bytes");
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&destination);
+    }
+
+    #[test]
+    fn publish_local_rejects_hash_matching_malformed_nar() {
+        let root = std::env::temp_dir().join(format!("jet-nar-publish-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let key = TrustKey::from_secret(vec![9; 32]).unwrap();
+        let nar = b"not a NAR";
+        let info = NarInfo {
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool".into(),
+            url: "nar/tool.nar".into(),
+            compression: "none".into(),
+            file_size: nar.len() as u64,
+            nar_size: nar.len() as u64,
+            nar_hash: nar_digest(nar),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            signatures: Vec::new(),
+        };
+
+        assert!(publish_local(&root, info, nar, &key).is_err());
+        assert!(!root.exists());
     }
 }

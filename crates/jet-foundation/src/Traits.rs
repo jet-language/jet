@@ -1541,7 +1541,7 @@ impl TraitRegistry {
             diags.push(Diagnostic::error(
                 "E2406",
                 format!(
-                    "can't declare `impl {} => {}` — neither type is defined in this program",
+                    "can't declare `impl {} -> {}` — neither type is defined in this program",
                     from_ty, to_ty
                 ),
                 "typed-target error conversions obey the same orphan rule as trait impls (S28); \
@@ -1559,12 +1559,12 @@ impl TraitRegistry {
             diags.push(Diagnostic::error(
                 "E2405",
                 format!(
-                    "duplicate error conversion: `impl {} => {}` is already declared",
+                    "duplicate error conversion: `impl {} -> {}` is already declared",
                     from_ty, to_ty
                 ),
                 "there can be at most one declared way to convert a `Source` error into a `Target`"
                     .to_string(),
-                "remove one of the two `impl … => …` blocks".to_string(),
+                "remove one of the two `impl … -> …` blocks".to_string(),
                 Some(span),
             ));
             let _ = prev; // the previous span could be added to the note in a future diagnostic upgrade
@@ -1573,7 +1573,7 @@ impl TraitRegistry {
         self.error_conversions.insert(key, span);
     }
 
-    /// D-ARROW-CONTROL1: returns true if a declared `impl from_ty => to_ty` exists.
+    /// D-ARROW-RESPELL1: returns true if a declared `impl from_ty -> to_ty` exists.
     pub fn has_error_conv(&self, from_ty: &str, to_ty: &str) -> bool {
         self.error_conversions
             .contains_key(&(from_ty.to_string(), to_ty.to_string()))
@@ -2413,8 +2413,8 @@ impl TraitRegistry {
     /// against the codec's fixed Jet-facing shape, so a wrong shape is a sema error before
     /// codegen bridges it to `jet_encode`/`jet_decode`.
     ///
-    ///   `Encode`:  `fn encode(self) => Data`         (one `self` param, returns `Data`)
-    ///   `Decode`:  `fn decode(tree: Data) => T [FieldError]!`
+    ///   `Encode`:  `fn encode(self) Data`             (one `self` param, returns `Data`)
+    ///   `Decode`:  `fn decode(tree: Data) T [FieldError]!`
     ///              (static — no `self`; one `Data` param; returns the owning type or
     ///               `[FieldError]`)
     fn check_serde_impl_methods(
@@ -2447,10 +2447,10 @@ impl TraitRegistry {
                 .filter(|p| p.name != Syntax::KW_SELF)
                 .collect();
             let ok = if trait_name == ENCODE {
-                // `encode(self) => Data`: exactly `self`, no other params, returns a Data.
+                // `encode(self) Data`: exactly `self`, no other params, returns a Data.
                 has_self && non_self.is_empty() && m.return_type.as_ref().is_some_and(is_data)
             } else {
-                // `decode(tree: Data) => T [FieldError]!`: static, one `Data` param,
+                // `decode(tree: Data) T [FieldError]!`: static, one `Data` param,
                 // returns the owning type (or `Self`) or the canonical error list.
                 let ret_ok = matches!(
                     &m.return_type,

@@ -5008,6 +5008,15 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
         String::from_utf8_lossy(&first.stderr)
     );
     let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
+    let producer = jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
+    assert!(
+        producer
+            .facts
+            .get("cache.reproducibility")
+            .is_some_and(|value| value.starts_with("independent-agreeing-v1:")),
+        "uncached source builds must carry fresh independent agreement"
+    );
+    assert!(!root.join("private/unreproducible").exists());
     assert!(
         fs::read_dir(&mirror.path)
             .unwrap()
@@ -5095,6 +5104,137 @@ fn jet_build_rejects_cache_after_manifest_semantics_change() {
         stderr.contains("recipe identity verification"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn independent_root_runner_promotes_only_agreed_source_output() {
+    let (_base, project, root) = core_hello_project("independent-root-runner");
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let repo = project.parent().unwrap().join("jet-pkgs");
+    let table = jetpack::RefSpec::SourceTable::from_decls([(
+        "mine".into(),
+        repo.to_string_lossy().into_owned(),
+        jetpack::RefSpec::ProviderKind::Core,
+    )]);
+    let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();
+    let store_dir = roots.hangar_dir();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+    };
+    let result = jetpack::Store::certify_independent_root_build(
+        &roots,
+        &ctx,
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+        jetpack::Store::IndependentRootOptions::default(),
+    )
+    .unwrap();
+    assert!(result.attestation.starts_with("independent-agreeing-v1:"));
+    assert!(Path::new(&result.entry.out).starts_with(roots.hangar_dir().join("objects")));
+    let producer = jetpack::Store::ProducerRecord::decode(&result.entry.producer_record).unwrap();
+    assert_eq!(
+        producer.facts.get("cache.reproducibility"),
+        Some(&result.attestation)
+    );
+    assert!(!root.join("private/unreproducible").exists());
+    assert!(!fs::read_dir(roots.hangar_dir().join("reproducibility-staging"))
+        .map(|entries| entries.flatten().next().is_some())
+        .unwrap_or(false));
+}
+
+#[test]
+fn independent_root_runner_rejects_divergence_before_registration() {
+    let (_base, project, root) = core_hello_project("independent-root-divergence");
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let repo = project.parent().unwrap().join("jet-pkgs");
+    let table = jetpack::RefSpec::SourceTable::from_decls([(
+        "mine".into(),
+        repo.to_string_lossy().into_owned(),
+        jetpack::RefSpec::ProviderKind::Core,
+    )]);
+    let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();
+    let store_dir = roots.hangar_dir();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+    };
+    let checks = std::cell::Cell::new(0);
+    let source = repo.join("pkgs/hello/bin/hello");
+    let changed = || {
+        let count = checks.get() + 1;
+        checks.set(count);
+        if count == 2 {
+            fs::write(&source, "#!/bin/sh\necho divergent\n").unwrap();
+        }
+        false
+    };
+    let error = jetpack::Store::certify_independent_root_build(
+        &roots,
+        &ctx,
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+        jetpack::Store::IndependentRootOptions {
+            retries: 0,
+            cancelled: Some(&changed),
+        },
+    )
+    .unwrap_err();
+    let error = format!("{error:?}");
+    assert!(error.contains("conflicting independent roots"), "{error}");
+    assert!(jetpack::Store::list(&roots).is_empty());
+    let reports = root.join("private/unreproducible");
+    let report = fs::read_dir(reports)
+        .unwrap()
+        .flatten()
+        .find(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+        .expect("divergence evidence");
+    let report = fs::read_to_string(report.path()).unwrap();
+    assert!(report.contains("\"kind\":\"action-identity\""), "{report}");
+}
+
+#[test]
+fn independent_root_runner_cancellation_leaves_no_store_result() {
+    let (_base, project, root) = core_hello_project("independent-root-cancel");
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let repo = project.parent().unwrap().join("jet-pkgs");
+    let table = jetpack::RefSpec::SourceTable::from_decls([(
+        "mine".into(),
+        repo.to_string_lossy().into_owned(),
+        jetpack::RefSpec::ProviderKind::Core,
+    )]);
+    let spec = jetpack::RefSpec::classify_in("hello@mine", &table).unwrap();
+    let store_dir = roots.hangar_dir();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+    };
+    let cancelled = || true;
+    let error = jetpack::Store::certify_independent_root_build(
+        &roots,
+        &ctx,
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+        jetpack::Store::IndependentRootOptions {
+            retries: 1,
+            cancelled: Some(&cancelled),
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error:?}").contains("cancelled"), "{error:?}");
+    assert!(jetpack::Store::list(&roots).is_empty());
 }
 
 
@@ -5357,4 +5497,140 @@ fn jet_hangar_du_counts_source_built_objects() {
         report.contains("1 built from source"),
         "du summary must count source-built objects honestly: {report}"
     );
+}
+
+#[test]
+fn jetos_plan_projects_package_system_output_deterministically() {
+    let project = Scratch::new("jetos-package-system-output");
+    fs::write(
+        project.join("package.jet"),
+        r#"name: "demo"
+outputs: .{
+    workstation: .System.{
+        name: "workstation"
+        target: linux.x64
+        packages: [ripgrep, "fd@nixpkgs", ripgrep]
+        services: .{ ssh: .{ enable: true, ports: [22] } }
+        options: .{ network: .{ hostName: "workstation" } }
+    }
+    prod: .Fleet.{ hosts: .{ edge: "system.workstation" } }
+}"#,
+    )
+    .unwrap();
+
+    let run = || {
+        jet()
+            .args(["os", "plan", "workstation", "--json", "--no-color", "--offline"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", project.join("jet-root"))
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let second = run();
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(first.stdout, second.stdout);
+    let json = String::from_utf8_lossy(&first.stdout);
+    assert!(json.contains("\"host\":\"workstation\""), "{json}");
+    assert!(json.contains("\"target\":\"linux.x64\""), "{json}");
+    assert!(json.contains("\"graph_identity\":\""), "{json}");
+    assert!(json.contains("\"ref\":\"ripgrep@nixpkgs\""), "{json}");
+    assert!(json.contains("\"name\":\"ssh\""), "{json}");
+    assert!(json.contains("\"key\":\"network.hostName\""), "{json}");
+    assert!(
+        !project.join("jet-root/systems/generations").exists(),
+        "plan must not create a generation"
+    );
+}
+
+#[test]
+fn jetos_plan_rejects_invalid_package_system_without_mutating_store() {
+    let project = Scratch::new("jetos-package-system-invalid");
+    fs::write(
+        project.join("package.jet"),
+        r#"name: "demo"
+outputs: .{ workstation: .System.{ target: linux.x64, services: .{ ssh: .{} } } }"#,
+    )
+    .unwrap();
+
+    let output = jet()
+        .args(["os", "plan", "workstation", "--json", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1340"), "{stderr}");
+    assert!(stderr.contains("outputs.workstation.services.ssh.enable"), "{stderr}");
+    assert!(
+        !project.join("jet-root/systems").exists(),
+        "a rejected projection must not publish JetOS state"
+    );
+}
+
+#[test]
+fn remote_scheduler_selects_capabilities_then_fails_over_in_order() {
+    use jetpack::Remote::{
+        ActionKey, BuildCapability, BuildResourcePool, RemoteAttemptError, RemoteBuildBinding,
+        RemoteBuildRequest, RemoteBuilder, RemoteBuilderCapabilities, RemoteScheduler,
+    };
+
+    let root = Scratch::new("remote-scheduler");
+    let fast_binding = RemoteBuildBinding::new("fast", root.join("fast"), b"fast-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_platform("linux-x86_64")
+        .with_execute(true);
+    let safe_binding = RemoteBuildBinding::new("safe", root.join("safe"), b"safe-key")
+        .unwrap()
+        .with_trust_domain("trusted")
+        .with_platform("linux-x86_64")
+        .with_execute(true);
+    let capabilities = |priority| {
+        RemoteBuilderCapabilities::new("linux-x86_64", "trusted")
+            .with_capability(BuildCapability::Exec)
+            .with_feature("clang")
+            .with_pool(BuildResourcePool::CPU)
+            .with_concurrency(2)
+            .with_priority(priority)
+            .with_execute(true)
+    };
+    let scheduler = RemoteScheduler::new([
+        RemoteBuilder::new(fast_binding, capabilities(20)).unwrap(),
+        RemoteBuilder::new(safe_binding, capabilities(10)).unwrap(),
+    ])
+    .unwrap();
+    let request = RemoteBuildRequest::new(ActionKey::new("remote-action"))
+        .with_capability(BuildCapability::Exec)
+        .with_platform("linux-x86_64")
+        .with_trust_domain("trusted")
+        .with_feature("clang")
+        .with_pool(BuildResourcePool::CPU)
+        .with_execute(true)
+        .with_local_fallback(true);
+
+    let selected = scheduler.select(&request).unwrap();
+    assert_eq!(selected.builder(), "fast");
+    let dispatch = scheduler
+        .dispatch(&request, |builder| {
+            if builder.builder() == "fast" {
+                Err(RemoteAttemptError::worker_lost("fast worker disappeared"))
+            } else {
+                Ok(builder.builder().to_string())
+            }
+        })
+        .unwrap();
+    assert_eq!(dispatch.builder, "safe");
+    assert_eq!(dispatch.attempted, vec!["fast", "safe"]);
+    assert_eq!(dispatch.value, "safe");
 }

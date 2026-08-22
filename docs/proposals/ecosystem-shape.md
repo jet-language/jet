@@ -127,16 +127,25 @@ Outputs are thin projections over facts stored once on the graph. The proposed c
 
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
-cli: Output :: .Executable.{ name: "todo", entry: run }
-lib: Output :: .Library.{ name: "todo_core", modules: [Todo] }
-api: Output :: .Service.{ name: "todo_api", entry: serve }
-release: Output :: .Check.{ name: "release", entry: verify_release }       // NEW: D-ECO-OUTPUT-KINDS1
-dev: Output :: .Environment.{ name: "dev", tools: [ripgrep] }              // NEW: D-ECO-OUTPUT-KINDS1
-image: Output :: .Image.{ name: "todo", from: cli, kind: .Oci }
-all: Output :: .Bundle.{ name: "todo-release", members: [cli, image] }
-host: Output :: .System.{ name: "halcyon", packages: [cli] }               // NEW: D-ECO-OUTPUT-KINDS1
-prod: Output :: .Fleet.{ name: "prod", hosts: .{ halcyon: host } }         // NEW: D-ECO-OUTPUT-KINDS1
+outputs: .{
+    cli: .Executable.{ name: "todo", entry: run }
+    lib: .Library.{ name: "todo_core", modules: [Todo] }
+    api: .Service.{ name: "todo_api", entry: serve }
+    release: .Check.{ name: "release", entry: verify_release }       // NEW: D-ECO-OUTPUT-KINDS1
+    dev: .Environment.{ name: "dev", tools: [ripgrep] }               // NEW: D-ECO-OUTPUT-KINDS1
+    image: .Image.{ name: "todo", from: cli, kind: .Oci }
+    all: .Bundle.{ name: "todo-release", members: [cli, image] }
+    host: .System.{ name: "halcyon", target: linux.x64, packages: [cli] } // NEW: D-ECO-OUTPUT-KINDS1
+    prod: .Fleet.{ name: "prod", hosts: .{ halcyon: "system.halcyon" } }  // NEW: D-ECO-OUTPUT-KINDS1
+}
 ```
+
+The shipped JetOS projection reads the System and Fleet values from
+package.jet. A System needs target and may include packages, services, and
+options. A Fleet maps host names to System names. The projection keeps the
+Package semantic digest as graph_identity in the shared EnvPlan and in
+JetOS plan.json. jet os plan previews this value; JetOS build and proof use
+the existing Hangar and generation receipt path.
 
 The payload holds only name and kind-specific facts. Sources, dependencies, actions, effects, policy, target facts, and provenance live once. `jet inspect output` (`NEW: D-ECO-OUTPUT-PAYLOAD1`) reconstructs the complete path:
 
@@ -176,7 +185,7 @@ Plural intents run every matching Output: `jet test` runs every Check. Singular 
 
 ### Lock, receipts, Hangar, and roots
 
-`.jet/lock` is a small, reviewable index, not a dump of artifact logs. It owns exact package graph identity, solver rationale, provider facts, targets, toolchains, policy, and complete merge edges. Each realization or activation appends an immutable receipt object to the Hangar and records its digest in the lock or generation (`NEW: D-ECO-RECEIPTSTORE1`). The receipt points back to locked inputs; it does not copy merge history.
+`.jet/lock` is a small, reviewable index, not a dump of artifact logs. It owns exact package graph identity, solver rationale, provider facts, targets, toolchains, policy, and complete merge edges. Each realization or activation appends an immutable receipt object to the Hangar and records its digest in the lock or generation. The receipt points back to locked inputs; it does not copy merge history.
 
 ```text
 .jet/lock

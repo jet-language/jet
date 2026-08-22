@@ -5,7 +5,7 @@
 
 pub use super::Replacement::ReplacementCandidate as ReplacementOverlay;
 use super::JSON::{self, JSONValue};
-use jet_pkg_model::ProviderFacts::{ProviderConflict, ProviderFactValue, ProviderFacts};
+use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProviderFamily {
@@ -144,6 +144,13 @@ impl ProviderFactReport {
         if self.facts.name.is_empty() || self.facts.version.is_empty() {
             return Err("provider facts need both a name and an exact version".to_string());
         }
+        if self.facts.source_identity.is_empty() {
+            return Err("provider facts need a resolved source identity".to_string());
+        }
+        if self.native_format.is_empty() || self.native_document.is_empty() {
+            return Err("provider facts need the native document and its format".to_string());
+        }
+        self.shared_facts().validate()?;
         Ok(())
     }
 
@@ -155,6 +162,23 @@ impl ProviderFactReport {
         shared.set_resolved_source(&self.facts.source_identity);
         shared.set_native_document(&self.native_format, &self.native_document);
         add_metadata_facts(&mut shared, &self.facts);
+        let selector_identity = if !shared.selector.version.is_empty() {
+            Some(shared.selector.version.clone())
+        } else if !shared.selector.revision.is_empty() {
+            Some(shared.selector.revision.clone())
+        } else if !shared.selector.digest.is_empty() {
+            Some(shared.selector.digest.clone())
+        } else {
+            None
+        };
+        if selector_identity.as_deref() != Some(self.facts.version.as_str()) {
+            shared.add_conflict(
+                "provider.selector.identity",
+                &self.facts.version,
+                selector_identity.as_deref().unwrap_or("<missing>"),
+                "provider.metadata",
+            );
+        }
         for (index, loss) in self.losses.iter().enumerate() {
             shared.add_loss(
                 &format!("provider.loss.{index}"),
@@ -163,18 +187,23 @@ impl ProviderFactReport {
             );
         }
         for (index, conflict) in self.conflicts.iter().enumerate() {
-            shared.conflicts.push(ProviderConflict {
-                key: format!("provider.conflict.{index}"),
-                left: String::new(),
-                right: conflict.clone(),
-                source: "provider.native_document".to_string(),
-            });
+            shared.add_conflict(
+                &format!("provider.conflict.{index}"),
+                "<provider-native-left-unavailable>",
+                conflict,
+                "provider.native_document",
+            );
         }
         shared
     }
 
     pub fn shared_facts(&self) -> ProviderFacts {
-        let reference = format!("{}@{}", self.facts.name, self.facts.family.label());
+        let reference = format!(
+            "{}#version={}@{}",
+            self.facts.name,
+            self.facts.version,
+            self.facts.family.label()
+        );
         self.shared_facts_for(&reference)
     }
 
@@ -192,18 +221,19 @@ impl ProviderFactReport {
     ) -> Result<crate::SemanticLock::SemanticRecord, String> {
         let shared = self.shared_facts_for(reference);
         shared.validate()?;
+        let qualified_reference = shared.qualified_reference();
         let mut record = crate::SemanticLock::SemanticRecord::new(
             crate::SemanticLock::LockIdentity {
                 kind: crate::SemanticLock::LockRecordKind::Package,
-                key: format!("provider:{reference}"),
-                exact: reference.to_string(),
+                key: format!("provider:{qualified_reference}"),
+                exact: qualified_reference.clone(),
                 hash: shared.digest(),
                 platform: platform.to_string(),
             },
             crate::SemanticLock::LockRationale {
                 owner_package: owner_package.to_string(),
                 reason: "provider-native facts lowered through the shared carrier".to_string(),
-                source_ref: reference.to_string(),
+                source_ref: qualified_reference,
                 provider: self.facts.family.label().to_string(),
                 exact_output: self.facts.source_identity.clone(),
                 ..Default::default()
@@ -268,6 +298,57 @@ fn add_metadata_facts(shared: &mut ProviderFacts, facts: &MetadataFacts) {
                     .collect(),
             ),
             "provider.native_projection",
+        );
+    }
+    if !facts.replacement_candidates.is_empty() {
+        let candidates = facts
+            .replacement_candidates
+            .iter()
+            .map(|candidate| {
+                let mut fields = std::collections::BTreeMap::new();
+                fields.insert(
+                    "foreign_identity".to_string(),
+                    ProviderFactValue::Text(candidate.foreign_identity.ref_string()),
+                );
+                fields.insert(
+                    "native_identity".to_string(),
+                    ProviderFactValue::Text(candidate.native_identity.ref_string()),
+                );
+                fields.insert(
+                    "license".to_string(),
+                    ProviderFactValue::Text(candidate.license.clone()),
+                );
+                fields.insert(
+                    "proof_status".to_string(),
+                    ProviderFactValue::Text(format!("{:?}", candidate.proof_status)),
+                );
+                fields.insert(
+                    "proof_digest".to_string(),
+                    ProviderFactValue::Text(candidate.proof_digest.clone()),
+                );
+                for (key, values) in [
+                    ("covered_public_symbols", &candidate.covered_public_symbols),
+                    ("unsupported_symbols", &candidate.unsupported_symbols),
+                    ("platforms", &candidate.platforms),
+                    ("proof_inputs", &candidate.proof_inputs),
+                ] {
+                    fields.insert(
+                        key.to_string(),
+                        ProviderFactValue::List(
+                            values
+                                .iter()
+                                .map(|value| ProviderFactValue::Text(value.clone()))
+                                .collect(),
+                        ),
+                    );
+                }
+                ProviderFactValue::Map(fields)
+            })
+            .collect();
+        shared.add_fact(
+            "package.replacement_candidates",
+            ProviderFactValue::List(candidates),
+            "provider.replacement",
         );
     }
 }

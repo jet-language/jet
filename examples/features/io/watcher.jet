@@ -11,7 +11,7 @@ use core.watcher as watcher
 // #2055: `WatchEvent.domain` and `.kind` are closed Core enums, not strings, so
 // turning one into output text is an exhaustive match with no `else` arm — a new
 // variant is a compile error here instead of silently taking a default branch.
-fn domain_label(domain: WatchDomain) String {
+fn domain_label(domain: WatchDomain) String -> {
     if domain == {
         .File -> { return "file" }
         .Process -> { return "process" }
@@ -19,7 +19,7 @@ fn domain_label(domain: WatchDomain) String {
     }
 }
 
-fn kind_label(kind: WatchKind) String {
+fn kind_label(kind: WatchKind) String -> {
     if kind == {
         .Created -> { return "Created" }
         .Modified -> { return "Modified" }
@@ -30,7 +30,7 @@ fn kind_label(kind: WatchKind) String {
     }
 }
 
-fn optional_kind_label(kind: WatchKind?) String {
+fn optional_kind_label(kind: WatchKind?) String -> {
     if kind == {
         .Val(value) -> { return kind_label(value) }
         .None -> { return "none" }

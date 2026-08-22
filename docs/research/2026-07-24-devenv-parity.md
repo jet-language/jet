@@ -88,7 +88,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | `dotenv` | — | **gap** | #784 |
 | `unsetEnvVars` / env hygiene | — | **gap** | #784 |
 | Prompt / starship | `prompt:` on env | **partial** | #784 |
-| `devenv info` summary | `jet env info` (U26) | **shipped** | — |
+| `devenv info` summary | `jet env info` (U26): typed package/service/job/variable cockpit | **shipped** | — |
 | Eval cache / <100ms activate | hangar + native eval work | **partial** | Depends #396/#397 |
 | `devenv gc` | U22 hangar GC | **partial** | Covered by hangar cards |
 | Ad-hoc CLI env (`-O` / `-p`) | `jet env -p` (U16) | **shipped** | — |
@@ -138,7 +138,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Automatic port allocation | — | **gap** | #785 |
 | Process↔task dependency graph | — | **gap** | #785 |
 | Alternate managers (process-compose…) | — | **reject** | I8 one supervisor |
-| Service presets (postgres, redis, …) | typed Service; shared typed catalog constructors | **shipped** | — |
+| Service presets (postgres, redis, …) | typed Service; one shared typed constructor registry | **shipped** | — |
 | Service state dirs / init scripts | partial | **partial** | #786 |
 
 ### G. Containers (video)

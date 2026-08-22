@@ -194,6 +194,7 @@ fn lock_and_authority_ledger_mirror_the_manifest_block() {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let (lock, _) = jet::Fetch::fetch(&root, &manifest, None, &options)
         .expect("authority-only manifest fetch");

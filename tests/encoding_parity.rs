@@ -783,8 +783,8 @@ migration Profile {
 }
 
 migration Profile {
-    rename name => display_name
-    change score: Int => Rank via { (n) -> Rank{ value: n } }
+    rename name -> display_name
+    change score: Int -> Rank via { (n) -> Rank{ value: n } }
 }
 
 migration Profile {

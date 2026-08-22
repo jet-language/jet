@@ -11,7 +11,7 @@ impl CleanupMarker.Close {
     fn close(^self) { print("cleanup: {self.name}") }
 }
 
-fn count(n: Int) Stream<Int> {
+fn count(n: Int) Stream<Int> -> {
     i := 0
     loop i < n {
         yield i
@@ -19,20 +19,20 @@ fn count(n: Int) Stream<Int> {
     }
 }
 
-fn stop_after_one() Stream<Int> {
+fn stop_after_one() Stream<Int> -> {
     print("producer: before")
     yield 1
     print("producer: after-close")
     yield 2
 }
 
-fn nested() Stream<Int> {
+fn nested() Stream<Int> -> {
     yield 10
     loop value in count(2) -> print("nested: {value + 20}")
     yield 99
 }
 
-fn cleanup_after_break() Stream<Int> {
+fn cleanup_after_break() Stream<Int> -> {
     marker := CleanupMarker{name: "stream"}
     defer close(^marker)
     print("cleanup: before")

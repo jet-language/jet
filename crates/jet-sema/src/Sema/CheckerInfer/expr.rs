@@ -2463,7 +2463,7 @@ impl<'a> Checker<'a> {
                                                         "Display is the user-facing interpolation hook; Debug is for `{{value:{debug_selector}}}`"
                                                     ),
                                                     format!(
-                                                        "add `impl {n}.Display {{ fn display(self) => String {{ … }} }}`"
+                                                        "add `impl {n}.Display {{ fn display(self) String -> {{ … }} }}"
                                                     ),
                                                     Some(inner.span()),
                                                 ));

@@ -86,13 +86,14 @@ wide :: I64{ 9_000_000_000 } // `_` digit separators (S67)
 // ============================================================================
 // FUNCTIONS & GENERICS
 // ============================================================================
-// `fn name(params) Ret -> value` or `fn name(params) Ret { … }` (S1/S12).
+// `fn name(params) Ret -> value` or `fn name(params) Ret -> { … }`; unit
+// callables keep bare braces (D-CALLABLE-ONE1=A).
 // Private by default; `pub` exports
 // to every consumer; `pub(package)` exports only inside the package boundary.
 
 fn greet(who: String) String -> "hello, {who}"
 fn id<T>(x: ^T) T -> x
-fn largest<T: Comparable>(xs: [T]) T {
+fn largest<T: Comparable>(xs: [T]) T -> {
     // ...
 }
 
@@ -164,7 +165,7 @@ fn control() {
 }
 
 // `if` is the universal branching keyword (D-IF1).
-fn branch(a: Int, b: Int) Int {
+fn branch(a: Int, b: Int) Int -> {
     // expression form — `else` required, both branches share a type (S68)
     m :: if a > b -> a else -> b
 
@@ -201,10 +202,10 @@ struct Point {
     y: Float
 
     fn dist_sq(self) Float -> (self.x * self.x) + (self.y * self.y)
-    fn origin() Point {                    // no `self` -> static/constructor (D-CTOR1)
+    fn origin() Point -> {                 // no `self` -> static/constructor (D-CTOR1)
         return Point{x: 0.0, y: 0.0}
     }
-    fn polar(r: Float, theta: Float) Point { return Point{x: r, y: theta} }
+    fn polar(r: Float, theta: Float) Point -> { return Point{x: r, y: theta} }
 }
 
 // Field punning: a bare name is shorthand for `name: name` when in scope (S77).
@@ -234,7 +235,7 @@ enum Shape {
 
 //<<< Owner Enum Dispatch: Enum variants syntax cleanup
 // Leading-dot patterns are required (D-ENUMDOT1 / E0367).
-fn describe(s: Shape) String {
+fn describe(s: Shape) String -> {
     return if s == {
         .Circle(r) -> "circle {r}"             // binds `r`
         .Rect(w, h) -> "rect {w}x{h}"
@@ -244,7 +245,7 @@ fn describe(s: Shape) String {
 //>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
-fn nested(r: Shape Error!) Bool {
+fn nested(r: Shape Error!) Bool -> {
     return if r == {
         .Ok(.Rect(w, h)) && w > h -> true
         else -> false
@@ -259,21 +260,21 @@ fn nested(r: Shape Error!) Bool {
 
 enum ParseError { Empty }
 
-fn parse_age(raw: String) Int ParseError! {
+fn parse_age(raw: String) Int ParseError! -> {
     if raw == "" {
         return Err(ParseError.Empty)          // Err(...) constructor (S35)
     }
     return Ok(7)                              // Ok(...) constructor
 }
 
-fn use_errors(raw: String) Int ParseError! {
+fn use_errors(raw: String) Int ParseError! -> {
     n :: parse_age(raw)?                       // `?` propagates (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return Ok(n * 2)
 }
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
-fn optionals(user: User?) String {
+fn optionals(user: User?) String -> {
     city :: user?.address?.city               // optional chaining produces T? (S71)
     name :: user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
@@ -321,7 +322,7 @@ impl Square.Shape2 {                          // top-level impl (S28)
 }
 
 // Trait name in type position -> dynamic dispatch; `<T: Trait>` -> monomorphize (S48).
-fn total_area(shapes: [Shape2]) Float {       // boxed dynamic dispatch
+fn total_area(shapes: [Shape2]) Float -> {    // boxed dynamic dispatch
     // ...
 }
 
@@ -439,7 +440,7 @@ fn fixed_size_list() {
 // one ordinary consumer pull. The producer resumes after that value is
 // accepted. A consumer `break` drops the iterator; task cancellation and
 // deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
-fn numbers(n: Int) Stream<Int> {
+fn numbers(n: Int) Stream<Int> -> {
     i := 0
     loop i < n {
         yield i
@@ -525,7 +526,7 @@ fn call_sites(player: Player, file: File) {
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
 #Unsafe("reads through a raw pointer; addr must be live and valid")
-fn deref_cell(cell: Int) Int {
+fn deref_cell(cell: Int) Int -> {
     addr :: mem.address_of(cell)               // address-of is a call, not a sigil
     #Unsafe("addr is the address of a live Int on this frame") {
         p :: *addr                             // raw-pointer-of
@@ -599,14 +600,14 @@ trait Greeter { fn greet(self) String }
 
 // Typestate via transitioning tags (D-STATE1): require a state, or transition states.
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
-#Transition(Closed, Open) fn open(self) File { }    // consume Closed, yield Open
+#Transition(Closed, Open) fn open(self) File -> { } // consume Closed, yield Open
 
 // Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.
 fn taint(raw: String) {
     user :: #Input raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Scrub(Input) fn sanitize(s: #Input String) String { return s }
+#Scrub(Input) fn sanitize(s: #Input String) String -> { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse
@@ -614,7 +615,7 @@ struct Ticket { id: Int }
 
 // Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
 // statement (E0419). D-MARKERMOVE1: `#MustUse` is a contract marker.
-#MustUse fn ack() Int { return 1 }
+#MustUse fn ack() Int -> { return 1 }
 #MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).

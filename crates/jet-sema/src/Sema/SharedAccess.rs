@@ -59,7 +59,7 @@ fn payload(span: Span) -> Expr {
     Expr::Ident(SHARED_PAYLOAD_PARAM.to_string(), span)
 }
 
-/// Build `handle.<method>(<payload> => <body>)`, tagging the synthesized
+/// Build `handle.<method>(<payload> -> <body>)`, tagging the synthesized
 /// argument so the retired-spelling check can tell this desugar apart from a
 /// user-typed closure.
 fn shared_access_call(handle: Expr, method: &str, body: LambdaBody, span: Span) -> Expr {

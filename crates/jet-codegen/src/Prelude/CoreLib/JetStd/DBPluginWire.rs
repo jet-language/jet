@@ -121,7 +121,7 @@
         }
     }
 
-    // D-FAIL-CONV2=A: one display hook backs both the shipped impl DBError => Err
+    // D-FAIL-CONV2=A: one display hook backs both the shipped impl DBError -> Err
     // and user interpolation.
     impl super::JetDisplay for DBError {
         fn jet_display(&self) -> String {

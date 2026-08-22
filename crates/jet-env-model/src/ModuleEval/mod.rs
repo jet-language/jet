@@ -23,12 +23,16 @@ mod Computed;
 mod Diagnostics;
 mod Environment;
 mod Eval;
+mod PackageOutput;
 mod Source;
 mod System;
 mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
+pub use PackageOutput::{
+    env_plan_from_package_outputs, project_package_outputs, PackageOutputError, PackageOutputPlan,
+};
 pub use Source::{
     evaluate_env, evaluate_env_with_environment, evaluate_env_with_preset,
     evaluate_env_with_selections, evaluate_package_profile, is_module_surface,

@@ -718,6 +718,11 @@ fn cargo_import_preserves_locked_versions() {
         "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
     );
     assert_eq!(plan.deps[0].locked_version, "1.0.200");
+    assert_eq!(plan.deps[0].provider_ref, "serde#version=1.0.200@cargo");
+    assert!(plan.emit_pkg_jet().contains("serde: serde#version=1.0.200@cargo"));
+    assert!(plan.provider_facts["serde#version=1.0.200@cargo"]
+        .validate()
+        .is_ok());
     assert!(plan.ffi_stubs.iter().any(|s| s.symbol == "serde"));
 }
 
@@ -731,6 +736,10 @@ fn npm_import_turns_scripts_into_legacy_build_actions() {
         .todos
         .iter()
         .any(|t| t.message.contains("legacy build action")));
+    assert!(plan
+        .provider_facts
+        .values()
+        .any(|facts| facts.losses.iter().any(|loss| loss.reason.contains("not an exact lock"))));
 }
 
 #[test]
@@ -743,8 +752,11 @@ fn python_import_marks_dynamic_metadata_todo() {
 #[test]
 fn swiftpm_import_emits_provider_refs() {
     let plan = jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
-    assert_eq!(plan.deps[0].provider_ref, "swiftpm@swift-log");
+    assert_eq!(plan.deps[0].provider_ref, "swift-log#revision=abc123@swiftpm");
     assert_eq!(plan.deps[0].locked_version, "abc123");
+    assert!(plan.provider_facts["swift-log#revision=abc123@swiftpm"]
+        .validate()
+        .is_ok());
 }
 
 #[test]
@@ -828,6 +840,47 @@ fn npm_metadata_normalizes_deps_scripts_bins() {
     assert_eq!(facts.dependencies, vec!["vite".to_string()]);
     assert_eq!(facts.scripts, vec!["build".to_string()]);
     assert_eq!(facts.bins, vec!["web".to_string()]);
+}
+
+#[test]
+fn provider_report_round_trips_through_lock_and_explain() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let native = r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5"}}"#;
+    let report = normalize_provider_document(ProviderFamily::Npm, native);
+    report.validate().expect("lossless npm report");
+    let shared = report.shared_facts();
+    assert_eq!(shared.qualified_reference(), "web#version=1.0.0@npm");
+    assert_eq!(shared.native_document, native);
+    assert!(shared
+        .explain_lines()
+        .iter()
+        .any(|line| line == "native json: retained"));
+    let round_trip = jetpack::ProviderFacts::from_json(&report.export_json())
+        .expect("shared provider facts JSON");
+    assert_eq!(round_trip, shared);
+    let lock = report
+        .lock_record("app", "web#1.0.0@npm", "any")
+        .expect("provider semantic lock");
+    assert_eq!(lock.identity.exact, "web#version=1.0.0@npm");
+    let digest = shared.digest();
+    assert_eq!(
+        lock.future_fields.get("provider-facts-digest"),
+        Some(&digest)
+    );
+}
+
+#[test]
+fn provider_report_surfaces_missing_identity_as_loss() {
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+    let report = normalize_provider_document(ProviderFamily::Npm, r#"{"name":"web"}"#);
+    assert!(!report.is_lossless());
+    let error = report.validate().expect_err("missing provider version");
+    assert!(error.contains("lossy") || error.contains("exact"), "{error}");
+    let shared = report.shared_facts_for("web@npm");
+    assert!(shared
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("exact version")));
 }
 
 #[test]
@@ -2384,6 +2437,7 @@ fn lock_file_content_hash_roundtrip() {
 
         effect_grants: vec![],
         envelope: None,
+        receipt: None,
         provenance: None,
     };
     let lock = LockFile {
@@ -2630,6 +2684,7 @@ fn fetch_locked_rejects_missing_lock() {
         locked: true,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
 
     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
@@ -2651,6 +2706,7 @@ fn registry_dependency_reports_transport_failure() {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
         .expect_err("registry dependency must report its verified transport diagnostic");
@@ -2755,6 +2811,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
 
     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
@@ -2856,6 +2913,7 @@ fn git_dep_branch_update_rewrites_lock() {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     assert!(
@@ -2901,6 +2959,7 @@ fn git_dep_branch_update_rewrites_lock() {
         locked: false,
         update: true,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let result2 = with_store(&store, || {
         jet::Fetch::fetch(&tmp, &mf, Some(&existing_lock), &update_opts)
@@ -3765,6 +3824,7 @@ fn vendored_offline_locked_build() {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     assert!(result.is_ok(), "initial fetch must succeed");
@@ -3829,6 +3889,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
 
             effect_grants: vec![],
             envelope: None,
+            receipt: None,
             provenance: None,
         }],
         root_dependencies: vec![name.into()],
@@ -3886,12 +3947,18 @@ fn sbom_cyclonedx_golden() {
 
 #[test]
 fn audit_e2603_on_vulnerable_dep() {
-    use jet::Publish::{audit_lockfile, parse_advisory_db};
+    use jet::Publish::{audit_lockfile, Advisory, SemVer, Severity, VersionReq};
 
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
-    let db = "JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM|critical\n";
-    let advisories = parse_advisory_db(db).unwrap();
+    let advisories = vec![Advisory {
+        id: "JET-2026-SEC-001".into(),
+        package: "crypto-lib".into(),
+        affected: VersionReq::parse("^0").unwrap(),
+        fixed: Some(SemVer::parse("0.9.5").unwrap()),
+        title: "Timing side-channel in AES-GCM".into(),
+        severity: Severity::Critical,
+    }];
     let matches = audit_lockfile(&lock, &advisories);
 
     assert_eq!(matches.len(), 1, "one advisory match expected");
@@ -3911,11 +3978,17 @@ fn audit_e2603_on_vulnerable_dep() {
 fn audit_non_critical_is_advisory() {
     // D-SUPPLY1: a non-critical advisory still matches but is advisory-only —
     // the severity carried back is below Critical, so `jet inspect audit` exits 0.
-    use jet::Publish::{audit_lockfile, parse_advisory_db, Severity};
+    use jet::Publish::{audit_lockfile, Advisory, SemVer, Severity, VersionReq};
 
     let lock = make_test_lock("util-lib", "1.0.0", "sha256-ccdd");
-    let db = "JET-2026-INFO-1|util-lib|^1|1.0.2|Minor info leak in debug logs|low\n";
-    let advisories = parse_advisory_db(db).unwrap();
+    let advisories = vec![Advisory {
+        id: "JET-2026-INFO-1".into(),
+        package: "util-lib".into(),
+        affected: VersionReq::parse("^1").unwrap(),
+        fixed: Some(SemVer::parse("1.0.2").unwrap()),
+        title: "Minor info leak in debug logs".into(),
+        severity: Severity::Low,
+    }];
     let matches = audit_lockfile(&lock, &advisories);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].severity, Severity::Low);
@@ -4268,6 +4341,93 @@ fn cli_yank_flips_index_entry() {
         "version must be flipped to yanked:\n{index}"
     );
 
+    // A yank hides the version from fresh selection but never releases its
+    // immutable identity. The real publish path must reject reuse as E1234.
+    let republish = jet_cmd_env(&["registry", "publish"], &proj, envs);
+    assert!(
+        !republish.status.success(),
+        "a yanked version must remain reserved"
+    );
+    let republish_stderr = String::from_utf8_lossy(&republish.stderr);
+    assert!(
+        republish_stderr.contains("E1234"),
+        "republishing a yanked version must cite E1234:\n{republish_stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn registry_transport_rejects_and_redacts_embedded_credentials() {
+    let registry = jet::Publish::RegistryConfig::private(
+        "scratch",
+        "https://user:super-secret@example.invalid/registry.git",
+        false,
+    );
+    assert_eq!(
+        jet::Publish::redact_registry_url(&registry.url),
+        "https://example.invalid/registry.git"
+    );
+    let diagnostic = jet::Publish::ensure_index_clone(&registry)
+        .expect_err("registry transport must reject embedded credentials");
+    let rendered = jet::Diagnostics::render_all("package.jet", "", &[diagnostic]);
+    assert!(rendered.contains("E1235"), "unexpected diagnostic:\n{rendered}");
+    assert!(
+        !rendered.contains("super-secret"),
+        "registry credential leaked in diagnostic:\n{rendered}"
+    );
+}
+
+#[test]
+fn registry_corrupt_artifact_is_rejected_before_install() {
+    let tmp = tmp_dir("registry_corrupt_artifact");
+    let repo = tmp.join("registry");
+    let artifact = repo.join("artifacts").join("corruptkit").join("1.0.0");
+    fs::create_dir_all(&artifact).unwrap();
+    fs::write(artifact.join("package.jet"), "not-the-published-bytes").unwrap();
+
+    let entry = signed_entry("corruptkit", "1.0.0", "sha256-not-the-tree", "", "");
+    let error = jet::Publish::verify_artifact(&repo, &entry)
+        .expect_err("a content-addressed registry artifact must fail closed when corrupted");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("failed its content hash"));
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[cfg(unix)]
+#[test]
+fn registry_interrupted_artifact_stage_leaves_no_partial() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("registry_interrupted_artifact");
+    let repo = tmp.join("registry");
+    let source = tmp.join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.jet"), "package bytes").unwrap();
+    symlink("package.jet", source.join("linked.jet")).unwrap();
+    let expected_hash = jet::SHA256::tree_hash(&source);
+
+    let error = jet::Publish::publish_artifact(
+        &repo,
+        &source,
+        "atomic-kit",
+        "1.0.0",
+        &expected_hash,
+    )
+    .expect_err("unsupported source nodes must abort the staged publication");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    let destination = jet::Publish::artifact_path(&repo, "atomic-kit", "1.0.0").unwrap();
+    assert!(!destination.exists(), "failed publication installed an artifact");
+    let package_dir = repo.join("artifacts").join("atomic-kit");
+    if package_dir.is_dir() {
+        assert!(
+            fs::read_dir(package_dir)
+                .unwrap()
+                .next()
+                .is_none(),
+            "failed publication left a staging directory"
+        );
+    }
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -4525,6 +4685,198 @@ fn signed_entry(
         public_key: public_key.to_string(),
         signature: signature.to_string(),
     }
+}
+
+#[test]
+fn cli_signed_advisory_feed_receipt_and_tamper_fail_closed() {
+    if !have_cargo() {
+        eprintln!("note: skipping signed advisory feed audit (cargo not found)");
+        return;
+    }
+    let tmp = tmp_dir("signed_advisory_audit");
+    let project = tmp.join("project");
+    let keys = tmp.join("keys");
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(project.join("package.jet"), min_manifest("app", "0.1.0")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        jet::Lock::write(&make_test_lock("mylib", "1.0.0", "sha256-locked")),
+    )
+    .unwrap();
+
+    with_keys(&keys, || {
+        let (seed, _public_path, public_key) =
+            jet::Publish::Sign::keygen("advisory", false).expect("advisory keygen should succeed");
+        let key_id = jet::Publish::advisory_key_id(&public_key).unwrap();
+        let mut feed = jet::Publish::AdvisoryFeed {
+            sequence: 1,
+            issued_at: 100,
+            expires_at: 10_000,
+            maturity_seconds: 86_400,
+            key_id,
+            public_key: public_key.clone(),
+            signature: String::new(),
+            releases: Vec::new(),
+            advisories: Vec::new(),
+            exceptions: Vec::new(),
+        };
+        feed.signature = jet::Publish::sign_advisory_feed(&feed, &seed)
+            .expect("advisory feed signing should succeed");
+        let feed_path = project.join(".jet/advisories.db");
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&feed)).unwrap();
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=1\n", public_key),
+        )
+        .unwrap();
+        let audit = || {
+            Command::new(jet_bin())
+                .args(["inspect", "audit"])
+                .current_dir(&project)
+                .env("JET_ADVISORY_NOW", "200")
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap()
+        };
+
+        let clean = audit();
+        assert_eq!(clean.status.code(), Some(0), "stderr={:?}", clean.stderr);
+        let stdout = String::from_utf8_lossy(&clean.stdout);
+        assert!(
+            stdout.contains("feed sequence 1 verified"),
+            "stdout={stdout}"
+        );
+        assert!(stdout.contains("no advisories found"), "stdout={stdout}");
+
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=2\n", public_key),
+        )
+        .unwrap();
+        let rollback = audit();
+        assert_eq!(rollback.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&rollback.stderr).contains("rolled back"));
+
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!(
+                "public_key={}\nmin_sequence=1\nrevoked_key={}\n",
+                public_key, public_key
+            ),
+        )
+        .unwrap();
+        let compromised = audit();
+        assert_eq!(compromised.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&compromised.stderr).contains("revoked"));
+
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=1\n", public_key),
+        )
+        .unwrap();
+        let accepted_digest = format!(
+            "sha256-{}",
+            jet::SHA256::sha256_hex(jet::Publish::advisory_feed_text(&feed).as_bytes())
+        );
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!(
+                "public_key={}\nmin_sequence=1\naccepted_digest={}\n",
+                public_key, accepted_digest
+            ),
+        )
+        .unwrap();
+        let mut fork = feed.clone();
+        fork.maturity_seconds = 86_401;
+        fork.signature = jet::Publish::sign_advisory_feed(&fork, &seed)
+            .expect("fork feed signing should succeed");
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&fork)).unwrap();
+        let mixed = audit();
+        assert_eq!(mixed.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&mixed.stderr).contains("forked"));
+
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=1\n", public_key),
+        )
+        .unwrap();
+        let mut stale = feed.clone();
+        stale.expires_at = 150;
+        stale.signature = jet::Publish::sign_advisory_feed(&stale, &seed)
+            .expect("stale feed signing should succeed");
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&stale)).unwrap();
+        let frozen = audit();
+        assert_eq!(frozen.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&frozen.stderr).contains("stale or expired"));
+
+        fs::write(
+            project.join(".jet/advisory-trust"),
+            format!("public_key={}\nmin_sequence=1\n", public_key),
+        )
+        .unwrap();
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&feed)).unwrap();
+
+        let mut immature_feed = feed.clone();
+        immature_feed.releases.push(jet::Publish::AdvisoryRelease {
+            package: "mylib".into(),
+            version: jet::Publish::SemVer::SemVer::parse("1.0.0").unwrap(),
+            first_seen: 100,
+            source_class: jet::Publish::SourceClass::ThirdParty,
+        });
+        immature_feed.signature = jet::Publish::sign_advisory_feed(&immature_feed, &seed)
+            .expect("immature feed signing should succeed");
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&immature_feed)).unwrap();
+        let immature = audit();
+        assert_eq!(
+            immature.status.code(),
+            Some(1),
+            "immature release must fail closed"
+        );
+        assert_eq!(
+            String::from_utf8(immature.stderr).unwrap(),
+            include_str!("cli/audit_maturity_e2609.txt")
+        );
+
+        let mut excepted_feed = immature_feed;
+        excepted_feed
+            .exceptions
+            .push(jet::Publish::AdvisoryException {
+                package: "mylib".into(),
+                version: jet::Publish::SemVer::SemVer::parse("1.0.0").unwrap(),
+                reason: "urgent security fix".into(),
+                reviewer: "security-team".into(),
+                expires_at: 1_000,
+            });
+        excepted_feed.signature = jet::Publish::sign_advisory_feed(&excepted_feed, &seed)
+            .expect("exception feed signing should succeed");
+        fs::write(&feed_path, jet::Publish::advisory_feed_text(&excepted_feed)).unwrap();
+        let excepted = audit();
+        assert_eq!(
+            excepted.status.code(),
+            Some(0),
+            "exact exception should allow the release"
+        );
+        assert!(String::from_utf8_lossy(&excepted.stdout).contains("no advisories found"));
+
+        let tampered = jet::Publish::advisory_feed_text(&jet::Publish::AdvisoryFeed {
+            maturity_seconds: 86_401,
+            ..feed
+        });
+        fs::write(feed_path, tampered).unwrap();
+        let rejected = audit();
+        assert_eq!(rejected.status.code(), Some(1), "tamper must fail closed");
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains("Error [E2610]:"),
+            "stderr={}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(rejected.stderr).unwrap(),
+            include_str!("cli/audit_tampered_e2610.txt")
+        );
+    });
+
+    let _ = fs::remove_dir_all(tmp);
 }
 
 #[test]

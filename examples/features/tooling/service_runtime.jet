@@ -8,7 +8,7 @@ fn worker_a() {}
 
 fn worker_b() {}
 
-fn status_label(status: TaskStatus) String {
+fn status_label(status: TaskStatus) String -> {
     if status == {
         .Running -> { return "running" }
         .Paused -> { return "paused" }
@@ -17,7 +17,7 @@ fn status_label(status: TaskStatus) String {
     return "unknown"
 }
 
-fn outcome_label(outcome: TaskOutcome) String {
+fn outcome_label(outcome: TaskOutcome) String -> {
     if outcome == {
         .Finished -> { return "finished" }
         .Panicked(_) -> { return "panicked" }
@@ -27,26 +27,26 @@ fn outcome_label(outcome: TaskOutcome) String {
     return "unknown"
 }
 
-fn status_is_paused(status: TaskStatus) Bool {
+fn status_is_paused(status: TaskStatus) Bool -> {
     if status == {
         .Paused -> { return true }
     }
     return false
 }
 
-fn outcome_is_finished(outcome: TaskOutcome) Bool {
+fn outcome_is_finished(outcome: TaskOutcome) Bool -> {
     if outcome == {
         .Finished -> { return true }
     }
     return false
 }
 
-fn telemetry_has_service_counters(text: String) Bool {
+fn telemetry_has_service_counters(text: String) Bool -> {
     return text.contains("\"observation\":\"Observe(workers=2") && text.contains("\"metric.counter.dead_letters\":0") && text.contains("\"metric.counter.events\":1") && text.contains("\"metric.counter.restarts\":1") && text.contains("\"metric.counter.chaos_failures\":1")
 }
 
 // D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
-fn service_probe() String {
+fn service_probe() String -> {
     probe := service.tree("probe")
     endpoint :: probe.worker("echo", worker_a, capacity: 1) ?? panic("probe worker")
     probe.start() ?? panic("probe start")

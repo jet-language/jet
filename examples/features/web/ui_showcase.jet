@@ -70,7 +70,7 @@ struct StatCard {
 }
 
 #Target(JS)
-fn hex_digit(n: Int) String {
+fn hex_digit(n: Int) String -> {
     return if n == {
         0 -> "0"
         1 -> "1"
@@ -92,7 +92,7 @@ fn hex_digit(n: Int) String {
 }
 
 #Target(JS)
-fn hi_nibble(n: Int) Int {
+fn hi_nibble(n: Int) Int -> {
     return if {
         n < 16 -> 0
         n < 32 -> 1
@@ -114,7 +114,7 @@ fn hi_nibble(n: Int) Int {
 }
 
 #Target(JS)
-fn hex_byte(n: Int) String {
+fn hex_byte(n: Int) String -> {
     hi :: hi_nibble(n)
     lo :: n - (hi * 16)
     return "{hex_digit(hi)}{hex_digit(lo)}"
@@ -136,7 +136,7 @@ fn fuel_color() Color -> {r: 232, g: 121, b: 12}
 fn boost_color() Color -> {r: 136, g: 85, b: 238}
 
 #Target(JS)
-fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) StatCard {
+fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) StatCard -> {
     return {label: ~label, value: ~value, color: ~color, x: x, y: y}
 }
 
@@ -152,7 +152,7 @@ fn paint_stat_card(card: StatCard) {
 }
 
 #Target(JS)
-fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) Float {
+fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) Float -> {
     if elapsed_ms <= 0 -> return from
     if elapsed_ms >= duration_ms -> return to
     t :: Float.from_int(elapsed_ms) / Float.from_int(duration_ms)
@@ -160,7 +160,7 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) Float {
     return from + (to - from) * eased
 }
 
-fn init_app() Signal<Int> {
+fn init_app() Signal<Int> -> {
     boosts :: reactive.signal(0)
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), Float{0.0}, Float{0.0}))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), Float{190.0}, Float{0.0}))
@@ -177,7 +177,7 @@ fn init_app() Signal<Int> {
     return boosts
 }
 
-fn init_fuel() Signal<Int> {
+fn init_fuel() Signal<Int> -> {
     elapsed :: reactive.signal(0)
     backend :: ui.null_backend()
     ui.reactive_render(() -> {

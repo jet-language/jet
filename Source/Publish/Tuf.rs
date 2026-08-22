@@ -54,6 +54,11 @@ pub struct RegistryMetadataFiles {
     pub checkpoint: String,
 }
 
+struct FileSnapshot {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
 /// Rebuild the signed sparse metadata and witness checkpoint from the current
 /// index. The returned paths are the complete metadata/log transaction and
 /// must be staged together with the package artifact and index line.
@@ -71,44 +76,73 @@ pub fn refresh_registry_metadata(
         )));
     }
 
-    let mut records = read_log(repo).map_err(|error| metadata_diagnostic(&error))?;
-    let mut known = records
+    // Metadata, checkpoint, and witness log are one publication unit. Keep a
+    // byte snapshot so a later write failure cannot leave a mixed checkpoint
+    // visible in the checkout (and therefore cannot be committed by accident).
+    let mut touched = vec![transparency_log_path(repo), checkpoint_path(repo)];
+    for name in grouped.keys() {
+        touched.push(sparse_metadata_path(repo, name).map_err(|error| metadata_diagnostic(&error))?);
+    }
+    touched.sort();
+    touched.dedup();
+    let snapshots = touched
         .iter()
-        .map(|record| record.entry.to_jsonl())
-        .collect::<BTreeSet<_>>();
-    let mut current = grouped
-        .values()
-        .flatten()
-        .cloned()
-        .collect::<Vec<_>>();
-    current.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then(left.version.cmp(&right.version))
-            .then(left.yanked.cmp(&right.yanked))
-    });
-    for entry in current {
-        if known.insert(entry.to_jsonl()) {
-            let operation = if entry.yanked { "yank" } else { "publish" };
-            let record = next_log_record(&records, operation, entry)
-                .map_err(|error| metadata_diagnostic(&error))?;
-            records.push(record);
-        }
-    }
-    validate_log(&records).map_err(|error| metadata_diagnostic(&error))?;
-    write_log(repo, &records).map_err(|error| metadata_diagnostic(&error))?;
+        .map(|path| snapshot_file(path).map_err(|error| metadata_diagnostic(&error)))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let checkpoint = write_checkpoint(repo, registry_name, &root_key, &records)
-        .map_err(|error| metadata_diagnostic(&error))?;
-    let mut paths = vec![transparency_log_path(repo), checkpoint_path(repo)];
-    for (name, entries) in grouped {
-        let metadata = write_sparse_metadata(repo, registry_name, &root_key, &name, &entries, &checkpoint)
-            .map_err(|error| metadata_diagnostic(&error))?;
-        paths.push(metadata);
+    let result = (|| -> io::Result<RegistryMetadataFiles> {
+        let mut records = read_log(repo)?;
+        let mut known = records
+            .iter()
+            .map(|record| record.entry.to_jsonl())
+            .collect::<BTreeSet<_>>();
+        let mut current = grouped
+            .values()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        current.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then(left.version.cmp(&right.version))
+                .then(left.yanked.cmp(&right.yanked))
+        });
+        for entry in current {
+            if known.insert(entry.to_jsonl()) {
+                let operation = if entry.yanked { "yank" } else { "publish" };
+                records.push(next_log_record(&records, operation, entry)?);
+            }
+        }
+        validate_log(&records)?;
+        write_log(repo, &records)?;
+
+        let checkpoint = write_checkpoint(repo, registry_name, &root_key, &records)?;
+        let mut paths = vec![transparency_log_path(repo), checkpoint_path(repo)];
+        for (name, entries) in &grouped {
+            paths.push(write_sparse_metadata(
+                repo,
+                registry_name,
+                &root_key,
+                name,
+                entries,
+                &checkpoint,
+            )?);
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(RegistryMetadataFiles { paths, checkpoint })
+    })();
+
+    match result {
+        Ok(files) => Ok(files),
+        Err(error) => match restore_snapshots(&snapshots) {
+            Ok(()) => Err(metadata_diagnostic(&error)),
+            Err(rollback) => Err(metadata_diagnostic(&io::Error::new(
+                error.kind(),
+                format!("{error}; registry metadata rollback failed: {rollback}"),
+            ))),
+        },
     }
-    paths.sort();
-    paths.dedup();
-    Ok(RegistryMetadataFiles { paths, checkpoint })
 }
 
 /// Verify one package's sparse TUF metadata, its signed checkpoint, and the
@@ -653,6 +687,47 @@ fn read_bounded(path: &Path, limit: usize) -> io::Result<String> {
         return Err(invalid("registry metadata exceeds its size limit"));
     }
     std::fs::read_to_string(path)
+}
+
+fn snapshot_file(path: &Path) -> io::Result<FileSnapshot> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(invalid("registry metadata path is not a regular file"))
+        }
+        Ok(_) => Ok(FileSnapshot {
+            path: path.to_path_buf(),
+            bytes: Some(std::fs::read(path)?),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(FileSnapshot {
+            path: path.to_path_buf(),
+            bytes: None,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn restore_snapshots(snapshots: &[FileSnapshot]) -> io::Result<()> {
+    let mut first_error = None;
+    for snapshot in snapshots {
+        let result = match &snapshot.bytes {
+            Some(bytes) => atomic_write(&snapshot.path, bytes),
+            None => match std::fs::symlink_metadata(&snapshot.path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                    Err(invalid("registry metadata rollback destination is not a regular file"))
+                }
+                Ok(_) => std::fs::remove_file(&snapshot.path),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error),
+            },
+        };
+        if let Err(error) = result {
+            first_error.get_or_insert(error);
+        }
+    }
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {

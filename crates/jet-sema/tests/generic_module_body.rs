@@ -315,7 +315,7 @@ module laws<T> {
     impl Wrapped.Reveal { type Output = T; fn reveal(self) => T { return self.value } }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
-    impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
 }
 module int_laws :: laws<Int>
 fn run() {}
@@ -372,8 +372,8 @@ fn duplicate_error_conversion_inside_instance_keeps_coherence_diagnostic() {
 module bad<T> {
     enum Source { Bad(T) }
     enum Target { Wrapped(Source) }
-    impl Source => Target { return Target.Wrapped(self) }
-    impl Source => Target { return Target.Wrapped(self) }
+    impl Source -> Target { return Target.Wrapped(self) }
+    impl Source -> Target { return Target.Wrapped(self) }
 }
 module instance :: bad<Int>
 fn run() {}
@@ -384,7 +384,7 @@ fn run() {}
 #[test]
 fn generic_module_does_not_launder_error_conversion_orphans() {
     let (_, diagnostics) = check(r#"
-module bad<T> { impl Int => String { return "number" } }
+module bad<T> { impl Int -> String { return "number" } }
 module instance :: bad<Int>
 fn run() {}
 "#);

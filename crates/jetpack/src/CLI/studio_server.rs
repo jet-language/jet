@@ -4,7 +4,6 @@ use super::studio_transactions::{
     StudioChangeSet, StudioProvedSource,
 };
 use crate::Output::Theme;
-use crate::Provider;
 use crate::Syntax;
 use std::path::{Path, PathBuf};
 
@@ -37,7 +36,7 @@ pub(super) fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
         project
     };
     let host = studio_host(parsed).unwrap_or_else(|| "host".to_string());
-    let offline = parsed.flags.offline || !Provider::nix_on_path();
+    let offline = parsed.flags.offline;
     Some(StudioContext {
         config,
         host,

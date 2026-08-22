@@ -2,7 +2,7 @@ use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe};
 
 impl<'a> Parser<'a> {
         /// D-MIGRATE1 as respelled by D-ARROW-CONTROL1: parse
-        /// `migration TypeName { rename a => b; … }`.
+        /// `migration TypeName { rename a -> b; … }`.
         pub(super) fn migration_decl(&mut self) -> Result<crate::AST::MigrationDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `migration` ident
@@ -17,7 +17,7 @@ impl<'a> Parser<'a> {
                 }
                 let op_tok = self.bump();
                 match &op_tok.kind {
-                    // D-MIGRATE1: `rename old => new`.
+                    // D-MIGRATE1: `rename old -> new`.
                     TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                         let (from, from_span) = self.expect_ident("as the field to rename")?;
                         self.expect_unified_arrow(
@@ -54,7 +54,7 @@ impl<'a> Parser<'a> {
                         let (field, field_span) = self.expect_ident("as the field to remove")?;
                         ops.push(crate::AST::MigrationOp::Remove { field, field_span });
                     }
-                    // D-MIGRATE2E: `change field: Old => New [via { expr }]`.
+                    // D-MIGRATE2E: `change field: Old -> New [via { expr }]`.
                     TokKind::Ident(kw) if kw == Syntax::KW_CHANGE => {
                         let (field, field_span) =
                             self.expect_ident("as the field whose type changes")?;
@@ -133,7 +133,7 @@ impl<'a> Parser<'a> {
                             "E0911",
                             format!("`{}` isn't a known migration verb", other),
                             "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
-                            "use `rename old => new`, `add f: T = default`, `remove f`, or `change f: Old => New via { … }`".to_string(),
+                            "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via { … }`".to_string(),
                             Some(op_tok.span),
                         ));
                         while !matches!(
@@ -149,7 +149,7 @@ impl<'a> Parser<'a> {
                             "E0003",
                             format!("expected a migration operation, found {}", desc),
                             "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
-                            "write `rename fieldA => fieldB` (or `add` / `remove` / `change`)".to_string(),
+                            "write `rename fieldA -> fieldB` (or `add` / `remove` / `change`)".to_string(),
                             Some(op_tok.span),
                         ));
                         while !matches!(

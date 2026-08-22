@@ -145,6 +145,7 @@ pub(crate) fn run_update(dep: Option<&str>) {
         locked: false,
         update: true,
         update_dep: dep.map(str::to_string),
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     match jet::Fetch::fetch(&root, &mf, existing_lock.as_ref(), &opts) {
         Ok((lock, _)) => {
@@ -254,6 +255,7 @@ fn do_fetch(root: &Path, locked: bool) {
         locked,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     match jet::Fetch::fetch(root, &mf, existing_lock.as_ref(), &opts) {
         Ok((lock, _)) => {

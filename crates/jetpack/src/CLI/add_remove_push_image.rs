@@ -466,7 +466,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     };
 
-    let Some(image) = plan.images.iter().find(|i| &i.name == name) else {
+    let Some(image) = plan.images.iter().find(|i| &i.name == name).cloned() else {
         theme.error(
             &format!("no image `{name}`"),
             &declared(),
@@ -483,6 +483,27 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     }
+
+    // An image names its environment explicitly. Do not silently project the
+    // beginner-default `dev` environment when the record says `env.full`.
+    let plan = if image.from_environment {
+        match ModuleEval::evaluate_env_with_environment(&src, &dir, Some(&image.from)) {
+            Ok(plan) => plan,
+            Err(d) => {
+                eprint!(
+                    "{}",
+                    crate::Diagnostics::render_all(
+                        Syntax::ENV_FILE,
+                        &src,
+                        std::slice::from_ref(&d),
+                    )
+                );
+                return 2;
+            }
+        }
+    } else {
+        plan
+    };
 
     let push_destination = match parsed.flags.push.as_deref() {
         Some(push_ref)
@@ -566,7 +587,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let out_dir = dir.join(".jet").join("images").join(name);
     let mut projection = Image::ProjectionReport::default();
-    if !image.services.is_empty() {
+    if !image.services.is_empty() || (image.from_environment && !plan.dev_services.is_empty()) {
         projection.rejected.push("services".to_string());
         if let Err(error) = write_rejected_projection(&out_dir, &projection) {
             theme.error(
@@ -616,6 +637,39 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         projection.changed.push("from:environment".to_string());
         if !plan.secrets.is_empty() {
             projection.omitted.push("environment.secrets".to_string());
+        }
+        if !plan.source_files.is_empty() {
+            projection.omitted.push("environment.source-files".to_string());
+        }
+        if !plan.environment_reads.is_empty() {
+            projection.omitted.push("environment.reads".to_string());
+        }
+        if !plan.adapters.is_empty() {
+            projection.omitted.push("environment.adapters".to_string());
+        }
+        if plan.prompt.is_some() {
+            projection.omitted.push("environment.prompt".to_string());
+        }
+        if !plan.systems.is_empty() {
+            projection.omitted.push("environment.systems".to_string());
+        }
+        if !plan.fleets.is_empty() {
+            projection.omitted.push("environment.fleets".to_string());
+        }
+        if !plan.vmtests.is_empty() {
+            projection.omitted.push("environment.vmtests".to_string());
+        }
+        if !plan.package_profiles.is_empty() {
+            projection.omitted.push("environment.package-profiles".to_string());
+        }
+        let lifecycle = &plan.lifecycle;
+        if !lifecycle.dotenv.is_empty()
+            || !lifecycle.unset.is_empty()
+            || !lifecycle.on_enter.is_empty()
+            || !lifecycle.checks.is_empty()
+            || lifecycle.reload_explicit
+        {
+            projection.omitted.push("environment.lifecycle".to_string());
         }
         if !plan.files.is_empty() {
             projection.omitted.push("environment.managed-files".to_string());
@@ -669,6 +723,12 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
     if !image.expose.is_empty() {
         projection.changed.push("expose".to_string());
     }
+    if let Some(target) = &image.target {
+        projection.changed.push(format!("platform:{target}"));
+    }
+    if image.base.is_some() {
+        projection.changed.push("base".to_string());
+    }
     if image.user.is_some() {
         projection.changed.push("user".to_string());
     }
@@ -713,6 +773,10 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let spec = Image::BuildSpec {
         files,
+        platform: image
+            .target
+            .clone()
+            .unwrap_or_else(|| "linux.x64".to_string()),
         entrypoint: vec![image.entrypoint.clone().unwrap_or_else(|| {
             if image.from_environment {
                 "/bin/sh".to_string()

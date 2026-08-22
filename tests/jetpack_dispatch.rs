@@ -71,6 +71,7 @@ module dev {
         .arg(&fixtures.path)
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "bare `jet outdated` must be rejected");
@@ -308,6 +309,7 @@ fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {
         .arg(&fixtures.path)
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
         .output()
         .unwrap();
     assert!(

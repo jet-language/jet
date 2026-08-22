@@ -2386,7 +2386,7 @@ fn canvas_and_semindex_share_composed_package_facts() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\noutputs: .{ workstation: .System.{ target: linux.x64 } }\n",
     )
     .unwrap();
     fs::write(
@@ -2410,6 +2410,8 @@ fn canvas_and_semindex_share_composed_package_facts() {
         assert!(json.contains("plasma-beta"), "{json}");
         assert!(json.contains("release.jet"), "{json}");
         assert!(json.contains("\"name\":\"demo\""), "{json}");
+        assert!(json.contains("\"kind\":\"system\""), "{json}");
+        assert!(json.contains("\"target\":\"linux.x64\""), "{json}");
     }
 }
 

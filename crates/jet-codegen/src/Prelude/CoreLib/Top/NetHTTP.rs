@@ -528,7 +528,7 @@ impl JetDebug for JetNetError {
         <Self as JetShow>::jet_show(self)
     }
 }
-// D-FAIL-CONV2=A: one display hook backs both the shipped impl NetError => Err
+// D-FAIL-CONV2=A: one display hook backs both the shipped impl NetError -> Err
 // and user interpolation.
 impl JetDisplay for JetNetError {
     fn jet_display(&self) -> String {

@@ -16,8 +16,34 @@ use std::sync::atomic::{AtomicU64, Ordering};
 const REPORT_DIR: &str = "unreproducible";
 const REPORT_STATUS: &str = "unreproducible";
 const REPORT_SCHEMA: &str = "jet-reproducibility-report-v1";
+const CERTIFICATION_STAGE_DIR: &str = "reproducibility-staging";
 
 static REPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static CERTIFICATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn recover_certification_staging_unlocked(roots: &Roots) -> io::Result<usize> {
+    let parent = roots.hangar_dir().join(CERTIFICATION_STAGE_DIR);
+    let metadata = match fs::symlink_metadata(&parent) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid("reproducibility staging is not a real directory"));
+    }
+    let mut swept = 0;
+    for entry in fs::read_dir(&parent)? {
+        let path = entry?.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid("reproducibility staging contains a non-directory"));
+        }
+        super::make_tree_writable_for_removal(&path)?;
+        fs::remove_dir_all(path)?;
+        swept += 1;
+    }
+    Ok(swept)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FirstDifference {
@@ -43,6 +69,355 @@ struct OutputSnapshot {
     nodes: BTreeMap<Vec<u8>, NodeObservation>,
 }
 
+/// A provider result that has not crossed the Hangar registration boundary.
+/// The workspace guards stay alive until the caller has promoted `realized`.
+pub(crate) struct PreparedRealization {
+    pub realized: super::super::Provider::Realized,
+    pub action_key: Option<String>,
+    pub attestation: Option<String>,
+    _workspaces: Vec<RootWorkspace>,
+}
+
+struct RootWorkspace {
+    path: PathBuf,
+    roots: Roots,
+}
+
+impl RootWorkspace {
+    fn new(roots: &Roots, side: &str, attempt: usize) -> io::Result<Self> {
+        let hangar = roots.hangar_dir();
+        Ingest::ensure_real_directory(&hangar, "Hangar root")?;
+        let parent = hangar.join(CERTIFICATION_STAGE_DIR);
+        Ingest::ensure_real_directory(&parent, "reproducibility staging")?;
+        let path = loop {
+            let sequence = CERTIFICATION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!(
+                "{}-{}-{}-{}",
+                std::process::id(),
+                side,
+                attempt,
+                sequence
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => break path,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        let roots = Roots::at(path.clone());
+        Ingest::ensure_real_directory(&roots.hangar_dir(), "independent Hangar root")?;
+        Ok(Self { path, roots })
+    }
+}
+
+impl Drop for RootWorkspace {
+    fn drop(&mut self) {
+        if fs::symlink_metadata(&self.path).is_ok() {
+            let _ = super::make_tree_writable_for_removal(&self.path);
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+/// Build through the real provider boundary without consulting a shared
+/// cache. This is also the seam used by the normal realization path when a
+/// writable shared cache would otherwise receive the result.
+pub(crate) fn realize_uncached(
+    roots: &Roots,
+    ctx: &super::super::Provider::Ctx<'_>,
+    request: &super::RealizeRequest<'_>,
+) -> Result<super::super::Provider::Realized, super::RealizeError> {
+    match request {
+        super::RealizeRequest::Package { spec, table } => {
+            super::super::Provider::realize(spec, table, ctx).map_err(super::RealizeError::Provider)
+        }
+        super::RealizeRequest::Adapter {
+            plan,
+            table,
+            expectation,
+        } => {
+            let (tools, _dependency_leases) =
+                super::realize_adapter_tools(roots, ctx, plan, table)?;
+            let mut realized =
+                super::super::Provider::realize_adapter(plan, ctx, expectation, &tools, table)
+                    .map_err(super::RealizeError::Provider)?;
+            super::bind_adapter_hook_identity(&mut realized, plan, table, expectation, ctx)
+                .map_err(super::RealizeError::Store)?;
+            Ok(realized)
+        }
+    }
+}
+
+/// Build one or two fresh roots. A non-source provider is returned once for
+/// the ordinary path; the explicit certification API rejects it.
+pub(crate) fn build_for_cache(
+    roots: &Roots,
+    ctx: &super::super::Provider::Ctx<'_>,
+    request: &super::RealizeRequest<'_>,
+    options: &super::IndependentRootOptions<'_>,
+    require_built: bool,
+) -> Result<PreparedRealization, super::RealizeError> {
+    let attempts = options.retries.saturating_add(1);
+    for attempt in 0..attempts {
+        check_cancelled(options)?;
+        let left_workspace =
+            RootWorkspace::new(roots, "left", attempt).map_err(super::RealizeError::Store)?;
+        let left_store = left_workspace.roots.hangar_dir();
+        let left_ctx = super::super::Provider::Ctx {
+            fixtures: ctx.fixtures,
+            store_dir: &left_store,
+            offline: ctx.offline,
+            project_dir: ctx.project_dir,
+        };
+        let left = match realize_uncached(&left_workspace.roots, &left_ctx, request) {
+            Ok(realized) => realized,
+            Err(_error) if attempt + 1 < attempts => continue,
+            Err(error) => return Err(error),
+        };
+        if left.source_state != super::super::Provider::SourceState::Built {
+            if require_built {
+                return Err(super::RealizeError::Provider(
+                    super::super::Provider::ProviderError::BadOutput(
+                        "independent certification accepts only a fresh source build; substituted, unsigned, or replayed results are rejected".into(),
+                    ),
+                ));
+            }
+            return Ok(PreparedRealization {
+                realized: left,
+                action_key: None,
+                attestation: None,
+                _workspaces: vec![left_workspace],
+            });
+        }
+
+        check_cancelled(options)?;
+        let right_workspace =
+            RootWorkspace::new(roots, "right", attempt).map_err(super::RealizeError::Store)?;
+        let right_store = right_workspace.roots.hangar_dir();
+        let right_ctx = super::super::Provider::Ctx {
+            fixtures: ctx.fixtures,
+            store_dir: &right_store,
+            offline: ctx.offline,
+            project_dir: ctx.project_dir,
+        };
+        let right = match realize_uncached(&right_workspace.roots, &right_ctx, request) {
+            Ok(realized) => realized,
+            Err(_error) if attempt + 1 < attempts => continue,
+            Err(error) => return Err(error),
+        };
+        let left_entry = entry_from_realized(&left_workspace.roots, &left)
+            .map_err(super::RealizeError::Store)?;
+        let right_entry = entry_from_realized(&right_workspace.roots, &right)
+            .map_err(super::RealizeError::Store)?;
+        let left_action = super::entry_action_key(&left_entry);
+        let right_action = super::entry_action_key(&right_entry);
+        let difference = if left_action != right_action {
+            Some(FirstDifference {
+                path: ".".into(),
+                kind: "action-identity".into(),
+                left: left_action.clone(),
+                right: right_action.clone(),
+            })
+        } else {
+            compare_entries(
+                &left_workspace.roots,
+                &left_entry,
+                &right_workspace.roots,
+                &right_entry,
+            )
+            .map_err(super::RealizeError::Store)?
+        };
+        if let Some(difference) = difference {
+            if attempt + 1 < attempts {
+                continue;
+            }
+            let left_producer = decode_producer(&left_entry).map_err(super::RealizeError::Store)?;
+            let right_producer =
+                decode_producer(&right_entry).map_err(super::RealizeError::Store)?;
+            let report = report_json(
+                &left_action,
+                &left_action,
+                &right_action,
+                &left_entry,
+                &right_entry,
+                &left_producer,
+                &right_producer,
+                &difference,
+            );
+            let report_path =
+                persist_report(roots, &left_action, &report).map_err(super::RealizeError::Store)?;
+            return Err(super::RealizeError::Store(unreproducible_error(
+                &left_action,
+                &format!(
+                    "conflicting independent roots at `{}`; report `{}`",
+                    difference.path,
+                    report_path.display()
+                ),
+            )));
+        }
+        check_cancelled(options)?;
+        let attestation = independent_attestation(&left_action, &left.envelope.output_hash);
+        return Ok(PreparedRealization {
+            realized: left,
+            action_key: Some(left_action),
+            attestation: Some(attestation),
+            _workspaces: vec![left_workspace, right_workspace],
+        });
+    }
+    Err(super::RealizeError::Store(io::Error::other(
+        "independent reproducibility runner exhausted its attempts",
+    )))
+}
+
+fn check_cancelled(options: &super::IndependentRootOptions<'_>) -> Result<(), super::RealizeError> {
+    if options.cancelled.is_some_and(|cancelled| cancelled()) {
+        return Err(super::RealizeError::Store(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "independent reproducibility certification cancelled",
+        )));
+    }
+    Ok(())
+}
+
+fn independent_attestation(action_key: &str, output_hash: &str) -> String {
+    let input = format!("jet-independent-cert-v1\n{action_key}\n{output_hash}\n");
+    format!(
+        "independent-agreeing-v1:sha256-{}",
+        SHA256::sha256_hex(input.as_bytes())
+    )
+}
+
+fn entry_from_realized(
+    roots: &Roots,
+    realized: &super::super::Provider::Realized,
+) -> io::Result<StoreEntry> {
+    if realized.source_state != super::super::Provider::SourceState::Built {
+        return Err(invalid("independent root result was not built from source"));
+    }
+    let hangar = roots.hangar_dir();
+    let canonical_hangar = fs::canonicalize(&hangar).unwrap_or(hangar.clone());
+    let canonical_out = fs::canonicalize(&realized.out)
+        .map_err(|error| invalid(&format!("independent root output is unavailable: {error}")))?;
+    if !canonical_out.starts_with(&canonical_hangar) {
+        return Err(invalid(
+            "independent root result points outside its private Hangar",
+        ));
+    }
+    for (label, path) in [
+        ("out", realized.out.as_str()),
+        ("bin", realized.bin.as_str()),
+        ("rlib", realized.rlib.as_str()),
+    ] {
+        if path.is_empty() {
+            continue;
+        }
+        let canonical = fs::canonicalize(path).map_err(|error| {
+            invalid(&format!(
+                "independent root `{label}` output is unavailable: {error}"
+            ))
+        })?;
+        if !canonical.starts_with(&canonical_out) {
+            return Err(invalid(&format!(
+                "independent root `{label}` output escapes the primary output"
+            )));
+        }
+    }
+    if realized.envelope.output_hash.is_empty()
+        || realized.reference.trim().is_empty()
+        || realized.envelope.provenance.trim().is_empty()
+        || realized.cache_identity.source_fingerprint.is_empty()
+        || realized.cache_identity.recipe_fingerprint.is_empty()
+        || realized.cache_identity.policy_fingerprint.is_empty()
+        || realized.cache_identity.platform.is_empty()
+        || realized.envelope.platform != realized.cache_identity.platform
+    {
+        return Err(invalid(
+            "independent root result has incomplete or mismatched build identity",
+        ));
+    }
+    let mut producer = realized.producer.clone();
+    producer.bind_cache_provenance(
+        &realized.reference,
+        &realized.envelope.output_hash,
+        &realized.cache_identity,
+    );
+    let producer = ProducerRecord::decode(&producer.encode()).map_err(io::Error::other)?;
+    let actual = Ingest::try_entry_output_hash(
+        roots,
+        &StoreEntry {
+            id: String::new(),
+            name: realized.name.clone(),
+            version: realized.version.clone(),
+            reference: realized.reference.clone(),
+            out: realized.out.clone(),
+            bin: realized.bin.clone(),
+            rlib: realized.rlib.clone(),
+            envelope: realized.envelope.clone(),
+            cache_identity: realized.cache_identity.clone(),
+            references: realized.references.clone(),
+            named_outputs: BTreeMap::new(),
+            platform_artifact_kind: String::new(),
+            producer_record: producer.encode(),
+            receipt: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        },
+    )
+    .map_err(io::Error::other)?;
+    if actual != realized.envelope.output_hash {
+        return Err(invalid(&format!(
+            "independent root output re-hashed as `{actual}`, expected `{}`",
+            realized.envelope.output_hash
+        )));
+    }
+    let mut named_outputs = BTreeMap::new();
+    for (name, path) in &realized.named_outputs {
+        let canonical = fs::canonicalize(path)?;
+        if !canonical.starts_with(&canonical_out) {
+            return Err(invalid(&format!(
+                "independent named output `{name}` escapes the primary output"
+            )));
+        }
+        if name == "out" && canonical != canonical_out {
+            return Err(invalid(
+                "independent named output `out` disagrees with the primary output",
+            ));
+        }
+        let digest = if name == "out" {
+            realized.envelope.output_hash.clone()
+        } else {
+            Envelope::try_output_hash_of_in_hangar(path, &canonical_hangar, false)
+                .map_err(io::Error::other)?
+        };
+        named_outputs.insert(name.clone(), digest);
+    }
+    named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
+    let id = super::entry_id(
+        &realized.name,
+        &realized.version,
+        &realized.reference,
+        &realized.out,
+    );
+    Ok(StoreEntry {
+        id,
+        name: realized.name.clone(),
+        version: realized.version.clone(),
+        reference: realized.reference.clone(),
+        out: realized.out.clone(),
+        bin: realized.bin.clone(),
+        rlib: realized.rlib.clone(),
+        envelope: realized.envelope.clone(),
+        cache_identity: realized.cache_identity.clone(),
+        references: realized.references.clone(),
+        named_outputs,
+        platform_artifact_kind: String::new(),
+        producer_record: producer.encode(),
+        receipt: String::new(),
+        realized_at: 0,
+        last_used_at: 0,
+    })
+}
+
 /// Check a candidate before the closure transaction can publish it.
 /// `additional` contains entries in the same not-yet-committed batch.
 pub(crate) fn certify_registration_unlocked(
@@ -50,15 +425,37 @@ pub(crate) fn certify_registration_unlocked(
     entry: &StoreEntry,
     additional: &[StoreEntry],
 ) -> io::Result<()> {
+    certify_registration_unlocked_mode(roots, entry, additional, None)
+}
+
+pub(crate) fn certify_registration_unlocked_with_fresh_agreement(
+    roots: &Roots,
+    entry: &StoreEntry,
+    additional: &[StoreEntry],
+    action_key: &str,
+) -> io::Result<()> {
+    certify_registration_unlocked_mode(roots, entry, additional, Some(action_key))
+}
+
+fn certify_registration_unlocked_mode(
+    roots: &Roots,
+    entry: &StoreEntry,
+    additional: &[StoreEntry],
+    fresh_action_key: Option<&str>,
+) -> io::Result<()> {
     let action_key = entry_action_key(entry);
-    if reproducibility_blocked(roots, &action_key)? {
+    let producer = decode_producer(entry)?;
+    let fresh_agreement = fresh_action_key == Some(action_key.as_str())
+        && producer
+            .facts
+            .get("cache.reproducibility")
+            .is_some_and(|value| value.starts_with("independent-agreeing-v1:"));
+    if reproducibility_blocked(roots, &action_key)? && !fresh_agreement {
         return Err(unreproducible_error(
             &action_key,
             "this action already has durable unreproducible evidence",
         ));
     }
-
-    let producer = decode_producer(entry)?;
     let mut candidates = BTreeMap::new();
     for candidate in list_unlocked(roots)
         .into_iter()
@@ -78,9 +475,11 @@ pub(crate) fn certify_registration_unlocked(
             } else {
                 (&candidate, entry, &candidate_producer, &producer)
             };
-        let difference = entry_difference(roots, left, right)?;
+        let difference = compare_entries(roots, left, roots, right)?;
         if let Some(difference) = difference {
             let report = report_json(
+                &action_key,
+                &action_key,
                 &action_key,
                 left,
                 right,
@@ -119,13 +518,52 @@ pub(crate) fn reproducibility_blocked(roots: &Roots, action_key: &str) -> io::Re
     }
 }
 
-fn entry_difference(
+/// Run one fresh agreeing registration while holding the Hangar lock. An old
+/// divergence report is removed only for this transaction and restored if the
+/// registration fails, so a failed promotion cannot silently clear evidence.
+pub(crate) fn with_fresh_agreement_unlocked<T>(
     roots: &Roots,
+    action_key: &str,
+    operation: impl FnOnce() -> io::Result<T>,
+) -> io::Result<T> {
+    let result = operation();
+    match result {
+        Ok(value) => {
+            remove_report(roots, action_key)?;
+            Ok(value)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_report(roots: &Roots, action_key: &str) -> io::Result<()> {
+    let Some(directory) = report_directory(roots, false)? else {
+        return Ok(());
+    };
+    let path = report_path(&directory, action_key);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(invalid("reproducibility evidence is not a regular file"));
+    }
+    fs::remove_file(&path)?;
+    super::sync_store_directory(&directory)?;
+    Ok(())
+}
+
+fn compare_entries(
+    left_roots: &Roots,
     left: &StoreEntry,
+    right_roots: &Roots,
     right: &StoreEntry,
 ) -> io::Result<Option<FirstDifference>> {
-    let left_snapshot = snapshot_for_entry(roots, left)?;
-    let right_snapshot = snapshot_for_entry(roots, right)?;
+    verify_existing_output(left_roots, left)?;
+    verify_existing_output(right_roots, right)?;
+    let left_snapshot = snapshot_for_entry(left_roots, left)?;
+    let right_snapshot = snapshot_for_entry(right_roots, right)?;
     if left_snapshot.digest != right_snapshot.digest {
         return Ok(Some(
             first_node_difference(&left_snapshot, &right_snapshot).unwrap_or(FirstDifference {
@@ -439,12 +877,12 @@ fn producer_provenance_facts(producer: &ProducerRecord) -> BTreeMap<String, Stri
         ("policy_facts".to_string(), producer.policy_facts.clone()),
     ]);
     for (key, value) in &producer.facts {
-        if !is_output_fact(key) {
+        if !is_output_fact(key) && key != "cache.reproducibility" {
             facts.insert(format!("fact.{key}"), value.clone());
         }
     }
     for (key, value) in producer.plan.facts() {
-        if !is_output_fact(key) {
+        if !is_output_fact(key) && key != "cache.reproducibility" {
             facts.insert(format!("plan.{key}"), value.clone());
         }
     }
@@ -457,6 +895,8 @@ fn is_output_fact(key: &str) -> bool {
 
 fn report_json(
     action_key: &str,
+    left_action_key: &str,
+    right_action_key: &str,
     left: &StoreEntry,
     right: &StoreEntry,
     left_producer: &ProducerRecord,
@@ -476,7 +916,7 @@ fn report_json(
     );
     fields.insert(
         "left".to_string(),
-        side_json(left, left_producer, action_key),
+        side_json(left, left_producer, left_action_key),
     );
     fields.insert(
         "producer_action".to_string(),
@@ -501,7 +941,7 @@ fn report_json(
     );
     fields.insert(
         "right".to_string(),
-        side_json(right, right_producer, action_key),
+        side_json(right, right_producer, right_action_key),
     );
     fields.insert("schema".to_string(), crate::JSON::quote(REPORT_SCHEMA));
     fields.insert("status".to_string(), crate::JSON::quote(REPORT_STATUS));

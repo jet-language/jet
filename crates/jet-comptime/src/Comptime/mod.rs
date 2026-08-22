@@ -6,7 +6,7 @@
 //! parameterizes, or selects a type, and never affects dispatch.
 //!
 //! Diagnostics: E3401 impurity (with call path — shared code with the
-//! run-time `=[]=>` check, D-META-EFFECT1 c3) · E0952 fuel exhausted ·
+//! run-time `-[]>` check, D-META-EFFECT1 c3) · E0952 fuel exhausted ·
 //! E0953 comptime panic (user message verbatim, overflow, divide-by-zero) ·
 //! E0955 embed_file errors · E0956 construct not yet supported at comptime.
 //!

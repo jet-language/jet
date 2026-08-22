@@ -73,7 +73,12 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} clean                          collect stale hangar objects + optimize
   {bin} search <query>                 search the local offline package index
   {bin} info <source>.<package>         show local offline package metadata
-  {bin} explain <ref>                  show resolution path and latest build status
+  {bin} explain <ref>                  show dependency, closure, liveness, and rebuild facts
+  {bin} explain why-depends <ref>      explain direct/transitive package dependencies
+  {bin} explain what-depends <ref>     explain direct/transitive package referrers
+  {bin} explain closure <ref>          explain the realized closure objects
+  {bin} explain why-live <ref>         explain active project/lifecycle roots
+  {bin} explain rebuild <ref>          explain cache identity and rebuild reason
   {bin} logs <pkg> --json              show persisted per-step build logs
   {bin} override draft <ref> --patch <file>
                                       draft reviewed workspace overlay policy

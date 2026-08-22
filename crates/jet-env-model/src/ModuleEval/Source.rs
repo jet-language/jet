@@ -751,6 +751,7 @@ pub fn evaluate_env_with_selections(
     Ok(EnvPlan {
         table,
         source_files,
+        graph_identity: None,
         environment_reads: env_reads,
         package_refs,
         adapters,

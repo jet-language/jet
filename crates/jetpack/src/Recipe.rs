@@ -24,14 +24,20 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::SHA256;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Card #367 slice 4: the `BuildStep`/`BuildRecipe` *data* shape sunk into
 // `jet-pkg-model` (data-down / engine-up) — re-exported under the historical
 // `crate::Recipe::{BuildStep,BuildRecipe}` path so every call site here and
 // in `Provider.rs`/`ModuleEval::Types` is unchanged.
-pub use jet_pkg_model::Recipe::{BuildRecipe, BuildStep};
+pub use jet_pkg_model::Recipe::{
+    BuildPlanFragment, BuildRecipe, BuildStep, PlanAuthority, PlanFragmentAction, PlanInput,
+    StagedPlanAction, StagedPlanError, StagedPlanLock,
+};
+
+static STAGED_PLAN_ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A locked source fetch recorded for `.jet/lock` provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +86,113 @@ impl RunReport {
             self.effects.push(e.to_string());
             self.effects.sort();
         }
+    }
+}
+
+/// The only host state exposed while a staged plan action emits its fragment.
+/// The callback has no filesystem handle, store handle, resolver, or ambient
+/// environment; it can read only the exact locked inputs through `read_input`.
+pub struct StagedPlanContext<'a> {
+    pub source_dir: &'a Path,
+    pub artifact_root: &'a Path,
+}
+
+/// A successful staged plan publication. The artifact directory is committed
+/// only after the fragment passes model validation and the complete BuildPlan
+/// graph is admitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedPlanReport {
+    pub action_identity: String,
+    pub fragment_digest: String,
+    pub plan_fingerprint: String,
+    pub artifact_dir: PathBuf,
+    pub lock: StagedPlanLock,
+}
+
+/// A plan callback can fail or be cancelled without publishing a partial
+/// fragment. Access outside the declared input authority is a separate error
+/// so diagnostics can name the violated sandbox rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedPlanActionError {
+    Cancelled,
+    Failed(String),
+    UndeclaredAccess(String),
+}
+
+impl std::fmt::Display for StagedPlanActionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => f.write_str("staged plan action was cancelled"),
+            Self::Failed(detail) => f.write_str(detail),
+            Self::UndeclaredAccess(detail) => write!(f, "undeclared staged-plan access: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for StagedPlanActionError {}
+
+/// Capability-limited input view for the plan callback.
+pub struct PlanSandbox<'a> {
+    source_dir: &'a Path,
+    declared_inputs: BTreeMap<String, String>,
+    observed_inputs: BTreeSet<String>,
+}
+
+impl<'a> PlanSandbox<'a> {
+    fn new(source_dir: &'a Path, inputs: &[PlanInput]) -> Self {
+        Self {
+            source_dir,
+            declared_inputs: inputs
+                .iter()
+                .map(|input| (input.path.clone(), input.digest.clone()))
+                .collect(),
+            observed_inputs: BTreeSet::new(),
+        }
+    }
+
+    /// Read one exact, declared input and verify its locked digest before
+    /// exposing bytes to the callback.
+    pub fn read_input(&mut self, path: &str) -> Result<Vec<u8>, StagedPlanActionError> {
+        let Some(declared_digest) = self.declared_inputs.get(path) else {
+            return Err(StagedPlanActionError::UndeclaredAccess(format!(
+                "input `{path}`"
+            )));
+        };
+        let source = confined_source(self.source_dir, path, false).map_err(|error| {
+            StagedPlanActionError::Failed(format!("{}: {}", error.code, error.what))
+        })?;
+        let bytes = std::fs::read(&source).map_err(|error| {
+            StagedPlanActionError::Failed(format!(
+                "could not read declared input `{path}`: {error}"
+            ))
+        })?;
+        let digest = SHA256::sha256_hex(&bytes);
+        if !digest_matches(declared_digest, &digest) {
+            return Err(StagedPlanActionError::Failed(format!(
+                "declared input `{path}` digest mismatch: expected `{declared_digest}`, got `sha256-{digest}`"
+            )));
+        }
+        self.observed_inputs.insert(path.to_string());
+        Ok(bytes)
+    }
+
+    /// Store reads are not part of D-JPK-DYNAMICPLAN1's sandbox authority.
+    pub fn read_store(&self, path: &str) -> Result<Vec<u8>, StagedPlanActionError> {
+        Err(StagedPlanActionError::UndeclaredAccess(format!(
+            "store path `{path}`"
+        )))
+    }
+
+    /// Package resolution is deliberately unavailable after the finite stage
+    /// boundary; all resolution facts must be declared by the caller.
+    pub fn resolve_package(&self, package: &str) -> Result<(), StagedPlanActionError> {
+        Err(StagedPlanActionError::UndeclaredAccess(format!(
+            "package resolution `{package}`"
+        )))
+    }
+
+    pub fn observed_inputs(&self) -> impl Iterator<Item = &str> {
+        self.observed_inputs.iter().map(String::as_str)
     }
 }
 
@@ -245,6 +358,381 @@ pub fn lower_to_plan(
     })
 }
 
+/// Run one finite sandboxed plan action, lower its typed fragment into the
+/// ordinary BuildPlan graph, and atomically publish the resulting stage.
+///
+/// The callback is the only dynamic part. It can inspect declared inputs but
+/// cannot resolve packages, read the store, inherit ambient state, or publish
+/// an artifact. Validation and graph admission happen before publication.
+pub fn run_staged_plan_action<F>(
+    action: &StagedPlanAction,
+    ctx: &StagedPlanContext<'_>,
+    tools: &HashMap<String, PathBuf>,
+    emit: F,
+) -> Result<StagedPlanReport, Diagnostic>
+where
+    F: FnOnce(&mut PlanSandbox<'_>) -> Result<BuildPlanFragment, StagedPlanActionError>,
+{
+    action
+        .validate_declaration()
+        .map_err(staged_plan_model_error)?;
+    let mut sandbox = PlanSandbox::new(ctx.source_dir, &action.inputs);
+    let fragment = emit(&mut sandbox).map_err(staged_plan_action_error)?;
+    action
+        .validate(&fragment)
+        .map_err(staged_plan_model_error)?;
+    let identity = action
+        .identity(&fragment)
+        .map_err(staged_plan_model_error)?;
+    let fragment_digest = action
+        .fragment_digest(&fragment)
+        .map_err(staged_plan_model_error)?;
+    let plan = lower_staged_plan_action(action, &fragment, tools)?;
+    let plan_fingerprint = plan_recipe_fingerprint(&plan)?;
+    let lock = action.lock(&fragment).map_err(staged_plan_model_error)?;
+    let artifact_dir = publish_staged_plan_artifact(
+        ctx.artifact_root,
+        action,
+        &fragment,
+        &lock,
+        &plan_fingerprint,
+    )?;
+    Ok(StagedPlanReport {
+        action_identity: identity,
+        fragment_digest,
+        plan_fingerprint,
+        artifact_dir,
+        lock,
+    })
+}
+
+/// Lower a validated staged fragment into the same finite action graph used by
+/// ordinary package recipes. The planner node owns the canonical fragment;
+/// every emitted action depends on it and on its declared predecessor markers.
+pub fn lower_staged_plan_action(
+    action: &StagedPlanAction,
+    fragment: &BuildPlanFragment,
+    tools: &HashMap<String, PathBuf>,
+) -> Result<crate::Comptime::Build::BuildPlan, Diagnostic> {
+    use crate::Comptime::Build::{ActionKind, ActionSpec, BuildContext as PlanContext, TargetSpec};
+
+    action.validate(fragment).map_err(staged_plan_model_error)?;
+    let identity = action.identity(fragment).map_err(staged_plan_model_error)?;
+    let fragment_digest = action
+        .fragment_digest(fragment)
+        .map_err(staged_plan_model_error)?;
+    let namespace = staged_plan_namespace(&action.name, &identity);
+    let plan_output = format!(".jet/staged-plan/{namespace}/fragment.plan");
+
+    let mut ordered = fragment.actions.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| left.name.cmp(&right.name));
+    let marker_paths = ordered
+        .iter()
+        .enumerate()
+        .map(|(index, emitted)| {
+            (
+                emitted.name.clone(),
+                format!(".jet/staged-plan/{namespace}/actions/{index}.stamp"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for emitted in &ordered {
+        for output in &emitted.outputs {
+            if output_paths_overlap(output, &plan_output)
+                || marker_paths
+                    .values()
+                    .any(|marker| output_paths_overlap(output, marker))
+            {
+                return Err(e1238_plan(&format!(
+                    "staged action `{}` output `{output}` overlaps the reserved staged-plan graph",
+                    emitted.name
+                )));
+            }
+        }
+    }
+
+    let mut plan_ctx = PlanContext::new();
+    let mut planner_spec =
+        ActionSpec::cached(["jet-staged-plan", action.name.as_str(), identity.as_str()])
+            .with_kind(ActionKind::Generic)
+            .with_outputs([plan_output.clone()])
+            .with_env("STAGED_PLAN_STAGE", action.stage.to_string())
+            .with_env("STAGED_PLAN_BOUND", action.stage_bound.to_string())
+            .with_env("STAGED_PLAN_PLATFORM", action.authority.platform.clone())
+            .with_env_allowlist([
+                "STAGED_PLAN_STAGE",
+                "STAGED_PLAN_BOUND",
+                "STAGED_PLAN_PLATFORM",
+            ])
+            .with_helper_version("jet-staged-plan", jet_pkg_model::Recipe::STAGED_PLAN_FORMAT)
+            .with_label("staged.action", action.name.clone())
+            .with_label("staged.identity", identity.clone())
+            .with_label("staged.fragment-digest", fragment_digest.clone())
+            .with_label("staged.stage", action.stage.to_string())
+            .with_label("staged.stage-bound", action.stage_bound.to_string())
+            .with_label("staged.platform", action.authority.platform.clone());
+    let mut planner_inputs = action.inputs.clone();
+    planner_inputs.sort();
+    for (index, input) in planner_inputs.iter().enumerate() {
+        planner_spec = planner_spec
+            .with_inputs([input.path.clone()])
+            .with_label(format!("staged.input.{index}.path"), input.path.clone())
+            .with_label(format!("staged.input.{index}.digest"), input.digest.clone());
+    }
+    let mut authority_tools = action.authority.tools.clone();
+    authority_tools.sort();
+    for (index, tool) in authority_tools.iter().enumerate() {
+        let path = realized_tool(tools, tool)?;
+        planner_spec = planner_spec.with_label(
+            format!("authority.tool.{index}.path"),
+            path.to_string_lossy().into_owned(),
+        );
+    }
+    planner_spec = add_authority_labels(
+        planner_spec,
+        &action.authority.tools,
+        &action.authority.effects,
+    );
+    for effect in &action.authority.effects {
+        planner_spec = planner_spec.with_cap(*effect);
+    }
+    let planner_handle = plan_ctx
+        .action(format!("staged-plan-{namespace}-planner"), planner_spec)
+        .map_err(|error| e1238_plan(&format!("staged planner action is invalid: {error:?}")))?;
+
+    let mut action_handles = vec![planner_handle];
+    for (index, emitted) in ordered.iter().enumerate() {
+        let tool_path = realized_tool(tools, &emitted.tool)?;
+        let mut argv = vec![tool_path.to_string_lossy().into_owned()];
+        argv.extend(emitted.args.iter().cloned());
+        let marker = marker_paths
+            .get(&emitted.name)
+            .expect("marker was created for every validated staged action");
+        let mut inputs = BTreeSet::new();
+        inputs.insert(plan_output.clone());
+        for input in &emitted.inputs {
+            inputs.insert(input.clone());
+        }
+        for dependency in &emitted.dependencies {
+            inputs.insert(
+                marker_paths
+                    .get(dependency)
+                    .expect("dependencies were validated before lowering")
+                    .clone(),
+            );
+        }
+        let mut outputs = emitted.outputs.clone();
+        outputs.sort();
+        outputs.push(marker.clone());
+        let mut spec = ActionSpec::cached(argv)
+            .with_kind(ActionKind::Compile)
+            .with_inputs(inputs)
+            .with_outputs(outputs)
+            .with_helper_version(&emitted.tool, "declared")
+            .with_label("staged.action", action.name.clone())
+            .with_label("staged.identity", identity.clone())
+            .with_label("staged.fragment-digest", fragment_digest.clone())
+            .with_label("staged.fragment-name", emitted.name.clone())
+            .with_label("staged.fragment-index", index.to_string())
+            .with_label("staged.tool", emitted.tool.clone())
+            .with_label("staged.platform", emitted.platform.clone())
+            .with_label("staged.stage", action.stage.to_string())
+            .with_label("staged.stage-bound", action.stage_bound.to_string());
+        for (key, value) in &emitted.env {
+            spec = spec.with_env(key.clone(), value.clone());
+        }
+        spec = spec.with_env_allowlist(emitted.env.keys().cloned());
+        for effect in &emitted.effects {
+            spec = spec.with_cap(*effect);
+        }
+        let mut emitted_input_facts = action
+            .inputs
+            .iter()
+            .filter(|input| emitted.inputs.iter().any(|path| path == &input.path))
+            .collect::<Vec<_>>();
+        emitted_input_facts.sort_by(|left, right| left.path.cmp(&right.path));
+        for (input_index, input) in emitted_input_facts.iter().enumerate() {
+            spec = spec
+                .with_label(
+                    format!("staged.input.{input_index}.path"),
+                    input.path.clone(),
+                )
+                .with_label(
+                    format!("staged.input.{input_index}.digest"),
+                    input.digest.clone(),
+                );
+        }
+        let mut authority_tools = action.authority.tools.clone();
+        authority_tools.sort();
+        for (tool_index, tool) in authority_tools.iter().enumerate() {
+            let path = realized_tool(tools, tool)?;
+            spec = spec.with_label(
+                format!("authority.tool.{tool_index}.path"),
+                path.to_string_lossy().into_owned(),
+            );
+        }
+        spec = add_authority_labels(spec, &action.authority.tools, &action.authority.effects);
+        let handle = plan_ctx
+            .action(format!("staged-plan-{namespace}-action-{index}"), spec)
+            .map_err(|error| {
+                e1238_plan(&format!(
+                    "staged emitted action `{}` is invalid: {error:?}",
+                    emitted.name
+                ))
+            })?;
+        action_handles.push(handle);
+    }
+
+    let mut target_spec = TargetSpec::new()
+        .with_metadata("staged.action", action.name.clone())
+        .with_metadata("staged.identity", identity)
+        .with_metadata("staged.fragment-digest", fragment_digest)
+        .with_metadata("staged.platform", action.authority.platform.clone())
+        .with_metadata("staged.stage", action.stage.to_string())
+        .with_metadata("staged.stage-bound", action.stage_bound.to_string());
+    for handle in action_handles {
+        target_spec = target_spec.with_action(handle);
+    }
+    let target = plan_ctx
+        .add_package(format!("staged-plan-{namespace}"), target_spec)
+        .map_err(|error| e1238_plan(&format!("staged plan target is invalid: {error:?}")))?;
+    plan_ctx
+        .plan_with_default(target)
+        .map_err(|error| e1238_plan(&format!("staged plan graph failed validation: {error:?}")))
+}
+
+fn add_authority_labels(
+    mut spec: crate::Comptime::Build::ActionSpec,
+    tools: &[String],
+    effects: &[jet_foundation::BuildEffect],
+) -> crate::Comptime::Build::ActionSpec {
+    for (index, tool) in tools.iter().enumerate() {
+        spec = spec.with_label(format!("authority.tool.{index}"), tool.clone());
+    }
+    for (index, effect) in effects.iter().enumerate() {
+        spec = spec.with_label(format!("authority.effect.{index}"), effect.flag());
+    }
+    spec
+}
+
+fn staged_plan_model_error(error: StagedPlanError) -> Diagnostic {
+    e1238_plan(&format!("{error}"))
+}
+
+fn staged_plan_action_error(error: StagedPlanActionError) -> Diagnostic {
+    match error {
+        StagedPlanActionError::Cancelled => Diagnostic::error(
+            "E1238",
+            "staged plan action was cancelled".to_string(),
+            "the finite stage produced no publishable fragment".to_string(),
+            "retry the build; cancellation leaves the previous artifact unchanged.".to_string(),
+            None,
+        ),
+        StagedPlanActionError::Failed(detail) => e1238_plan(&format!(
+            "staged plan action failed before publication: {detail}"
+        )),
+        StagedPlanActionError::UndeclaredAccess(detail) => {
+            e1238_plan(&format!("staged plan action denied {detail}"))
+        }
+    }
+}
+
+fn staged_plan_namespace(name: &str, identity: &str) -> String {
+    let digest = identity
+        .rsplit(':')
+        .next()
+        .unwrap_or(identity)
+        .chars()
+        .take(16)
+        .collect::<String>();
+    format!("{}-{digest}", safe_plan_component(name))
+}
+
+fn safe_plan_component(value: &str) -> String {
+    let mut output = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if output.is_empty() {
+        output.push_str("action");
+    }
+    output
+}
+
+fn publish_staged_plan_artifact(
+    artifact_root: &Path,
+    action: &StagedPlanAction,
+    fragment: &BuildPlanFragment,
+    lock: &StagedPlanLock,
+    plan_fingerprint: &str,
+) -> Result<PathBuf, Diagnostic> {
+    std::fs::create_dir_all(artifact_root)
+        .map_err(|error| recipe_io_error("could not create staged-plan artifact root", error))?;
+    let namespace = staged_plan_namespace(&action.name, &lock.action_identity);
+    let artifact = artifact_root.join(namespace);
+    let fragment_bytes = fragment.canonical_bytes();
+    let lock_bytes = lock.encode();
+    if artifact.exists() {
+        let matches = std::fs::read(artifact.join("fragment.plan"))
+            .map(|bytes| bytes == fragment_bytes)
+            .unwrap_or(false)
+            && std::fs::read_to_string(artifact.join("lock"))
+                .map(|contents| contents == lock_bytes)
+                .unwrap_or(false)
+            && std::fs::read_to_string(artifact.join("plan.fingerprint"))
+                .map(|contents| contents == plan_fingerprint)
+                .unwrap_or(false);
+        if matches {
+            return Ok(artifact);
+        }
+        return Err(e1238_plan(
+            "staged-plan artifact identity collides with a different published result",
+        ));
+    }
+
+    let counter = STAGED_PLAN_ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let staging = artifact_root.join(format!(".staged-plan-{}-{counter}", std::process::id()));
+    let mut guard = StagedPlanArtifactGuard {
+        path: staging.clone(),
+        published: false,
+    };
+    std::fs::create_dir(&staging)
+        .map_err(|error| recipe_io_error("could not create staged-plan scratch", error))?;
+    std::fs::write(staging.join("fragment.plan"), fragment_bytes)
+        .map_err(|error| recipe_io_error("could not write staged-plan fragment", error))?;
+    std::fs::write(staging.join("lock"), lock_bytes)
+        .map_err(|error| recipe_io_error("could not write staged-plan lock", error))?;
+    std::fs::write(staging.join("plan.fingerprint"), plan_fingerprint)
+        .map_err(|error| recipe_io_error("could not write staged-plan fingerprint", error))?;
+    if let Err(error) = std::fs::rename(&staging, &artifact) {
+        return Err(recipe_io_error(
+            "could not publish staged-plan artifact",
+            error,
+        ));
+    }
+    guard.published = true;
+    Ok(artifact)
+}
+
+struct StagedPlanArtifactGuard {
+    path: PathBuf,
+    published: bool,
+}
+
+impl Drop for StagedPlanArtifactGuard {
+    fn drop(&mut self) {
+        if !self.published {
+            remove_path(&self.path);
+        }
+    }
+}
+
 fn step_marker(package: &str, index: usize) -> String {
     format!(".jet/recipe/{package}/step-{index}.stamp")
 }
@@ -333,9 +821,11 @@ fn output_paths_overlap(left: &str, right: &str) -> bool {
 fn e1238_plan(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1238",
-        "recipe finite staged plan is invalid".to_string(),
-        detail.to_string(),
-        "fix the recipe's declared inputs, outputs, tools, or stage order.".to_string(),
+        "build recipe or staged plan action is not a valid declared action graph".to_string(),
+        format!(
+            "{detail}; staged plans use only declared inputs, realized tools, effects, platform facts, and finite acyclic outputs"
+        ),
+        "declare every authority fact, fix the graph, and retry the stage.".to_string(),
         None,
     )
 }
@@ -870,6 +1360,16 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn digest_matches(declared: &str, actual_hex: &str) -> bool {
+    declared == actual_hex
+        || declared
+            .strip_prefix("sha256-")
+            .is_some_and(|digest| digest == actual_hex)
+        || declared
+            .strip_prefix("sha256:")
+            .is_some_and(|digest| digest == actual_hex)
+}
+
 /// Build hooks cannot receive a credential provider. Reject URL userinfo at
 /// the recipe boundary so the secret cannot reach transport, cache metadata,
 /// diagnostics, or step logs.
@@ -1226,7 +1726,7 @@ fn e1237_source(source: &str) -> Diagnostic {
     )
 }
 
-/// E1238 — a recipe named a build tool that is not a realized `Pkg` dep.
+/// E1238 — a recipe or staged plan violated its declared build graph contract.
 pub fn e1238(tool: &str) -> Diagnostic {
     Diagnostic::error(
         "E1238",

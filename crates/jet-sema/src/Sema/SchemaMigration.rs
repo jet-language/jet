@@ -55,8 +55,8 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 /// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
 /// them, and so the op expressions are type-checked and lowered through the
 /// normal pipeline:
-///   - `change … via { (old) => body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) => New`
-///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() => T`
+///   - `change … via { (old) -> body }` → `fn __jet_migrate_conv_<T>_<i>_<f>(old: Old) New -> body`
+///   - `add f: T = val`                 → `fn __jet_migrate_add_<T>_<i>_<f>() T -> body`
 /// The op's `conv_fn`/`default_fn` is set to the synthetic name. Types that
 /// never decode at runtime (no `Decode` derive, or generic) get nothing — the
 /// migration stays a compile-time intent check only, and codegen emits nothing
@@ -197,9 +197,9 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
     }
 }
 
-/// Build `fn <name>(<param>: Old) => New { <converter body> }` from a `change`
+/// Build `fn <name>(<param>: Old) New -> { <converter body> }` from a `change`
 /// op's inline converter. The canonical converter is a one-parameter lambda
-/// `(old) => expr`; anything else is treated as a callable applied to the old
+/// `(old) -> expr`; anything else is treated as a callable applied to the old
 /// value.
 fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, span: Span) -> Func {
     let (param_name, body): (String, Vec<Stmt>) = match conv {
@@ -380,7 +380,7 @@ pub fn check_schema_migrations(
         }
     }
 
-    // D-MIGRATE2B: an `impl Old => New` in scope is a fallback converter source.
+    // D-MIGRATE2B: an `impl Old -> New` in scope is a fallback converter source.
     // Collect declared error-conversion-style impls as (from, to) type-name pairs.
     let mut conv_impls: Vec<(String, String)> = Vec::new();
     for item in items {
@@ -522,7 +522,7 @@ pub fn check_schema_migrations(
                 continue; // unchanged
             }
             // A `change f: old -> new` op declares intent. The converter is the
-            // inline `via { … }` (D-MIGRATE2B step 1) OR an `impl Old => New`
+            // inline `via { … }` (D-MIGRATE2B step 1) OR an `impl Old -> New`
             // in scope (step 2). Without either → ask for a converter (step 3).
             let change_op = ops.iter().find_map(|op| match op {
                 DeclaredOp::Change {
@@ -538,7 +538,7 @@ pub fn check_schema_migrations(
             match change_op {
                 Some(true) => {} // inline converter present → OK
                 Some(false) => {
-                    // No inline `via`; look for an `impl Old => New` fallback.
+                    // No inline `via`; look for an `impl Old -> New` fallback.
                     let has_impl = conv_impls
                         .iter()
                         .any(|(from, to)| from == old_ty && to == &new_ty);
@@ -616,7 +616,7 @@ fn e0910_changed_type(
         ),
         "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
         format!(
-            "add `migration {} {{ change {}: {} -> {} via {{ (old) => … }} }}`, or bump the major version",
+            "add `migration {} {{ change {}: {} -> {} via {{ (old) -> … }} }}`, or bump the major version",
             type_name, field, old_ty, new_ty
         ),
         Some(span),
@@ -624,7 +624,7 @@ fn e0910_changed_type(
 }
 
 /// E0910: a `change` op is declared but no converter (neither inline `via` nor
-/// an `impl Old => New` in scope) is available.
+/// an `impl Old -> New` in scope) is available.
 fn e0910_change_no_converter(
     type_name: &str,
     field: &str,
@@ -640,7 +640,7 @@ fn e0910_change_no_converter(
         ),
         "a type change needs a way to turn an old value into a new one — old data already on disk is read through it".to_string(),
         format!(
-            "add an inline `via {{ (old) => … }}` to the `change` op, or declare `impl {} => {} {{ … }}` in scope",
+            "add an inline `via {{ (old) -> … }}` to the `change` op, or declare `impl {} -> {} {{ … }}` in scope",
             old_ty, new_ty
         ),
         Some(span),

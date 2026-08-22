@@ -19,7 +19,7 @@ fn first(values: [Int]) View<Int> from values -> values[0..1]
 // The result safely borrows whichever input wins at runtime. Both possible
 // owners remain live at the call site. D-MEMPROVENANCE3=A: the `from` clause
 // makes that contract explicit for library APIs.
-fn longer(left: String, right: String) View<str> from left | right {
+fn longer(left: String, right: String) View<str> from left | right -> {
     if left.len() >= right.len() {
         winner :: left.trim()
         return winner
@@ -28,14 +28,14 @@ fn longer(left: String, right: String) View<str> from left | right {
     return winner
 }
 
-fn domain(email: String) Domain {
+fn domain(email: String) Domain -> {
     value :: email.after("@")
     return Domain{value: value}
 }
 
 // Both parser outputs borrow one caller-owned input. `parse` proves that
 // provenance composes through an ordinary wrapper call.
-fn scan(source: String) Token {
+fn scan(source: String) Token -> {
     text :: source.before(":")
     rest :: source.after(":")
     return Token{text: text, rest: rest}
@@ -44,14 +44,14 @@ fn scan(source: String) Token {
 fn parse(source: String) Token -> scan(source)
 
 // A parser can return a list of tokens borrowed from different input buffers.
-fn tokenize(left: String, right: String) [View<str>] {
+fn tokenize(left: String, right: String) [View<str>] -> {
     left_token :: left.before(":")
     right_token :: right.before(":")
     return [left_token, right_token]
 }
 
 // A borrowing deserializer can also keep one field from each input buffer.
-fn deserialize(header: String, payload: String) BorrowedRecord {
+fn deserialize(header: String, payload: String) BorrowedRecord -> {
     kind :: header.after(":")
     body :: payload.after(":")
     return BorrowedRecord{kind: kind, body: body}

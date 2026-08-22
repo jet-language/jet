@@ -5,16 +5,16 @@ use core.regex as re
 fn run() {
     text :: "order 42 shipped to zip 90210"
     // is_match: does the pattern occur at all?
-    has_digits :: re.is_match(.{"\d+"}, text)
+    has_digits :: re.is_match({"\d+"}, text)
     print(has_digits)
     // find: the first matched substring (an optional — `None` if no match).
-    first :: re.find(.{"\d+"}, text)
+    first :: re.find({"\d+"}, text)
     if first == .Val(n) -> print(n)
     // find_all: every match, left to right.
-    nums :: re.find_all(.{"\d+"}, text)
+    nums :: re.find_all({"\d+"}, text)
     print(nums.len())
     // match + capture groups: group(0) is the whole match, group(n) the n-th group.
-    m :: re.match(.{"(\d+) shipped"}, text)
+    m :: re.match({"(\d+) shipped"}, text)
     if m == .Val(mat) {
         whole :: mat.group(0) ?? "none"
         first_group :: mat.group(1) ?? "none"
@@ -22,10 +22,10 @@ fn run() {
         print(first_group)
     }
     // replace_all: rewrite every match.
-    masked :: re.replace_all(.{"\d+"}, text, "#")
+    masked :: re.replace_all({"\d+"}, text, "#")
     print(masked)
     // split on whitespace runs.
-    words :: re.split(.{"\s+"}, text)
+    words :: re.split({"\s+"}, text)
     print(words.len())
 
     // compile once, reuse with typed flags and named groups.
@@ -42,7 +42,7 @@ fn run() {
 
     // callback replacement and split limit.
     word :: re.compile("\\w+") ?? panic("bad word")
-    print(word.replace_all_with("a b", (m: Match) => "hit"))
+    print(word.replace_all_with("a b", (m: Match) -> "hit"))
     sep :: re.compile(",\\s*") ?? panic("bad sep")
     limited :: sep.split_limit("a, b, c", 2)
     print(limited[1])

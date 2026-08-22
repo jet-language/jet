@@ -98,6 +98,22 @@ fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
     .unwrap();
 }
 
+fn image_blob_containing(root: &Path, needle: &[u8]) -> Vec<u8> {
+    fs::read_dir(root.join("blobs/sha256"))
+        .unwrap()
+        .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+        .find(|bytes| bytes.windows(needle.len()).any(|window| window == needle))
+        .unwrap_or_else(|| panic!("image has no blob containing {:?}", needle))
+}
+
+fn image_layer(root: &Path) -> Vec<u8> {
+    fs::read_dir(root.join("blobs/sha256"))
+        .unwrap()
+        .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+        .find(|bytes| bytes.len() >= 263 && &bytes[257..263] == b"ustar\0")
+        .expect("image has no ustar layer blob")
+}
+
 // ── field-check / cross-check (modeval) ─────────────────────────────────────
 
 /// I5: the committed typed-image fixture (the `.Oci` shape) is the executable
@@ -241,6 +257,42 @@ fn environment_image_uses_realized_package_output() {
         .unwrap();
     assert!(report.contains("package:bash@nixpkgs"), "projection: {report}");
     assert!(!project.path.join("build").exists());
+    let image = project.path.join(".jet/images/server");
+    let layer = image_layer(&image);
+    assert!(layer.windows(6).any(|window| window == b"bin/sh\0"));
+    assert!(!image_blob_containing(&image, br#""User":"10001""#).is_empty());
+}
+
+#[test]
+fn environment_image_projects_named_environment_not_default() {
+    let project = Scratch::new("environment-selection");
+    let root = Scratch::new("environment-selection-root");
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [\"bash@nixpkgs\"] }\nmodule env.full { packages: [\"sh@nixpkgs\"] }\nmodule image.server { from: env.full, target: linux.arm64 }\n",
+    )
+    .unwrap();
+    ingest_executable(&root.path, "bash", "bash@nixpkgs@default", "bash");
+    ingest_executable(&root.path, "sh", "sh@nixpkgs@default", "sh");
+
+    let out = jetpack()
+        .args(["image", "server"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let report = fs::read_to_string(project.path.join(".jet/images/server/projection.json"))
+        .unwrap();
+    assert!(report.contains("package:sh@nixpkgs"), "projection: {report}");
+    assert!(!report.contains("package:bash@nixpkgs"), "projection: {report}");
+    assert!(report.contains("platform:linux.arm64"), "projection: {report}");
+    assert!(!image_blob_containing(
+        &project.path.join(".jet/images/server"),
+        br#""architecture":"arm64""#,
+    )
+    .is_empty());
 }
 
 #[test]

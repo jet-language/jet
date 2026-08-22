@@ -2166,7 +2166,7 @@ partially guessed.
 | Project configuration files | `package.jet` owns package identity, `workspace.jet` owns workspace membership, and `env.jet` owns named source aliases and environment facts. All three use Jet grammar and are resolved from the nearest applicable project root. | A `jetpack.toml` file is a retired second grammar and is rejected with E1225 before dependency resolution. |
 | SemVer and dependency ranges | SemVer 2.0.0 `major.minor.patch`, optional pre-release/build identifiers, and the documented node-semver comparator, caret, tilde, x, hyphen, whitespace-AND, and `||`-OR forms. A leading version `v` is accepted for tag compatibility; an empty requirement means `*`. | Core numeric overflow/leading zeroes, empty identifiers, invalid characters, wildcard-before-number forms, empty `||` alternatives, and any range whose exclusive upper bound would overflow `u64`. Pre-release numeric identifiers remain spec-unbounded and compare without integer conversion. |
 | C bind prototypes | Top-level `return_type name(parameters);` declarations for the documented scalar, `char*`, and `void` subset. `(void)`/empty lists and unnamed scalar parameters are accepted. Unsupported but structurally valid types are reported in the skipped list. | Function bodies/pointers, variadics, unbalanced lists, empty comma fields, trailing declarator text, non-ASCII C identifiers, and declarations with no return type. No guessed binding is emitted. |
-| Registry JSONL and advisory database | One UTF-8 JSON object per registry line with nonempty string `name`/`version`, `tier`, and `gate_status`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, plus optional boolean `yanked`; `tier` is `core` or `community`, and `gate_status` records the five named gate states. Advisory lines are `id|package|affected|fixed-or-empty|title[|severity]`; blank lines and `#` comments are allowed, and unknown/missing severity remains `medium` for compatibility. See [registry tiers](registry-tiers.md). | Malformed/duplicate/nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, invalid tier or gate status, advisory field-count errors, empty required fields, invalid affected/fixed versions, or `|` inside fields. Reads fail closed with E2607 rather than skipping security metadata. |
+| Registry JSONL and signed advisory feed | One UTF-8 JSON object per registry line with nonempty string `name`/`version`, `tier`, and `gate_status`, optional string `content_hash`, `fingerprint`, `public_key`, and `signature`, plus optional boolean `yanked`; `tier` is `core` or `community`, and `gate_status` records the five named gate states. The offline advisory file starts with `jet-advisory-feed-v1`, then a signed `feed|sequence|issued-unix|expires-unix|maturity-seconds|key-id|public-key|signature` header, exact `release|package#version|first-seen-unix|source-class` records, `advisory|id|package|affected|fixed-or-empty|title|severity` records, and exact `exception|package#version|reason|reviewer|expires-unix` records. `key-id` is `sha256-` plus the hash of the decoded public-key bytes. `.jet/advisory-trust` pins the publisher key, minimum sequence, accepted digest, and revoked keys. The default third-party maturity window is 24 hours; first-party and workspace releases default to zero. See [registry tiers](registry-tiers.md). | Malformed/duplicate/nested-fake JSON fields, unknown registry keys, wrong field types, partial registry records, invalid tier or gate status, unsigned/untrusted/stale/expired/rolled-back/forked advisory feeds, compromised keys, missing remote release records, invalid exact targets, advisory field-count errors, empty required fields, invalid affected/fixed versions, or `|` inside fields. Reads fail closed with E2607, E2609, E2610, or E2611 rather than skipping security metadata. |
 
 **VS Code / Cursor**: `editors/vscode/` — TextMate grammar + LSP client (plain
 JS, no compile step; `install.sh` packs and installs the vsix). The client
@@ -2784,11 +2784,13 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   private `jet env export <shell>` callback that emits nothing until the current
   directory crosses an env boundary, so it is a no-op on the vast majority of
   prompts.
-- **`image.<name>:` values are Jetpack OCI images.** Active fields are
-  `kind: .Oci` (optional when `from: packages.<name>` makes it clear),
-  `from: packages.<name>`, `expose: [Int]`, `env_vars: ["KEY": "value"]`,
-  `files: [String]`, and `base: oci("<ref>")`. `base:` is captured but not yet
-  realized because registry-pull is gated on TLS/native-client work. `.Iso`,
+- **`image.<name>:` values are Jetpack OCI images.** `from: env.<name>` projects
+  the selected typed environment through this same image record; the safe
+  default is a non-root runnable `/bin/sh` assembled from verified Hangar
+  executable output. The record also accepts `services`, `target`, `user`,
+  `entrypoint`, `health`, `expose`, `env_vars`, `files`, and `base`; service
+  projection remains rejected until the typed supervisor prerequisite lands.
+  `base:` is captured but not yet realized for remote references. `.Iso`,
   `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer inputs handled
   by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
@@ -2808,9 +2810,10 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   source drift, and cache tampering fail closed. Offline reuse re-verifies the
   sealed Hangar output without contacting the repository.
 - **No-Nix machines (U23):** core packages and adapted packages realize without
-  Nix. Package refs that still route through the Nix compatibility provider are
-  reported together as E1272, naming only those holes and suggesting either
-  installing Nix or drafting an adapter with `jetpack add <ref> --adapt`.
+  Nix. Package refs that lack a pinned compatibility output are reported
+  together as E1272, naming only those holes. Jetpack does not invoke an
+  installed Nix executable for package realization; use a verified output or
+  draft an adapter with `jetpack add <ref> --adapt`.
   Foreign-flake projection uses the bounded native evaluator. Unsupported
   expressions remain E1256; Jetpack does not delegate this path to an
   installed `nix` binary.
@@ -2820,11 +2823,22 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   same package records the editor discovery hooks consume: source, name,
   resolved ref, version, platforms, docs, provenance, and typed service option
   fields.
+- **Environment discovery cockpit (U26/#789):** `jet env info [--env <name>]
+  [--preset <name>] [--json]` reads one selected typed environment plan. It
+  reports package refs, typed service readiness/dependency/restart/watch facts,
+  the ratified `jobs` and `checks` lists, variables with source labels, managed
+  files, and integration facts. It does not realize packages, start services,
+  run lifecycle actions, or apply files; sibling `env.<name>` contributions are
+  not merged into the selected report.
 - **Failed-build debugging (U27):** recipe-backed builds persist per-step logs
   under the hangar. On failure, scratch is preserved in hangar-managed storage
   and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
-  `jet explain <ref>` prints the latest resolution/build record; code-form
-  `jet explain E1234` keeps the existing diagnostic essay behavior.
+  `jet explain <ref>` prints Store identity, provider facts, dependency and
+  closure edges, liveness roots, and rebuild checks. The causal views
+  `jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
+  one part of the same fact model. `jet explain <ref> --json` emits the stable JSON
+  projection; code-form `jet explain E1234` keeps the existing diagnostic essay
+  behavior.
 - **Hybrid CLI output (D-FE-CLI1):** trivial reads stay quiet, multi-package
   realization/build work reports dependency-chain progress, and mutations plan
   before applying. Plan rows use `+`, `-`, and `~` in both colored and plain

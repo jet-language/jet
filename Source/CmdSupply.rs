@@ -413,7 +413,10 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // c56 (D-JPK-CACHE1=A / D-VERSION1=A): push the index entry to the git
     // registry. The registry is a git repo — publishing is: clone/pull the
     // sparse index, append the version line, commit, push.
-    status!("publishing to registry index `{}` ...", registry.url);
+    status!(
+        "publishing to registry index `{}` ...",
+        jet::Publish::redact_registry_url(&registry.url)
+    );
 
     let source_repo = match jet::Publish::ensure_index_clone(&registry) {
         Ok(r) => r,
@@ -430,7 +433,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // non-yanked version. This is the enforcement point the decision promised
     // but couldn't land without a real push target.
     match jet::Publish::find_published(&source_repo, name, version) {
-        Ok(Some(existing)) if !existing.yanked => {
+        Ok(Some(_existing)) => {
             eprint!(
                 "{}",
                 jet::render_diagnostics(
@@ -631,7 +634,15 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     };
     if let Err(e) = jet::Publish::Index::write_index_entry(repo, &entry) {
         fail_publish_checkout(&checkout, || {
-            crate::cli_error!("E2105", "couldn't write the registry index entry: {}", e);
+            let diagnostic = if e.kind() == std::io::ErrorKind::AlreadyExists {
+                jet::Publish::e1234(name, version)
+            } else {
+                jet::Publish::e2607("registry index", &e.to_string())
+            };
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
         });
     }
 
@@ -675,7 +686,12 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    status!("ok: published `{}` v{} to {}", name, version, registry.url);
+    status!(
+        "ok: published `{}` v{} to {}",
+        name,
+        version,
+        jet::Publish::redact_registry_url(&registry.url)
+    );
 }
 
 /// Source hash + plan fingerprint for the index entry. Reuses the lock's
@@ -785,6 +801,7 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
         locked: false,
         update: false,
         update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
     };
     let (lock, dep_dirs) = jet::Fetch::fetch(&root, &mf, existing_lock.as_ref(), &opts)
         .unwrap_or_else(|diags| {
@@ -839,7 +856,8 @@ pub(crate) fn run_vendor(vendor_dir: Option<&str>) {
     }
 }
 
-/// `jet inspect audit [--advisory-db <path>]` — check the lockfile against an advisory DB.
+/// jet inspect audit [--advisory-db <path>] — verify a signed offline feed
+/// before checking the lockfile against its advisories and freshness policy.
 pub(crate) fn run_audit(db_path: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
@@ -847,17 +865,47 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
         "error: no package.jet found — run `jet inspect audit` inside a project",
     );
 
-    let lock = match jet::Lock::load(&root) {
-        Some(l) => l,
-        None => {
-            println!("audit: no lockfile found — run `jet fetch` first");
-            exit(ExitCodes::OK);
+    let lock_path = root.join(".jet").join("lock");
+    let lock_text = match fs::read_to_string(&lock_path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            audit_fail(
+                &lock_path,
+                "",
+                jet::Publish::e2611(
+                    "the unified lockfile",
+                    "run `jet fetch`, review the lock, then run `jet inspect audit` again",
+                ),
+            );
+        }
+        Err(error) => {
+            audit_fail(
+                &lock_path,
+                "",
+                jet::Publish::e2611(
+                    "a readable unified lockfile",
+                    &format!(
+                        "repair `{}` and run `jet inspect audit` again: {error}",
+                        lock_path.display()
+                    ),
+                ),
+            );
+        }
+    };
+    let lock = match jet::Lock::parse(&lock_text) {
+        Ok(lock) => lock,
+        Err(error) => {
+            audit_fail(
+                &lock_path,
+                &lock_text,
+                jet::Publish::e2611(
+                    "a valid unified lockfile",
+                    &format!("repair `{}`: {error}", lock_path.display()),
+                ),
+            );
         }
     };
 
-    // Load the explicitly selected local database, the environment-selected
-    // local database, or the project-local default. No network lookup happens
-    // in an audit command.
     let configured_path = db_path
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("JET_ADVISORY_DB").map(PathBuf::from))
@@ -865,83 +913,120 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
             let path = root.join(".jet").join("advisories.db");
             path.is_file().then_some(path)
         });
-    let db_text = if let Some(path) = configured_path.as_deref() {
-        match fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) => {
-                crate::cli_error!("E2105", "couldn't read advisory database `{}`: {}", path.display(), e);
-                exit(ExitCodes::USER_ERROR);
-            }
+    let Some(feed_path) = configured_path else {
+        audit_fail(
+            &root,
+            "",
+            jet::Publish::e2611(
+                "a signed advisory database",
+                "pass --advisory-db <path>, set JET_ADVISORY_DB, or add .jet/advisories.db",
+            ),
+        );
+    };
+    let feed_text = match fs::read_to_string(&feed_path) {
+        Ok(text) => text,
+        Err(error) => {
+            audit_fail(
+                &feed_path,
+                "",
+                jet::Publish::e2611(
+                    "a readable signed advisory database",
+                    &format!("repair `{}` and retry: {error}", feed_path.display()),
+                ),
+            );
+        }
+    };
+    let feed = match jet::Publish::parse_advisory_feed(&feed_text) {
+        Ok(feed) => feed,
+        Err(diagnostic) => {
+            audit_fail(&feed_path, &feed_text, diagnostic);
+        }
+    };
+
+    let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join(".jet").join("advisory-trust"));
+    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
+        jet::Publish::AdvisoryTrustRoot {
+            public_key: public_key.to_string_lossy().trim().to_string(),
+            ..Default::default()
         }
     } else {
-        String::new()
-    };
-
-    let advisories = match jet::Publish::parse_advisory_db(&db_text) {
-        Ok(advisories) => advisories,
-        Err(diagnostic) => {
-            let advisory_source = configured_path.as_deref().map_or_else(
-                || "advisory database".to_string(),
-                |path| path.display().to_string(),
-            );
-            eprint!(
-                "{}",
-                jet::render_diagnostics(
-                    &advisory_source,
-                    &db_text,
-                    &[diagnostic]
-                )
-            );
-            exit(ExitCodes::USER_ERROR);
+        let trust_text = match fs::read_to_string(&trust_path) {
+            Ok(text) => text,
+            Err(error) => {
+                audit_fail(
+                    &trust_path,
+                    "",
+                    jet::Publish::e2610(
+                        "advisory trust root",
+                        &format!("could not read `{}`: {error}", trust_path.display()),
+                    ),
+                );
+            }
+        };
+        match jet::Publish::parse_advisory_trust(&trust_text) {
+            Ok(trust) => trust,
+            Err(diagnostic) => audit_fail(&trust_path, &trust_text, diagnostic),
         }
     };
 
-    if advisories.is_empty() && configured_path.is_none() {
-        println!(
-            "audit: no advisory database configured.\n\
-             pass --advisory-db <path>, set JET_ADVISORY_DB, or add `.jet/advisories.db`\n\
-             to check against a local database."
-        );
-        exit(ExitCodes::OK);
-    }
+    let report = match jet::Publish::audit_advisory_feed(&lock, &feed, &trust, jet::Publish::advisory_now()) {
+        Ok(report) => report,
+        Err(diagnostic) => audit_fail(&feed_path, &feed_text, diagnostic),
+    };
+    println!(
+        "audit: feed sequence {} verified (key {}, digest {}, offline local feed).",
+        report.receipt.sequence,
+        report.receipt.key_id,
+        report.receipt.digest
+    );
+    println!(
+        "audit: policy maturity {}s; exact exceptions use package#version; {} dependencies checked.",
+        report.receipt.maturity_seconds,
+        lock.packages.len()
+    );
 
-    let matches = jet::Publish::audit_lockfile(&lock, &advisories);
-    if matches.is_empty() {
-        println!(
-            "audit: {} dependencies checked, no advisories found.",
-            lock.packages.len()
-        );
+    let raw = String::new();
+    let diags: Vec<_> = report
+        .maturity
+        .iter()
+        .cloned()
+        .chain(report.matches.iter().map(|m| m.diagnostic.clone()))
+        .collect();
+    if diags.is_empty() {
+        println!("audit: no advisories found.");
         return;
     }
-
-    // D-SUPPLY1: report every match, but only a CRITICAL advisory makes the
-    // command exit nonzero (advisory scan). Lower severities inform and exit 0.
-    let raw = String::new();
-    let diags: Vec<_> = matches.iter().map(|m| m.diagnostic.clone()).collect();
     eprint!(
         "{}",
         jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, &raw, &diags)
     );
 
-    let critical = matches
+    let critical = report
+        .matches
         .iter()
         .filter(|m| m.severity == jet::Publish::Severity::Critical)
         .count();
     eprintln!(
         "\n{} advisory match(es) found ({} critical)",
-        matches.len(),
+        report.matches.len(),
         critical
     );
-    if critical > 0 {
+    if critical > 0 || !report.maturity.is_empty() {
         eprintln!(
-            "audit: {} critical advisor{} — failing. Upgrade the affected dependenc{}.",
-            critical,
-            if critical == 1 { "y" } else { "ies" },
-            if critical == 1 { "y" } else { "ies" },
+            "audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception."
         );
         exit(ExitCodes::USER_ERROR);
     }
-    // Non-critical matches are advisory only: exit 0 so a scan doesn't break CI.
+}
+
+fn audit_fail(path: &Path, raw: &str, diagnostic: jet::Diagnostics::Diagnostic) -> ! {
+    eprint!(
+        "{}",
+        jet::render_diagnostics(&path.display().to_string(), raw, &[diagnostic])
+    );
+    exit(ExitCodes::USER_ERROR);
 }
 
 /// `jet audit copies [<entry.jet>]` — show every compiler-inserted owning
@@ -1202,7 +1287,12 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    println!("ok: yanked `{}` v{} in {}", name, version, registry.url);
+    println!(
+        "ok: yanked `{}` v{} in {}",
+        name,
+        version,
+        jet::Publish::redact_registry_url(&registry.url)
+    );
     if let Some(msg) = message {
         println!("  reason: {}", msg);
     }

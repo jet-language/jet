@@ -78,44 +78,172 @@ pub struct ProviderSelector {
 
 impl ProviderSelector {
     pub fn parse(raw: &str) -> ProviderSelector {
-        let mut selector = ProviderSelector {
-            raw: raw.to_string(),
-            ..Default::default()
-        };
-        for part in raw
-            .strip_prefix('#')
-            .unwrap_or(raw)
-            .split(['&', ','])
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-        {
-            let (key, value) = part.split_once('=').unwrap_or(("revision", part));
-            match key.trim() {
-                "version" => selector.version = value.trim().to_string(),
-                "revision" | "rev" => selector.revision = value.trim().to_string(),
-                "baseline" => selector.baseline = value.trim().to_string(),
-                "feature" | "features" => {
-                    selector.features = value
-                        .split('+')
-                        .chain(value.split(','))
-                        .map(str::trim)
-                        .filter(|feature| !feature.is_empty())
-                        .map(str::to_string)
-                        .collect();
-                    selector.features.sort();
-                    selector.features.dedup();
-                }
-                "digest" | "hash" | "sha256" => selector.digest = value.trim().to_string(),
-                "platform" | "target" => selector.platform = value.trim().to_string(),
-                _ => {}
-            }
-        }
-        selector
+        parse_selector_details(raw).selector
     }
 
     pub fn is_exact(&self) -> bool {
-        !self.version.is_empty() || !self.revision.is_empty() || !self.digest.is_empty()
+        let has_exact_identity = [
+            exact_selector_value(&self.version, SelectorValue::Version),
+            exact_selector_value(&self.revision, SelectorValue::Revision),
+            exact_selector_value(&self.digest, SelectorValue::Digest),
+        ]
+        .into_iter()
+        .any(|exact| exact);
+        let has_invalid_identity = [
+            (&self.version, SelectorValue::Version),
+            (&self.revision, SelectorValue::Revision),
+            (&self.digest, SelectorValue::Digest),
+        ]
+        .into_iter()
+        .any(|(value, kind)| !value.is_empty() && !exact_selector_value(value, kind));
+        has_exact_identity && !has_invalid_identity
     }
+}
+
+#[derive(Clone, Copy)]
+enum SelectorValue {
+    Version,
+    Revision,
+    Digest,
+}
+
+fn exact_selector_value(value: &str, kind: SelectorValue) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    match kind {
+        SelectorValue::Version => {
+            !value.starts_with(['^', '~', '>', '<', '=', '*'])
+                && !value.contains("||")
+                && !value.contains(',')
+                && !matches!(value, "latest" | "next" | "main" | "master" | "head")
+        }
+        SelectorValue::Revision => {
+            !matches!(
+                value,
+                "latest" | "next" | "main" | "master" | "head" | "develop"
+            ) && !value.starts_with("refs/heads/")
+        }
+        SelectorValue::Digest => {
+            value.starts_with("sha256-") || value.starts_with("sha256:") || value.len() >= 32
+        }
+    }
+}
+
+#[derive(Default)]
+struct SelectorDetails {
+    selector: ProviderSelector,
+    unknown: Vec<String>,
+    conflicts: Vec<(String, String, String)>,
+}
+
+fn parse_selector_details(raw: &str) -> SelectorDetails {
+    let mut details = SelectorDetails {
+        selector: ProviderSelector {
+            raw: raw.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let body = raw.strip_prefix('#').unwrap_or(raw);
+    for group in body.split('&') {
+        let mut start = 0;
+        for (offset, character) in group.char_indices() {
+            if character == ',' && is_selector_assignment(group[offset + 1..].trim_start()) {
+                parse_selector_part(&mut details, group[start..offset].trim());
+                start = offset + 1;
+            }
+        }
+        parse_selector_part(&mut details, group[start..].trim());
+    }
+    details
+}
+
+fn parse_selector_part(details: &mut SelectorDetails, part: &str) {
+    if part.is_empty() {
+        return;
+    }
+    let (key, value) = part.split_once('=').unwrap_or(("version", part));
+    let key = key.trim();
+    let value = value.trim();
+    match key {
+        "version" => set_selector_value(
+            &mut details.selector.version,
+            "version",
+            value,
+            &mut details.conflicts,
+        ),
+        "revision" | "rev" => set_selector_value(
+            &mut details.selector.revision,
+            "revision",
+            value,
+            &mut details.conflicts,
+        ),
+        "baseline" => set_selector_value(
+            &mut details.selector.baseline,
+            "baseline",
+            value,
+            &mut details.conflicts,
+        ),
+        "feature" | "features" => {
+            details.selector.features.extend(
+                value
+                    .split(['+', ','])
+                    .map(str::trim)
+                    .filter(|feature| !feature.is_empty())
+                    .map(str::to_string),
+            );
+            details.selector.features.sort();
+            details.selector.features.dedup();
+        }
+        "digest" | "hash" | "sha256" => set_selector_value(
+            &mut details.selector.digest,
+            "digest",
+            value,
+            &mut details.conflicts,
+        ),
+        "platform" | "target" => set_selector_value(
+            &mut details.selector.platform,
+            "platform",
+            value,
+            &mut details.conflicts,
+        ),
+        _ => details.unknown.push(part.to_string()),
+    }
+}
+
+fn set_selector_value(
+    slot: &mut String,
+    key: &str,
+    value: &str,
+    conflicts: &mut Vec<(String, String, String)>,
+) {
+    if !slot.is_empty() && slot != value {
+        conflicts.push((key.to_string(), slot.clone(), value.to_string()));
+    } else if slot.is_empty() {
+        *slot = value.to_string();
+    }
+}
+
+fn is_selector_assignment(part: &str) -> bool {
+    let Some((key, _)) = part.split_once('=') else {
+        return false;
+    };
+    matches!(
+        key.trim(),
+        "version"
+            | "revision"
+            | "rev"
+            | "baseline"
+            | "feature"
+            | "features"
+            | "digest"
+            | "hash"
+            | "sha256"
+            | "platform"
+            | "target"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,7 +299,8 @@ impl ProviderFacts {
         let selector_raw = selector_part
             .map(|selector| format!("#{selector}"))
             .unwrap_or_default();
-        let selector = ProviderSelector::parse(&selector_raw);
+        let selector_details = parse_selector_details(&selector_raw);
+        let selector = selector_details.selector;
         let mut facts = ProviderFacts {
             provider: provider.to_string(),
             reference: reference.to_string(),
@@ -217,6 +346,46 @@ impl ProviderFacts {
                 "reference.selector",
             );
         }
+        for unknown in selector_details.unknown {
+            facts.add_loss(
+                "provider.selector",
+                &format!("unsupported selector fact `{unknown}` cannot be normalized losslessly"),
+                "reference.selector",
+            );
+        }
+        for (key, left, right) in selector_details.conflicts {
+            facts.add_conflict(
+                &format!("provider.selector.{key}"),
+                &left,
+                &right,
+                "reference.selector",
+            );
+        }
+        for (key, value, kind) in [
+            (
+                "version",
+                facts.selector.version.clone(),
+                SelectorValue::Version,
+            ),
+            (
+                "revision",
+                facts.selector.revision.clone(),
+                SelectorValue::Revision,
+            ),
+            (
+                "digest",
+                facts.selector.digest.clone(),
+                SelectorValue::Digest,
+            ),
+        ] {
+            if !value.is_empty() && !exact_selector_value(&value, kind) {
+                facts.add_loss(
+                    &format!("provider.selector.{key}"),
+                    &format!("mutable {key} selector `{value}` is not an exact provider identity"),
+                    "reference.selector",
+                );
+            }
+        }
         facts
     }
 
@@ -231,6 +400,13 @@ impl ProviderFacts {
                     right,
                     source: source.to_string(),
                 });
+            } else if let Some(existing_source) = self.provenance.get_mut(key) {
+                if existing_source != source
+                    && !existing_source.split(" | ").any(|item| item == source)
+                {
+                    existing_source.push_str(" | ");
+                    existing_source.push_str(source);
+                }
             }
             return;
         }
@@ -242,6 +418,15 @@ impl ProviderFacts {
         self.losses.push(ProviderLoss {
             key: key.to_string(),
             reason: reason.to_string(),
+            source: source.to_string(),
+        });
+    }
+
+    pub fn add_conflict(&mut self, key: &str, left: &str, right: &str, source: &str) {
+        self.conflicts.push(ProviderConflict {
+            key: key.to_string(),
+            left: left.to_string(),
+            right: right.to_string(),
             source: source.to_string(),
         });
     }
@@ -296,9 +481,103 @@ impl ProviderFacts {
             || self.reference.trim().is_empty()
             || self.target.trim().is_empty()
         {
-            return Err("provider facts need a provider, target, and fully qualified reference".to_string());
+            return Err(
+                "provider facts need a provider, target, and fully qualified reference".to_string(),
+            );
+        }
+        let (reference_root, reference_selector) = split_reference_selector(&self.reference);
+        let (reference_target, _) = reference_root
+            .rsplit_once('@')
+            .unwrap_or((reference_root.as_str(), ""));
+        if reference_target != self.target {
+            return Err(format!(
+                "provider fact target `{}` disagrees with reference target `{reference_target}`",
+                self.target
+            ));
+        }
+        if let Some(raw_selector) = reference_selector {
+            let parsed = parse_selector_details(&format!("#{raw_selector}")).selector;
+            if parsed.version != self.selector.version
+                || parsed.revision != self.selector.revision
+                || parsed.baseline != self.selector.baseline
+                || parsed.features != self.selector.features
+                || parsed.digest != self.selector.digest
+                || parsed.platform != self.selector.platform
+            {
+                return Err(
+                    "provider fact selector disagrees with its fully qualified reference"
+                        .to_string(),
+                );
+            }
+        } else if !self.selector.raw.is_empty() {
+            return Err(
+                "provider fact selector is present but the reference has no selector".to_string(),
+            );
+        }
+        if is_external_provider(&self.provider) && !self.effective_selector().is_exact() {
+            return Err(format!(
+                "external provider `{}` requires an exact version, revision, or digest",
+                self.provider
+            ));
+        }
+        for key in self.facts.keys() {
+            if !self.provenance.contains_key(key) {
+                return Err(format!("provider fact `{key}` lacks provenance"));
+            }
+        }
+        for key in self.provenance.keys() {
+            if !self.facts.contains_key(key) {
+                return Err(format!("provider provenance `{key}` has no fact"));
+            }
+        }
+        for (key, expected) in [
+            ("provider.resolved_source", self.resolved_source.as_str()),
+            ("profile.name", self.profile.as_str()),
+            ("profile.provenance", self.profile_provenance.as_str()),
+        ] {
+            if !expected.is_empty()
+                && !matches!(self.facts.get(key), Some(ProviderFactValue::Text(value)) if value == expected)
+            {
+                return Err(format!(
+                    "provider field `{key}` disagrees with its typed fact"
+                ));
+            }
+        }
+        if self.native_document.is_empty() != self.native_format.is_empty() {
+            return Err(
+                "provider native format and native document must be retained together".to_string(),
+            );
         }
         Ok(())
+    }
+
+    /// Return the canonical direct-root spelling used by locks and generated
+    /// output. The original source spelling remains in `reference`.
+    pub fn qualified_reference(&self) -> String {
+        let (root, _) = split_reference_selector(&self.reference);
+        let selector = canonical_selector(&self.effective_selector());
+        if selector.is_empty() {
+            return root;
+        }
+        if let Some((target, provider)) = root.rsplit_once('@') {
+            format!("{target}#{selector}@{provider}")
+        } else {
+            format!("{root}#{selector}")
+        }
+    }
+
+    /// Use a selector resolved by an explicitly declared source authority when
+    /// the package spelling itself is intentionally unpinned. The raw selector
+    /// and the resolved selector remain separate facts.
+    pub fn effective_selector(&self) -> ProviderSelector {
+        if self.selector.is_exact() {
+            return self.selector.clone();
+        }
+        let Some(ProviderFactValue::Text(raw)) = self.facts.get("provider.resolved_selector")
+        else {
+            return self.selector.clone();
+        };
+        ProviderSelector::parse(raw)
     }
 
     pub fn digest(&self) -> String {
@@ -364,7 +643,20 @@ impl ProviderFacts {
     }
 
     pub fn from_json(text: &str) -> Result<ProviderFacts, String> {
-        let root = JSON::parse(text)?.as_object()?.clone();
+        let value = JSON::parse(text)?;
+        Self::from_json_value(&value)
+    }
+
+    pub fn from_json_value(value: &JSONValue) -> Result<ProviderFacts, String> {
+        let root = value.as_object()?;
+        if root
+            .get("schema")
+            .ok_or_else(|| "provider facts lack `schema`".to_string())?
+            .as_str()?
+            != "jet-provider-facts-v1"
+        {
+            return Err("provider facts have an unsupported schema".to_string());
+        }
         let string = |key: &str| {
             root.get(key)
                 .ok_or_else(|| format!("provider facts lack `{key}`"))?
@@ -425,7 +717,10 @@ impl ProviderFacts {
             }
         }
         for loss in &self.losses {
-            lines.push(format!("loss {}: {} ({})", loss.key, loss.reason, loss.source));
+            lines.push(format!(
+                "loss {}: {} ({})",
+                loss.key, loss.reason, loss.source
+            ));
         }
         for conflict in &self.conflicts {
             lines.push(format!(
@@ -450,6 +745,29 @@ fn split_reference_selector(reference: &str) -> (String, Option<String>) {
         return (format!("{prefix}@{provider}"), Some(selector.to_string()));
     }
     (prefix.to_string(), Some(suffix.to_string()))
+}
+
+fn canonical_selector(selector: &ProviderSelector) -> String {
+    let mut parts = Vec::new();
+    if !selector.version.is_empty() {
+        parts.push(format!("version={}", selector.version));
+    }
+    if !selector.revision.is_empty() {
+        parts.push(format!("revision={}", selector.revision));
+    }
+    if !selector.baseline.is_empty() {
+        parts.push(format!("baseline={}", selector.baseline));
+    }
+    if !selector.features.is_empty() {
+        parts.push(format!("features={}", selector.features.join("+")));
+    }
+    if !selector.digest.is_empty() {
+        parts.push(format!("digest={}", selector.digest));
+    }
+    if !selector.platform.is_empty() {
+        parts.push(format!("platform={}", selector.platform));
+    }
+    parts.join("&")
 }
 
 fn is_external_provider(provider: &str) -> bool {
@@ -531,7 +849,11 @@ fn parse_losses(value: Option<&JSONValue>) -> Result<Vec<ProviderLoss>, String> 
         .map(|value| {
             let object = value.as_object()?;
             Ok(ProviderLoss {
-                key: object.get("key").ok_or("loss lacks key")?.as_str()?.to_string(),
+                key: object
+                    .get("key")
+                    .ok_or("loss lacks key")?
+                    .as_str()?
+                    .to_string(),
                 reason: object
                     .get("reason")
                     .ok_or("loss lacks reason")?
@@ -556,7 +878,11 @@ fn parse_conflicts(value: Option<&JSONValue>) -> Result<Vec<ProviderConflict>, S
         .map(|value| {
             let object = value.as_object()?;
             Ok(ProviderConflict {
-                key: object.get("key").ok_or("conflict lacks key")?.as_str()?.to_string(),
+                key: object
+                    .get("key")
+                    .ok_or("conflict lacks key")?
+                    .as_str()?
+                    .to_string(),
                 left: object
                     .get("left")
                     .ok_or("conflict lacks left")?
@@ -575,4 +901,54 @@ fn parse_conflicts(value: Option<&JSONValue>) -> Result<Vec<ProviderConflict>, S
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProviderFacts, ProviderSelector};
+
+    #[test]
+    fn bare_selector_is_version_and_features_are_lossless() {
+        let selector = ProviderSelector::parse("#2.0.17&features=lua,ssl");
+        assert_eq!(selector.version, "2.0.17");
+        assert_eq!(selector.revision, "");
+        assert_eq!(
+            selector.features,
+            vec!["lua".to_string(), "ssl".to_string()]
+        );
+        assert!(selector.is_exact());
+    }
+
+    #[test]
+    fn provider_facts_round_trip_identity_provenance_and_native_bytes() {
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad#2.0.17@npm");
+        facts.set_resolved_source("npm:left-pad@2.0.17");
+        facts.set_native_document("package.json", "{\"name\":\"left-pad\"}\n");
+        facts.add_fact(
+            "package.version",
+            super::ProviderFactValue::Text("2.0.17".to_string()),
+            "package.json.version",
+        );
+        facts.validate().expect("lossless provider facts");
+        assert_eq!(facts.qualified_reference(), "left-pad#version=2.0.17@npm");
+        let round_trip = ProviderFacts::from_json(&facts.to_json()).expect("provider facts JSON");
+        assert_eq!(round_trip, facts);
+        assert!(round_trip
+            .explain_lines()
+            .iter()
+            .any(|line| line == "native package.json: retained"));
+    }
+
+    #[test]
+    fn mutable_selector_is_an_explicit_loss() {
+        let facts = ProviderFacts::for_reference("npm", "vite#^5@npm");
+        assert!(!facts.is_lossless());
+        let error = facts
+            .validate()
+            .expect_err("mutable selector must fail closed");
+        assert!(
+            error.contains("lossy") || error.contains("exact"),
+            "{error}"
+        );
+    }
 }

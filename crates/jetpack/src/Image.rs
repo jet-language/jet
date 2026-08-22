@@ -43,6 +43,7 @@ const OS: &str = "linux";
 const MEDIA_TYPE_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
 const MEDIA_TYPE_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
 const MEDIA_TYPE_LAYER: &str = "application/vnd.oci.image.layer.v1.tar";
+const DEFAULT_PLATFORM: &str = "linux.x64";
 const MAX_REGISTRY_RESPONSE_BYTES: u64 = 64 * 1024;
 static COPY_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -64,6 +65,8 @@ pub struct LayerFile {
 #[derive(Debug, Clone)]
 pub struct BuildSpec {
     pub files: Vec<LayerFile>,
+    /// The single platform represented by this OCI layout.
+    pub platform: String,
     /// The container's `Entrypoint` (D-JPK-IMAGE1: the package binary's path
     /// inside the image, e.g. `["/usr/local/bin/myapp"]`).
     pub entrypoint: Vec<String>,
@@ -83,6 +86,7 @@ impl Default for BuildSpec {
     fn default() -> Self {
         Self {
             files: Vec::new(),
+            platform: DEFAULT_PLATFORM.to_string(),
             entrypoint: Vec::new(),
             env: Vec::new(),
             expose: Vec::new(),
@@ -156,6 +160,7 @@ pub fn write_projection_report(
             return Err(invalid("image projection is not a regular file"));
         }
     }
+    remove_stale_temporary(&temporary)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -187,6 +192,7 @@ pub fn build_with_base(
     base: Option<&Path>,
 ) -> io::Result<BuiltImage> {
     ensure_real_layout_directory(out_dir)?;
+    let architecture = oci_architecture(&spec.platform)?;
     let mut files: Vec<&LayerFile> = spec.files.iter().collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     validate_layer_files(&files)?;
@@ -205,7 +211,7 @@ pub fn build_with_base(
         .unwrap_or_default();
     diff_ids.push(format!("sha256:{layer_digest}"));
 
-    let config_json = build_config_json_with_diff_ids(spec, &diff_ids);
+    let config_json = build_config_json_with_diff_ids(spec, &diff_ids, architecture);
     let config_digest = SHA256::sha256_hex(config_json.as_bytes());
 
     let mut layers = base_layers;
@@ -903,6 +909,7 @@ fn write_blob(out_dir: &Path, digest: &str, data: &[u8]) -> io::Result<()> {
         ));
     }
     let temporary = path.with_extension(format!("partial-{}", std::process::id()));
+    remove_stale_temporary(&temporary)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -948,7 +955,11 @@ fn write_index(
 /// The OCI image config (minimal subset: `architecture`/`os`/`config`/`rootfs`;
 /// no `created`/`history` — an embedded build timestamp is exactly the kind of
 /// nondeterminism this builder exists to avoid).
-fn build_config_json_with_diff_ids(spec: &BuildSpec, diff_ids: &[String]) -> String {
+fn build_config_json_with_diff_ids(
+    spec: &BuildSpec,
+    diff_ids: &[String],
+    architecture: &str,
+) -> String {
     let env_arr = sorted_env(&spec.env)
         .iter()
         .map(|(k, v)| JSON::quote(&format!("{k}={v}")))
@@ -981,12 +992,20 @@ fn build_config_json_with_diff_ids(spec: &BuildSpec, diff_ids: &[String]) -> Str
         .join(",");
     format!(
         "{{\"architecture\":\"{arch}\",\"os\":\"{os}\",\"config\":{{\"Env\":[{env_arr}],\"ExposedPorts\":{{{exposed}}},\"Entrypoint\":[{entrypoint_arr}],\"User\":\"{user}\"{health}}},\"rootfs\":{{\"type\":\"layers\",\"diff_ids\":[{diff_ids}]}}}}",
-        arch = ARCHITECTURE,
+        arch = architecture,
         os = OS,
         user = spec.user,
         health = health,
         diff_ids = diff_ids,
     )
+}
+
+fn oci_architecture(platform: &str) -> io::Result<&'static str> {
+    match platform {
+        "linux.x64" => Ok(ARCHITECTURE),
+        "linux.arm64" => Ok("arm64"),
+        _ => Err(invalid("OCI image platform is unsupported")),
+    }
 }
 
 fn build_manifest_json_with_layers(
@@ -1258,6 +1277,19 @@ fn read_regular_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn remove_stale_temporary(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(invalid("OCI temporary output is not a regular file"));
+            }
+            fs::remove_file(path)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 fn write_layout_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -1265,6 +1297,7 @@ fn write_layout_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    remove_stale_temporary(&temporary)?;
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
@@ -1453,6 +1486,7 @@ mod tests {
     fn build_is_reproducible_across_separate_builds() {
         let spec = BuildSpec {
             files: vec![bin("usr/local/bin/app", "the binary")],
+            platform: "linux.x64".to_string(),
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![("RUST_LOG".to_string(), "info".to_string())],
             expose: vec![8080],
@@ -1496,6 +1530,7 @@ mod tests {
         };
         let spec_a = BuildSpec {
             files: vec![f1.clone(), f2.clone()],
+            platform: "linux.x64".to_string(),
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
@@ -1527,6 +1562,7 @@ mod tests {
     fn different_content_yields_different_digest() {
         let spec_a = BuildSpec {
             files: vec![bin("usr/local/bin/app", "version one")],
+            platform: "linux.x64".to_string(),
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
@@ -1573,6 +1609,7 @@ mod tests {
     fn oci_layout_has_the_required_files() {
         let spec = BuildSpec {
             files: vec![bin("usr/local/bin/app", "bin")],
+            platform: "linux.x64".to_string(),
             entrypoint: vec!["/usr/local/bin/app".to_string()],
             env: vec![],
             expose: vec![],
@@ -1586,6 +1623,36 @@ mod tests {
         assert!(dir.join("index.json").is_file());
         let digest_hex = built.manifest_digest.trim_start_matches("sha256:");
         assert!(dir.join("blobs").join("sha256").join(digest_hex).is_file());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_atomic_temporary_files_are_recovered() {
+        let dir =
+            std::env::temp_dir().join(format!("jet-oci-test-recovery-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("blobs/sha256")).unwrap();
+
+        let index = dir.join("index.json");
+        let index_tmp = index.with_extension(format!("tmp-{}", std::process::id()));
+        fs::write(&index_tmp, b"stale").unwrap();
+        write_layout_file(&index, b"fresh").unwrap();
+        assert_eq!(fs::read(&index).unwrap(), b"fresh");
+
+        let blob = b"blob";
+        let digest = digest_for(blob);
+        let blob_path = dir.join("blobs/sha256").join(digest_hex(&digest).unwrap());
+        let blob_tmp = blob_path.with_extension(format!("partial-{}", std::process::id()));
+        fs::write(&blob_tmp, b"stale").unwrap();
+        write_blob(&dir, &digest, blob).unwrap();
+        assert_eq!(fs::read(&blob_path).unwrap(), blob);
+
+        let projection_tmp =
+            dir.join("projection.json.tmp-".to_string() + &std::process::id().to_string());
+        fs::write(&projection_tmp, b"stale").unwrap();
+        write_projection_report(&dir, "sha256:manifest", &ProjectionReport::default()).unwrap();
+        assert!(dir.join("projection.json").is_file());
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

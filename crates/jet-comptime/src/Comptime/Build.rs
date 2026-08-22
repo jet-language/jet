@@ -16,6 +16,8 @@ mod actions_policy;
 pub use actions_policy::*;
 mod cache_cas;
 pub use cache_cas::*;
+mod remote_scheduler;
+pub use remote_scheduler::*;
 mod provenance_toolchains;
 pub use provenance_toolchains::*;
 mod plugins_modules;

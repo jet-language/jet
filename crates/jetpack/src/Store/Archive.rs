@@ -166,6 +166,93 @@ pub(super) fn recover_archive_staging_unlocked(roots: &Roots) -> io::Result<usiz
     )
 }
 
+/// Restore a repair quarantine left by a process crash.  Only names written
+/// by `repair_archive` are considered, and the backup is re-hashed before it
+/// can return to the canonical object pool.
+pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<usize> {
+    let quarantine = roots.hangar_dir().join("quarantine");
+    let metadata = match fs::symlink_metadata(&quarantine) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid("Hangar quarantine is not a real directory"));
+    }
+    let objects = roots.hangar_dir().join("objects");
+    super::Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
+    let mut recovered = 0;
+    for item in fs::read_dir(&quarantine)? {
+        let item = item?;
+        let name = item.file_name().to_string_lossy().into_owned();
+        let Some(repair_name) = name.strip_prefix("repair-") else {
+            continue;
+        };
+        let Some((digest, nonce)) = repair_name.split_once('-') else {
+            return Err(invalid("repair quarantine name is malformed"));
+        };
+        if nonce.is_empty() {
+            return Err(invalid("repair quarantine name has no recovery nonce"));
+        }
+        validate_digest(digest)?;
+        let backup = item.path();
+        let backup_metadata = fs::symlink_metadata(&backup)?;
+        if backup_metadata.file_type().is_symlink() || !backup_metadata.is_dir() {
+            return Err(invalid("repair quarantine contains a non-directory backup"));
+        }
+        let actual = Envelope::try_output_hash_of_in_hangar(
+            &backup.to_string_lossy(),
+            &roots.hangar_dir(),
+            true,
+        )
+        .map_err(io::Error::other)?;
+        if actual != digest {
+            return Err(invalid(&format!(
+                "repair quarantine backup `{digest}` has digest `{actual}`"
+            )));
+        }
+        let destination = objects.join(digest);
+        match fs::symlink_metadata(&destination) {
+            Ok(existing) if existing.file_type().is_symlink() || !existing.is_dir() => {
+                return Err(invalid(&format!(
+                    "existing Hangar object `{digest}` is not a directory"
+                )))
+            }
+            Ok(_) => {
+                let existing_hash = Envelope::try_output_hash_of_in_hangar(
+                    &destination.to_string_lossy(),
+                    &roots.hangar_dir(),
+                    true,
+                )
+                .map_err(io::Error::other)?;
+                if existing_hash != digest {
+                    return Err(invalid(&format!(
+                        "existing Hangar object `{digest}` has a conflicting digest"
+                    )));
+                }
+                remove_tree(&backup)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                fs::rename(&backup, &destination)?;
+                if let Err(error) = seal_tree(&destination) {
+                    let restored = make_tree_writable(&destination)
+                        .and_then(|()| fs::rename(&destination, &backup));
+                    if let Err(restore) = restored {
+                        return Err(io::Error::other(format!(
+                            "{error}; repair quarantine restore failed: {restore}"
+                        )));
+                    }
+                    return Err(error);
+                }
+                super::sync_store_directory(&objects)?;
+            }
+            Err(error) => return Err(error),
+        }
+        recovered += 1;
+    }
+    Ok(recovered)
+}
+
 /// Have the shared-store broker sign a bounded, content-verified archive.
 /// This keeps the administrator's signing secret inside the broker process.
 pub fn attest_archive(roots: &Roots, bytes: &[u8], key: &str) -> io::Result<Vec<u8>> {
@@ -289,9 +376,25 @@ pub fn repair_archive(
     source_archive: Option<&Path>,
     key: Option<&str>,
 ) -> io::Result<ArchiveReport> {
-    super::Ingest::require_real_directory(&roots.hangar_dir(), "Hangar root")?;
-    let entry = select_entry(roots, target)?;
-    match verify_live_entry(roots, &entry) {
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        repair_archive_unlocked(roots, target, source_archive, key)
+    })
+}
+
+fn repair_archive_unlocked(
+    roots: &Roots,
+    target: &str,
+    source_archive: Option<&Path>,
+    key: Option<&str>,
+) -> io::Result<ArchiveReport> {
+    super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
+    super::Ingest::ensure_real_directory(
+        &roots.hangar_dir().join("objects"),
+        "Hangar object pool",
+    )?;
+    Closure::recover_closure_journal_unlocked(roots)?;
+    let entry = select_entry_unlocked(roots, target)?;
+    match verify_live_entry_unlocked(roots, &entry) {
         Ok(()) => {
             return Ok(ArchiveReport {
                 objects: 1,
@@ -315,12 +418,18 @@ pub fn repair_archive(
     let bytes = read_bounded(source)?;
     let archive = Archive::decode(&bytes)?;
     archive.verify_signature(roots, key, false)?;
+    verify_archive_contents(roots, &archive)?;
+    if archive.root_id != entry.id {
+        return Err(invalid(
+            "repair archive root does not match the requested entry",
+        ));
+    }
     if !archive.objects.iter().any(|object| object.id == entry.id) {
         return Err(invalid(
             "repair archive does not contain the requested entry",
         ));
     }
-    let object_path = PathBuf::from(&entry.out);
+    let object_path = repair_output_path(roots, &entry)?;
     let hangar = roots.hangar_dir();
     if !is_under(&object_path, &hangar) {
         return Err(invalid(
@@ -334,21 +443,77 @@ pub fn repair_archive(
         entry.envelope.output_hash,
         unique_suffix()
     ));
-    fs::rename(&object_path, &backup)?;
-    let imported = import_archive(roots, &bytes, key, false);
+    let had_object = match fs::symlink_metadata(&object_path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    if had_object {
+        super::make_tree_writable_for_removal(&object_path)?;
+        fs::rename(&object_path, &backup)?;
+        super::sync_store_directory(object_path.parent().unwrap_or(hangar.as_path()))?;
+    }
+    let report = archive.report();
+    let imported = import_archive_unlocked(roots, archive);
     match imported {
-        Ok(report) => {
-            remove_tree(&backup)?;
+        Ok(_) => {
+            if had_object {
+                let _ = remove_tree(&backup);
+            }
             Ok(report)
         }
         Err(error) => {
-            if object_path.exists() {
-                remove_tree(&object_path)?;
+            let mut rollback_errors = Vec::new();
+            match fs::symlink_metadata(&object_path) {
+                Ok(_) => {
+                    if let Err(rollback) = remove_tree(&object_path) {
+                        rollback_errors.push(format!("removing imported output: {rollback}"));
+                    }
+                }
+                Err(rollback) if rollback.kind() != io::ErrorKind::NotFound => {
+                    rollback_errors.push(format!("checking imported output: {rollback}"));
+                }
+                Err(_) => {}
             }
-            fs::rename(&backup, &object_path)?;
+            if had_object {
+                if rollback_errors.is_empty() {
+                    if let Err(rollback) = fs::rename(&backup, &object_path) {
+                        rollback_errors.push(format!("restoring quarantined output: {rollback}"));
+                    } else if let Err(rollback) = super::sync_store_directory(
+                        object_path.parent().unwrap_or(hangar.as_path()),
+                    ) {
+                        rollback_errors.push(format!("syncing restored output: {rollback}"));
+                    }
+                } else {
+                    rollback_errors.push(format!(
+                        "quarantined output remains at `{}`",
+                        backup.display()
+                    ));
+                }
+            }
+            if !rollback_errors.is_empty() {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("{error}; repair rollback: {}", rollback_errors.join("; ")),
+                ));
+            }
             Err(error)
         }
     }
+}
+
+fn repair_output_path(roots: &Roots, entry: &StoreEntry) -> io::Result<PathBuf> {
+    validate_digest(&entry.envelope.output_hash)?;
+    let expected = roots
+        .hangar_dir()
+        .join("objects")
+        .join(&entry.envelope.output_hash);
+    if Path::new(&entry.out) != expected {
+        return Err(invalid(
+            "Hangar entry output is not its canonical content-addressed object",
+        ));
+    }
+    Ok(expected)
 }
 
 fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Result<Archive> {
@@ -458,6 +623,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
     let stage_objects = stage.join("objects");
     fs::create_dir(&stage)?;
     fs::create_dir(&stage_objects)?;
+    let mut moved = Vec::new();
     let result = (|| {
         let mut package_records = Vec::new();
         let mut seen_digests = BTreeSet::new();
@@ -517,7 +683,6 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
 
         validate_import_destinations(roots, &package_records, &seen_digests)?;
 
-        let mut moved = Vec::new();
         for digest in &seen_digests {
             let staged = stage_objects.join(digest);
             let destination = objects_dir.join(digest);
@@ -526,7 +691,6 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 .as_ref()
                 .is_ok_and(|metadata| metadata.file_type().is_symlink())
             {
-                rollback_import_moves(&mut moved)?;
                 return Err(invalid(&format!(
                     "existing Hangar object `{digest}` is a symlink"
                 )));
@@ -546,17 +710,26 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 remove_tree(&staged)?;
             } else {
                 fs::rename(&staged, &destination)?;
+                moved.push((destination.clone(), staged.clone()));
                 seal_tree(&destination)?;
-                moved.push((destination, staged));
             }
         }
 
+        super::sync_store_directory(&objects_dir)?;
         if let Err(error) = super::Closure::register_entries_unlocked(roots, &package_records) {
-            rollback_import_moves(&mut moved)?;
             return Err(error);
         }
         Ok(package_records.len())
     })();
+    let result = match result {
+        Ok(value) => Ok(value),
+        Err(error) => match rollback_import_moves(&mut moved) {
+            Ok(()) => Err(error),
+            Err(rollback) => Err(io::Error::other(format!(
+                "{error}; archive import rollback failed: {rollback}"
+            ))),
+        },
+    };
     let _ = remove_tree(&stage);
     result
 }
@@ -586,6 +759,7 @@ fn portable_entry(
         named_outputs: meta.named_outputs.clone(),
         platform_artifact_kind: meta.platform_artifact_kind.clone(),
         producer_record: meta.producer_record.clone(),
+        receipt: meta.receipt.clone(),
         realized_at: meta.realized_at.unwrap_or_else(now_secs),
         last_used_at: meta.last_used_at.unwrap_or_else(now_secs),
     })
@@ -623,6 +797,11 @@ fn map_member_path(source_out: &Path, member: &str, destination: &Path) -> io::R
 
 fn verify_live_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
     super::verify_hangar_object(roots, entry).map_err(|error| io::Error::other(error.what()))
+}
+
+fn verify_live_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
+    super::verify_hangar_object_unlocked(roots, entry)
+        .map_err(|error| io::Error::other(error.what()))
 }
 
 fn verify_archive_object(
@@ -693,6 +872,14 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
 
 fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
     let entries = list_checked(roots)?;
+    select_entry_from(&entries, target)
+}
+
+fn select_entry_unlocked(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
+    select_entry_from(&super::list_unlocked(roots), target)
+}
+
+fn select_entry_from(entries: &[StoreEntry], target: &str) -> io::Result<StoreEntry> {
     entries
         .iter()
         .find(|entry| {

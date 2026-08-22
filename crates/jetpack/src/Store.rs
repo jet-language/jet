@@ -168,10 +168,12 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
         let staging = Ingest::recover_hangar_staging_unlocked(roots)?;
+        let reproducibility = Reproducibility::recover_certification_staging_unlocked(roots)?;
         let archive = Archive::recover_archive_staging_unlocked(roots)?;
+        let repairs = Archive::recover_repair_quarantine_unlocked(roots)?;
         let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
-        Ok(staging + archive + leases + closure)
+        Ok(staging + reproducibility + archive + repairs + leases + closure)
     })
 }
 
@@ -260,6 +262,33 @@ pub enum RealizeRequest<'a> {
         table: &'a super::RefSpec::SourceTable,
         expectation: &'a CacheExpectation,
     },
+}
+
+/// Controls a source-only independent-root reproducibility certification.
+///
+/// A retry always starts both builds in fresh roots. The callback is polled
+/// between build/promotion boundaries; a cancelled run never enters Hangar.
+#[derive(Clone, Copy)]
+pub struct IndependentRootOptions<'a> {
+    pub retries: usize,
+    pub cancelled: Option<&'a dyn Fn() -> bool>,
+}
+
+impl Default for IndependentRootOptions<'_> {
+    fn default() -> Self {
+        Self {
+            retries: 1,
+            cancelled: None,
+        }
+    }
+}
+
+/// The durable result of a successful independent-root certification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndependentRootCertification {
+    pub entry: StoreEntry,
+    pub action_key: String,
+    pub attestation: String,
 }
 
 pub struct VerifiedRealization {
@@ -440,7 +469,7 @@ fn record_verified_mode(
         )?)
         .map_err(std::io::Error::other)?;
         producer.bind_cache_provenance(reference, &envelope.output_hash, cache_identity);
-        let entry = StoreEntry {
+        let mut entry = StoreEntry {
             id: id.clone(),
             name: name.to_string(),
             version: version.to_string(),
@@ -454,6 +483,7 @@ fn record_verified_mode(
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
             producer_record: producer.encode(),
+            receipt: String::new(),
             realized_at,
             last_used_at: now,
         };
@@ -463,6 +493,7 @@ fn record_verified_mode(
         fs::create_dir_all(&dir)?;
         let registration = (|| {
             pin_nix_gc_root(&dir, &out)?;
+            Closure::prepare_entry_receipt(roots, &mut entry)?;
             register_entry_unlocked(roots, &entry)
         })();
         if let Err(error) = registration {
@@ -478,6 +509,27 @@ pub(crate) fn record_realized_mode(
     realized: &super::Provider::Realized,
 ) -> std::io::Result<StoreEntry> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        record_realized_mode_unlocked(roots, realized, None)
+    })
+}
+
+pub(crate) fn record_realized_mode_with_fresh_agreement(
+    roots: &Roots,
+    action_key: &str,
+    realized: &super::Provider::Realized,
+) -> std::io::Result<StoreEntry> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        Reproducibility::with_fresh_agreement_unlocked(roots, action_key, || {
+            record_realized_mode_unlocked(roots, realized, Some(action_key))
+        })
+    })
+}
+
+fn record_realized_mode_unlocked(
+    roots: &Roots,
+    realized: &super::Provider::Realized,
+    fresh_action_key: Option<&str>,
+) -> std::io::Result<StoreEntry> {
         ProducerRecord::decode(&realized.producer.encode()).map_err(std::io::Error::other)?;
         let graph = Closure::closure_graph_structure_unlocked(roots)?;
         Closure::validate_universe_references(
@@ -518,7 +570,7 @@ pub(crate) fn record_realized_mode(
             &realized.envelope.output_hash,
             &realized.cache_identity,
         );
-        let entry = StoreEntry {
+        let mut entry = StoreEntry {
             id,
             name: realized.name.clone(),
             version: realized.version.clone(),
@@ -532,6 +584,7 @@ pub(crate) fn record_realized_mode(
             named_outputs,
             platform_artifact_kind: String::new(),
             producer_record: producer.encode(),
+            receipt: String::new(),
             realized_at,
             last_used_at: now,
         };
@@ -541,14 +594,22 @@ pub(crate) fn record_realized_mode(
         fs::create_dir_all(&dir)?;
         let registration = (|| {
             pin_nix_gc_root(&dir, &out)?;
-            register_entry_unlocked(roots, &entry)
+            Closure::prepare_entry_receipt(roots, &mut entry)?;
+            if let Some(action_key) = fresh_action_key {
+                Closure::register_entry_unlocked_after_fresh_agreement(
+                    roots,
+                    &entry,
+                    action_key,
+                )
+            } else {
+                register_entry_unlocked(roots, &entry)
+            }
         })();
         if let Err(error) = registration {
             Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
             return Err(error);
         }
         Ok(entry)
-    })
 }
 
 fn canonicalize_local_output_unlocked(
@@ -671,74 +732,14 @@ fn canonicalize_local_output_unlocked(
 
 const NIX_GC_ROOT: &str = "nix-gc-root";
 
-/// Keep every live Nix compatibility output reachable until JP11 imports its
-/// closure into Hangar. A root on the top-level output protects its transitive
-/// Nix closure. Missing fixture paths are not roots and remain readable only as
-/// metadata.
-fn pin_nix_gc_root(entry_dir: &Path, out: &str) -> std::io::Result<()> {
+/// Reject direct `/nix/store` registration until a native store authority can
+/// prove and retain the closure. Jetpack never asks `nix-store` to create a
+/// root; local Hangar outputs use the normal closure proof below.
+fn pin_nix_gc_root(_entry_dir: &Path, out: &str) -> std::io::Result<()> {
     let out_path = Path::new(out);
-    if !out_path.starts_with("/nix/store") || !out_path.exists() {
-        return Ok(());
-    }
-    pin_nix_gc_root_with(entry_dir, out_path, Path::new("nix-store"))
-}
-
-/// Startup migration for records written before JP0. Every real Nix output is
-/// rooted before any command may consume or clean Hangar state.
-pub fn migrate_nix_gc_roots(roots: &Roots) -> std::io::Result<usize> {
-    migrate_nix_gc_roots_with(roots, Path::new("/nix/store"), Path::new("nix-store"))
-}
-
-fn migrate_nix_gc_roots_with(
-    roots: &Roots,
-    store_prefix: &Path,
-    nix_store: &Path,
-) -> std::io::Result<usize> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        Closure::recover_closure_journal_unlocked(roots)?;
-        let mut rooted = 0;
-        for entry in list_unlocked(roots) {
-            let out = Path::new(&entry.out);
-            if !out.starts_with(store_prefix) || !out.exists() {
-                continue;
-            }
-            let entry_dir = roots.hangar_dir().join(&entry.id);
-            let root = entry_dir.join(NIX_GC_ROOT);
-            if root.exists()
-                && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok()
-            {
-                continue;
-            }
-            if fs::symlink_metadata(&root).is_ok() {
-                fs::remove_file(&root)?;
-            }
-            pin_nix_gc_root_with(&entry_dir, out, nix_store)?;
-            rooted += 1;
-        }
-        Ok(rooted)
-    })
-}
-
-fn pin_nix_gc_root_with(entry_dir: &Path, out: &Path, nix_store: &Path) -> std::io::Result<()> {
-    let root = entry_dir.join(NIX_GC_ROOT);
-    let output = Command::new(nix_store)
-        .arg("--add-root")
-        .arg(&root)
-        .arg("--indirect")
-        .arg("--realise")
-        .arg(out)
-        .output()?;
-    if !output.status.success() {
+    if out_path.starts_with("/nix/store") {
         return Err(std::io::Error::other(format!(
-            "could not create durable Nix GC root for `{}`: {}",
-            out.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    if !root.exists() {
-        return Err(std::io::Error::other(format!(
-            "nix-store reported success but did not create GC root `{}`",
-            root.display()
+            "Nix compatibility output `{out}` needs a verified native store authority"
         )));
     }
     Ok(())
@@ -1587,14 +1588,11 @@ fn create_exec_wrappers(
     _snapshot_root: &Path,
     executables: &[(std::ffi::OsString, fs::File)],
 ) -> std::io::Result<Option<ExecWrappers>> {
-    // Data-only outputs need no named executable handoff. Keep them usable on
-    // every tier-1 host while the protected service handles executable leases.
-    if executables.is_empty() {
-        return Ok(None);
-    }
-    Err(std::io::Error::other(
-        "immutable executable PATH handoff is unavailable on this platform",
-    ))
+    // The private lease snapshot is the executable handoff on macOS/Windows.
+    // Epoch 8 owns stronger hostile-process confinement; refusing every
+    // executable here would make the tier-1 package path data-only.
+    let _ = executables;
+    Ok(None)
 }
 
 fn copy_snapshot_node(
@@ -1746,6 +1744,7 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
+                project_receipt_projection(ctx, &hit.entry)?;
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -1770,6 +1769,7 @@ pub fn realize_verified(
                             validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                                 .map_err(RealizeError::Store)?;
                         }
+                        project_receipt_projection(ctx, &hit.entry)?;
                         return Ok(VerifiedRealization {
                             entry: hit.entry,
                             source_state: super::Provider::SourceState::Substituted,
@@ -1807,6 +1807,7 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
+                project_receipt_projection(ctx, &hit.entry)?;
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -1816,32 +1817,45 @@ pub fn realize_verified(
         }
     }
 
-    let realized = match request {
-        RealizeRequest::Package { spec, table } => {
-            super::Provider::realize(spec, table, ctx).map_err(RealizeError::Provider)?
-        }
-        RealizeRequest::Adapter {
-            plan,
-            table,
-            expectation,
-        } => {
-            let (tools, _dependency_leases) = realize_adapter_tools(roots, ctx, plan, table)?;
-            let mut realized = super::Provider::realize_adapter(plan, ctx, expectation, &tools, table)
-                .map_err(RealizeError::Provider)?;
-            bind_adapter_hook_identity(&mut realized, plan, table, expectation, ctx)
-                .map_err(RealizeError::Store)?;
-            realized
-        }
+    let independent = Some(Reproducibility::build_for_cache(
+        roots,
+        ctx,
+        &request,
+        &IndependentRootOptions::default(),
+        false,
+    )?);
+    let mut realized = if let Some(prepared) = independent.as_ref() {
+        prepared.realized.clone()
+    } else {
+        Reproducibility::realize_uncached(roots, ctx, &request)?
     };
+    if let Some(attestation) = independent
+        .as_ref()
+        .and_then(|prepared| prepared.attestation.as_ref())
+    {
+        realized
+            .producer
+            .facts
+            .insert("cache.reproducibility".into(), attestation.clone());
+    }
     // The provider snapshots its Nix lock facts before producing bytes. Check
     // that snapshot again immediately before the Store registration so a
     // concurrent lock edit cannot detach the producer record from the output
     // that is about to become reusable.
     super::Provider::validate_nix_lock_before_store(ctx, &realized)
         .map_err(RealizeError::Provider)?;
-    let mut entry = record_realized_mode(roots, &realized).map_err(RealizeError::Store)?;
+    let mut entry = if let Some(action_key) = independent
+        .as_ref()
+        .and_then(|prepared| prepared.action_key.as_deref())
+    {
+        record_realized_mode_with_fresh_agreement(roots, action_key, &realized)
+    } else {
+        record_realized_mode(roots, &realized)
+    }
+    .map_err(RealizeError::Store)?;
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
+    project_receipt_projection(ctx, &entry)?;
     if realized.source_state == super::Provider::SourceState::Built {
         publish_realized_to_bound_caches(roots, &entry);
     }
@@ -1851,6 +1865,210 @@ pub fn realize_verified(
         entry,
         source_state: realized.source_state,
         lease,
+    })
+}
+
+/// Run and publish a fresh, source-only independent-root certification.
+///
+/// This entry point deliberately bypasses existing local/shared hits: both
+/// provider executions start in private roots and the first result is not
+/// promoted until the second result agrees on action, output, and provenance.
+pub fn certify_independent_root_build(
+    roots: &Roots,
+    ctx: &super::Provider::Ctx<'_>,
+    request: RealizeRequest<'_>,
+    options: IndependentRootOptions<'_>,
+) -> Result<IndependentRootCertification, RealizeError> {
+    if let RealizeRequest::Package { spec, table } = &request {
+        enforce_manifest_provenance_floor(ctx.project_dir, &spec.package)?;
+        super::Provider::validate_cache_authority(spec, table, ctx)
+            .map_err(RealizeError::Provider)?;
+    }
+    Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
+    let prepared = Reproducibility::build_for_cache(roots, ctx, &request, &options, true)?;
+    let action_key = prepared.action_key.clone().ok_or_else(|| {
+        RealizeError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "independent certification produced no action identity",
+        ))
+    })?;
+    if options.cancelled.is_some_and(|cancelled| cancelled()) {
+        return Err(RealizeError::Store(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "independent reproducibility certification cancelled",
+        )));
+    }
+    let attestation = prepared.attestation.clone().ok_or_else(|| {
+        RealizeError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "independent certification has no agreeing attestation",
+        ))
+    })?;
+    let mut realized = prepared.realized.clone();
+    realized
+        .producer
+        .facts
+        .insert("cache.reproducibility".into(), attestation.clone());
+    super::Provider::validate_nix_lock_before_store(ctx, &realized)
+        .map_err(RealizeError::Provider)?;
+    let mut entry = record_realized_mode_with_fresh_agreement(roots, &action_key, &realized)
+        .map_err(RealizeError::Store)?;
+    entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
+        .map_err(RealizeError::Provider)?;
+    project_receipt_projection(ctx, &entry)?;
+    publish_realized_to_bound_caches(roots, &entry);
+    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
+    Ok(IndependentRootCertification {
+        entry,
+        action_key,
+        attestation,
+    })
+}
+
+fn project_receipt_projection(
+    ctx: &super::Provider::Ctx<'_>,
+    entry: &StoreEntry,
+) -> Result<(), RealizeError> {
+    let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
+        return Ok(());
+    };
+    if entry.receipt.is_empty() {
+        return Err(RealizeError::Store(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Hangar entry `{}` has no connected receipt", entry.id),
+        )));
+    }
+    super::RuntimePolicy::with_project_lock(project, "receipt-projection", || {
+        record_receipt_projection(
+            project,
+            &entry.name,
+            &entry.reference,
+            &entry.envelope.output_hash,
+            &entry.receipt,
+        )
+        .map_err(std::io::Error::other)
+    })
+    .map(|_| ())
+    .map_err(RealizeError::Store)
+}
+
+fn record_receipt_projection(
+    project_root: &Path,
+    package_name: &str,
+    reference: &str,
+    output_hash: &str,
+    receipt: &str,
+) -> std::io::Result<bool> {
+    if !valid_receipt_digest(receipt) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid Hangar receipt digest `{receipt}`"),
+        ));
+    }
+    if output_hash.is_empty() && reference.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Hangar receipt projection has no package identity",
+        ));
+    }
+    let lock_path = project_root.join(crate::Syntax::UNIFIED_LOCK_FILE);
+    let raw = match fs::read_to_string(&lock_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let mut lock = crate::Lock::parse(&raw).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not parse project lock `{}`: {error}", lock_path.display()),
+        )
+    })?;
+    let Some(package) = lock.packages.iter_mut().find(|package| {
+        package.name == package_name
+            && receipt_package_matches(package, reference, output_hash)
+    }) else {
+        return Ok(false);
+    };
+    if package.receipt.as_deref() == Some(receipt) {
+        return Ok(false);
+    }
+    package.receipt = Some(receipt.to_string());
+    crate::Lock::ensure_build_stamp(project_root, &mut lock);
+    write_project_lock_atomically(&lock_path, &crate::Lock::write(&lock))?;
+    Ok(true)
+}
+
+fn receipt_package_matches(
+    package: &super::Lock::LockedPackage,
+    reference: &str,
+    output_hash: &str,
+) -> bool {
+    let source_matches = match &package.source {
+        super::Lock::LockSource::Root => reference == "." || reference == "root",
+        super::Lock::LockSource::Path(path) => path == reference,
+        super::Lock::LockSource::Git { url, .. } => url == reference,
+        super::Lock::LockSource::Nix { reference: value, .. }
+        | super::Lock::LockSource::Cran { reference: value, .. }
+        | super::Lock::LockSource::LuaRocks { reference: value, .. }
+        | super::Lock::LockSource::Registry { reference: value, .. } => value == reference,
+    };
+    let output_matches = package
+        .envelope
+        .as_ref()
+        .is_some_and(|envelope| !output_hash.is_empty() && envelope.output_hash == output_hash);
+    source_matches || output_matches
+}
+
+fn valid_receipt_digest(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256-") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+fn write_project_lock_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("project lock has no parent directory"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::other("project lock has no UTF-8 file name"))?;
+    let mut temporary = None;
+    for attempt in 0..32u32 {
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.partial",
+            std::process::id() + attempt
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(contents.as_bytes()).and_then(|()| file.sync_all())
+                {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error);
+                }
+                temporary = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    let temporary = temporary.ok_or_else(|| {
+        std::io::Error::other("could not allocate a temporary project lock path after 32 attempts")
+    })?;
+    fs::rename(&temporary, path).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        error
     })
 }
 
@@ -2719,9 +2937,19 @@ pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
 
 /// Re-hash a hangar object with cas-peer hardlink law (hangar-internal OK).
 pub fn verify_hangar_object(roots: &Roots, entry: &StoreEntry) -> Result<(), IngestError> {
+    let _lock = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")
+        .map_err(|error| IngestError::IO(error.to_string()))?;
+    verify_hangar_object_unlocked(roots, entry)
+}
+
+pub(super) fn verify_hangar_object_unlocked(
+    roots: &Roots,
+    entry: &StoreEntry,
+) -> Result<(), IngestError> {
     let hangar = roots.hangar_dir();
     let allow = !entry.platform_artifact_kind.is_empty();
-    let graph = closure_graph(roots).map_err(|error| IngestError::Invalid(error.to_string()))?;
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)
+        .map_err(|error| IngestError::Invalid(error.to_string()))?;
     let record = graph.records.get(&entry.id).ok_or_else(|| {
         IngestError::Invalid(format!("closure graph has no record `{}`", entry.id))
     })?;
@@ -2796,6 +3024,7 @@ fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
                 || name == OBJECTS_DIR
                 || name == CAS_DIR
                 || name == REFERRERS_DIR
+                || name == "receipts"
                 || name == "lifecycle-db"
                 || name == "closure-db"
                 || name == "quarantine"
@@ -2901,6 +3130,8 @@ mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
+mod Explain;
+pub use Explain::*;
 pub(crate) use Closure::dir_size;
 pub(crate) use Cache::{fsync_tree, make_tree_writable_for_removal, seal_node};
 pub(crate) mod Lifecycle;

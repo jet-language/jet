@@ -3749,7 +3749,7 @@ fn validate_selected_action_outputs(
 
 /// D-BUILDENTRY1: `E3501`'s contract, held in one place. Entry identity (the
 /// `build` name plus its `BuildContext` parameter) and the typed
-/// `=> BuildPlan ?` clause are graded by the same sema predicates that
+/// `BuildPlan ?` result facts are graded by the same sema predicates that
 /// `Sema::strip_build_only_entries` uses to keep the entry out of runtime
 /// codegen, so selection, rejection, and removal cannot drift apart (I8).
 fn valid_build_signature(func: &crate::AST::Func) -> bool {
@@ -4186,7 +4186,7 @@ fn validate_build_authority(
                 "E3503",
                 format!("this build uses `{}` without declaring it on `fn build`", effect.name()),
                 "the build signature is the static authority manifest audited before build code executes".to_string(),
-                format!("add `{}` to the build function's `=[...]=>` effect row", effect.name()),
+                format!("add `{}` to the build function's `-[...]>` effect row", effect.name()),
                 Some(span),
             )]);
         }
@@ -4362,7 +4362,7 @@ fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
         "E3501",
         "`fn build` must take one `BuildContext` and return `BuildPlan ?`".to_string(),
         "the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes".to_string(),
-        "write `fn build(b: BuildContext) => BuildPlan ?`".to_string(),
+        "write `fn build(b: BuildContext) BuildPlan ?`".to_string(),
         Some(span),
     )
 }

@@ -1847,7 +1847,7 @@ const BUILD_ENTRY_FN: &str = "build";
 /// it. The return clause is graded separately by
 /// [`build_entry_signature_is_valid`].
 ///
-/// The name alone is not enough: an ordinary `fn build(count: Int) => Int` is a
+/// The name alone is not enough: an ordinary `fn build(count: Int) Int ->` is a
 /// normal runtime function, and dropping it would emit calls to a name that has
 /// no definition.
 pub fn is_build_entry(func: &Func) -> bool {
@@ -1857,7 +1857,7 @@ pub fn is_build_entry(func: &Func) -> bool {
 }
 
 /// D-BUILDENTRY1: does the build entry carry its one typed contract,
-/// `fn build(b: BuildContext) => BuildPlan ?`? This is what `E3501` reports on.
+/// `fn build(b: BuildContext) BuildPlan ?`? This is what `E3501` reports on.
 /// Build authority and graph handoff are one contract, so a build entry with
 /// any other return clause is selected, rejected, and never emitted.
 pub fn build_entry_signature_is_valid(func: &Func) -> bool {

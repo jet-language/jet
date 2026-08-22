@@ -4,6 +4,8 @@
 //! canonical editable files and data-only TODO facts for callers/tests.
 
 use super::JSON::{self, JSONValue};
+use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPlan {
@@ -15,6 +17,9 @@ pub struct ImportPlan {
     pub ffi_stubs: Vec<FFIStub>,
     pub todos: Vec<ImportTodo>,
     pub migration: Vec<MigrationStatus>,
+    /// One shared provider-fact record per imported provider reference. Losses
+    /// remain on the record so generated files cannot hide an unresolved fact.
+    pub provider_facts: BTreeMap<String, ProviderFacts>,
 }
 
 impl ImportPlan {
@@ -28,7 +33,12 @@ impl ImportPlan {
             ffi_stubs: Vec::new(),
             todos: Vec::new(),
             migration: Vec::new(),
+            provider_facts: BTreeMap::new(),
         }
+    }
+
+    fn retain_provider_facts(&mut self, facts: ProviderFacts) {
+        self.provider_facts.insert(facts.reference.clone(), facts);
     }
 
     pub fn emit_pkg_jet(&self) -> String {
@@ -50,7 +60,13 @@ impl ImportPlan {
         let mut deps = self.deps.clone();
         deps.sort_by(|a, b| a.name.cmp(&b.name));
         for dep in deps {
-            out.push_str(&format!("    {}: {},\n", dep.name, dep.provider_ref));
+            let provider_ref = self
+                .provider_facts
+                .get(&dep.provider_ref)
+                .filter(|facts| facts.is_lossless())
+                .map(ProviderFacts::qualified_reference)
+                .unwrap_or(dep.provider_ref);
+            out.push_str(&format!("    {}: {},\n", dep.name, provider_ref));
         }
         out.push_str("}\n");
         out
@@ -138,6 +154,14 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                     locked_version: String::new(),
                     dev: false,
                 });
+                let mut facts = ProviderFacts::for_reference("nix", &format!("{name}@nixpkgs"));
+                facts.set_native_document("flake-facts.json", facts_json);
+                facts.add_loss(
+                    "provider.selector",
+                    "imported Nix package has no exact package selector; retain the flake lock before realization",
+                    source_path,
+                );
+                plan.retain_provider_facts(facts);
             }
         }
     }
@@ -163,12 +187,47 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
     plan.packages.push(ImportedPackage { name, version });
     for dep in dependency_keys(cargo_toml, "[dependencies]") {
         let locked = lock_version(cargo_lock, &dep);
+        let provider_ref = if locked.is_empty() {
+            format!("{dep}@cargo")
+        } else {
+            format!("{dep}#version={locked}@cargo")
+        };
         plan.deps.push(ImportedDep {
             name: dep.clone(),
-            provider_ref: format!("cargo@{dep}"),
-            locked_version: locked,
+            provider_ref: provider_ref.clone(),
+            locked_version: locked.clone(),
             dev: false,
         });
+        let mut facts = ProviderFacts::for_reference("cargo", &provider_ref);
+        facts.set_native_document(
+            "Cargo.toml+Cargo.lock",
+            &format!("Cargo.toml:\n{cargo_toml}\nCargo.lock:\n{cargo_lock}"),
+        );
+        facts.add_fact(
+            "package.name",
+            ProviderFactValue::Text(dep.clone()),
+            "Cargo.toml.dependencies",
+        );
+        if !locked.is_empty() {
+            facts.set_resolved_source(&format!("cargo:{dep}@{locked}"));
+            facts.add_fact(
+                "package.version",
+                ProviderFactValue::Text(locked.clone()),
+                "Cargo.lock.version",
+            );
+        } else {
+            facts.add_loss(
+                "provider.selector",
+                "Cargo.lock has no exact version for this dependency",
+                "Cargo.lock",
+            );
+            plan.todos.push(ImportTodo {
+                source_path: "Cargo.lock".to_string(),
+                message: format!("dependency `{dep}` remains unresolved until Cargo.lock supplies an exact version"),
+                suggested_surface: Some("pin the Cargo provider ref with #version=<exact>@cargo".to_string()),
+            });
+        }
+        plan.retain_provider_facts(facts);
         plan.ffi_stubs.push(FFIStub {
             path: format!("ffi/{dep}.jet"),
             symbol: dep,
@@ -205,9 +264,36 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
         for (name, val) in deps {
             plan.deps.push(ImportedDep {
                 name: name.clone(),
-                provider_ref: format!("npm@{name}"),
+                provider_ref: format!("{name}@npm"),
                 locked_version: val.as_str().unwrap_or("").to_string(),
                 dev: false,
+            });
+            let provider_ref = format!("{name}@npm");
+            let mut facts = ProviderFacts::for_reference("npm", &provider_ref);
+            facts.set_native_document("package.json", package_json);
+            facts.add_fact(
+                "package.name",
+                ProviderFactValue::Text(name.clone()),
+                "package.json.dependencies",
+            );
+            let requested = val.as_str().unwrap_or("").to_string();
+            if !requested.is_empty() {
+                facts.add_fact(
+                    "package.request",
+                    ProviderFactValue::Text(requested.clone()),
+                    "package.json.dependencies",
+                );
+            }
+            facts.add_loss(
+                "provider.selector",
+                &format!("npm dependency range `{requested}` is not an exact lock identity"),
+                "package.json.dependencies",
+            );
+            plan.retain_provider_facts(facts);
+            plan.todos.push(ImportTodo {
+                source_path: "package.json".to_string(),
+                message: format!("dependency `{name}` keeps npm request `{requested}`; resolve an exact package lock before realization"),
+                suggested_surface: Some("pin the npm provider ref with #version=<exact>@npm".to_string()),
             });
         }
     }
@@ -236,6 +322,15 @@ pub fn import_python_metadata(name: &str, dynamic_fields: &[&str]) -> ImportPlan
             suggested_surface: None,
         });
     }
+    let reference = format!("{name}@pypi");
+    let mut facts = ProviderFacts::for_reference("pypi", &reference);
+    facts.set_native_document("python-metadata", name);
+    facts.add_loss(
+        "provider.selector",
+        "Python import has no exact distribution version",
+        "pyproject.toml",
+    );
+    plan.retain_provider_facts(facts);
     plan
 }
 
@@ -247,10 +342,25 @@ pub fn import_swiftpm(name: &str, revision: &str) -> ImportPlan {
     });
     plan.deps.push(ImportedDep {
         name: name.to_string(),
-        provider_ref: format!("swiftpm@{name}"),
+        provider_ref: format!("{name}#revision={revision}@swiftpm"),
         locked_version: revision.to_string(),
         dev: false,
     });
+    let provider_ref = format!("{name}#revision={revision}@swiftpm");
+    let mut facts = ProviderFacts::for_reference("swiftpm", &provider_ref);
+    facts.set_resolved_source(&format!("swiftpm:{name}@{revision}"));
+    facts.set_native_document("Package.resolved", &provider_ref);
+    facts.add_fact(
+        "package.name",
+        ProviderFactValue::Text(name.to_string()),
+        "Package.resolved.identity",
+    );
+    facts.add_fact(
+        "package.revision",
+        ProviderFactValue::Text(revision.to_string()),
+        "Package.resolved.revision",
+    );
+    plan.retain_provider_facts(facts);
     plan
 }
 

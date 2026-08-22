@@ -1219,7 +1219,6 @@ mod tests {
             return;
         }
 
-        assert!(!crate::Provider::nix_on_path());
         let dir = scratch("native_no_nix");
         std::fs::write(
             dir.join("flake.nix"),

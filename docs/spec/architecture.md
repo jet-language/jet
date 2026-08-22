@@ -106,6 +106,14 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
+Package-to-JetOS projection stays on this split. jet-pkg-model reads the
+canonical Package outputs and computes the semantic graph identity.
+jet-env-model::ModuleEval::project_package_outputs lowers System and Fleet
+payloads into SystemPlan and FleetPlan. jetpack loads that plan for
+jet os plan and the existing generation writer carries the same identity into
+plan.json and the source proof. Hangar realization and atomic generation
+publication remain in jetpack; the projection adds no store or rollout path.
+
 ### Read-only compiler API
 
 `core.compiler` is the one typed, compile-time-only front-end surface

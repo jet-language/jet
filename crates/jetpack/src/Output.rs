@@ -100,6 +100,10 @@ impl Theme {
         eprintln!("{pad}{} {}", self.gray("▸"), msg);
     }
 
+    pub fn graph_identity(&self, identity: &str) {
+        self.detail(&format!("package graph identity: {identity}"));
+    }
+
     /// A success line ending in a green check.
     pub fn ok(&self, msg: &str) {
         eprintln!("  {}  {} {}", self.gutter(), msg, self.green("✓"));

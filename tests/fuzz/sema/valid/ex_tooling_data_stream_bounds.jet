@@ -21,7 +21,7 @@ fn run() {
         .Val(row) -> { print("first: {row.service} {row.latency_ms}") }
         .None -> panic("expected row")
     }
-    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
     if groups == {
         .Ok(rows) -> { print("unexpected ok {data.count(rows)}") }
         .Err(error) -> print("{error}")

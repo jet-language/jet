@@ -105,6 +105,65 @@ pub fn resolve_publish_registry() -> RegistryConfig {
     }
 }
 
+/// Remove embedded user information before a registry endpoint reaches any
+/// user-visible diagnostic. Credentials belong in a provider, never in a git
+/// URL or Jet output.
+pub fn redact_registry_url(value: &str) -> String {
+    let Some(separator) = value.find("://") else {
+        return value.to_string();
+    };
+    let authority_start = separator + 3;
+    let authority_end = value[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|offset| authority_start + offset)
+        .unwrap_or(value.len());
+    let authority = &value[authority_start..authority_end];
+    let Some(at) = authority.rfind('@') else {
+        return value.to_string();
+    };
+    format!(
+        "{}{}{}",
+        &value[..authority_start],
+        &authority[at + 1..],
+        &value[authority_end..]
+    )
+}
+
+fn registry_url_has_credentials(value: &str) -> bool {
+    let Some(separator) = value.find("://") else {
+        return false;
+    };
+    let authority_start = separator + 3;
+    let authority_end = value[authority_start..]
+        .find(['/', '?', '#'])
+        .map(|offset| authority_start + offset)
+        .unwrap_or(value.len());
+    value[authority_start..authority_end].contains('@')
+}
+
+fn validate_registry_transport(registry: &RegistryConfig) -> Result<(), Diagnostic> {
+    if registry_url_has_credentials(&registry.url) {
+        return Err(e1235(
+            &registry.url,
+            "registry URLs must not contain embedded credentials",
+        ));
+    }
+    Ok(())
+}
+
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command.env_remove("JET_REGISTRY_URL");
+    for (key, _) in std::env::vars_os() {
+        let key = key.to_string_lossy();
+        if key.starts_with("JET_REGISTRY_") && key.ends_with("_URL") {
+            command.env_remove(&*key);
+        }
+    }
+    command
+}
+
 /// Host-pinned root key location for a registry. The registry name is hashed
 /// before it becomes a path component, so repository or environment input can
 /// never escape the host trust directory.
@@ -174,10 +233,24 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
         ));
     }
     std::fs::create_dir_all(parent)?;
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&path)?;
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let existing = std::fs::read_to_string(&path)?;
+            if existing.trim() != public_key {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "registry root key pin changed",
+                ));
+            }
+            return Ok(path);
+        }
+        Err(error) => return Err(error),
+    };
     use std::io::Write;
     file.write_all(public_key.as_bytes())?;
     file.write_all(b"\n")?;
@@ -246,11 +319,11 @@ fn registry_cache_component(name: &str) -> String {
     }
 }
 
-/// Clone the registry index if we have no local cache, else `git pull --ff-only`
-/// to refresh it. Same `Command::new("git")` idiom the dirty-tree check uses —
-/// no new dependency. A pull failure on an empty upstream is tolerated (there is
-/// nothing to fast-forward yet); a real network/auth failure surfaces as E1235.
+/// Clone the registry index into a private sibling, then install it by rename;
+/// an existing cache is refreshed with `git pull --ff-only`. A real
+/// network/auth failure surfaces as E1235.
 pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnostic> {
+    validate_registry_transport(registry)?;
     let dir = index_repo_path(registry);
     match std::fs::symlink_metadata(&dir) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
@@ -263,8 +336,30 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(e1235(&registry.url, &error.to_string())),
     }
-    if dir.join(".git").is_dir() {
-        let pull = Command::new("git")
+    let git_dir = dir.join(".git");
+    if let Ok(metadata) = std::fs::symlink_metadata(&git_dir) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(e1235(
+                &registry.url,
+                "the local registry cache has an invalid git directory",
+            ));
+        }
+    }
+    if git_dir.is_dir() {
+        let origin = git_command()
+            .args(["remote", "get-url", "origin"])
+            .current_dir(&dir)
+            .output()
+            .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+        if !origin.status.success()
+            || String::from_utf8_lossy(&origin.stdout).trim() != registry.url.as_str()
+        {
+            return Err(e1235(
+                &registry.url,
+                "the local registry cache belongs to a different remote",
+            ));
+        }
+        let pull = git_command()
             .args(["pull", "--ff-only"])
             .current_dir(&dir)
             .output()
@@ -282,26 +377,61 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
             return Err(e1235(&registry.url, &error.to_string()));
         }
     }
-    let owns_destination = match std::fs::create_dir(&dir) {
-        Ok(()) => true,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-        Err(error) => return Err(e1235(&registry.url, &error.to_string())),
-    };
-    let clone = Command::new("git")
-        .args(["clone", &registry.url, &dir.to_string_lossy()])
+    let parent = dir
+        .parent()
+        .ok_or_else(|| e1235(&registry.url, "registry cache path has no parent"))?;
+    let partial = parent.join(format!(
+        ".{}.partial-{}",
+        registry_cache_component(&registry.name),
+        unique_suffix()
+    ));
+    if std::fs::symlink_metadata(&partial).is_ok() {
+        return Err(e1235(
+            &registry.url,
+            "registry cache has a colliding partial clone",
+        ));
+    }
+    let partial_display = partial.to_string_lossy().into_owned();
+    let clone = git_command()
+        .args(["clone", &registry.url, &partial_display])
         .output();
     match clone {
-        Ok(o) if o.status.success() => Ok(dir),
+        Ok(o) if o.status.success() => match std::fs::rename(&partial, &dir) {
+            Ok(()) => Ok(dir),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let cleanup = cleanup_owned_clone(&partial, true);
+                if !dir.join(".git").is_dir() {
+                    return Err(e1235(
+                        &registry.url,
+                        "a concurrent registry cache winner is incomplete",
+                    ));
+                }
+                match cleanup {
+                    Ok(()) => Ok(dir),
+                    Err(cleanup_error) => Err(attach_checkout_cleanup_failure(
+                        e1235(&registry.url, "couldn't remove the losing partial registry clone"),
+                        &partial,
+                        &cleanup_error,
+                    )),
+                }
+            }
+            Err(error) => Err(clone_failure(
+                registry,
+                &partial,
+                true,
+                error.to_string(),
+            )),
+        },
         Ok(o) => Err(clone_failure(
             registry,
-            &dir,
-            owns_destination,
+            &partial,
+            true,
             clone_output_detail(&o),
         )),
         Err(error) => Err(clone_failure(
             registry,
-            &dir,
-            owns_destination,
+            &partial,
+            true,
             error.to_string(),
         )),
     }
@@ -441,15 +571,18 @@ fn clone_failure(
 
 /// Clone a clean publication checkout from the registry's current remote.
 pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishCheckout, Diagnostic> {
+    validate_registry_transport(registry)?;
     let suffix = unique_suffix();
     let path = std::env::temp_dir().join(format!("jet-registry-publish-{suffix}"));
-    let owns_path = match std::fs::create_dir(&path) {
-        Ok(()) => true,
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-        Err(error) => return Err(e1235(&registry.url, &error.to_string())),
-    };
-    let output = Command::new("git")
-        .args(["clone", &registry.url, &path.to_string_lossy()])
+    if std::fs::symlink_metadata(&path).is_ok() {
+        return Err(e1235(
+            &registry.url,
+            "publication checkout path already exists",
+        ));
+    }
+    let path_display = path.to_string_lossy().into_owned();
+    let output = git_command()
+        .args(["clone", &registry.url, &path_display])
         .output();
     let output = match output {
         Ok(output) => output,
@@ -457,7 +590,7 @@ pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishChec
             return Err(clone_failure(
                 registry,
                 &path,
-                owns_path,
+                true,
                 error.to_string(),
             ));
         }
@@ -466,14 +599,14 @@ pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishChec
         return Err(clone_failure(
             registry,
             &path,
-            owns_path,
+            true,
             clone_output_detail(&output),
         ));
     }
     Ok(PublishCheckout {
         path,
         cleanup_attempted: Cell::new(false),
-        owns_path,
+        owns_path: true,
     })
 }
 
@@ -499,7 +632,8 @@ fn push_index_inner(
     expected: Option<&IndexEntry>,
     recover_race: bool,
 ) -> Result<(), Diagnostic> {
-    let run = |args: &[&str]| Command::new("git").args(args).current_dir(repo).output();
+    validate_registry_transport(registry)?;
+    let run = |args: &[&str]| git_command().args(args).current_dir(repo).output();
     // A scratch clone may carry no user identity; set one so `commit` works.
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
     let _ = run(&["config", "user.name", "jet registry publish"]);
@@ -515,7 +649,7 @@ fn push_index_inner(
     if paths.is_empty() {
         return Err(e1235(&registry.url, "publication has no explicit paths"));
     }
-    let mut add = Command::new("git");
+    let mut add = git_command();
     add.args(["add", "--"]);
     for path in paths {
         let relative = path
@@ -698,8 +832,21 @@ fn rebuild_publication_after_race(
                 Err(error) => return Err(e1235(&registry.url, &error.to_string())),
             }
         } else {
-            Index::write_index_entry(repo, expected)
-                .map_err(|error| e1235(&registry.url, &error.to_string()))?;
+            match Index::find_entry(repo, &expected.name, &expected.version)
+                .map_err(|error| e1235(&registry.url, &error.to_string()))?
+            {
+                Some(existing) if existing != *expected => {
+                    return Err(e1234(&expected.name, &expected.version));
+                }
+                Some(_) => {}
+                None => Index::write_index_entry(repo, expected).map_err(|error| {
+                    if error.kind() == io::ErrorKind::AlreadyExists {
+                        e1234(&expected.name, &expected.version)
+                    } else {
+                        e1235(&registry.url, &error.to_string())
+                    }
+                })?,
+            }
             let source = artifact_path(stale_repo, &expected.name, &expected.version)
                 .map_err(|error| e1235(&registry.url, &error.to_string()))?;
             if !source.is_dir() {
@@ -741,7 +888,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         Err(_) => return false,
     };
     let spec = format!("{remote}:{relative}");
-    let output = match Command::new("git")
+    let output = match git_command()
         .args(["show", &spec])
         .current_dir(repo)
         .output()
@@ -763,7 +910,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         },
         Err(_) => return false,
     };
-    if !Command::new("git")
+    if !git_command()
         .args(["cat-file", "-e", &format!("{remote}:{artifact}")])
         .current_dir(repo)
         .output()
@@ -782,7 +929,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
             .ok()
             .map(|relative| relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
             .is_some_and(|relative| {
-                Command::new("git")
+                git_command()
                     .args(["cat-file", "-e", &format!("{remote}:{relative}")])
                     .current_dir(repo)
                     .output()
@@ -791,7 +938,7 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
     })
 }
 
-/// D-VERSION1=A: the version already sits in the index and is not yanked —
+/// D-VERSION1=A: a version already sits in the index — yanked or live — so
 /// republishing it is refused. Reads the local clone; the caller must
 /// `ensure_index_clone` first.
 pub fn find_published(
@@ -878,34 +1025,48 @@ pub fn publish_artifact(
     let parent = destination
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry artifact has no parent"))?;
+    ensure_real_directory(repo, "registry checkout")?;
+    ensure_real_directory_if_present(&repo.join("artifacts"), "registry artifact root")?;
+    ensure_real_directory_if_present(
+        &repo.join("artifacts").join(name),
+        "registry artifact package directory",
+    )?;
     std::fs::create_dir_all(parent)?;
+    ensure_real_directory(parent, "registry artifact parent")?;
     let staging = parent.join(format!(
         ".{}.jet-artifact-{}",
         version,
         unique_suffix()
     ));
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging)?;
+    if std::fs::symlink_metadata(&staging).is_ok() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "registry artifact staging path already exists",
+        ));
     }
-    copy_artifact_tree(source, &staging)?;
-    if SHA256::tree_hash(&staging) != actual {
-        let hash_mismatch = io::Error::new(
-            io::ErrorKind::InvalidData,
-            "staged registry artifact does not match its source hash",
-        );
-        return match std::fs::remove_dir_all(&staging) {
-            Ok(()) => Err(hash_mismatch),
+    let result = (|| {
+        copy_artifact_tree(source, &staging)?;
+        if SHA256::tree_hash(&staging) != actual {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "staged registry artifact does not match its source hash",
+            ));
+        }
+        std::fs::rename(&staging, &destination)
+    })();
+    match result {
+        Ok(()) => Ok(destination),
+        Err(error) => match remove_staging_path(&staging) {
+            Ok(()) => Err(error),
             Err(cleanup_error) => Err(io::Error::new(
-                hash_mismatch.kind(),
+                error.kind(),
                 format!(
-                    "{hash_mismatch}; couldn't remove staged registry artifact `{}`: {cleanup_error}",
+                    "{error}; couldn't remove staged registry artifact `{}`: {cleanup_error}",
                     staging.display()
                 ),
             )),
-        };
+        },
     }
-    std::fs::rename(&staging, &destination)?;
-    Ok(destination)
 }
 
 fn unique_suffix() -> String {
@@ -959,6 +1120,36 @@ fn validate_artifact_component(value: &str, label: &str) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+fn ensure_real_directory(path: &Path, label: &str) -> io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{label} is not a real directory"),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_real_directory_if_present(path: &Path, label: &str) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => ensure_real_directory(path, label),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_staging_path(path: &Path) -> io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            std::fs::remove_file(path)
+        }
+        Ok(_) => std::fs::remove_dir_all(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn copy_artifact_tree(source: &Path, destination: &Path) -> io::Result<()> {
@@ -1047,18 +1238,17 @@ pub fn verify_index_entry(
 }
 
 /// Fetch-side resolution **with** c146 signature verification: clone/pull the
-/// index, then verify every non-yanked entry. Returns the live entries plus any
-/// key-rotation warnings; a signature mismatch or a `require_signed` violation
-/// aborts with the matching diagnostic.
-pub fn resolve_and_verify(
+/// index, then verify every recorded entry. This all-entry view is required for
+/// exact locked yanks: a yank hides a version from new selection but never
+/// invalidates an existing lock.
+pub fn resolve_and_verify_all(
     registry: &RegistryConfig,
     name: &str,
 ) -> Result<(Vec<IndexEntry>, Vec<String>), Diagnostic> {
     let repo = ensure_index_clone(registry)?;
     let all = verify_registry_package(&repo, &registry.name, name)?;
-    let live: Vec<IndexEntry> = all.iter().filter(|e| !e.yanked).cloned().collect();
     let mut warnings = Vec::new();
-    for e in &live {
+    for e in &all {
         verify_entry_tier(e)?;
         warnings.extend(verify_index_entry(
             &all,
@@ -1067,6 +1257,16 @@ pub fn resolve_and_verify(
             &registry.name,
         )?);
     }
+    Ok((all, warnings))
+}
+
+/// Fetch-side resolution view: return only versions a new dependency may pick.
+pub fn resolve_and_verify(
+    registry: &RegistryConfig,
+    name: &str,
+) -> Result<(Vec<IndexEntry>, Vec<String>), Diagnostic> {
+    let (all, warnings) = resolve_and_verify_all(registry, name)?;
+    let live = all.into_iter().filter(|entry| !entry.yanked).collect();
     Ok((live, warnings))
 }
 
@@ -1117,14 +1317,14 @@ pub fn e1247(registry: &str, name: &str, version: &str) -> Diagnostic {
     )
 }
 
-/// E1234 — version immutability (D-VERSION1): a published, non-yanked version
-/// can never be overwritten.
+/// E1234 — version immutability (D-VERSION1): a published version can never be
+/// overwritten or reused after a yank.
 pub fn e1234(name: &str, version: &str) -> Diagnostic {
     Diagnostic::error(
         "E1234",
-        format!("`{name}` {version} already exists in the registry index and is not yanked"),
-        "published versions are immutable (D-VERSION1) — a version can never be overwritten, \
-         only yanked, so anyone who already locked it keeps building the exact same bytes."
+        format!("`{name}` {version} is already reserved in the registry index"),
+        "published versions are immutable (D-VERSION1) — a version can never be overwritten or \
+         reused after a yank, so anyone who already locked it keeps building the exact same bytes."
             .to_string(),
         format!(
             "bump the version in `{}` and publish again, or `jet registry yank {version}` the existing \
@@ -1138,15 +1338,17 @@ pub fn e1234(name: &str, version: &str) -> Diagnostic {
 
 /// E1235 — the registry index could not be reached (clone/pull/push failed).
 pub fn e1235(url: &str, detail: &str) -> Diagnostic {
+    let safe_url = redact_registry_url(url);
+    let safe_detail = detail.replace(url, &safe_url);
     Diagnostic::error(
         "E1235",
-        format!("couldn't reach the registry index at `{url}`"),
+        format!("couldn't reach the registry index at `{safe_url}`"),
         format!(
             "the git operation against the registry failed (network, auth, or a stale local \
-             clone): {detail}"
+             clone): {safe_detail}"
         ),
         format!(
-            "check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a \
+            "check network access and credentials for `{safe_url}`, or set `JET_REGISTRY_URL` to a \
              reachable mirror."
         ),
         None,

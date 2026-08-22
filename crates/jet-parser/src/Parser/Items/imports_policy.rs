@@ -1336,7 +1336,7 @@ impl<'a> Parser<'a> {
                         self.must_use_type_def(false)
                     }
                     // D-MIGRATE1 + D-ARROW-CONTROL1:
-                    // `migration TypeName { rename a => b }`
+                    // `migration TypeName { rename a -> b }`
                     TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                         self.migration_decl().map(Item::Migration)
                     }

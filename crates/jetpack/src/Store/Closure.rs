@@ -1,10 +1,15 @@
 use super::*;
+use std::io::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const DB_DIR: &str = "closure-db";
 const JOURNAL_DIR: &str = "journal";
 const PARTIAL_SUFFIX: &str = ".partial";
 const TXN_SUFFIX: &str = ".txn";
 const COMPACT_AFTER: usize = 64;
+const RECEIPTS_DIR: &str = "receipts";
+const RECEIPT_PARTIAL_SUFFIX: &str = ".partial";
+static RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub struct DuEntry {
     pub id: String,
     pub name: String,
@@ -144,6 +149,72 @@ mod registration_tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn connected_receipt_is_atomic_recoverable_and_corruption_preserves_output() {
+        let (roots, _guard) = roots();
+        let ingested = ingest(&roots, "receipt-proof");
+        assert!(ingested.entry.receipt.starts_with("sha256-"));
+        let receipt = roots
+            .hangar_dir()
+            .join(RECEIPTS_DIR)
+            .join(&ingested.entry.receipt);
+        let bytes = fs::read(&receipt).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.starts_with("jet-hangar-receipt-v1\n"));
+        assert!(text.contains("action\t706c616e6e6564\t"));
+        assert!(text.contains("activation-proof\t\t\n"));
+
+        let partial = receipt.with_file_name(".crashed-receipt.partial");
+        fs::write(&partial, b"partial receipt").unwrap();
+        recover_closure_journal(&roots).unwrap();
+        assert!(!partial.exists());
+
+        fs::remove_file(&receipt).unwrap();
+        assert!(recover_closure_journal(&roots).unwrap() >= 1);
+        assert_eq!(fs::read(&receipt).unwrap(), bytes);
+
+        fs::write(&receipt, b"corrupt receipt").unwrap();
+        let error = list_checked(&roots).unwrap_err();
+        assert!(error.to_string().contains("receipt"), "{error}");
+        assert!(Path::new(&ingested.entry.out).is_dir());
+        fs::remove_file(&receipt).unwrap();
+        recover_closure_journal(&roots).unwrap();
+        assert_eq!(fs::read(&receipt).unwrap(), bytes);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn receipt_directory_symlink_is_rejected_without_path_escape() {
+        use std::os::unix::fs::symlink;
+
+        let (roots, _guard) = roots();
+        let outside = roots.root.join("receipt-outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep"), "live").unwrap();
+        let receipts = roots.hangar_dir().join(RECEIPTS_DIR);
+        fs::create_dir_all(roots.hangar_dir()).unwrap();
+        symlink(&outside, &receipts).unwrap();
+        let source = roots.root.join("receipt-symlink-source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("payload"), "bytes").unwrap();
+        let result = ingest_tree(
+            &roots,
+            &IngestRequest {
+                name: "receipt-symlink".into(),
+                version: "1".into(),
+                reference: "path:receipt-symlink".into(),
+                cache_identity: identity(),
+                references: Vec::new(),
+                outputs: BTreeMap::from([("out".into(), source)]),
+                signature: String::new(),
+                provenance: "registration-test".into(),
+                platform_artifact_kind: String::new(),
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(outside.join("keep")).unwrap(), "live");
     }
 
     #[test]
@@ -623,7 +694,7 @@ pub fn entry_action_key(entry: &StoreEntry) -> String {
 }
 
 fn action_replay_fact(key: &str) -> bool {
-    !key.starts_with("nix.output.") && !key.starts_with("output.")
+    !key.starts_with("nix.output.") && !key.starts_with("output.") && key != "cache.reproducibility"
 }
 
 fn push_frame(out: &mut Vec<u8>, field: &[u8]) {
@@ -701,7 +772,15 @@ fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, Clos
 }
 
 pub(crate) fn register_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<bool> {
-    register_entry_unlocked_mode(roots, entry, None)
+    register_entry_unlocked_mode(roots, entry, None, None)
+}
+
+pub(crate) fn register_entry_unlocked_after_fresh_agreement(
+    roots: &Roots,
+    entry: &StoreEntry,
+    action_key: &str,
+) -> std::io::Result<bool> {
+    register_entry_unlocked_mode(roots, entry, None, Some(action_key))
 }
 
 /// Register a batch of already-quarantined entries as one closure transaction.
@@ -792,17 +871,27 @@ pub(crate) fn register_entry_unlocked_with_hook(
     entry: &StoreEntry,
     after_append: &mut dyn FnMut(),
 ) -> std::io::Result<bool> {
-    register_entry_unlocked_mode(roots, entry, Some(after_append))
+    register_entry_unlocked_mode(roots, entry, Some(after_append), None)
 }
 
 fn register_entry_unlocked_mode(
     roots: &Roots,
     entry: &StoreEntry,
     after_append: Option<&mut dyn FnMut()>,
+    fresh_action_key: Option<&str>,
 ) -> std::io::Result<bool> {
     verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
-    super::certify_registration_unlocked(roots, entry, &[])?;
+    if let Some(action_key) = fresh_action_key {
+        super::certify_registration_unlocked_with_fresh_agreement(
+            roots,
+            entry,
+            &[],
+            action_key,
+        )?;
+    } else {
+        super::certify_registration_unlocked(roots, entry, &[])?;
+    }
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
         && objects
@@ -965,11 +1054,11 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
 }
 
 fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
+    let mut recovered = recover_receipt_staging(roots)?;
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
-        return Ok((0, ClosureGraph::default()));
+        return Ok((recovered, ClosureGraph::default()));
     };
-    let mut recovered = 0;
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
@@ -996,6 +1085,19 @@ fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usi
         .values()
         .filter(|record| !record.package_meta.is_empty())
     {
+        let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "closure record `{}` has invalid package metadata",
+                    record.id
+                ),
+            )
+        })?;
+        recovered += usize::from(materialize_receipt(
+            roots,
+            &store_entry_from_meta(&record.id, &meta),
+        )?);
         recovered += usize::from(materialize_package_record(roots, record)?);
     }
     for id in &graph.deleted_records {
@@ -1004,10 +1106,191 @@ fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usi
     Ok((recovered, graph))
 }
 
+/// Prepare the immutable receipt before the closure WAL becomes authoritative.
+/// The caller keeps the returned digest in the package projection, so the
+/// in-memory result, `meta.json`, closure record, and project lock all name the
+/// same object.
+pub(super) fn prepare_entry_receipt(roots: &Roots, entry: &mut StoreEntry) -> std::io::Result<()> {
+    let digest = materialize_receipt(roots, entry)?;
+    entry.receipt = digest;
+    Ok(())
+}
+
+fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<String> {
+    let bytes = render_receipt(entry).into_bytes();
+    let digest = format!("sha256-{}", SHA256::sha256_hex(&bytes));
+    if !entry.receipt.is_empty() && entry.receipt != digest {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Hangar receipt projection for `{}` names `{}`, expected `{}`",
+                entry.id, entry.receipt, digest
+            ),
+        ));
+    }
+    let receipts = roots.hangar_dir().join(RECEIPTS_DIR);
+    super::Ingest::ensure_real_directory(&receipts, "Hangar receipt directory")?;
+    let path = receipts.join(&digest);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Hangar receipt `{digest}` is not a regular file; repair the receipt object"
+                ),
+            ));
+        }
+        Ok(_) => {
+            let actual = fs::read(&path)?;
+            if actual != bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Hangar receipt `{digest}` is corrupt; restore the exact object or remove the unreferenced receipt"
+                    ),
+                ));
+            }
+            return Ok(digest);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let sequence = RECEIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let partial = receipts.join(format!(
+        ".{digest}-{}-{sequence}{RECEIPT_PARTIAL_SUFFIX}",
+        std::process::id()
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&partial)?;
+    if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+        let _ = fs::remove_file(&partial);
+        return Err(error);
+    }
+    match fs::rename(&partial, &path) {
+        Ok(()) => {
+            sync_dir(&receipts)?;
+            Ok(digest)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&partial);
+            let actual = fs::read(&path)?;
+            if actual != bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Hangar receipt `{digest}` changed during publication"),
+                ));
+            }
+            Ok(digest)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&partial);
+            Err(error)
+        }
+    }
+}
+
+fn recover_receipt_staging(roots: &Roots) -> std::io::Result<usize> {
+    let receipts = roots.hangar_dir().join(RECEIPTS_DIR);
+    let Ok(metadata) = fs::symlink_metadata(&receipts) else {
+        return Ok(0);
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Hangar receipt directory is not a real directory; repair the path before recovery",
+        ));
+    }
+    let mut recovered = 0;
+    for item in fs::read_dir(&receipts)? {
+        let path = item?.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if !name.starts_with('.') || !name.ends_with(RECEIPT_PARTIAL_SUFFIX) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(&path)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Hangar receipt staging path `{}` is not removable",
+                    path.display()
+                ),
+            ));
+        }
+        recovered += 1;
+    }
+    if recovered > 0 {
+        sync_dir(&receipts)?;
+    }
+    Ok(recovered)
+}
+
+fn render_receipt(entry: &StoreEntry) -> String {
+    let mut out = String::from("jet-hangar-receipt-v1\n");
+    receipt_line(&mut out, "input", "reference", &entry.reference);
+    receipt_line(
+        &mut out,
+        "input",
+        "source-fingerprint",
+        &entry.cache_identity.source_fingerprint,
+    );
+    receipt_line(
+        &mut out,
+        "input",
+        "recipe-fingerprint",
+        &entry.cache_identity.recipe_fingerprint,
+    );
+    receipt_line(
+        &mut out,
+        "input",
+        "policy-fingerprint",
+        &entry.cache_identity.policy_fingerprint,
+    );
+    receipt_line(
+        &mut out,
+        "input",
+        "platform",
+        &entry.cache_identity.platform,
+    );
+    let references = entry.references.iter().collect::<BTreeSet<_>>();
+    for reference in references {
+        receipt_line(&mut out, "input", "closure", reference);
+    }
+    receipt_line(&mut out, "action", "planned", &entry_action_key(entry));
+    let mut outputs = entry.named_outputs.clone();
+    outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+    for (name, digest) in outputs {
+        receipt_line(&mut out, "output", &name, &digest);
+    }
+    receipt_line(&mut out, "activation-proof", "", "");
+    receipt_line(&mut out, "parent-generation", "", "");
+    out
+}
+
+fn receipt_line(out: &mut String, kind: &str, name: &str, value: &str) {
+    out.push_str(kind);
+    out.push('\t');
+    out.push_str(&hex(name));
+    out.push('\t');
+    out.push_str(&hex(value));
+    out.push('\n');
+}
+
 fn descriptor_for_entry(
     roots: &Roots,
     entry: &StoreEntry,
 ) -> std::io::Result<(Vec<ClosureObject>, ClosureRecord)> {
+    let mut normalized = entry.clone();
+    prepare_entry_receipt(roots, &mut normalized)?;
+    let entry = &normalized;
     let primary = entry.envelope.output_hash.clone();
     if primary.is_empty() {
         return Err(std::io::Error::other(format!(
@@ -1358,6 +1641,7 @@ fn validate_graph_structure_mode(
             })?;
             let meta = parse_meta(&record.package_meta)
                 .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+            validate_receipt_projection(roots, id, &meta, allow_legacy)?;
             if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
                 return Err(format!(
                     "closure record `{id}` action key disagrees with package metadata"
@@ -1458,6 +1742,7 @@ fn validate_applied_entry(
             })?;
             let meta = parse_meta(&record.package_meta)
                 .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
+            validate_receipt_projection(roots, id, &meta, allow_legacy)?;
             if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
                 return Err(format!(
                     "closure record `{id}` action key disagrees with package metadata"
@@ -1485,7 +1770,56 @@ fn validate_graph_store_proofs(
     allow_legacy: bool,
 ) -> Result<(), String> {
     for record in graph.records.values() {
+        if !record.package_meta.is_empty() {
+            let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+                format!(
+                    "closure record `{}` has invalid package metadata",
+                    record.id
+                )
+            })?;
+            validate_receipt_projection(roots, &record.id, &meta, allow_legacy)?;
+        }
         validate_record_store_proof(roots, record, allow_legacy)?;
+    }
+    Ok(())
+}
+
+fn validate_receipt_projection(
+    roots: &Roots,
+    id: &str,
+    meta: &ParsedMeta,
+    allow_legacy: bool,
+) -> Result<(), String> {
+    if meta.receipt.is_empty() {
+        if allow_legacy {
+            return Ok(());
+        }
+        return Err(format!("closure record `{id}` has no Hangar receipt"));
+    }
+    if !valid_receipt_digest(&meta.receipt) {
+        return Err(format!(
+            "closure record `{id}` has an invalid Hangar receipt digest `{}`",
+            meta.receipt
+        ));
+    }
+    let entry = store_entry_from_meta(id, meta);
+    let expected_bytes = render_receipt(&entry).into_bytes();
+    let expected = format!("sha256-{}", SHA256::sha256_hex(&expected_bytes));
+    if meta.receipt != expected {
+        return Err(format!(
+            "closure record `{id}` receipt digest `{}` disagrees with `{expected}`",
+            meta.receipt
+        ));
+    }
+    let path = roots.hangar_dir().join(RECEIPTS_DIR).join(&meta.receipt);
+    let bytes = fs::read(&path).map_err(|error| {
+        format!(
+            "closure record `{id}` cannot read Hangar receipt `{}`: {error}",
+            path.display()
+        )
+    })?;
+    if bytes != expected_bytes {
+        return Err(format!("closure record `{id}` Hangar receipt is corrupt"));
     }
     Ok(())
 }
@@ -1662,6 +1996,7 @@ fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {
         named_outputs: meta.named_outputs.clone(),
         platform_artifact_kind: meta.platform_artifact_kind.clone(),
         producer_record: meta.producer_record.clone(),
+        receipt: meta.receipt.clone(),
         realized_at: meta.realized_at.unwrap_or(0),
         last_used_at: meta.last_used_at.unwrap_or(0),
     }
@@ -1960,6 +2295,16 @@ fn hex(value: &str) -> String {
         out.push(DIGITS[(byte & 0x0f) as usize] as char);
     }
     out
+}
+
+fn valid_receipt_digest(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256-") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 fn unhex(value: &str) -> Result<String, String> {

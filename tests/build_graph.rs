@@ -16,12 +16,23 @@ use jet::Comptime::Build::{
     WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
     execute_build_plan_with_front_end_and_compiler,
     execute_build_plan_with_front_end_and_remote,
+    remote_execution_identity,
     read_packaged_file_bounded,
 };
 use std::fs;
 use std::sync::{Arc, Barrier, Mutex};
 
 static REMOTE_HOST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn remote_empty_log_digests(
+    transport: &RemoteCacheTransport,
+    policy: &RemoteCachePolicy,
+) -> (ContentDigest, ContentDigest) {
+    (
+        transport.upload_execution_blob(b"", policy).unwrap(),
+        transport.upload_execution_blob(b"", policy).unwrap(),
+    )
+}
 
 #[test]
 fn registers_typed_targets_and_default_plan() {
@@ -1051,15 +1062,28 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         sandbox: sandbox.clone(),
     };
     transport.submit_execution(&request, &policy).unwrap();
+    let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
     let result = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![output],
         toolchain_digest: request.toolchain_digest.clone(),
         sandbox,
+        stdout_digest,
+        stderr_digest,
+        provenance_signer: request.sandbox.worker_id.clone(),
     };
     transport.publish_execution_result(&result, &policy).unwrap();
+    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+    let mut disagreement = result.clone();
+    disagreement.outcome = ActionOutcome::Failed { exit_code: 7 };
+    assert!(matches!(
+        transport.publish_execution_result(&disagreement, &policy),
+        Err(RemoteCacheError::InvalidRecord(message))
+            if message.contains("disagrees with the already published result")
+    ));
     assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
 
     let wrong_policy = RemoteCachePolicy::granted(
@@ -1149,10 +1173,14 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
     let late = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: Vec::new(),
         toolchain_digest: request.toolchain_digest.clone(),
-        sandbox: proof,
+        sandbox: proof.clone(),
+        stdout_digest: ContentDigest::from_bytes(b""),
+        stderr_digest: ContentDigest::from_bytes(b""),
+        provenance_signer: proof.worker_id.clone(),
     };
     assert!(matches!(
         transport.publish_execution_result(&late, &policy),
@@ -1224,13 +1252,18 @@ fn remote_cancelled_attempt_history_rejects_replay_after_later_submission() {
             if message.contains("attempt id was already cancelled")
     ));
 
+    let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy_b);
     let result_b = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request_b.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request_b),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: Vec::new(),
         toolchain_digest: request_b.toolchain_digest.clone(),
-        sandbox: proof_b,
+        sandbox: proof_b.clone(),
+        stdout_digest,
+        stderr_digest,
+        provenance_signer: proof_b.worker_id.clone(),
     };
     transport
         .publish_execution_result(&result_b, &policy_b)
@@ -1277,13 +1310,18 @@ fn remote_cancel_and_publish_are_one_commit_race() {
         sandbox: proof.clone(),
     };
     transport.submit_execution(&request, &policy).unwrap();
+    let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
     let result = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: Vec::new(),
         toolchain_digest: request.toolchain_digest.clone(),
-        sandbox: proof,
+        sandbox: proof.clone(),
+        stdout_digest,
+        stderr_digest,
+        provenance_signer: proof.worker_id.clone(),
     };
 
     let barrier = Arc::new(Barrier::new(3));
@@ -1426,11 +1464,14 @@ fn remote_driver_consumes_authenticated_worker_result() {
                     );
                     let bytes = b"remote worker output";
                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
+                    let (stdout_digest, stderr_digest) =
+                        remote_empty_log_digests(&transport, &policy);
                     transport
                         .publish_execution_result(
                             &RemoteExecutionResult {
                                 key: request.key.clone(),
                                 attempt_id: request.attempt_id.clone(),
+                                execution_id: remote_execution_identity(&request),
                                 outcome: ActionOutcome::Succeeded { exit_code: 0 },
                                 outputs: vec![ActionOutputRecord {
                                     path: request.outputs[0].clone(),
@@ -1438,7 +1479,10 @@ fn remote_driver_consumes_authenticated_worker_result() {
                                     byte_len: bytes.len() as u64,
                                 }],
                                 toolchain_digest: request.toolchain_digest.clone(),
-                                sandbox: request.sandbox,
+                                sandbox: request.sandbox.clone(),
+                                stdout_digest,
+                                stderr_digest,
+                                provenance_signer: request.sandbox.worker_id.clone(),
                             },
                             &policy,
                         )
@@ -1599,9 +1643,11 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
     let output_digest = transport
         .upload_execution_blob(b"compiled", &policy)
         .unwrap();
+    let (stdout_digest, stderr_digest) = remote_empty_log_digests(&transport, &policy);
     let result = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![ActionOutputRecord {
             path: output_path,
@@ -1609,7 +1655,10 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
             byte_len: 8,
         }],
         toolchain_digest: request.toolchain_digest.clone(),
-        sandbox,
+        sandbox: sandbox.clone(),
+        stdout_digest,
+        stderr_digest,
+        provenance_signer: sandbox.worker_id.clone(),
     };
     transport.publish_execution_result(&result, &policy).unwrap();
     assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
@@ -1750,9 +1799,11 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
     assert_eq!(worker.read_execution_request(&key).unwrap(), request);
 
     let output_digest = worker.upload_execution_blob(b"compiled", &policy).unwrap();
+    let (stdout_digest, stderr_digest) = remote_empty_log_digests(&worker, &policy);
     let result = RemoteExecutionResult {
         key: key.clone(),
         attempt_id: request.attempt_id.clone(),
+        execution_id: remote_execution_identity(&request),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![ActionOutputRecord {
             path: request.outputs[0].clone(),
@@ -1761,6 +1812,9 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
         }],
         toolchain_digest: request.toolchain_digest.clone(),
         sandbox: sandbox.clone(),
+        stdout_digest,
+        stderr_digest,
+        provenance_signer: sandbox.worker_id.clone(),
     };
     worker.publish_execution_result(&result, &policy).unwrap();
     assert_eq!(client.download_execution_result(&key, &policy).unwrap(), result);

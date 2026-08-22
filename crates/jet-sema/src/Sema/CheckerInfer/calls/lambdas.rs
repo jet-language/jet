@@ -232,7 +232,7 @@ use std::collections::HashSet;
             // D-CONC-SHARE1=A: a write through a `Shared<T>` handle is one
             // locked edit of the CELL, not a change to the handle binding.
             // `check_stmt` rewrites `handle.field += v` into
-            // `handle.edit(payload => { payload.field += v })`
+            // `handle.edit(payload -> { payload.field += v })`
             // (`Sema/SharedAccess.rs`), a body that only READS the handle — the
             // very shape the retired `handle.edit(…)` closure spelling had, and
             // the reason `shared_capture` below lets a handle cross a task with
@@ -715,8 +715,8 @@ use std::collections::HashSet;
                     if self.is_task_spawn {
                         self.borrow_ctx = true;
                     }
-                    // S46 one-line bodies: `() => transfer(...)` is the brace-free
-                    // form of `() => { transfer(...) }`. When no value is expected
+                    // S46 one-line bodies: `() -> transfer(...)` is the brace-free
+                    // form of `() -> { transfer(...) }`. When no value is expected
                     // (() / () E! callback, or inferred spawn body), treat the
                     // call as a statement so void functions do not trip E0116.
                     let needs_value = match effective_ret.as_ref() {
@@ -914,7 +914,7 @@ use std::collections::HashSet;
                 ret: ret_ty.map(Box::new),
                 // A lambda value is a concrete callback, not a demand for one.
                 // A body sema proves effect-free publishes the empty bound so it
-                // satisfies `=[]=>` positions; anything else stays unbounded and
+                // satisfies `-[]>` positions; anything else stays unbounded and
                 // the call-site D-EFF2 obligation solver decides.
                 effect_bound: lam
                     .effects

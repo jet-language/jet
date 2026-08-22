@@ -195,6 +195,13 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
         let path = index_entry_path(repo, &entry.name)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+            let metadata = std::fs::symlink_metadata(parent)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "registry index package directory is not a real directory",
+                ));
+            }
         }
         let mut text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
@@ -291,6 +298,13 @@ fn validate_index_component(value: &str, label: &str) -> io::Result<()> {
 fn with_index_lock<T>(repo: &Path, name: &str, action: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
     let lock_dir = repo.join("index");
     std::fs::create_dir_all(&lock_dir)?;
+    let metadata = std::fs::symlink_metadata(&lock_dir)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry index root is not a real directory",
+        ));
+    }
     let lock_path = lock_dir.join(format!(".{name}.lock"));
     let mut lock = None;
     for _ in 0..100 {
@@ -351,12 +365,19 @@ fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
             .unwrap_or(0),
     ));
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.file_type().is_symlink() {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "registry index path must not be a symlink",
+                "registry index path must be a regular file",
             ));
         }
+    }
+    let metadata = std::fs::symlink_metadata(parent)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "registry index parent is not a real directory",
+        ));
     }
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()

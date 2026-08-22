@@ -1656,8 +1656,26 @@ impl RemoteCacheTransport {
         for output in &result.outputs {
             self.read_remote_blob_with_len(&output.digest, output.byte_len)?;
         }
+        self.read_remote_blob(&result.stdout_digest)?;
+        self.read_remote_blob(&result.stderr_digest)?;
         ensure_remote_root(&self.root)?;
         let path = self.execution_result_path(&result.key)?;
+        match secure_read_file_bounded(&self.root, &path, MAX_REMOTE_WIRE_BYTES + 256) {
+            Ok(existing_wire) => {
+                let existing = decode_remote_execution_result(
+                    &self.open("execution-result", &existing_wire)?,
+                )?;
+                if existing == *result {
+                    return Ok(());
+                }
+                return Err(RemoteCacheError::InvalidRecord(
+                    "remote execution result disagrees with the already published result"
+                        .to_string(),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(RemoteCacheError::Io(error)),
+        }
         let bytes = self.seal(
             "execution-result",
             encode_remote_execution_result(result).as_bytes(),
@@ -1702,6 +1720,8 @@ impl RemoteCacheTransport {
         for output in &result.outputs {
             self.read_remote_blob_with_len(&output.digest, output.byte_len)?;
         }
+        self.read_remote_blob(&result.stdout_digest)?;
+        self.read_remote_blob(&result.stderr_digest)?;
         Ok(result)
     }
 
@@ -1874,10 +1894,38 @@ pub struct RemoteExecutionRequest {
 pub struct RemoteExecutionResult {
     pub key: ActionKey,
     pub attempt_id: String,
+    /// Immutable identity for this exact action/attempt/proof statement.
+    pub execution_id: ContentDigest,
     pub outcome: ActionOutcome,
     pub outputs: Vec<ActionOutputRecord>,
     pub toolchain_digest: ContentDigest,
     pub sandbox: RemoteSandboxProof,
+    /// CAS digests for the complete worker logs. Empty logs are represented by
+    /// the digest of an uploaded empty blob, never by an omitted field.
+    pub stdout_digest: ContentDigest,
+    pub stderr_digest: ContentDigest,
+    /// The worker identity that signed the provenance statement through the
+    /// authenticated transport receipt.
+    pub provenance_signer: String,
+}
+
+/// Compute the immutable identity a worker must repeat in its result.
+pub fn remote_execution_identity(request: &RemoteExecutionRequest) -> ContentDigest {
+    let payload = format!(
+        "jet.remote-execution.v1\nkey={}\nattempt={}\ntoolchain={}\nsandbox={}\naction={}\nprovenance={}\nsandbox_class={}\nworker={}\nplatform={}\nabi={}\nreceipt={}\n",
+        request.key.as_str(),
+        request.attempt_id,
+        request.toolchain_digest.as_str(),
+        request.sandbox.sandbox_id,
+        request.sandbox.action_key,
+        request.sandbox.provenance_digest.as_str(),
+        request.sandbox.sandbox_class,
+        request.sandbox.worker_id,
+        request.sandbox.platform,
+        request.sandbox.abi,
+        request.sandbox.worker_receipt,
+    );
+    ContentDigest::from_bytes(payload.as_bytes())
 }
 
 fn validate_remote_execution_request(
@@ -1926,6 +1974,20 @@ fn validate_remote_execution_result(
     validate_remote_attempt_id(&result.attempt_id)?;
     validate_remote_count(result.outputs.len(), "execution outputs")?;
     ContentDigest::parse(result.toolchain_digest.as_str())?;
+    ContentDigest::parse(result.execution_id.as_str())?;
+    ContentDigest::parse(result.stdout_digest.as_str())?;
+    ContentDigest::parse(result.stderr_digest.as_str())?;
+    if result.provenance_signer.is_empty()
+        || result.provenance_signer.len() > 256
+        || result
+            .provenance_signer
+            .chars()
+            .any(|character| character.is_control())
+    {
+        return Err(RemoteCacheError::InvalidRecord(
+            "remote execution provenance signer is invalid".to_string(),
+        ));
+    }
     if !result.sandbox.is_complete() {
         return Err(RemoteCacheError::Denied(RemoteCacheDenied {
             request: RemoteActionRequest::Execute,
@@ -1941,6 +2003,11 @@ fn validate_remote_execution_result(
     if result.sandbox.attempt_id != result.attempt_id {
         return Err(RemoteCacheError::InvalidRecord(
             "remote execution result attempt does not match its sandbox proof".to_string(),
+        ));
+    }
+    if result.provenance_signer != result.sandbox.worker_id {
+        return Err(RemoteCacheError::InvalidRecord(
+            "remote execution provenance signer does not match its worker".to_string(),
         ));
     }
     for output in &result.outputs {
@@ -1959,6 +2026,7 @@ fn validate_execution_parity(
         || request.attempt_id != result.attempt_id
         || request.toolchain_digest != result.toolchain_digest
         || request.sandbox != result.sandbox
+        || result.execution_id != remote_execution_identity(request)
     {
         return Err(RemoteCacheError::InvalidRecord(
             "remote execution result changed action, toolchain, or sandbox provenance".to_string(),
@@ -2222,9 +2290,10 @@ fn decode_remote_execution_request(
 
 fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
     let mut encoded = format!(
-        "version=1\nkey={}\nattempt={}\noutcome={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\noutputs={}\n",
+        "version=2\nkey={}\nattempt={}\nexecution_id={}\noutcome={}\ntoolchain={}\nsandbox={}\nproof_action={}\nproof_provenance={}\nworker_id={}\nplatform={}\nabi={}\nworker_receipt={}\nstdout={}\nstderr={}\nprovenance_signer={}\noutputs={}\n",
         hex_encode(result.key.as_str().as_bytes()),
         hex_encode(result.attempt_id.as_bytes()),
+        result.execution_id.as_str(),
         encode_remote_outcome(result.outcome),
         result.toolchain_digest.as_str(),
         hex_encode(result.sandbox.sandbox_id.as_bytes()),
@@ -2234,6 +2303,9 @@ fn encode_remote_execution_result(result: &RemoteExecutionResult) -> String {
         hex_encode(result.sandbox.platform.as_bytes()),
         hex_encode(result.sandbox.abi.as_bytes()),
         hex_encode(result.sandbox.worker_receipt.as_bytes()),
+        result.stdout_digest.as_str(),
+        result.stderr_digest.as_str(),
+        hex_encode(result.provenance_signer.as_bytes()),
         result.outputs.len(),
     );
     for output in &result.outputs {
@@ -2260,6 +2332,7 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
     let mut version = None;
     let mut key = None;
     let mut attempt_id = None;
+    let mut execution_id = None;
     let mut outcome = None;
     let mut toolchain_digest = None;
     let mut sandbox_id = None;
@@ -2269,6 +2342,9 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
     let mut platform = None;
     let mut abi = None;
     let mut worker_receipt = None;
+    let mut stdout_digest = None;
+    let mut stderr_digest = None;
+    let mut provenance_signer = None;
     let mut output_count = None;
     let mut outputs = Vec::new();
     for line in text.lines() {
@@ -2295,6 +2371,11 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
                     "execution result attempt id is not UTF-8".to_string(),
                 )
             })?);
+        } else if let Some(value) = line.strip_prefix("execution_id=") {
+            if !seen.insert("execution_id") {
+                return Err(duplicate_remote_field("execution_id"));
+            }
+            execution_id = Some(ContentDigest::parse(value)?);
         } else if let Some(value) = line.strip_prefix("outcome=") {
             if !seen.insert("outcome") {
                 return Err(duplicate_remote_field("outcome"));
@@ -2362,6 +2443,25 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
                     "execution result worker receipt is not UTF-8".to_string(),
                 )
             })?);
+        } else if let Some(value) = line.strip_prefix("stdout=") {
+            if !seen.insert("stdout") {
+                return Err(duplicate_remote_field("stdout"));
+            }
+            stdout_digest = Some(ContentDigest::parse(value)?);
+        } else if let Some(value) = line.strip_prefix("stderr=") {
+            if !seen.insert("stderr") {
+                return Err(duplicate_remote_field("stderr"));
+            }
+            stderr_digest = Some(ContentDigest::parse(value)?);
+        } else if let Some(value) = line.strip_prefix("provenance_signer=") {
+            if !seen.insert("provenance_signer") {
+                return Err(duplicate_remote_field("provenance_signer"));
+            }
+            provenance_signer = Some(String::from_utf8(hex_decode(value)?).map_err(|_| {
+                RemoteCacheError::InvalidRecord(
+                    "execution result provenance signer is not UTF-8".to_string(),
+                )
+            })?);
         } else if let Some(value) = line.strip_prefix("outputs=") {
             if !seen.insert("outputs") {
                 return Err(duplicate_remote_field("outputs"));
@@ -2393,7 +2493,7 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
             )));
         }
     }
-    if version != Some(1) || output_count != Some(outputs.len()) {
+    if version != Some(2) || output_count != Some(outputs.len()) {
         return Err(RemoteCacheError::InvalidRecord(
             "execution result version or output count is invalid".to_string(),
         ));
@@ -2407,6 +2507,9 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
     let result = RemoteExecutionResult {
         key,
         attempt_id: attempt_id.clone(),
+        execution_id: execution_id.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord("missing execution identity".to_string())
+        })?,
         outcome: outcome.ok_or_else(|| {
             RemoteCacheError::InvalidRecord("missing execution outcome".to_string())
         })?,
@@ -2440,6 +2543,15 @@ fn decode_remote_execution_result(bytes: &[u8]) -> Result<RemoteExecutionResult,
                 RemoteCacheError::InvalidRecord("missing execution worker receipt".to_string())
             })?,
         ),
+        stdout_digest: stdout_digest.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord("missing execution stdout digest".to_string())
+        })?,
+        stderr_digest: stderr_digest.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord("missing execution stderr digest".to_string())
+        })?,
+        provenance_signer: provenance_signer.ok_or_else(|| {
+            RemoteCacheError::InvalidRecord("missing execution provenance signer".to_string())
+        })?,
     };
     validate_remote_execution_result(&result)?;
     Ok(result)

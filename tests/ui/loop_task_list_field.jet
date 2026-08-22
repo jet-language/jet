@@ -1,12 +1,14 @@
-struct Pool { handles: [Task<Int>] }
+struct Pool {
+    handles: [Task<Int>]
+}
 
-fn drain(p: Pool) => Int {
+fn drain(p: Pool) Int -> {
     total := 0
     loop h in p.handles -> total += h.join() ?? 0
     total
 }
 
 fn run() {
-    p :: Pool{ handles: [task 1] }
+    p :: Pool{handles: [task 1]}
     print(drain(p))
 }

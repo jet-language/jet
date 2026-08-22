@@ -1,7 +1,10 @@
 use super::entry::default_config_path;
 use super::options_rendering::user_names;
 use super::types::Target;
-use jet_env_model::ModuleEval::{self, EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::{
+    self, env_plan_from_package_outputs, project_package_outputs, EnvPlan, SystemPlan,
+};
+use crate::Package::PackageFacts;
 use crate::Output::Theme;
 use crate::Syntax;
 use std::fs;
@@ -20,7 +23,11 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
     }
     let Some((host, root)) = raw.split_once(Syntax::OS_HOST_SELECTOR) else {
         return Some(Target {
-            config: default_config_path(),
+            config: config_for_root(
+                default_config_path()
+                    .parent()
+                    .unwrap_or_else(|| Path::new(".")),
+            ),
             host: raw.to_string(),
         });
     };
@@ -44,7 +51,7 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
     }
     let path = PathBuf::from(root);
     let config = if path.is_dir() {
-        path.join(Syntax::CONFIG_FILE)
+        config_for_root(&path)
     } else {
         path
     };
@@ -52,6 +59,15 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
         config,
         host: host.to_string(),
     })
+}
+
+fn config_for_root(root: &Path) -> PathBuf {
+    let package = root.join(Syntax::PACKAGE_FILE);
+    if package.is_file() {
+        package
+    } else {
+        root.join(Syntax::CONFIG_FILE)
+    }
 }
 
 pub(super) fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
@@ -112,6 +128,9 @@ pub(super) fn load_user_generation_target(
 }
 
 pub(super) fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
+    if target.config.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
+        return load_package_plan(theme, target);
+    }
     let src = match fs::read_to_string(&target.config) {
         Ok(src) => src,
         Err(_) => {
@@ -147,6 +166,56 @@ pub(super) fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
         }
     };
     Some(plan)
+}
+
+fn load_package_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
+    let root = target
+        .config
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let facts = match PackageFacts::load(root) {
+        Some(Ok(facts)) => facts,
+        Some(Err(error)) => {
+            theme.error(
+                "the Package graph is invalid",
+                &format!(
+                    "{} could not load package.jet: {error}",
+                    target.config.display()
+                ),
+                "repair package.jet or its composed Config files, then run the command again.",
+            );
+            return None;
+        }
+        None => {
+            theme.error_coded(
+                "E0981",
+                "the jetos package file does not exist",
+                &format!(
+                    "jet os tried to load {} for host {}.",
+                    target.config.display(),
+                    target.host
+                ),
+                "create package.jet, or pass an explicit root after the @.",
+            );
+            return None;
+        }
+    };
+    let projection = match project_package_outputs(&facts) {
+        Ok(projection) => projection,
+        Err(error) => {
+            theme.error(
+                "the Package graph cannot project to JetOS",
+                &format!("package output projection failed: {error}"),
+                "repair the named System or Fleet output, then run the command again.",
+            );
+            return None;
+        }
+    };
+    Some(env_plan_from_package_outputs(
+        Syntax::PACKAGE_FILE,
+        projection,
+    ))
 }
 
 pub(super) fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {

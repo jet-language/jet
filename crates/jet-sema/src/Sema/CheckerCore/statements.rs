@@ -1484,7 +1484,7 @@ impl<'a> Checker<'a> {
                     // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
                     // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
                     let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
-                    // D-STREAMYIELD1: a generator (`=> Stream<T>`) yields values; `return`
+                    // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
                     // only ever ends the stream early — bare `return;` is fine, `return
                     // value;` is E0806 (a generator body yields, it doesn't return a value).
                     if let Some(Type::Apply { name, args }) = &resolved_ret {
@@ -1745,7 +1745,7 @@ impl<'a> Checker<'a> {
                                             display_return.show(),
                                             display_actual.show()
                                         ),
-                                        "the value handed back must match the type after `=>`"
+                                        "the value handed back must match the declared return type"
                                             .to_string(),
                                         type_fix_hint(&display_return, &display_actual),
                                         Some(e.span()),
@@ -1758,10 +1758,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0113",
                                 format!("`{}` doesn't return a value", self.fn_name),
-                                "a function only hands back a value if it declares one with `=> Type`"
+                                "a function only hands back a value if it declares a return type before `->`"
                                     .to_string(),
                                 format!(
-                                    "remove the value (`return;`), or declare `=> {}` on the function",
+                                    "remove the value (`return;`), or declare `{}` as the return type before `->`",
                                     ty_name
                                 ),
                                 Some(e.span()),
@@ -1784,7 +1784,7 @@ impl<'a> Checker<'a> {
                                         self.fn_name,
                                         rt.show()
                                     ),
-                                    "the value handed back must match the type after `=>`".to_string(),
+                                    "the value handed back must match the declared return type".to_string(),
                                     "add the value: `return ...;`".to_string(),
                                     Some(*span),
                                 ));
@@ -1853,8 +1853,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0805",
                             format!("`{}` outside a generator", Syntax::KW_YIELD),
-                            "`yield` hands a value to a `Stream<T>` consumer — only a function declared `=> Stream<T>` may use it".to_string(),
-                            format!("declare `=> {}<T>` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
+                            "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it".to_string(),
+                            format!("declare `{}<T> ->` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
                             Some(*span),
                         ));
                         self.infer(e);
@@ -3012,7 +3012,7 @@ impl<'a> Checker<'a> {
                 }
                 // `#Transact(name) { … }`.
                 // Bind the user-chosen handle `name` (typed `Transaction`) so
-                // `name.on_commit(() => { … })` resolves inside the block, then check
+                // `name.on_commit(() -> { … })` resolves inside the block, then check
                 // the body with the transaction depth raised: an irreversible Core
                 // effect (Net/FS/Exec) reached directly in the block is E0746
                 // (D-TXN2) at its call site. A lexical scope; erased in codegen (I3).

@@ -5,7 +5,7 @@ use super::realize::{
 };
 use super::workspace_sources::{fixtures_for, workspace_root};
 use crate::Output::{self, Theme};
-use crate::Store::{self, Roots};
+use crate::Store::{self, ExplainLens, Roots};
 use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
 
 /// `jetpack update [<source>]` — resolve channel source refs and move only
@@ -272,32 +272,49 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.error_coded(diagnostic.code, &rendered.what, &rendered.why, &rendered.fix);
         return 2;
     }
+    let (lens, package) = match ExplainLens::parse(query) {
+        Some(lens) => {
+            let Some(package) = parsed.positional.get(1) else {
+                theme.error(
+                    &format!("explain lens `{query}` needs a package ref"),
+                    "causal package explanations need the lens and the package ref.",
+                    &format!("write `jet explain {query} <ref>`."),
+                );
+                return 2;
+            };
+            (lens, package.as_str())
+        }
+        None => (ExplainLens::All, query.as_str()),
+    };
     let roots = Store::resolve();
-    let package = query
-        .split_once(':')
-        .map(|(_, p)| p)
-        .or_else(|| query.split_once('.').map(|(_, p)| p))
-        .unwrap_or(query);
-    match BuildDebug::latest(&roots.hangar_dir(), package) {
-        Ok(Some(attempt)) => {
-            print!("{}", BuildDebug::explain(&attempt));
-            0
+    match Store::explain_package(&roots, package, lens) {
+        Ok(Some(explanation)) => {
+            if parsed.flags.json {
+                println!("{}", explanation.to_json());
+            } else {
+                print!("{}", explanation.text());
+            }
+            if explanation.reports.iter().any(|report| report.kind == "conflict") {
+                2
+            } else {
+                0
+            }
         }
         Ok(None) => {
             theme.error_coded(
                 "E1274",
-                &format!("no build log for `{query}`"),
-                "`jet explain <ref>` can explain refs after Jetpack has recorded a build attempt.",
-                &format!("run `jet build {query}` first, or use `jet explain E1234` for diagnostic-code help."),
+                &format!("no package record or build attempt for `{package}`"),
+                "`jet explain` reads the Hangar Store and persisted Jetpack build attempts; neither contains this package.",
+                &format!("run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help."),
             );
             2
         }
-        Err(e) => {
+        Err(error) => {
             theme.error_coded(
                 "E1274",
-                "couldn't read build explanation",
-                &e,
-                "check the build log directory under the Jetpack hangar.",
+                "couldn't read package explanation",
+                &error.to_string(),
+                "repair the Hangar closure/lock record, then retry the explanation.",
             );
             2
         }

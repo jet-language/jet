@@ -1021,7 +1021,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::TypeAlias(a) => a.span.start,
         // D-QUAL3: unit families use their own span.
         Item::UnitFamily(uf) => uf.span.start,
-        // D-ERR-CONV: use the from_span (start of `impl Source => Target {}`).
+        // D-ERR-CONV: use the from_span (start of `impl Source -> Target {}`).
         Item::ErrorConv(ec) => src[..ec.from_span.start]
             .rfind("impl")
             .unwrap_or(ec.from_span.start),

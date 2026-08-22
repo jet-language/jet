@@ -994,7 +994,7 @@ fn bare_member_shorthand_forced_interpreter() {
         } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stderr, "");
-            assert_eq!(stdout, "HELL0 W0RLD\n3\n[Ada]\n[ADA, GRACE]\n");
+            assert_eq!(stdout, "HELL0 W0RLD\n3\n[1, 2]\n[Ada]\n[ADA, GRACE]\n");
         }
         RunOutcome::Problems(diagnostics) => {
             panic!("forced interpreter rejected bare member shorthand: {diagnostics:?}")

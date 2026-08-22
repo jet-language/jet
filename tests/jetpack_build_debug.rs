@@ -23,7 +23,7 @@ fn write_project(dir: &Path) {
         dir.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "weirdctl",

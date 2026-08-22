@@ -31,7 +31,7 @@ fn hangar_ingest_path_law_reserved_is_e1299() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     let diagnostic = stderr
-        .find("\n  error[E1299]")
+        .find("Error [E1299]:")
         .map(|idx| &stderr[idx..])
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot("hangar_path_law_reserved", diagnostic);
@@ -61,7 +61,7 @@ fn hangar_ingest_missing_output_is_atomic_and_retryable() {
     let failed = ingest();
     assert_eq!(failed.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&failed.stderr);
-    assert!(stderr.contains("error[E1315]"), "{stderr}");
+    assert!(stderr.contains("Error [E1315]"), "{stderr}");
     assert!(stderr.contains("does not exist"), "{stderr}");
     assert!(
         !stderr.contains("ingested"),
@@ -215,6 +215,162 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         "CLI recovery must replay committed package metadata"
     );
     let _ = Path::new("."); // keep Path import used on all cfgs
+}
+
+#[test]
+fn hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object() {
+    let root = Scratch::new("hangar-repair-root");
+    let project = Scratch::new("hangar-repair-project");
+    let source = Scratch::new("hangar-repair-source");
+    fs::write(source.join("payload"), "trusted bytes\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "repairable",
+            "--ref",
+            "repairable@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap();
+    let archive = root.join("repairable.hangar");
+    let export = jetpack()
+        .args([
+            "hangar",
+            "export",
+            "repairable@fixture",
+            "--to",
+            archive.to_str().unwrap(),
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        export.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let unsigned_archive = root.join("unsigned.hangar");
+    fs::write(
+        &unsigned_archive,
+        jetpack::Store::export_unsigned_archive(&roots, &entry.id, false).unwrap(),
+    )
+    .unwrap();
+
+    let payload = Path::new(&entry.out).join("payload");
+    make_tree_writable(Path::new(&entry.out));
+    fs::write(&payload, "tampered bytes\n").unwrap();
+    let rejected = jet()
+        .args([
+            "hangar",
+            "repair",
+            "repairable@fixture",
+            "--from",
+            unsigned_archive.to_str().unwrap(),
+            "--yes",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("unsigned Hangar archives"),
+        "stderr: {}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "tampered bytes\n");
+
+    let repair = |archive: &Path| {
+        jet()
+            .args([
+                "hangar",
+                "repair",
+                "repairable@fixture",
+                "--from",
+                archive.to_str().unwrap(),
+                "--yes",
+                "--no-color",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap()
+    };
+    let repaired = repair(&archive);
+    assert!(
+        repaired.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&repaired.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+    jetpack::Store::verify_hangar_object(
+        &roots,
+        &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+    )
+    .unwrap();
+
+    let quarantine = root.path.join("hangar").join("quarantine");
+    fs::create_dir_all(&quarantine).unwrap();
+    make_tree_writable(Path::new(&entry.out));
+    fs::rename(
+        &entry.out,
+        quarantine.join(format!("repair-{}-crash", entry.envelope.output_hash)),
+    )
+    .unwrap();
+    let recovered = jet()
+        .args(["hangar", "recover", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        recovered.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+    jetpack::Store::verify_hangar_object(
+        &roots,
+        &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+    )
+    .unwrap();
+
+    make_tree_writable(Path::new(&entry.out));
+    fs::remove_dir_all(&entry.out).unwrap();
+    let repaired_missing = repair(&archive);
+    assert!(
+        repaired_missing.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&repaired_missing.stderr)
+    );
+    assert_eq!(fs::read_to_string(&payload).unwrap(), "trusted bytes\n");
+    jetpack::Store::verify_hangar_object(
+        &roots,
+        &jetpack::Store::find_by_reference(&roots, "repairable@fixture").unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]

@@ -2094,7 +2094,7 @@ impl<'a> Checker<'a> {
                         name, display_type_name
                     ),
                     format!(
-                        "`{}` is declared `{} => …` — its value always comes from that formula, never from a struct literal",
+                        "`{}` is declared `{} -> …` — its value always comes from that formula, never from a struct literal",
                         name, name
                     ),
                     format!("remove `{}` from this `.{{ … }}`", name),

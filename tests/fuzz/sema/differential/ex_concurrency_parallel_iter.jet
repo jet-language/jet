@@ -1,22 +1,22 @@
 // D-PARCAPTURE1=D: explicit parallel collection adapters.
 // para_map/para_filter preserve order; para_partition returns (false_, true_).
 // para_fold uses fresh per-chunk seeds and a deterministic merge tree.
-fn double(n: Int) => Int :: n * 2
+fn double(n: Int) Int -> n * 2
 
-fn is_even(n: Int) => Bool :: n % 2 == 0
+fn is_even(n: Int) Bool -> n % 2 == 0
 
 fn run() {
     nums :: [Int]{1, 2, 3, 4, 5}
     // para_map: double each element in parallel.
-    doubled :: nums.para_map((n: Int) => n * 2)
+    doubled :: nums.para_map((n: Int) -> n * 2)
     print(doubled)
     // para_filter: keep even numbers.
-    evens :: nums.para_filter((n: Int) => n % 2 == 0)
+    evens :: nums.para_filter((n: Int) -> n % 2 == 0)
     print(evens)
-    split :: nums.para_partition((n: Int) => n % 2 == 0)
+    split :: nums.para_partition((n: Int) -> n % 2 == 0)
     print(split.false_)
     print(split.true_)
     // para_fold: fresh worker seeds, per-item step, deterministic merge.
-    total :: nums.para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right)
+    total :: nums.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)
     print(total)
 }

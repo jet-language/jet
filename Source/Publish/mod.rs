@@ -5,7 +5,7 @@
 //!   - Public API extraction from parsed Jet AST items.
 //!   - API diff → E2601 (breaking change under non-breaking version bump).
 //!   - PubGrub-style conflict detection → E2602.
-//!   - Advisory database format + check → E2603.
+//!   - Signed advisory feed and policy check → E2603/E2609/E2610.
 //!   - Artifact integrity verification → E2604.
 //!   - SBOM emission (SPDX 2.3 tag-value format from a lockfile).
 //!   - `jet registry vendor` (copy resolved deps into a `vendor/` tree).
@@ -346,10 +346,14 @@ mod tests {
 
     #[test]
     fn advisory_parse_and_match() {
-        let db = "JET-2026-0001|mylib|^1.0|1.0.5|Remote code execution via parse\n";
-        let advisories = parse_advisory_db(db).unwrap();
-        assert_eq!(advisories.len(), 1);
-        let adv = &advisories[0];
+        let public_key = "00".repeat(32);
+        let key_id = advisory_key_id(&public_key).unwrap();
+        let feed = parse_advisory_feed(&format!(
+            "{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\nadvisory|JET-2026-0001|mylib|^1.0|1.0.5|Remote code execution via parse|medium\n"
+        ))
+        .unwrap();
+        assert_eq!(feed.advisories.len(), 1);
+        let adv = &feed.advisories[0];
         assert_eq!(adv.id, "JET-2026-0001");
         assert!(adv.affects(&sv("1.0.3")));
         assert!(!adv.affects(&sv("1.0.5"))); // fixed
@@ -395,8 +399,14 @@ mod tests {
     #[test]
     fn audit_lockfile_emits_e2603() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
-        let db = "ADV-001|mylib|^1.0|1.0.5|XSS in template engine\n";
-        let advisories = parse_advisory_db(db).unwrap();
+        let advisories = vec![Advisory {
+            id: "ADV-001".into(),
+            package: "mylib".into(),
+            affected: VersionReq::parse("^1.0").unwrap(),
+            fixed: Some(sv("1.0.5")),
+            title: "XSS in template engine".into(),
+            severity: Severity::Medium,
+        }];
         let matches = audit_lockfile(&lock, &advisories);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].diagnostic.code, "E2603");
@@ -407,8 +417,14 @@ mod tests {
     #[test]
     fn audit_severity_parsed_from_db() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
-        let db = "ADV-002|mylib|^1.0||Heap overflow|critical\n";
-        let advisories = parse_advisory_db(db).unwrap();
+        let advisories = vec![Advisory {
+            id: "ADV-002".into(),
+            package: "mylib".into(),
+            affected: VersionReq::parse("^1.0").unwrap(),
+            fixed: None,
+            title: "Heap overflow".into(),
+            severity: Severity::Critical,
+        }];
         assert_eq!(advisories[0].severity, Severity::Critical);
         let matches = audit_lockfile(&lock, &advisories);
         assert_eq!(matches.len(), 1);
@@ -417,25 +433,60 @@ mod tests {
 
     #[test]
     fn advisory_parser_rejects_partial_ambiguous_and_invalid_records() {
-        for db in [
-            "missing|fields|only\n",
-            "ADV||^1.0||title\n",
-            "ADV|pkg|1 ||||title\n",
-            "ADV|pkg|^1.0|not-a-version|title\n",
-            "ADV|pkg|^1.0||title|critical|extra\n",
+        let public_key = "00".repeat(32);
+        let key_id = advisory_key_id(&public_key).unwrap();
+        for record in [
+            "missing|fields|only",
+            "advisory|ADV||^1.0||title|critical",
+            "release|pkg@1.0.0|100|third-party",
+            "advisory|ADV|pkg|^1.0|not-a-version|title|critical",
+            "advisory|ADV|pkg|^1.0||title|critical|extra",
         ] {
-            let diagnostic = parse_advisory_db(db).unwrap_err();
+            let text = format!(
+                "{ADVISORY_FEED_MAGIC}\nfeed|1|100|1000|86400|{key_id}|{public_key}|sig\n{record}\n"
+            );
+            let diagnostic = parse_advisory_feed(&text).unwrap_err();
             assert_eq!(diagnostic.code, "E2607");
         }
     }
 
     #[test]
+    fn signed_advisory_feed_parser_binds_exact_policy_targets() {
+        let public_key = "00".repeat(32);
+        let key_id = advisory_key_id(&public_key).unwrap();
+        let text = format!(
+            "{ADVISORY_FEED_MAGIC}\nfeed|7|100|100000|86400|{key_id}|{public_key}|signature\nrelease|mylib#1.0.3|100|third-party\nadvisory|ADV-1|mylib|^1.0|1.0.5|security fix|high\nexception|mylib#1.0.3|incident response|security-team|200000\n"
+        );
+        let feed = parse_advisory_feed(&text).expect("signed feed records should parse");
+        assert_eq!(feed.sequence, 7);
+        assert_eq!(feed.releases[0].source_class, SourceClass::ThirdParty);
+        assert_eq!(feed.exceptions[0].package, "mylib");
+        assert!(advisory_feed_payload(&feed).contains("mylib#1.0.3"));
+
+        let at_target = text.replace("mylib#1.0.3", "mylib@1.0.3");
+        assert_eq!(parse_advisory_feed(&at_target).unwrap_err().code, "E2607");
+    }
+
+    #[test]
+    fn advisory_trust_and_policy_fail_closed() {
+        let duplicate = "public_key=00\npublic_key=11\n";
+        assert_eq!(parse_advisory_trust(duplicate).unwrap_err().code, "E2607");
+        let revoked = parse_advisory_trust("public_key=00\nrevoked_key=00\n").unwrap();
+        assert!(revoked.revoked_keys.contains("00"));
+
+        let diagnostic = e2609("mylib", "1.0.3", 86_500, SourceClass::ThirdParty);
+        assert_eq!(diagnostic.code, "E2609");
+        assert!(diagnostic.what.contains("mylib#1.0.3"));
+        assert!(diagnostic.fix.contains("package#version"));
+    }
+
+    #[test]
     fn malformed_supply_metadata_diagnostic_is_pinned() {
-        let diagnostic = e2607("advisory database", "line 2 has an invalid fixed version");
+        let diagnostic = e2607("advisory feed", "line 2 has an invalid fixed version");
         assert_eq!(diagnostic.code, "E2607");
         assert_eq!(
             diagnostic.what,
-            "advisory database is malformed: line 2 has an invalid fixed version"
+            "advisory feed is malformed: line 2 has an invalid fixed version"
         );
         assert_eq!(
             diagnostic.why,
@@ -443,7 +494,7 @@ mod tests {
         );
         assert_eq!(
             diagnostic.fix,
-            "fix the malformed advisory database record and retry; use the documented parser contract and UTF-8 text."
+            "fix the malformed advisory feed record and retry; use the documented parser contract and UTF-8 text."
         );
     }
 

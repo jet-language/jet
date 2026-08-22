@@ -446,23 +446,6 @@ pub fn main(args: Vec<String>) -> i32 {
             );
             return 2;
         }
-        if let Err(error) = Store::migrate_nix_gc_roots(&roots) {
-            Store::report_integrity(
-                &theme,
-                &Store::IntegrityFailure {
-                    package: "Nix compatibility closure".to_string(),
-                    version: "legacy".to_string(),
-                    expected: "durable GC root".to_string(),
-                    actual: error.to_string(),
-                    reason: "Nix GC-root migration".to_string(),
-                    disposition: "Jetpack stopped before any package path could be consumed."
-                        .to_string(),
-                    fix: "Restore access to `nix-store`, then rerun this command before using the package."
-                        .to_string(),
-                },
-            );
-            return 2;
-        }
     }
 
     match verb.as_str() {

@@ -13,6 +13,7 @@ use super::plan_graph::{BuildExecutionReport, BuildPlan};
 use super::provenance_toolchains::{ProbeKind, ReproducibilityClass};
 use super::targets::BuildPath;
 use super::validation::resolve_under;
+use super::{RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -868,6 +869,22 @@ fn remote_for_action(
             capability: BuildCapability::Net,
         });
     }
+    // The CLI selects one host-owned binding by name, but the selected binding
+    // still crosses the canonical capability scheduler. Multi-builder callers
+    // use the same model with more candidates; this adapter keeps the driver
+    // entry point's explicit single-name contract intact.
+    let request = RemoteBuildRequest::new(key.clone())
+        .with_platform(binding.platform.clone())
+        .with_trust_domain(binding.trust_domain.clone())
+        .with_cache_read(binding.cache_read)
+        .with_cache_write(binding.cache_write)
+        .with_execute(binding.execute)
+        .with_local_fallback(binding.fallback_local);
+    let scheduler = RemoteScheduler::new([RemoteBuilder::from_binding(binding.clone())])
+        .map_err(|error| remote_action(action, error.to_string()))?;
+    scheduler
+        .select(&request)
+        .map_err(|error| remote_action(action, error.to_string()))?;
     let policy = remote_attempt_policy(plan, action, key, binding, &transport)?;
     Ok(Some((transport, policy, binding.execute)))
 }

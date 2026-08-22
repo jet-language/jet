@@ -7,7 +7,7 @@
 use super::parse::Parsed;
 use super::realize::{project_env_root, realize_ref_outcome, RefOutcome, RowStyle};
 use crate::Output::Theme;
-use crate::{EnvFile, RefSpec, Store, Syntax, JSON, SHA256};
+use crate::{EnvFile, ProviderFacts, RefSpec, Store, Syntax, JSON, SHA256};
 use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -291,6 +291,14 @@ fn profile_rollback(theme: &Theme, parsed: &Parsed) -> i32 {
             "`jet profile rollback` accepts a name and optional generation",
             "without a number it selects the generation immediately before the current one",
             "try `jet profile rollback dev 3`",
+        );
+        return 2;
+    }
+    if !valid_profile_name(&name) {
+        theme.error(
+            "profile generation name is unsafe",
+            "generation names are single path components",
+            "use a name such as `dev` or `release`",
         );
         return 2;
     }
@@ -663,6 +671,12 @@ fn realization_spec(
         .provider_facts
         .validate()
         .map_err(|error| io::Error::other(format!("E1335: {error}")))?;
+    if package.provider_facts.reference != package.raw {
+        return Err(io::Error::other(format!(
+            "E1335: provider reference `{}` disagrees with source ref `{}`",
+            package.provider_facts.reference, package.raw
+        )));
+    }
     let target = match &package.channel {
         Some(channel) => format!("{}#{}", package.target, channel),
         None => package.target.clone(),
@@ -679,6 +693,24 @@ fn realization_spec(
     };
     let spec = RefSpec::classify_in(&raw, table)
         .map_err(|error| io::Error::other(format!("E1335: unsupported profile ref: {error:?}")))?;
+    let default_alias = package
+        .provider_facts
+        .reference
+        .rsplit_once(Syntax::REF_PROVIDER_AT)
+        .filter(|(_, source)| *source == Syntax::DEFAULT_SOURCE)
+        .map(|(target, _)| {
+            format!(
+                "{target}{}{}",
+                Syntax::REF_PROVIDER_AT,
+                Syntax::REF_SOURCE_NIXPKGS
+            )
+        });
+    if raw != package.provider_facts.reference && default_alias.as_deref() != Some(raw.as_str()) {
+        return Err(io::Error::other(format!(
+            "E1335: realized ref `{raw}` would discard provider identity `{}`",
+            package.provider_facts.reference
+        )));
+    }
     Ok(spec)
 }
 
@@ -853,7 +885,7 @@ fn format_generation_metadata(
                 .map(JSON::quote)
                 .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"raw\":{},\"target\":{},\"source\":{},\"upstream\":{},\"provider\":{},\"channel\":{},\"declared_by\":[{}],\"provider_facts\":{},\"output_hash\":{},\"store_root\":{}}}",
+                "{{\"raw\":{},\"target\":{},\"source\":{},\"upstream\":{},\"provider\":{},\"channel\":{},\"declared_by\":[{}],\"provider_facts\":{},\"provider_facts_digest\":{},\"output_hash\":{},\"store_root\":{}}}",
                 JSON::quote(&package.fact.raw),
                 JSON::quote(&package.fact.target),
                 JSON::quote(&package.fact.source),
@@ -862,6 +894,7 @@ fn format_generation_metadata(
                 channel,
                 quote_strings(&package.fact.declared_by),
                 package.fact.provider_facts.to_json(),
+                JSON::quote(&package.fact.provider_facts.digest()),
                 JSON::quote(&package.entry.envelope.output_hash),
                 JSON::quote(&roots.root.to_string_lossy()),
             )
@@ -1227,6 +1260,28 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
         let facts = package
             .get("provider_facts")
             .ok_or_else(|| io::Error::other("profile generation package lacks provider facts"))?;
+        let parsed_facts = ProviderFacts::from_json_value(facts).map_err(|error| {
+            io::Error::other(format!(
+                "profile generation provider facts are invalid: {error}"
+            ))
+        })?;
+        parsed_facts.validate().map_err(|error| {
+            io::Error::other(format!(
+                "profile generation provider facts fail validation: {error}"
+            ))
+        })?;
+        let digest = package
+            .get("provider_facts_digest")
+            .ok_or_else(|| {
+                io::Error::other("profile generation package lacks provider facts digest")
+            })?
+            .as_str()
+            .map_err(io::Error::other)?;
+        if digest != parsed_facts.digest() {
+            return Err(io::Error::other(
+                "profile generation provider facts digest disagrees with its record",
+            ));
+        }
         let facts = facts.as_object().map_err(io::Error::other)?;
         for key in [
             "schema",

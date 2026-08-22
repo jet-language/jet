@@ -2677,7 +2677,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact`
+            // D-TXN3/D-TXN4: `<handle>.on_commit(() -> { … })` on a `#Transact`
             // transaction handle. Same shape as `scope.guard`: a zero-parameter
             // lambda, Drop-backed, run LIFO on a clean commit and dropped on a
             // `?`-failure/rollback. Returns a guard handle (`TransactionGuard`),
@@ -2696,7 +2696,7 @@ impl<'a> Checker<'a> {
                             ),
                             "a post-commit hook registers a single cleanup lambda".to_string(),
                             format!(
-                                "write `{}.{}(() => {{ … }})`",
+                                "write `{}.{}(() -> {{ … }})`",
                                 "<handle>",
                                 crate::Syntax::TXN_ON_COMMIT
                             ),
@@ -2721,7 +2721,7 @@ impl<'a> Checker<'a> {
                                         if params.len() == 1 { "" } else { "s" }
                                     ),
                                     "the hook body takes no arguments — it captures what it needs via closure".to_string(),
-                                    format!("write `<handle>.{}(() => {{ … }})` with no parameters", crate::Syntax::TXN_ON_COMMIT),
+                                    format!("write `<handle>.{}(() -> {{ … }})` with no parameters", crate::Syntax::TXN_ON_COMMIT),
                                     Some(args[0].expr.span()),
                                 ));
                             }
@@ -2737,7 +2737,7 @@ impl<'a> Checker<'a> {
                                 "a post-commit hook runs a lambda only after the transaction commits"
                                     .to_string(),
                                 format!(
-                                    "write `<handle>.{}(() => {{ … }})`",
+                                    "write `<handle>.{}(() -> {{ … }})`",
                                     crate::Syntax::TXN_ON_COMMIT
                                 ),
                                 Some(args[0].expr.span()),
@@ -2749,7 +2749,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("TransactionGuard".to_string()));
                 }
             }
-            // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a
+            // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() -> { … })` on a
             // `#Transact` handle — the exact mirror of `on_commit`. A zero-parameter
             // lambda, Drop-backed, run LIFO on a `?`-failure/rollback and dropped on a
             // clean commit. Returns the same `TransactionGuard` handle.
@@ -2767,7 +2767,7 @@ impl<'a> Checker<'a> {
                             ),
                             "a rollback hook registers a single undo lambda".to_string(),
                             format!(
-                                "write `{}.{}(() => {{ … }})`",
+                                "write `{}.{}(() -> {{ … }})`",
                                 "<handle>",
                                 crate::Syntax::TXN_ON_ROLLBACK
                             ),
@@ -2792,7 +2792,7 @@ impl<'a> Checker<'a> {
                                         if params.len() == 1 { "" } else { "s" }
                                     ),
                                     "the hook body takes no arguments — it captures what it needs via closure".to_string(),
-                                    format!("write `<handle>.{}(() => {{ … }})` with no parameters", crate::Syntax::TXN_ON_ROLLBACK),
+                                    format!("write `<handle>.{}(() -> {{ … }})` with no parameters", crate::Syntax::TXN_ON_ROLLBACK),
                                     Some(args[0].expr.span()),
                                 ));
                             }
@@ -2808,7 +2808,7 @@ impl<'a> Checker<'a> {
                                 "a rollback hook runs a lambda only when the transaction rolls back"
                                     .to_string(),
                                 format!(
-                                    "write `<handle>.{}(() => {{ … }})`",
+                                    "write `<handle>.{}(() -> {{ … }})`",
                                     crate::Syntax::TXN_ON_ROLLBACK
                                 ),
                                 Some(args[0].expr.span()),

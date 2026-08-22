@@ -30,6 +30,17 @@ pub struct Roots {
 }
 
 impl Roots {
+    /// Construct an explicit non-default root for an isolated operation.
+    ///
+    /// Independent build roots use the same model as the user store, but must
+    /// never inherit the native user-data spelling from `resolve`.
+    pub fn at(root: PathBuf) -> Self {
+        Self {
+            root,
+            dev_mode: false,
+        }
+    }
+
     /// The global content-addressed store (hangar) under this root.
     pub fn hangar_dir(&self) -> PathBuf {
         self.root.join(if self.dev_mode {
@@ -155,6 +166,10 @@ pub struct StoreEntry {
     /// Versioned canonical producer/action/source replay record. Empty only for
     /// pre-JP4 metadata; engine migration must validate or reject it.
     pub producer_record: String,
+    /// D-ECO-RECEIPT2 / D-ECO-RECEIPTSTORE1: digest of the immutable Hangar
+    /// receipt connected to this realized entry. Empty only for pre-receipt
+    /// metadata that the closure migration must upgrade before reuse.
+    pub receipt: String,
     /// Unix seconds when this hangar object was first realized.
     pub realized_at: u64,
     /// Unix seconds when Jetpack last reused/refreshed this object.
@@ -211,6 +226,7 @@ impl StoreEntry {
         field("named_outputs", &named_outputs, true);
         field("platform_artifact_kind", &self.platform_artifact_kind, false);
         field("producer_record", &self.producer_record, false);
+        field("receipt", &self.receipt, false);
         field("realized_at", &realized_at, false);
         // last field — no trailing comma
         out.push_str("  ");
@@ -284,6 +300,7 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 named_outputs: parsed.named_outputs,
                 platform_artifact_kind: parsed.platform_artifact_kind,
                 producer_record: parsed.producer_record,
+                receipt: parsed.receipt,
                 realized_at: parsed.realized_at.unwrap_or(0),
                 last_used_at: parsed.last_used_at.unwrap_or(0),
             });
@@ -310,6 +327,7 @@ pub struct ParsedMeta {
     pub named_outputs: BTreeMap<String, String>,
     pub platform_artifact_kind: String,
     pub producer_record: String,
+    pub receipt: String,
     pub realized_at: Option<u64>,
     pub last_used_at: Option<u64>,
 }
@@ -364,6 +382,7 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
         named_outputs,
         platform_artifact_kind: get("platform_artifact_kind").unwrap_or_default(),
         producer_record: get("producer_record").unwrap_or_default(),
+        receipt: get("receipt").unwrap_or_default(),
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
     })

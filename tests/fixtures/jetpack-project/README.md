@@ -16,7 +16,7 @@ fixtures so the commands run without Nix or a network.
   in its source tree (U10).
 - `functional-env.jet` — an alternative, fully functional sketch of the same
   environment (a runnable Jet program that prints the directive list).
-- `fixtures/*.json` — captured `nix build --json` output, used by `--offline`.
+- `fixtures/*.json` — pinned compatibility output, used by `--offline`.
   Named-source fixtures are keyed by the source name, e.g. `stable-ripgrep.json`.
 
 ## Try it (offline, no Nix required)
@@ -33,7 +33,7 @@ $ JETPACK_FIXTURES=fixtures jetpack build --offline
            ▸ /nix/store/…-neovim-0.10.2
   jetpack  resolving hello@mine …
   jetpack  hello ready ✓
-           ▸ …/store/hello-…           (core � no Nix)
+           ▸ …/store/hello-…           (core · no Nix)
   jetpack  built 3 package(s).
 ```
 
@@ -43,13 +43,13 @@ against the unstable channel, and `hello@mine` through the first-party `core`
 provider (no Nix). `jetpack add fd@unstable` / `jetpack remove fd@unstable`
 edit `env.jet` in place, preserving the source declarations.
 
-## Online
+## Native compatibility
 
-With Nix installed, drop `--offline`/`JETPACK_FIXTURES` and Jetpack resolves
-through the real Nix provider:
+Package refs use a pinned fixture or verified Hangar output. Jetpack does not
+shell out to an installed Nix executable for package realization:
 
 ```
-$ jetpack run fastfetch@nixpkgs
+$ JETPACK_FIXTURES=fixtures jetpack run fastfetch@nixpkgs -- fastfetch
 ```
 
 See `docs/guide/07-jetpack.md` for the full command surface.

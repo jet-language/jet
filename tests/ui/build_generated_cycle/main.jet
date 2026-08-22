@@ -1,17 +1,12 @@
 // @programmable_build
-
-fn build(b: BuildContext) => BuildPlan ! {
+fn build(b: BuildContext) BuildPlan ! -> {
     b.generate("alpha") {
         pub fn alpha() {}
     }?
     b.generate("alpha") {
         pub fn beta() {}
     }?
-    app :: b.add_executable(
-        "app",
-        ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"],
-        []
-    )?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
     return b.plan(app)
 }
 

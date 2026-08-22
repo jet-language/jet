@@ -585,7 +585,7 @@ mod marker_registry_tests {
     #[test]
     fn marker_explain_reports_typed_signature_and_retirement() {
         let inline = super::lookup("Inline").expect("Inline registry explanation");
-        assert_eq!(inline.meaning, "`#Inline(mode: InlineMode = .Hint)`");
+        assert_eq!(inline.meaning, "`#Inline(mode: InlineMode{.Hint})`");
         assert!(!inline.retired);
 
         let pure = super::lookup("Pure").expect("Pure retirement explanation");

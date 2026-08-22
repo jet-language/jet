@@ -9,25 +9,15 @@ struct Order {
 }
 
 impl Order {
-    #Transition(_, Draft) fn start(id: Int) => Order {
-        return Order{id: id}
-    }
+    #Transition(_, Draft) fn start(id: Int) Order -> { return Order{id: id} }
 
-    #Transition(Draft, Confirmed) fn confirm(self: ^Order) => Order {
-        return self
-    }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) Order -> { return self }
 
-    #Transition(Draft, Cancelled) fn cancel(self: ^Order) => Order {
-        return self
-    }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) Order -> { return self }
 
-    #Transition(Confirmed, Draft) fn reopen(self: ^Order) => Order {
-        return self
-    }
+    #Transition(Confirmed, Draft) fn reopen(self: ^Order) Order -> { return self }
 
-    #Transition(Cancelled, Draft) fn restore(self: ^Order) => Order {
-        return self
-    }
+    #Transition(Cancelled, Draft) fn restore(self: ^Order) Order -> { return self }
 }
 
 fn run(paid: Bool) {

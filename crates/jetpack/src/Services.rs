@@ -47,6 +47,8 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// name with no entry and no explicit `run:` is a plain "don't know how to
 /// start this" error, not a silent no-op.
 struct Catalog {
+    /// Canonical name first; remaining names are accepted aliases.
+    names: &'static [&'static str],
     /// The `<package>@<source>` ref to realize before spawning (D-JPK-REF1
     /// ref grammar) — added to the project's package refs automatically.
     pkg_ref: &'static str,
@@ -56,13 +58,19 @@ struct Catalog {
     executable: &'static str,
     port: i64,
     run: fn(port: i64, data_dir: &Path) -> Vec<String>,
-    ready: fn(port: i64) -> String,
+    readiness: fn(port: i64) -> ReadyProbe,
     prepare: fn(port: i64, data_dir: &Path, env: &ShellEnv) -> Result<(), String>,
 }
 
-/// A catalog entry that can be shown to an author or extended by a typed
-/// contribution. The runtime still requires a real executable for every
-/// preset; this record is metadata, not a fake service implementation.
+impl Catalog {
+    fn canonical_name(&self) -> &'static str {
+        self.names[0]
+    }
+}
+
+/// Typed metadata exposed by the shared preset constructor registry. The
+/// runtime still requires a real executable for every preset; this record is
+/// discovery metadata, not a fake service implementation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServicePreset {
     pub name: String,
@@ -180,13 +188,14 @@ fn prepare_nginx(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), Stri
         .map_err(|error| format!("couldn't write Nginx preset config: {error}"))
 }
 
-fn catalog(name: &str) -> Option<Catalog> {
-    match name {
-        "redis" => Some(Catalog {
-            pkg_ref: "redis@nixpkgs",
-            executable: "redis-server",
-            port: 6379,
-            run: |port, data_dir| vec![
+const CATALOG: &[Catalog] = &[
+    Catalog {
+        names: &["redis"],
+        pkg_ref: "redis@nixpkgs",
+        executable: "redis-server",
+        port: 6379,
+        run: |port, data_dir| {
+            vec![
                 "redis-server".to_string(),
                 "--port".to_string(),
                 port.to_string(),
@@ -194,55 +203,67 @@ fn catalog(name: &str) -> Option<Catalog> {
                 "no".to_string(),
                 "--dir".to_string(),
                 data_dir.display().to_string(),
-            ],
-            ready: |port| format!("redis-cli -p {port} ping"),
-            prepare: prepare_none,
-        }),
-        "postgres" | "postgresql" => Some(Catalog {
-            pkg_ref: "postgresql@nixpkgs",
-            executable: "postgres",
-            port: 5432,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("redis-cli -p {port} ping")),
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["postgres", "postgresql"],
+        pkg_ref: "postgresql@nixpkgs",
+        executable: "postgres",
+        port: 5432,
+        run: |port, data_dir| {
+            vec![
                 "postgres".to_string(),
                 "-D".to_string(),
                 data_dir.display().to_string(),
                 "-p".to_string(),
                 port.to_string(),
-            ],
-            ready: |port| format!("pg_isready -h 127.0.0.1 -p {port}"),
-            prepare: prepare_postgres,
-        }),
-        "mysql" => Some(Catalog {
-            pkg_ref: "mysql@nixpkgs",
-            executable: "mysqld",
-            port: 3306,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("pg_isready -h 127.0.0.1 -p {port}")),
+        prepare: prepare_postgres,
+    },
+    Catalog {
+        names: &["mysql"],
+        pkg_ref: "mysql@nixpkgs",
+        executable: "mysqld",
+        port: 3306,
+        run: |port, data_dir| {
+            vec![
                 "mysqld".to_string(),
                 format!("--datadir={}", data_dir.display()),
                 format!("--port={port}"),
                 "--skip-networking=0".to_string(),
-            ],
-            ready: |port| format!("mysqladmin ping -h 127.0.0.1 -P {port}"),
-            prepare: prepare_mysql,
-        }),
-        "mariadb" => Some(Catalog {
-            pkg_ref: "mariadb@nixpkgs",
-            executable: "mariadbd",
-            port: 3306,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("mysqladmin ping -h 127.0.0.1 -P {port}")),
+        prepare: prepare_mysql,
+    },
+    Catalog {
+        names: &["mariadb"],
+        pkg_ref: "mariadb@nixpkgs",
+        executable: "mariadbd",
+        port: 3306,
+        run: |port, data_dir| {
+            vec![
                 "mariadbd".to_string(),
                 format!("--datadir={}", data_dir.display()),
                 format!("--port={port}"),
                 "--skip-networking=0".to_string(),
-            ],
-            ready: |port| format!("mariadb-admin ping -h 127.0.0.1 -P {port}"),
-            prepare: prepare_mariadb,
-        }),
-        "nginx" => Some(Catalog {
-            pkg_ref: "nginx@nixpkgs",
-            executable: "nginx",
-            port: 8080,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("mariadb-admin ping -h 127.0.0.1 -P {port}")),
+        prepare: prepare_mariadb,
+    },
+    Catalog {
+        names: &["nginx"],
+        pkg_ref: "nginx@nixpkgs",
+        executable: "nginx",
+        port: 8080,
+        run: |port, data_dir| {
+            vec![
                 "nginx".to_string(),
                 "-p".to_string(),
                 nginx_prefix(port, data_dir).display().to_string(),
@@ -253,54 +274,72 @@ fn catalog(name: &str) -> Option<Catalog> {
                     .to_string(),
                 "-g".to_string(),
                 "daemon off;".to_string(),
-            ],
-            ready: |port| format!("curl -fsS http://127.0.0.1:{port}/"),
-            prepare: prepare_nginx,
-        }),
-        "minio" => Some(Catalog {
-            pkg_ref: "minio@nixpkgs",
-            executable: "minio",
-            port: 9000,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/")),
+        prepare: prepare_nginx,
+    },
+    Catalog {
+        names: &["minio"],
+        pkg_ref: "minio@nixpkgs",
+        executable: "minio",
+        port: 9000,
+        run: |port, data_dir| {
+            vec![
                 "minio".to_string(),
                 "server".to_string(),
                 data_dir.display().to_string(),
                 "--address".to_string(),
                 format!(":{port}"),
-            ],
-            ready: |port| format!("curl -fsS http://127.0.0.1:{port}/minio/health/live"),
-            prepare: prepare_none,
-        }),
-        "mail" | "mailpit" => Some(Catalog {
-            pkg_ref: "mailpit@nixpkgs",
-            executable: "mailpit",
-            port: 8025,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| {
+            ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/minio/health/live"))
+        },
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["mailpit", "mail"],
+        pkg_ref: "mailpit@nixpkgs",
+        executable: "mailpit",
+        port: 8025,
+        run: |port, data_dir| {
+            vec![
                 "mailpit".to_string(),
                 "--database".to_string(),
                 data_dir.join("mailpit.db").display().to_string(),
                 "--listen".to_string(),
                 format!("127.0.0.1:{port}"),
-            ],
-            ready: |port| format!("curl -fsS http://127.0.0.1:{port}/api/v1/info"),
-            prepare: prepare_none,
-        }),
-        "adminer" => Some(Catalog {
-            pkg_ref: "adminer@nixpkgs",
-            executable: "adminer",
-            port: 8081,
-            run: |port, data_dir| vec![
+            ]
+        },
+        readiness: |port| {
+            ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/api/v1/info"))
+        },
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["adminer"],
+        pkg_ref: "adminer@nixpkgs",
+        executable: "adminer",
+        port: 8081,
+        run: |port, data_dir| {
+            vec![
                 "adminer".to_string(),
                 "--port".to_string(),
                 port.to_string(),
                 "--root".to_string(),
                 data_dir.display().to_string(),
-            ],
-            ready: |port| format!("curl -fsS http://127.0.0.1:{port}/"),
-            prepare: prepare_none,
-        }),
-        _ => None,
-    }
+            ]
+        },
+        readiness: |port| ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/")),
+        prepare: prepare_none,
+    },
+];
+
+fn catalog(name: &str) -> Option<&'static Catalog> {
+    CATALOG
+        .iter()
+        .find(|entry| entry.names.iter().any(|candidate| *candidate == name))
 }
 
 /// The catalog's package ref for `name`, if any — `evaluate_env`'s caller
@@ -346,14 +385,12 @@ pub fn image_run_command(plan: &DevServicePlan) -> Result<Vec<String>, String> {
 /// Built-in service presets exposed by the typed contribution/catalog path.
 /// Keep this list derived from the same `catalog` matcher used at runtime.
 pub fn catalog_presets() -> Vec<ServicePreset> {
-    ["redis", "postgres", "mysql", "mariadb", "nginx", "minio", "mailpit", "adminer"]
-        .into_iter()
-        .filter_map(|name| {
-            catalog(name).map(|entry| ServicePreset {
-                name: name.to_string(),
-                package: entry.pkg_ref.to_string(),
-                default_port: entry.port,
-            })
+    CATALOG
+        .iter()
+        .map(|entry| ServicePreset {
+            name: entry.canonical_name().to_string(),
+            package: entry.pkg_ref.to_string(),
+            default_port: entry.port,
         })
         .collect()
 }
@@ -809,14 +846,17 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
         }
     };
     validate_foreground_run(&run, &plan.name)?;
-    let ready = plan.ready.clone().or_else(|| {
-        cat.as_ref()
-            .map(|c| (c.ready)(ports.first().copied().unwrap_or(c.port)))
+    let ready = plan.ready.clone();
+    let ready_probe = plan.ready_probe.clone().or_else(|| {
+        plan.ready.is_none().then(|| {
+            cat.as_ref()
+                .map(|c| (c.readiness)(ports.first().copied().unwrap_or(c.port)))
+        })?
     });
     Ok(Resolved {
         run,
         ready,
-        ready_probe: plan.ready_probe.clone(),
+        ready_probe,
         ports,
         dir,
         data_dir,
@@ -2118,7 +2158,7 @@ fn start_one_with_recovery(
             }
             if plan.ready.is_none() && plan.ready_probe.is_none() {
                 if let Some(catalog) = catalog(&plan.name) {
-                    resolved.ready = Some((catalog.ready)(
+                    resolved.ready_probe = Some((catalog.readiness)(
                         resolved.ports.first().copied().unwrap_or(catalog.port as i64),
                     ));
                 }
@@ -4849,11 +4889,64 @@ mod tests {
             let resolved = resolve(&dir, &plan).expect("every preset must resolve for host services");
             assert_eq!(resolved.run.first().map(String::as_str), Some(*executable));
             assert_eq!(resolved.ports, vec![*port]);
+            assert!(resolved.ready.is_none(), "preset readiness must stay typed");
             match *name {
-                "redis" => assert_eq!(resolved.ready.as_deref(), Some("redis-cli -p 6379 ping")),
-                "postgres" => assert_eq!(resolved.ready.as_deref(), Some("pg_isready -h 127.0.0.1 -p 5432")),
-                _ => {}
+                "redis" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("redis-cli -p 6379 ping".to_string()))
+                ),
+                "postgres" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("pg_isready -h 127.0.0.1 -p 5432".to_string()))
+                ),
+                "mysql" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("mysqladmin ping -h 127.0.0.1 -P 3306".to_string()))
+                ),
+                "mariadb" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("mariadb-admin ping -h 127.0.0.1 -P 3306".to_string()))
+                ),
+                "nginx" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8080/".to_string()))
+                ),
+                "minio" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec(
+                        "curl -fsS http://127.0.0.1:9000/minio/health/live".to_string()
+                    ))
+                ),
+                "mailpit" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec(
+                        "curl -fsS http://127.0.0.1:8025/api/v1/info".to_string()
+                    ))
+                ),
+                "adminer" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8081/".to_string()))
+                ),
+                _ => unreachable!(),
             }
+        }
+        for (alias, canonical) in [("postgresql", "postgres"), ("mail", "mailpit")] {
+            assert_eq!(catalog_pkg_ref(alias), catalog_pkg_ref(canonical));
+            assert_eq!(catalog_executable(alias), catalog_executable(canonical));
+            let alias_plan = DevServicePlan {
+                name: alias.to_string(),
+                enable: true,
+                ..Default::default()
+            };
+            let canonical_plan = DevServicePlan {
+                name: canonical.to_string(),
+                enable: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                resolve(&dir, &alias_plan).unwrap().run,
+                resolve(&dir, &canonical_plan).unwrap().run
+            );
         }
         fs::remove_dir_all(&dir).ok();
     }

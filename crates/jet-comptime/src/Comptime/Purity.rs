@@ -1,7 +1,7 @@
 //! Purity check: walk the call graph reachable from a comptime `init` and
 //! reject the first impure call (IO, FFI) with the path that reached it
 //! (E3401 — D-META-EFFECT1 c3: the one call-graph walk, shared with the
-//! run-time `=[]=>` declaration check in `jet-sema/Sema/Purity.rs`, since
+//! run-time `-[]>` declaration check in `jet-sema/Sema/Purity.rs`, since
 //! `jet-sema` depends on `jet-comptime` and not the other way around).
 //! `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
 
@@ -22,7 +22,7 @@ use super::Diagnostics::impurity_diag;
 /// review's "one walk, explicit mode parameters" requirement.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PurityStage {
-    /// jet-sema's `=[]=>` declared-effect check (also the `jet eval --pure`
+    /// jet-sema's `-[]>` declared-effect check (also the `jet eval --pure`
     /// whole-program root check): checks what actually executes at run
     /// time. `#Impure(...)` bodies DO run at run time — the marker records
     /// and gates the ambient call, it doesn't erase it — so a
@@ -128,7 +128,7 @@ fn impure_builtin(name: &str) -> bool {
 /// `is_leaf_impure` accepts — built into a diagnostic by `diag(name, path,
 /// span)` — with the full call-chain path that reached it. Empty `funcs`
 /// makes this a direct-body-only check (no transitive recursion), which is
-/// what a `=[]=>`-declared function's own body check needs; a populated
+/// what a `-[]>`-declared function's own body check needs; a populated
 /// `funcs` map (comptime's reachable functions, or a whole program's) makes
 /// it the transitive `jet eval --pure` / comptime-evaluation check. `stage`
 /// selects which statement kinds the walk descends into — see
@@ -181,7 +181,7 @@ where
 /// `jet eval --pure` whole-program root check, which seeds both with the
 /// entry function's own name so a direct violation in the root reads
 /// "`entry` calls `x`" instead of "`x` is impure, but `entry` declares
-/// `=[]=>`".
+/// `-[]>`".
 pub fn walk_purity_stmts_from<F>(
     stmts: &[Stmt],
     funcs: &HashMap<String, F>,
@@ -713,7 +713,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
         Stmt::Impure {
             reason_expr, body, ..
         } => {
-            // See PurityStage: run-time descends (an `=[]=>` fn's declared
+            // See PurityStage: run-time descends (an `-[]>` fn's declared
             // empty effect set must still reject an ambient call fenced only
             // by `#Impure`), build-time skips (the ambient call is checked
             // by --gate impure=allow/E3411 at the point it would actually run).

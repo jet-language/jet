@@ -134,7 +134,7 @@ pub const MARKER_NUMERIC: &str = "Numeric";
 /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `#Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
-/// (`fn subtotal(price: Usd, qty: Int) => Usd`). The family is the
+/// (`fn subtotal(price: Usd, qty: Int) Usd`). The family is the
 /// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
 /// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
 pub const MARKER_UNIT_FAMILY: &str = "UnitFamily";
@@ -145,7 +145,6 @@ pub const UNIT_FAMILY_SCALE_FIELD: &str = "scale";
 pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 
 /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
-/// field layout is snapshotted at release time. A breaking field change without
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
 pub const MARKER_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
@@ -175,7 +174,7 @@ pub const MARKER_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `#PublishedSchema` struct changed between
-/// releases. Used as `migration TypeName { rename old => new }`.
+/// releases. Used as `migration TypeName { rename old -> new }`.
 /// D-VALIDATE1 (ratified 2026-07-12, card #506): contextual keyword `validate`
 /// — introduces the in-body `validate { … }` block inside a struct definition
 /// (S82 in-body grammar). Rules are `check(cond, at: field, "msg")`
@@ -215,13 +214,13 @@ pub const KW_ADD: &str = "add"; // D-MIGRATE2
 pub const KW_REMOVE: &str = "remove"; // D-MIGRATE2
 
 /// D-MIGRATE2E, amended by D-ARROW-CONTROL1:
-/// `change f: Old => New [via { … }]` inside a
+/// `change f: Old -> New [via { … }]` inside a
 /// `migration { }` block — a field type change with an optional inline converter.
 pub const KW_CHANGE: &str = "change"; // D-MIGRATE2
 
 /// D-MIGRATE2E (ratified): the `via { expr }` clause that supplies the inline
 /// converter for a `change` op
-/// (`change price: Int => Usd via { c => Usd.from_int(c) }`).
+/// (`change price: Int -> Usd via { c -> Usd.from_int(c) }`).
 ///
 /// D-EFF2 (ratified 2026-06-22): also the pass-through marker in a `#(via f)`
 /// signature annotation — a function whose published effect set IS whatever the

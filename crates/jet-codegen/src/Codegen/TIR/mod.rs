@@ -4872,7 +4872,7 @@ pub enum TTryConvert {
     None,
     /// D-FAIL-ERROR1=A: construct the default `Err` value from a message.
     DefaultErr,
-    /// Declared `impl Source => Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
+    /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
     /// holds the mangled Rust conversion-function name.
     Typed(String),
     /// D-UNIONTYPE1=A: wrap the error into a compiler-generated union enum.

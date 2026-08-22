@@ -40,7 +40,8 @@ malformed, or does not name the package and version being published.
 The channel is closed unless all four machine gates pass:
 
 - #935 live signature chain;
-- #431 advisory audit with an explicit local database and no matches;
+- #431 advisory audit with a signed local feed, pinned trust root, freshness
+  policy, and no matches;
 - #1912 package name policy;
 - #1913 maintainer liveness.
 

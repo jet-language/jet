@@ -1,11 +1,8 @@
 // E0918 (D-METHODMACRO1=A): `#Inline(Always)` cannot expand a call it never
 // literally sees — passing the function as a value (here, as a callback)
 // means some call sites never write `triple(...)` at all.
-#Inline(Always) fn triple(x: Int) => Int {
-    return x * 3
-}
+#Inline(Always) fn triple(x: Int) Int -> { return x * 3 }
 
-fn apply(f: fn(Int) => Int, v: Int) => Int :: f(v)
-fn run() {
-    print(apply(triple, 5))
-}
+fn apply(f: fn(Int) Int, v: Int) Int -> f(v)
+
+fn run() { print(apply(triple, 5)) }

@@ -1,13 +1,13 @@
 //! Provider translation layer (D-JPK5).
 //!
 //! Jetpack owns the package lifecycle. Nix is a *compatibility provider*: we
-//! translate a Jetpack ref into a flake ref, ask Nix to realize it, parse the
-//! store path it prints, and turn that into a `bin` directory for PATH. The
-//! native Jetpack builder can later sit beside this same `Realized` boundary.
+//! translate a Jetpack ref into a flake ref, consume a pinned compatibility
+//! result, and turn that into a `bin` directory for PATH. The native Jetpack
+//! builder can sit beside this same `Realized` boundary.
 //!
 //! Determinism for tests: when a fixtures dir is supplied (the `--offline`
-//! path, or `JETPACK_FIXTURES`), we read a canned `nix build --json` file
-//! instead of shelling out — exactly the Forge fixture pattern.
+//! path, or `JETPACK_FIXTURES`), we read a pinned compatibility result. The
+//! package provider has no installed-Nix process fallback.
 
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use super::Package;
@@ -705,9 +705,7 @@ impl SourceState {
 /// friendly diagnostic (see `report`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderError {
-    /// The `nix` binary isn't installed / on PATH and this source needs it.
-    NixMissing,
-    /// `nix build` ran but failed; carries a trimmed reason.
+    /// A compatibility provider failed; carries a trimmed reason.
     BuildFailed(String),
     /// The provider's JSON didn't have the shape we expected.
     BadOutput(String),
@@ -833,18 +831,6 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
     explicit.or_else(|| std::env::var_os("JETPACK_FIXTURES").map(PathBuf::from))
 }
 
-/// Whether the `nix` compatibility provider is reachable on PATH. The native
-/// foreign-flake bridge does not call this probe. Package references that
-/// still need the compatibility provider use it to fail with the bounded
-/// no-Nix diagnostic before a raw process spawn.
-pub fn nix_on_path() -> bool {
-    Command::new("nix")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 // ──────────────────────────────────────────────
 // Provider boundary (R0; see docs/plans/epoch-5/unified-ecosystem.md).
 //
@@ -868,9 +854,8 @@ pub(crate) trait Provider {
 }
 
 /// The Nix compatibility provider for package references that are not yet
-/// representable by the native provider. The no-Nix gate prevents this path
-/// from being reached accidentally; when selected explicitly it translates a
-/// ref to `nix build --no-link --json` and records the provider identity.
+/// representable by the native provider. The no-installed-Nix gate admits only
+/// an explicit pinned result or a verified Hangar reuse.
 pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {
@@ -891,7 +876,12 @@ impl Provider for NixProvider {
                     spec.raw
                 )))
             }
-            None => run_nix(spec, table)?,
+            None => {
+                return Err(ProviderError::Unsupported(format!(
+                    "native Nix package realization needs a pinned compatibility output for `{}`; Jetpack does not invoke an installed Nix executable",
+                    spec.raw
+                )))
+            }
         };
         let mut realized = parse_realization(spec, &stdout)?;
         let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
@@ -1472,10 +1462,10 @@ pub fn uses_nix_provider(
     matches!(resolve_kind(spec, table, offline, cache_dir), ProviderKind::Nix | ProviderKind::Infer)
 }
 
-/// U23 / D-JPK-NONIX1=A: package refs that resolve through the Nix
-/// compatibility provider need the Nix bridge unless a fixture is standing in
-/// for that provider. This fact is computed before spawning `nix`, so no-Nix
-/// machines get one package-focused diagnostic instead of a raw spawn error.
+/// U23 / D-JPK-NIXSTORE1=D: package refs that resolve through the Nix
+/// compatibility provider need an explicit compatibility output unless a
+/// fixture is standing in for that provider. This fact is computed before
+/// provider dispatch, so no-Nix machines get one package-focused diagnostic.
 pub fn needs_nix_bridge(
     spec: &RefSpec,
     table: &SourceTable,
@@ -1838,32 +1828,6 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     has_pack
 }
 
-fn run_nix(spec: &RefSpec, table: &SourceTable) -> Result<String, ProviderError> {
-    ensure_network_allowed("run nix provider")?;
-    let output = Command::new("nix")
-        .args(["build", "--no-link", "--json"])
-        .arg(flake_ref(spec, table))
-        .output();
-    let output = match output {
-        Ok(o) => o,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(ProviderError::NixMissing)
-        }
-        Err(e) => return Err(ProviderError::BuildFailed(e.to_string())),
-    };
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let reason = stderr
-            .trim()
-            .lines()
-            .last()
-            .unwrap_or("nix build failed")
-            .to_string();
-        return Err(ProviderError::BuildFailed(reason));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 fn network_denied() -> bool {
     std::env::var_os("JETPACK_DENY_NETWORK").is_some_and(|v| !v.is_empty())
 }
@@ -1878,8 +1842,8 @@ fn ensure_network_allowed(need: &str) -> Result<(), ProviderError> {
     }
 }
 
-/// Parse `nix build --json` output: an array of build results, each with an
-/// `outputs` object. `out` is canonical primary; `bin` remains a named output.
+/// Parse a pinned compatibility result: an array of build results, each with
+/// an `outputs` object. `out` is canonical primary; `bin` remains a named output.
 fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderError> {
     let parsed = JSON::parse_lenient(stdout).map_err(ProviderError::BadOutput)?;
     let bad_output = |reason: String| ProviderError::BadOutput(parsed.diagnostic(reason));

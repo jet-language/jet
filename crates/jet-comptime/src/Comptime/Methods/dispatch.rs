@@ -1138,7 +1138,7 @@ impl<'a> Interp<'a> {
 
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
     /// would in the compiled program. When `v`'s type has a user-written
-    /// `impl Type.Display { fn display(self) => String }`, run that exact Jet
+    /// `impl Type.Display { fn display(self) String -> { … } }`, run that exact Jet
     /// function body (byte-identical to what the real build does); otherwise
     /// fall back to the built-in `jet_show()` rendering (every primitive, and
     /// any struct/enum with no such impl — sema only accepts those in
@@ -1261,7 +1261,7 @@ impl<'a> Interp<'a> {
         }
     }
 
-    /// c139: invoke a closure value (`(x) => x > 3`) with already-evaluated
+    /// c139: invoke a closure value (`(x) -> x > 3`) with already-evaluated
     /// arguments — the counterpart of `call_func` for a lambda instead of a
     /// named `fn`. The frame starts from the closure's captured scope (so it
     /// still sees the bindings visible where it was created) with the params
@@ -1480,7 +1480,7 @@ impl<'a> Interp<'a> {
         self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_FILE, args, span)
     }
 
-    /// D-CTIO1 + D-ARROW-CONTROL1: `embed_bytes("path") => [U8]` — the
+    /// D-CTIO1 + D-ARROW-RESPELL1: `embed_bytes("path") [U8]` — the
     /// binary-safe sibling of
     /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
     /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
@@ -1488,7 +1488,7 @@ impl<'a> Interp<'a> {
         self.eval_build_time_io(crate::Syntax::BUILTIN_EMBED_BYTES, args, span)
     }
 
-    /// D-CTFIND1/2 + D-ARROW-CONTROL1: `find(glob) => [String]` walks inside
+    /// D-CTFIND1/2 + D-ARROW-RESPELL1: `find(glob) [String]` walks inside
     /// the source file's
     /// directory, returns sorted relative file paths, and records each match's
     /// hash as Tier-1 lock evidence.

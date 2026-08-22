@@ -210,6 +210,10 @@ pub struct CacheTransferReport {
     /// Provenance identities carried in the signed cache admission decision.
     pub builder: String,
     pub provenance: String,
+    /// The signed admission receipt accepted for this transfer, when the
+    /// endpoint uses Jetpack's native cache receipt protocol.
+    pub receipt_version: Option<u64>,
+    pub receipt_expires_unix: Option<u64>,
     pub credential_provider: Option<String>,
     pub bytes: u64,
 }
@@ -503,6 +507,8 @@ pub fn publish_cache_entry(
                     signed_fingerprint: proof.signed_fingerprint,
                     builder: cache_builder_for_report(&entry),
                     provenance: cache_provenance_for_report(&entry),
+                    receipt_version: proof.receipt_version,
+                    receipt_expires_unix: proof.receipt_expires_unix,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: stats.bytes,
                 });
@@ -557,6 +563,8 @@ pub fn verify_cache_transfer(
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    receipt_version: None,
+                    receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: bytes.len() as u64,
                 });
@@ -576,6 +584,8 @@ pub fn verify_cache_transfer(
                     signed_fingerprint: transfer.signed_fingerprint,
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    receipt_version: None,
+                    receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: transfer.nar.len() as u64,
                 });
@@ -600,12 +610,15 @@ pub fn verify_cache_transfer(
                     failures.push(format!("{mirror}: output identity failed: {error}"));
                     continue;
                 }
+                let receipt = artifact.receipt;
+                let info = artifact.info;
                 return Ok(report_for(
                     &binding,
                     mirror,
-                    artifact.info,
+                    info,
                     bytes.len() as u64,
                     Some(&expected),
+                    Some(&receipt),
                 ));
             }
             Ok(None) => failures.push(format!("{mirror}: cache entry not found")),
@@ -664,6 +677,8 @@ pub fn substitute_cache_entry(
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    receipt_version: None,
+                    receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: bytes.len() as u64,
                 });
@@ -683,6 +698,8 @@ pub fn substitute_cache_entry(
                     signed_fingerprint: transfer.signed_fingerprint,
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    receipt_version: None,
+                    receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: transfer.nar.len() as u64,
                 });
@@ -723,6 +740,8 @@ pub fn substitute_cache_entry(
                             signed_fingerprint: fingerprint_for_info(&artifact.info),
                             builder: cache_builder_for_report(&expected),
                             provenance: cache_provenance_for_report(&expected),
+                            receipt_version: Some(artifact.receipt.version),
+                            receipt_expires_unix: Some(artifact.receipt.expires_unix),
                             credential_provider: binding.credential_provider.clone(),
                             bytes: stats.bytes,
                         });
@@ -765,7 +784,7 @@ pub fn cache_binding_json(binding: &CacheBinding) -> String {
 
 pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> String {
     format!(
-        "{{\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"credential_provider\":{},\"bytes\":{}}}",
+        "{{\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}}}",
         crate::JSON::quote(operation),
         crate::JSON::quote(&report.role),
         crate::JSON::quote(&report.mirror),
@@ -780,6 +799,14 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
         crate::JSON::quote(&report.signed_fingerprint),
         crate::JSON::quote(&report.builder),
         crate::JSON::quote(&report.provenance),
+        report
+            .receipt_version
+            .map(|version| version.to_string())
+            .unwrap_or_else(|| "null".to_string()),
+        report
+            .receipt_expires_unix
+            .map(|expires| expires.to_string())
+            .unwrap_or_else(|| "null".to_string()),
         report
             .credential_provider
             .as_deref()
@@ -1009,6 +1036,7 @@ fn report_for(
     info: NarInfo,
     bytes: u64,
     expected: Option<&StoreEntry>,
+    receipt: Option<&CacheReceipt>,
 ) -> CacheTransferReport {
     CacheTransferReport {
         role: binding.role.clone(),
@@ -1026,6 +1054,8 @@ fn report_for(
         provenance: expected
             .map(cache_provenance_for_report)
             .unwrap_or_default(),
+        receipt_version: receipt.map(|receipt| receipt.version),
+        receipt_expires_unix: receipt.map(|receipt| receipt.expires_unix),
         credential_provider: binding.credential_provider.clone(),
         bytes,
     }
@@ -1739,6 +1769,8 @@ fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result
 struct TransferProof {
     nix_nar_hash: Option<String>,
     signed_fingerprint: String,
+    receipt_version: Option<u64>,
+    receipt_expires_unix: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1772,6 +1804,8 @@ fn publish_endpoint(
             Ok(TransferProof {
                 nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_key(key),
+                receipt_version: Some(receipt.version),
+                receipt_expires_unix: Some(receipt.expires_unix),
             })
         }
         CacheEndpoint::Hangar => Err(invalid(
@@ -1810,6 +1844,8 @@ fn publish_endpoint(
             Ok(TransferProof {
                 nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_info(&signed),
+                receipt_version: Some(receipt.version),
+                receipt_expires_unix: Some(receipt.expires_unix),
             })
         }
     }
@@ -2046,6 +2082,8 @@ fn prove_nix_transfer(
     Ok(TransferProof {
         nix_nar_hash: Some(info.nar_hash.clone()),
         signed_fingerprint: nix_admission_fingerprint(uri, path, &info, key),
+        receipt_version: None,
+        receipt_expires_unix: None,
     })
 }
 

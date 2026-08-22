@@ -46,7 +46,7 @@ impl JetDebug for JetBrowserError {
     }
 }
 
-// D-FAIL-CONV2=A: one display hook backs both the shipped impl BrowserError => Err
+// D-FAIL-CONV2=A: one display hook backs both the shipped impl BrowserError -> Err
 // and user interpolation.
 impl JetDisplay for JetBrowserError {
     fn jet_display(&self) -> String {

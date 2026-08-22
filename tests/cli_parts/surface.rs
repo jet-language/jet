@@ -1358,6 +1358,27 @@ fn malformed_advisory_database_is_e2607_snapshot() {
 }
 
 #[test]
+fn audit_missing_advisory_database_fails_closed() {
+    let dir = isolated_cwd("audit_missing_e2611");
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::create_dir(dir.join(".jet")).unwrap();
+    fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
+
+    let output = Command::new(jet())
+        .args(["inspect", "audit"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    check_snapshot(
+        "audit_missing_e2611.txt",
+        &String::from_utf8(output.stderr).unwrap(),
+    );
+}
+
+#[test]
 fn jetpack_missing_build_log_golden() {
     let cwd = isolated_cwd(&line!().to_string());
     let root = cwd.join("jetpack-root");
@@ -1374,6 +1395,21 @@ fn jetpack_missing_build_log_golden() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     check_snapshot("e1274_missing_build_log.txt", &stderr);
+}
+
+#[test]
+fn jetpack_missing_package_explain_golden() {
+    let cwd = isolated_cwd(&line!().to_string());
+    let root = cwd.join("jetpack-root");
+    let out = Command::new(jet())
+        .args(["explain", "definitely_missing", "--no-color"])
+        .current_dir(&cwd)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "missing package is an explain error");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    check_snapshot("e1274_missing_package_explain.txt", &stderr);
 }
 
 #[test]

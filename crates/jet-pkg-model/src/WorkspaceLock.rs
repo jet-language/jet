@@ -4,6 +4,9 @@
 //! to get a static workspace index from `.jet/lock` without evaluating Jet
 //! and without depending on `jetpack`'s engine crate. Only the canonical
 //! `workspace.jet` index may supply member-index facts.
+//! Realized package receipt references remain package-lock facts and are
+//! parsed/preserved by `Lock`; this read-only projection intentionally returns
+//! only workspace identity and membership.
 //!
 //! The write path (`WorkspaceLock::write`) needs `jetpack::RuntimePolicy` for
 //! file locking; it lives in `jetpack::WorkspaceLock` and re-exports this

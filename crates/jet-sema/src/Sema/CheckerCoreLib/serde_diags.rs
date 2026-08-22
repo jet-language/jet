@@ -686,10 +686,10 @@ pub(crate) fn reactive_not_lambda(kind: &str, got: &Type, span: Span) -> Diagnos
         "E2910",
         format!("`reactive.{kind}` needs a lambda, not {}", got.show()),
         format!(
-            "a reactive {} is built from a `() => …` body so it can re-run when a signal changes",
+            "a reactive {} is built from a `() -> …` body so it can re-run when a signal changes",
             kind
         ),
-        format!("write `reactive.{kind}(() => {{ … }})`"),
+        format!("write `reactive.{kind}(() -> {{ … }})`"),
         Some(span),
     )
 }
@@ -704,7 +704,7 @@ pub(crate) fn reactive_lambda_arity(kind: &str, n: usize, span: Span) -> Diagnos
             if n == 1 { "" } else { "s" }
         ),
         "the body takes no arguments — it reads the signals it depends on via `.get()`".to_string(),
-        format!("write `reactive.{kind}(() => {{ … }})` with no parameters"),
+        format!("write `reactive.{kind}(() -> {{ … }})` with no parameters"),
         Some(span),
     )
 }
@@ -716,7 +716,7 @@ pub(crate) fn reactive_derived_unit(span: Span) -> Diagnostic {
         "`reactive.derived` must compute and return a value".to_string(),
         "a derived value is recomputed from its signals; its lambda has to return the value"
             .to_string(),
-        "return a value from the body, or use `reactive.effect(() => { … })` for a side effect"
+        "return a value from the body, or use `reactive.effect(() -> { … })` for a side effect"
             .to_string(),
         Some(span),
     )

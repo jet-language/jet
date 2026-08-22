@@ -39,13 +39,16 @@ pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
-    let Some((_, system)) = load_target(theme, &target) else {
+    let Some((plan_data, system)) = load_target(theme, &target) else {
         return 2;
     };
-    let plan = render_plan_json(&system, &[], None);
+    let plan = render_plan_json(&system, &[], None, plan_data.graph_identity.as_deref());
     if flags.json {
         println!("{plan}");
     } else {
+        if let Some(identity) = plan_data.graph_identity.as_deref() {
+            theme.graph_identity(identity);
+        }
         theme.ok(&format!("jetos plan for {}", theme.bold(&system.name)));
         println!("{plan}");
     }

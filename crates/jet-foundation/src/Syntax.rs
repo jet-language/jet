@@ -55,7 +55,7 @@
 // selects the final report boundary. CLI, web, wasm, and service adapters
 // carry one report with target-native delivery.
 // D-FAIL-CONV2=A (ratified 2026-08-17, card #2018) adds no token: the standard
-// library ships one `impl <CoreError> => Err` per family member on the
+// library ships one `impl <CoreError> -> Err` per family member on the
 // D-FAIL-CONV1 rail. Sema injects only the conversions a module's `?`
 // operators exercise. A program's own error type still needs its own
 // declaration.
@@ -146,6 +146,16 @@
 // callable results and control arms/bodies in every position.
 // D-ARROW-RESPELL1=A (ratified 2026-08-21): `->` is canonical; `:>` and `=>`
 // are retired teaching spellings with no alias.
+// D-CALLABLE-ONE1=A (ratified 2026-08-21, card #2144): one callable interface
+// puts return facts before either the plain `->` body marker or the fused
+// effect form `-[Effects]>`.
+// D-EFFECT-ROW2=B (ratified 2026-08-21, card #2144): effect ceilings keep the
+// `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE1=A gives lambdas
+// the same interface suffixes.
+// D-ARMHEAD-PAREN1=A, D-SUBJECT-COHERE1=A, and D-DEFAULT-SHAPE1=B (ratified
+// 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
+// declaration defaults reuse the existing parentheses, dot, and typed-value
+// forms.
 // D-ERRSUFFIX1=B (ratified 2026-08-21) gives each failure role its own suffix:
 // `[Success?] [ErrorUnion!]`; `?` remains absence and `!` marks the error type.
 // A bare `!` keeps the default-error meaning.

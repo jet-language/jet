@@ -573,7 +573,14 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
         let final_obj = objects.join(&primary);
         let deduplicated = final_obj.is_dir();
         let out_path = final_obj.to_string_lossy().into_owned();
-        let bin = final_obj.join("bin");
+        // `final_obj` is not published until below. Inspect the staged output
+        // when deciding whether to record its executable projection; checking
+        // the final CAS path here leaves every ingest-created entry with an
+        // empty `bin` field.
+        let staged_bin = staged_outs
+            .get("out")
+            .map(|out| out.join("bin"))
+            .filter(|path| path.is_dir());
         let envelope = super::super::Envelope::Envelope {
             output_hash: primary.clone(),
             platform: if req.cache_identity.platform.is_empty() {
@@ -603,17 +610,16 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
         )?)
         .map_err(std::io::Error::other)?;
         producer.bind_cache_provenance(&req.reference, &primary, &req.cache_identity);
-        let entry = StoreEntry {
+        let mut entry = StoreEntry {
             id: id.clone(),
             name: req.name.clone(),
             version: req.version.clone(),
             reference: req.reference.clone(),
             out: out_path,
-            bin: if bin.is_dir() {
-                bin.to_string_lossy().into_owned()
-            } else {
-                String::new()
-            },
+            bin: staged_bin
+                .as_ref()
+                .map(|_| final_obj.join("bin").to_string_lossy().into_owned())
+                .unwrap_or_default(),
             rlib: String::new(),
             envelope,
             cache_identity: req.cache_identity.clone(),
@@ -621,6 +627,7 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
             named_outputs: named_digests.clone(),
             platform_artifact_kind: req.platform_artifact_kind.clone(),
             producer_record: producer.encode(),
+            receipt: String::new(),
             realized_at: read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now),
             last_used_at: now,
         };
@@ -686,6 +693,7 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
             super::sync_store_directory(&objects)?;
         }
 
+        super::Closure::prepare_entry_receipt(roots, &mut entry)?;
         register_entry_unlocked(roots, &entry)?;
         Ok(IngestedObject {
             entry,

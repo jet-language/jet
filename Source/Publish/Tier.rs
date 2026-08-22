@@ -251,7 +251,11 @@ pub fn community_gate_error(package: &str, version: &str, status: &GateStatus) -
 }
 
 fn advisory_gate_status(project_root: &Path) -> GateState {
-    let Some(lock) = crate::Lock::load(project_root) else {
+    let lock_path = project_root.join(".jet").join("lock");
+    let Ok(lock_text) = std::fs::read_to_string(lock_path) else {
+        return GateState::Blocked;
+    };
+    let Ok(lock) = crate::Lock::parse(&lock_text) else {
         return GateState::Blocked;
     };
     let path = std::env::var_os("JET_ADVISORY_DB")
@@ -266,10 +270,30 @@ fn advisory_gate_status(project_root: &Path) -> GateState {
     let Ok(text) = std::fs::read_to_string(path) else {
         return GateState::Blocked;
     };
-    let Ok(advisories) = super::parse_advisory_db(&text) else {
+    let Ok(feed) = super::parse_advisory_feed(&text) else {
         return GateState::Blocked;
     };
-    if super::audit_lockfile(&lock, &advisories).is_empty() {
+    let trust = if let Some(public_key) = std::env::var_os("JET_ADVISORY_PUBLIC_KEY") {
+        super::AdvisoryTrustRoot {
+            public_key: public_key.to_string_lossy().trim().to_string(),
+            ..Default::default()
+        }
+    } else {
+        let trust_path = std::env::var_os("JET_ADVISORY_TRUST")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| project_root.join(".jet").join("advisory-trust"));
+        let Ok(trust_text) = std::fs::read_to_string(trust_path) else {
+            return GateState::Blocked;
+        };
+        let Ok(trust) = super::parse_advisory_trust(&trust_text) else {
+            return GateState::Blocked;
+        };
+        trust
+    };
+    let Ok(report) = super::audit_advisory_feed(&lock, &feed, &trust, super::advisory_now()) else {
+        return GateState::Blocked;
+    };
+    if report.matches.is_empty() && report.maturity.is_empty() {
         GateState::Passed
     } else {
         GateState::Blocked

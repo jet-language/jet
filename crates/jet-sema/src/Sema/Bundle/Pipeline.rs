@@ -483,7 +483,7 @@ fn check_bundle_opts_for_output_inner(
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
     // meet the taken arm. Rewrites into an `@if` chain (reuses D-WHEN1).
     diags.extend(super::super::desugar_os_switches(bundle));
-    // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
+    // D-MIGRATE4: desugar each `change … via { (old) -> … }` converter on a
     // decodable `#PublishedSchema` type into a synthetic top-level converter
     // function, so the runtime migration step (codegen) can call it. Runs before
     // registration/checking so those synthetic functions are type-checked and

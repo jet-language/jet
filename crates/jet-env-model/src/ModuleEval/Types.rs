@@ -367,6 +367,9 @@ pub struct EnvPlan {
     /// The source files that contributed to this graph, relative to the
     /// environment root and in deterministic discovery order.
     pub source_files: Vec<String>,
+    /// The semantic identity of the Package graph that produced this plan.
+    /// Legacy environment plans have no Package authority and keep this None.
+    pub graph_identity: Option<String>,
     /// Every typed environment read in the root config surface and discovered
     /// module files, in source/discovery order.
     pub environment_reads: Vec<EnvironmentRead>,

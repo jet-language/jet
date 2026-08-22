@@ -1,6 +1,6 @@
 //! Comptime diagnostic constructors (E3401 impurity — D-META-EFFECT1 c3: the
 //! comptime purity gate now shares its diagnostic code with the run-time
-//! `=[]=>` check, since the two are the same rule at different stages ·
+//! `-[]>` check, since the two are the same rule at different stages ·
 //! E0953 panic family · E0956 unsupported construct). E0952/E2202 fuel
 //! diagnostics are inline in `Interp::burn`; E0955 embed-file errors are
 //! inline in `eval_embed_file`.
@@ -98,7 +98,7 @@ pub(super) fn unsupported_expr(e: &Expr) -> Diagnostic {
 }
 
 /// D-META-EFFECT1 c3: the comptime purity gate's diagnostic — one call-graph
-/// walk, one code (E3401), shared with the run-time `=[]=>` check
+/// walk, one code (E3401), shared with the run-time `-[]>` check
 /// (`jet-sema/Sema/Purity.rs::e3401`). E0951 retired into this code; every
 /// place that used to see E0951 now sees E3401 with the same shape of
 /// message.

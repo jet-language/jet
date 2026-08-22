@@ -19,13 +19,13 @@ pub enum DotNetError {
     ResourceLimit
 }
 
-fn error(code: Int) DotNetError {
+fn error(code: Int) DotNetError -> {
     if code == 2 -> return DotNetError.InvalidHandle
     if code == 3 -> return DotNetError.ResourceLimit
     return DotNetError.Exception
 }
 
-pub fn new(arg0: Int) Handle DotNetError! {
+pub fn new(arg0: Int) Handle DotNetError! -> {
     value :: abi.new(arg0)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))
@@ -41,21 +41,21 @@ impl Handle.Close {
     }
 }
 
-pub fn add(handle: Handle, arg0: Int) Int DotNetError! {
+pub fn add(handle: Handle, arg0: Int) Int DotNetError! -> {
     value :: abi.add(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))
     return Ok(value)
 }
 
-pub fn explode(handle: Handle, arg0: Int) Int DotNetError! {
+pub fn explode(handle: Handle, arg0: Int) Int DotNetError! -> {
     value :: abi.explode(handle.value, arg0)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))
     return Ok(value)
 }
 
-pub fn twice(arg0: Float) Float DotNetError! {
+pub fn twice(arg0: Float) Float DotNetError! -> {
     value :: abi.twice(arg0)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))

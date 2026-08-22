@@ -806,66 +806,15 @@ mod tests {
         assert!(!proof.trusted());
     }
 
-    #[cfg(unix)]
     #[test]
-    fn nix_compat_output_gets_durable_gc_root() {
-        use std::os::unix::fs::PermissionsExt as _;
-
+    fn nix_compat_output_fails_closed_without_native_store_authority() {
         let (roots, _g) = temp_roots();
-        let entry = roots.root.join("entry");
-        let out = roots.root.join("fake-nix-output");
-        let helper = roots.root.join("fake-nix-store");
-        fs::create_dir_all(&entry).unwrap();
-        fs::create_dir_all(&out).unwrap();
-        fs::write(&helper, "#!/bin/sh\nln -s \"$5\" \"$2\"\n").unwrap();
-        let mut perms = fs::metadata(&helper).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&helper, perms).unwrap();
-
-        pin_nix_gc_root_with(&entry, &out, &helper).unwrap();
-        assert_eq!(fs::read_link(entry.join(NIX_GC_ROOT)).unwrap(), out);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn startup_migration_roots_existing_real_paths() {
-        use std::os::unix::fs::PermissionsExt as _;
-
-        let (roots, _g) = temp_roots();
-        let prefix = roots.root.join("nix/store");
-        let out = prefix.join("abc-demo");
-        fs::create_dir_all(&out).unwrap();
-        fs::write(out.join("payload"), "demo").unwrap();
-        let envelope = super::super::super::Envelope::Envelope::for_output(
-            &out.to_string_lossy(),
-            "demo@nixpkgs",
-            "nix",
-        );
-        let entry = record(
-            &roots,
-            "demo",
-            "1.0",
-            "demo@nixpkgs",
-            &out.to_string_lossy(),
-            "",
-            "",
-            &envelope,
-        )
-        .unwrap();
-        let helper = roots.root.join("fake-nix-store-migrate");
-        fs::write(&helper, "#!/bin/sh\nln -s \"$5\" \"$2\"\n").unwrap();
-        let mut perms = fs::metadata(&helper).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&helper, perms).unwrap();
-
-        assert_eq!(
-            migrate_nix_gc_roots_with(&roots, &prefix, &helper).unwrap(),
-            1
-        );
-        let root = roots.hangar_dir().join(entry.id).join(NIX_GC_ROOT);
-        assert_eq!(
-            fs::canonicalize(root).unwrap(),
-            fs::canonicalize(out).unwrap()
+        let error = pin_nix_gc_root(&roots.root.join("entry"), "/nix/store/demo").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("needs a verified native store authority"),
+            "error: {error}"
         );
     }
 
@@ -1226,6 +1175,7 @@ mod tests {
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
             producer_record: String::new(),
+            receipt: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -1345,6 +1295,7 @@ mod tests {
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
             producer_record: String::new(),
+            receipt: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -1404,6 +1355,7 @@ mod tests {
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
             producer_record: String::new(),
+            receipt: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };
@@ -1479,6 +1431,7 @@ mod tests {
             named_outputs: BTreeMap::new(),
             platform_artifact_kind: String::new(),
             producer_record: String::new(),
+            receipt: String::new(),
             realized_at: 0,
             last_used_at: 0,
         };

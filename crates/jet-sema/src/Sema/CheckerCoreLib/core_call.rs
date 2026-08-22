@@ -3625,7 +3625,7 @@ impl<'a> Checker<'a> {
                                 "E0112",
                                 format!("`http.serve` handler must be a function or HTTPRouter, not {}", other.show()),
                                 "the handler is called with each incoming `HTTPRequest`".to_string(),
-                                "pass a router (`http.router()`) or a lambda: `(req) => HTTPResponse { … }`".to_string(),
+                                "pass a router (`http.router()`) or a lambda: `(req) -> HTTPResponse { … }`".to_string(),
                                 Some(args[1].expr.span()),
                             ));
                         }
@@ -3633,7 +3633,7 @@ impl<'a> Checker<'a> {
                     }
                     return None; // serve runs forever; no meaningful return type
                 }
-                // D-DEFER1 option B: scope.guard(() => { … }) → ScopeGuard
+                // D-DEFER1 option B: scope.guard(() -> { … }) → ScopeGuard
                 // The argument must be a zero-parameter lambda. LIFO drop order is
                 // guaranteed by Rust's reverse-declaration semantics.
                 ("core.mem.scope", "guard") => {
@@ -3657,7 +3657,7 @@ impl<'a> Checker<'a> {
                                         if params.len() == 1 { "" } else { "s" }
                                     ),
                                     "the guard body takes no arguments — it captures what it needs via closure".to_string(),
-                                    "write `scope.guard(() => { cleanup_code })` with no parameters".to_string(),
+                                    "write `scope.guard(() -> { cleanup_code })` with no parameters".to_string(),
                                     Some(args[0].expr.span()),
                                 ));
                             }
@@ -3667,7 +3667,7 @@ impl<'a> Checker<'a> {
                                 "E0112",
                                 format!("`scope.guard` needs a lambda, not {}", other.show()),
                                 "a scope guard runs a cleanup lambda when the binding goes out of scope".to_string(),
-                                "write `scope.guard(() => { cleanup_code })`".to_string(),
+                                "write `scope.guard(() -> { cleanup_code })`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                         }
@@ -3799,7 +3799,7 @@ impl<'a> Checker<'a> {
                         args: vec![elem],
                     });
                 }
-                // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(() => { … })` — reactive
+                // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(() -> { … })` — reactive
                 // measure/layout/paint loop; re-runs when a signal read inside changes.
                 ("core.ui", "reactive_render") => {
                     if args.len() != 1 {
@@ -3835,7 +3835,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 // D-WEB-CLICK-PORT1=D: `ui.button(label)` or
-                // `ui.button(label, on_click: () => …)`.
+                // `ui.button(label, on_click: () -> …)`.
                 ("core.ui", "button") => {
                     if args.len() != 1 && args.len() != 2 {
                         self.diags
@@ -4294,7 +4294,7 @@ impl<'a> Checker<'a> {
                 // The catch-all demanded a third gate it describes as "raw key
                 // import", which this call is not, and that rejected the shipped
                 // executable spec `examples/features/crypto/vault_secret.jet`
-                // — which declares `=[Secret, IO]=>` exactly as the spec says
+                // — which declares `-[Secret, IO]>` exactly as the spec says
                 // (I5, #2018). Empty body: fall through to the shared
                 // fixed-signature check like every other gated arm here.
                 ("core.crypto.vault", "get") => {}

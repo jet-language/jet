@@ -103,6 +103,7 @@ pub(super) fn write_generation_files(
         system,
         realized,
         Some((&packages_json, &services_json, &options_json)),
+        plan.graph_identity.as_deref(),
     );
     fs::write(dir.join("plan.json"), &plan_text)?;
     write_root_closure(dir, realized).map_err(|error| {
@@ -663,6 +664,7 @@ pub(super) fn render_plan_json(
     system: &SystemPlan,
     realized: &[RealizedPackage],
     prebuilt: Option<(&str, &str, &str)>,
+    graph_identity: Option<&str>,
 ) -> String {
     let (packages_json, services_json, options_json) = match prebuilt {
         Some((p, s, o)) => (p.to_string(), s.to_string(), o.to_string()),
@@ -714,10 +716,12 @@ pub(super) fn render_plan_json(
         .collect::<Vec<_>>()
         .join(",");
     let boot = boot_profile(system);
+    let graph_identity = graph_identity.map(JSON::quote).unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"host\":{},\"target\":{},\"boot\":{},\"packages\":[{}],\"closure\":[{}],\"services\":[{}],\"options\":[{}]}}",
+        "{{\"host\":{},\"target\":{},\"graph_identity\":{},\"boot\":{},\"packages\":[{}],\"closure\":[{}],\"services\":[{}],\"options\":[{}]}}",
         JSON::quote(&system.name),
         JSON::quote(&system.target),
+        graph_identity,
         boot.to_json(),
         packages_json,
         closure_json,

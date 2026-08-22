@@ -3,6 +3,34 @@ use std::collections::BTreeMap;
 
 use super::SemVer::{SemVer, VersionReq};
 
+/// The one resolution vocabulary shared by registry selection and update
+/// proofs. Conservative preserves an existing lock when possible; the other
+/// modes choose a compatible live candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveMode {
+    Conservative,
+    Latest,
+    Lowest,
+    LowestDirect,
+}
+
+impl Default for ResolveMode {
+    fn default() -> Self {
+        Self::Conservative
+    }
+}
+
+impl ResolveMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Conservative => "conservative",
+            Self::Latest => "latest",
+            Self::Lowest => "lowest",
+            Self::LowestDirect => "lowest-direct",
+        }
+    }
+}
+
 // ──────────────────────────────────────────────
 // Highest-compatible resolver (D-RESOLVE1=A)
 // ──────────────────────────────────────────────
@@ -65,6 +93,28 @@ pub fn select_highest_compatible<'a>(
         "(no versions available)",
         "registry",
     ))
+}
+
+/// Select a compatible version under the ratified resolution vocabulary.
+/// `Conservative` is handled by the caller's exact-lock check and falls back
+/// to the latest live candidate when no lock exists.
+pub fn select_compatible<'a>(
+    package: &str,
+    constraints: &[&VersionConstraint],
+    available: &'a [SemVer],
+    mode: ResolveMode,
+) -> Result<&'a SemVer, Diagnostic> {
+    if matches!(mode, ResolveMode::Conservative | ResolveMode::Latest) {
+        return select_highest_compatible(package, constraints, available);
+    }
+    let winner = available
+        .iter()
+        .filter(|version| constraints.iter().all(|constraint| constraint.req.matches(version)))
+        .min();
+    winner.ok_or_else(|| {
+        select_highest_compatible(package, constraints, available)
+            .expect_err("no compatible candidate should produce a diagnostic")
+    })
 }
 
 // ──────────────────────────────────────────────

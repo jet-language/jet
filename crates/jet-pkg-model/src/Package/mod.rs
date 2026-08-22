@@ -2704,7 +2704,14 @@ fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
         PackageOutputKind::Image => matches!(field, "name" | "from" | "kind" | "environment"),
         PackageOutputKind::Bundle => matches!(field, "name" | "members"),
         PackageOutputKind::System => {
-            matches!(field, "name" | "packages" | "services" | "options")
+            matches!(
+                field,
+                "name"
+                    | crate::Syntax::SYSTEM_FIELD_TARGET
+                    | "packages"
+                    | "services"
+                    | "options"
+            )
         }
         PackageOutputKind::Fleet => matches!(field, "name" | "hosts"),
     }

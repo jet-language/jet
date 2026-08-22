@@ -164,7 +164,7 @@ pub(super) fn realize_ref_outcome(
         );
         return RefOutcome::Failed;
     }
-    if !package_fixture_available(flags, spec) && !Provider::nix_on_path() && !offline_reuse_ok {
+    if uses_nix && !package_fixture_available(flags, spec) && !offline_reuse_ok {
         if let Some(need) = Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir) {
             return RefOutcome::NeedsNix(need);
         }
@@ -268,13 +268,6 @@ pub(super) fn realize_ref_outcome(
             )
         }
         Err(Store::RealizeError::Provider(e)) => {
-            if matches!(e, ProviderError::NixMissing) {
-                if let Some(need) =
-                    Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir)
-                {
-                    return RefOutcome::NeedsNix(need);
-                }
-            }
             report_provider_error(theme, &e);
             RefOutcome::Failed
         }
@@ -320,9 +313,9 @@ pub(super) fn report_nix_bridge_required(
     }
     let count = holes.len();
     let subject = if count == 1 {
-        "package needs"
+        "package lacks"
     } else {
-        "packages need"
+        "packages lack"
     };
     let refs = holes
         .iter()
@@ -335,10 +328,12 @@ pub(super) fn report_nix_bridge_required(
         .unwrap_or("<ref>");
     theme.error_coded(
         "E1272",
-        &format!("{count} {subject} the Nix bridge, and Nix is not installed"),
-        &format!("{refs} currently realize through the Nix compatibility provider on this machine."),
+        &format!("{count} {subject} a supported Nix compatibility output"),
         &format!(
-            "install Nix from the official installer, or replace the package with a native source/adapter; `jetpack add {fix_ref} --adapt` drafts one."
+            "{refs} need a pinned compatibility output. Jetpack does not invoke an installed Nix executable for package realization."
+        ),
+        &format!(
+            "provide a pinned fixture or verified Hangar output, or replace the package with a native source/adapter; `jetpack add {fix_ref} --adapt` drafts one."
         ),
     );
 }
@@ -465,11 +460,6 @@ fn version_from_out(name: &str, out: &str) -> Option<String> {
 
 pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
     match err {
-        ProviderError::NixMissing => theme.error(
-            "couldn't run `nix`",
-            "This package comes from the Nix provider, but `nix` isn't on your PATH.",
-            "install Nix from the official installer, or use a native Jetpack source.",
-        ),
         ProviderError::BuildFailed(reason) => theme.error(
             "the provider failed to build that package",
             reason,
@@ -489,12 +479,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::FixtureMissing(path) => theme.error(
             "no offline fixture for that ref",
             &format!("expected a fixture at {}", path.display()),
-            "drop a captured `nix build --json` file there, or run online.",
+            "provide a pinned compatibility fixture or verified Hangar output; Jetpack has no installed-Nix fallback.",
         ),
         ProviderError::Unsupported(reason) => theme.error(
             "that source can't be realized yet",
             reason,
-            "for now use a `…@nixpkgs` or `…@github` ref while the native builder lands.",
+            "provide a pinned compatibility output or use a supported native source.",
         ),
         ProviderError::ForeignProjection(reason) => theme.error_coded(
             "E1256",

@@ -7,7 +7,7 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::Manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
-use crate::Publish::{self, VersionReq};
+use crate::Publish::{self, ResolveMode, VersionReq};
 use crate::Publish::SemVer::SemVer;
 use crate::Store;
 use crate::Syntax;
@@ -28,6 +28,8 @@ pub struct FetchOptions {
     pub update: bool,
     /// If Some, only update this specific dep name.
     pub update_dep: Option<String>,
+    /// How registry versions are selected when no exact lock is reused.
+    pub resolution: ResolveMode,
 }
 
 /// Resolve, fetch, and install all dependencies from a manifest.
@@ -99,7 +101,7 @@ pub fn fetch(
         })?;
     }
     let lock_str = Lock::write(&new_lock);
-    std::fs::write(&lock_path, &lock_str).map_err(|e| {
+    write_lock_atomically(&lock_path, lock_str.as_bytes()).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
             format!("couldn't write {}", Syntax::UNIFIED_LOCK_FILE),
@@ -110,6 +112,52 @@ pub fn fetch(
     })?;
 
     Ok((new_lock, dep_dirs))
+}
+
+fn write_lock_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "lock path is not a regular file",
+            ));
+        }
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "lock has no parent"))?;
+    let parent_metadata = std::fs::symlink_metadata(parent)?;
+    if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "lock parent is not a real directory",
+        ));
+    }
+    let partial = parent.join(format!(
+        ".{}.partial-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("lock"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0),
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        use std::io::Write;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&partial, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 fn enforce_provenance_policy(
@@ -508,8 +556,18 @@ impl<'a> Resolver<'a> {
             }
 
             DepSpec::Registry(version_req) => {
-                let registry = Publish::resolve_publish_registry();
-                let (available, _warnings) = Publish::resolve_and_verify(&registry, dep_name)
+                let update_requested = self.registry_update_requested(dep_name);
+                let registry = if update_requested {
+                    Publish::resolve_publish_registry()
+                } else {
+                    self.locked_registry_config(dep_name)
+                        .unwrap_or_else(Publish::resolve_publish_registry)
+                };
+                let (available, _warnings) = if update_requested {
+                    Publish::resolve_and_verify(&registry, dep_name)
+                } else {
+                    Publish::resolve_and_verify_all(&registry, dep_name)
+                }
                     .map_err(|diagnostic| {
                         vec![registry_diagnostic(
                             dep_name,
@@ -524,15 +582,53 @@ impl<'a> Resolver<'a> {
                         "use a SemVer requirement such as `1.2.0`, `^1.2`, or `>=1.0 <2.0`",
                     )]
                 })?;
-                let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
-                    .into_iter()
-                    .filter_map(|entry| {
-                        let version = SemVer::parse(&entry.version)?;
-                        requirement.matches(&version).then_some((version, entry))
+                let locked_version = (!update_requested
+                    && self.opts.resolution == ResolveMode::Conservative)
+                    .then(|| self.find_locked_registry_version(dep_name))
+                    .flatten();
+                let selected = locked_version
+                    .as_deref()
+                    .filter(|version| {
+                        SemVer::parse(version)
+                            .is_some_and(|parsed| requirement.matches(&parsed))
                     })
-                    .collect();
-                candidates.sort_by(|left, right| left.0.cmp(&right.0));
-                let Some((_selected_version, selected)) = candidates.pop() else {
+                    .and_then(|version| available.iter().find(|entry| entry.version == version))
+                    .cloned()
+                    .or_else(|| {
+                        let mut candidates: Vec<(SemVer, crate::Publish::IndexEntry)> = available
+                            .into_iter()
+                            .filter(|entry| !entry.yanked)
+                            .filter_map(|entry| {
+                                let version = SemVer::parse(&entry.version)?;
+                                requirement.matches(&version).then_some((version, entry))
+                            })
+                            .collect();
+                        let versions: Vec<SemVer> =
+                            candidates.iter().map(|(version, _)| version.clone()).collect();
+                        let constraint = crate::Publish::VersionConstraint {
+                            package: dep_name.to_string(),
+                            req: requirement.clone(),
+                            from: chain.first().cloned().unwrap_or_default(),
+                        };
+                        let mode = match self.opts.resolution {
+                            ResolveMode::LowestDirect if chain.len() > 2 => ResolveMode::Latest,
+                            ResolveMode::Conservative => ResolveMode::Latest,
+                            mode => mode,
+                        };
+                        let selected_version = Publish::select_compatible(
+                            dep_name,
+                            &[&constraint],
+                            &versions,
+                            mode,
+                        )
+                        .ok()
+                        .cloned()?;
+                        candidates
+                            .drain(..)
+                            .find(|(version, _)| *version == selected_version)
+                            .map(|(_, entry)| entry)
+                    });
+                let Some(selected) = selected else {
                     return Err(vec![registry_diagnostic(
                         dep_name,
                         &format!("no published version satisfies `{version_req}`"),
@@ -711,6 +807,45 @@ impl<'a> Resolver<'a> {
         self.opts.update_dep.as_deref() == Some(dep_name)
     }
 
+    fn registry_update_requested(&self, dep_name: &str) -> bool {
+        self.opts.update
+            && (self.opts.update_dep.is_none()
+                || self.opts.update_dep.as_deref() == Some(dep_name))
+    }
+
+    fn locked_registry_config(&self, dep_name: &str) -> Option<Publish::RegistryConfig> {
+        let package = self.existing_lock?.packages.iter().find(|package| {
+            package.name == dep_name && matches!(&package.source, LockSource::Registry { .. })
+        })?;
+        let LockSource::Registry {
+            registry,
+            repository,
+            tier,
+            ..
+        } = &package.source
+        else {
+            return None;
+        };
+        let tier = Publish::RegistryTier::parse(tier).unwrap_or(Publish::RegistryTier::Core);
+        Some(Publish::RegistryConfig {
+            name: registry.clone(),
+            url: repository.clone(),
+            mirror: false,
+            require_signed: tier == Publish::RegistryTier::Community,
+            tier,
+        })
+    }
+
+    fn find_locked_registry_version(&self, dep_name: &str) -> Option<String> {
+        self.existing_lock?
+            .packages
+            .iter()
+            .find(|package| {
+                package.name == dep_name && matches!(&package.source, LockSource::Registry { .. })
+            })
+            .map(|package| package.version.clone())
+    }
+
     fn existing_provenance(
         &self,
         dep_name: &str,
@@ -873,7 +1008,7 @@ fn build_dep_dirs_from_lock(
                 crate::Publish::verify_index_entry(
                     &all_entries,
                     &entry,
-                    config.require_signed,
+                    config.require_signed || entry.tier == crate::Publish::RegistryTier::Community,
                     &config.name,
                 )
                 .map_err(|diagnostic| vec![diagnostic])?;

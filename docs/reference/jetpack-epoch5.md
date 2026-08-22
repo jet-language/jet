@@ -86,6 +86,11 @@ records; they do not become invented defaults. Core, Nix, local path, Jet
 registry, and verified binary paths expose byte/lock abilities. The foreign
 ecosystem importers expose metadata facts until a dedicated verified transport
 adapter exists; they do not claim network fetch or offline substitution.
+The shared carrier preserves direct-root selectors and canonicalizes bare
+version shorthand to `#version=<exact>` for lock output. Native bytes,
+provenance, resolved source selectors, and the carrier digest are retained in
+explain and generated generation metadata; mutable or conflicting selectors
+remain visible as loss/conflict records.
 
 ## Workspace membership
 
@@ -265,10 +270,11 @@ the generated help, shell completions, and manual.
 
 ## Environment discovery
 
-`jet env info` reads the typed environment plan. It shows the selected
+`jet env info` reads one selected typed environment plan. It shows the selected
 environment, packages, services, `jobs`, `checks`, variables, managed file
 destinations, and integration facts. `jet env info --json` emits the same
-facts for tools.
+facts for tools. The `--env <name>` selector applies to every fact in the
+report; sibling environment contributions are not merged.
 It is exposed as the matching `jet env info` action in the same CLI surfaces.
 
 The report does not realize packages, start services, run jobs, or apply
@@ -337,6 +343,14 @@ local migration escape and never becomes the default. Remote `ssh://` and
 `https://` copy destinations fail with a transport error; Jet does not claim
 to have transferred bytes when no verified transport is configured.
 
+Repair takes the Hangar lock for selection, verification, quarantine, and
+publication. It accepts a missing or corrupt canonical object only from a
+signed archive, stages and re-hashes the replacement before registration, and
+restores the quarantined object if import fails. A process crash leaves the
+old object in a `repair-*` quarantine entry; `jet hangar recover` re-hashes and
+restores that entry without following symlinks. Repair rejects an entry whose
+output is not exactly its content-addressed `hangar/objects/<digest>` path.
+
 ## Host-owned binary caches
 
 Workspace policy may request cache roles. The host binds those roles to an
@@ -374,6 +388,16 @@ Local and host-adapter transfers resume through a verified .partial prefix
 before publication. A missing or corrupt mirror falls back to source
 realization; it never installs an unsigned, mismatched, or replayed result.
 
+### Independent-root source certification
+
+An uncached source build runs twice in fresh private Hangar roots. Jet compares
+the canonical action identity, output tree, named outputs, and producer facts
+before it moves either result into the shared content-addressed store. A
+divergence writes first-difference evidence under
+`private/unreproducible/<action-key>.json`; it publishes no closure or trusted
+cache fact. Retry and cancellation discard the private roots, and recovery
+sweeps abandoned certification roots.
+
 `jet shared-store install` creates the optional administrator-installed shared
 Hangar configuration and socket-activation units. Each request runs as a
 short-lived non-root `DynamicUser` with a private state directory. The socket
@@ -395,9 +419,10 @@ or a write grant is absent or expired, realization also stays private.
 
 `jet hangar recover` is the repair boundary for interrupted publication. It
 replays committed closure projections, removes abandoned ingest and archive
-stages, and reclaims snapshots whose lease owner is no longer alive. A
-symlinked staging or lease root stops recovery with the live path untouched so
-the operator can repair the boundary and retry.
+stages, restores verified repair quarantine entries, and reclaims snapshots
+whose lease owner is no longer alive. A symlinked staging, repair quarantine,
+or lease root stops recovery with the live path untouched so the operator can
+repair the boundary and retry.
 
 ## Services
 
@@ -411,7 +436,7 @@ separate from process start. A service can use `exec`, `http`, `notify`, or
 ```text
 module env.dev {
     services: {
-        api: Service.{
+        api: Service{
             enable: true,
             run: ["./bin/api", "--port", "8080"],
             ready: .http("http://127.0.0.1:8080/health", 200),
@@ -422,6 +447,11 @@ module env.dev {
     }
 }
 ```
+
+Built-in service presets use one typed constructor registry. The registry gives
+each preset its package reference, executable, default port, argument vector,
+readiness probe, and state setup. Host supervision, image projection, and service
+discovery use these same facts. They do not keep separate preset tables.
 
 `after` names a declared service dependency. It is the only dependency spelling;
 the retired `depends_on` spelling is rejected. Jetpack validates names, disabled

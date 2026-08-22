@@ -1,18 +1,22 @@
 // D-CLAIM-BENCH1=A: a measured claim uses the ordinary `#Test` marker.
 // `jet test --measure` selects each block and `jet run` ignores them.
-fn fib(n: Int) => Int {
+fn fib(n: Int) Int -> {
     if n < 2 -> return n
     return fib(n - 1) + fib(n - 2)
 }
 
 fn run() { print("fib(10) = {fib(10)}") }
 
-#Test("fib(10)") { .measure {
-    assert_eq(fib(10), 55)
-} }
+#Test("fib(10)") {
+    .measure {
+        assert_eq(fib(10), 55)
+    }
+}
 
-#Test("sum to 100") { .measure {
-    total := 0
-    loop i in 0..100 -> total += i
-    assert_eq(total, 4950)
-} }
+#Test("sum to 100") {
+    .measure {
+        total := 0
+        loop i in 0..100 -> total += i
+        assert_eq(total, 4950)
+    }
+}

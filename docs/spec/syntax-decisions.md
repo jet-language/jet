@@ -4354,11 +4354,17 @@ merge-history authority.
 
 D-ECO-RECEIPT2 does not choose schema, serialization, file placement,
 retention, a normalized-DAG shape, a freeze algorithm, or CLI spelling.
-Implementation is currently fragmented across #420, #422, #424, #425, and
-#431; those cards or a dedicated receipt-integration card must connect the
-record end to end before this law ships. #608 itself adds no `Syntax.rs` entry,
-parser or runtime behavior, diagnostic, grammar, snapshot, or executable
-example.
+Earlier implementation work was fragmented across #420, #422, #424, #425,
+and #431; card #655 connects the package-realization record end to end without
+adding a syntax, parser, runtime behavior, diagnostic, grammar, snapshot, or
+executable example.
+
+Card #655 now supplies the package-realization substrate without changing this
+law's user surface: one immutable Hangar receipt object is content-addressed
+by digest, and `.jet/lock` stores only that digest projection. The package
+schema records locked input identity, planned action, output digests, and the
+reserved activation-proof and parent-generation fields; package realization
+does not invent activation evidence.
 
 **S52 — Files** *(D-JPK-FILES, D-JPK-FILENAME2)*: per-package manifest
 is **`package.jet`** (bare `name:`/`version:` identity + `packages:` +
@@ -5195,7 +5201,9 @@ compiler-extension WASM components (typed post-sema snapshot; see above) —
 not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
 cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
-dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
+dir; `--shell-on-fail`; `jet explain <ref>` reports Store identity, provider
+facts, dependency/closure edges, liveness roots, and rebuild checks; `jet logs
+<pkg>` persists per-step records.
 
 **D-DOC-GEN1=A**: the documentation generator command is `jet doc`. Default
 output is deterministic local HTML; `--json` emits the stable docs schema;

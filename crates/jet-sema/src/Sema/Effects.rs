@@ -226,7 +226,7 @@ pub fn effect_covers(bound: &str, e: &str) -> bool {
 /// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
 pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
     // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
-    // diagnostics, reachability, and `=[!Panic]=>`, but never requires a
+    // diagnostics, reachability, and `-[!Panic]>`, but never requires a
     // positive function bound or a `#Abilities` authority.
     // D-AUTHORITY-MEM1=B: memory is deny-only in the same way. Memory events
     // publish `Mem.Alloc`/`Mem.Rc` into the inferred row so `-[!Mem.Alloc]>`
@@ -478,7 +478,7 @@ pub fn show_set(set: &EffectSet) -> String {
 }
 /// E0746 (D-TXN2/D-BOUND-UNDO1): an irreversible effect (Net/FS/Exec/FFI) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
-/// after the block or register it via `name.on_commit(() => { … })`.
+/// after the block or register it via `name.on_commit(() -> { … })`.
 pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
     if e == Effect::FFI {
         return Diagnostic::error(
@@ -504,7 +504,7 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
             crate::Syntax::KW_TRANSACT, e.name()
         ),
         format!(
-            "move this call after the block, or register it with `<handle>.{}(() => {{ … }})` so it runs only on a clean commit",
+            "move this call after the block, or register it with `<handle>.{}(() -> {{ … }})` so it runs only on a clean commit",
             crate::Syntax::TXN_ON_COMMIT
         ),
         Some(span),
@@ -1421,15 +1421,15 @@ pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: S
     Diagnostic::error(
         "E0749",
         format!(
-            "`{}` reaches the `{}` effect, which it prohibits with `=[!{}]=>`",
+            "`{}` reaches the `{}` effect, which it prohibits with `-[!{}]>`",
             fn_name, reached_list, decl_list
         ),
         format!(
-            "a `=[!{}]=>` row means the function and every callee it can reach must not use `{}`",
+            "a `-[!{}]>` row means the function and every callee it can reach must not use `{}`",
             decl_list, reached_list
         ),
         format!(
-            "remove the call that introduces `{}`, or drop the `=[!{}]=>` prohibition",
+            "remove the call that introduces `{}`, or drop the `-[!{}]>` prohibition",
             reached_list, decl_list
         ),
         Some(span),
@@ -1452,7 +1452,7 @@ pub fn e0749_panic(
             "`{panic_site}` can stop; `{fn_name}` and every reachable callee must not stop when Panic is denied"
         ),
         format!(
-            "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `=[!{prohibition}]=>` prohibition"
+            "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{prohibition}]>` prohibition"
         ),
         Some(span),
     )
@@ -1973,7 +1973,7 @@ pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
          no other explicit effect row at all."
             .to_string(),
         format!(
-            "add `=[Secret]=>` to `{}`'s signature (or widen an existing effect row to cover it)",
+            "add `-[Secret]>` to `{}`'s signature (or widen an existing effect row to cover it)",
             fn_name
         ),
         Some(span),

@@ -1077,11 +1077,13 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
 
 #[test]
 fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
-    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn impure() { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
+    let source = "fn value() Int { return 1 }\nfn concise() Int -> 1\nfn record() Rect -> { width: 1, height: 2 }\nfn impure() { print(1) }\nfn explicit() () { print(1) }\nfn fail() ! { }\nfn bounded() Int -[IO]> { return 1 }\nfn pure() Int -[]> { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) Int -[IO]> { return 1 } }\n";
     let once = jet::format_source(source).expect("callable body shapes should format");
     assert!(once.contains("fn value() Int -> { return 1 }"), "{once}");
     assert!(once.contains("fn concise() Int -> 1"), "{once}");
+    assert!(once.contains("fn record() Rect -> { width: 1, height: 2 }"), "{once}");
     assert!(once.contains("fn impure() { print(1) }"), "{once}");
+    assert!(once.contains("fn explicit() () { print(1) }"), "{once}");
     assert!(once.contains("fn fail() ! {}"), "{once}");
     assert!(once.contains("fn bounded() Int -[IO]> { return 1 }"), "{once}");
     assert!(once.contains("fn pure() Int -[]> { return 1 }"), "{once}");
@@ -1501,7 +1503,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     // already use parser shapes owned by existing generic/type/call/loop
     // grammar. Future task/shared/select forms stay on their implementation
     // cards and do not get parser stubs here.
-    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) TaskFailure {
+    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) TaskFailure -> {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown

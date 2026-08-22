@@ -3823,7 +3823,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     v
                 ),
 
-                // D-ERR-CONV: declared `impl Source => Target` → `.map_err(<fn>)`.
+                // D-ERR-CONV: declared `impl Source -> Target` → `.map_err(<fn>)`.
                 TTryConvert::Typed(conv_fn) => format!("{}.map_err({})", v, conv_fn),
                 // D-UNIONTYPE1=A: member error → anonymous union wrap.
                 TTryConvert::WidenUnion { enum_name, tag } =>

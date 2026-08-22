@@ -10,6 +10,10 @@
 //! std-only (I6).
 
 use crate::SHA256;
+use jet_foundation::BuildEffect;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::path::{Component, Path};
 
 /// One step of a build recipe. Names are internal; the user-facing spellings are
 /// the finite `Recipe.build(steps: […])` forms from D-JPK-BUILDRECIPE1.
@@ -33,6 +37,639 @@ pub enum BuildStep {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BuildRecipe {
     pub steps: Vec<BuildStep>,
+}
+
+/// One exact input made visible to a finite staged plan action.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PlanInput {
+    pub path: String,
+    pub digest: String,
+}
+
+impl PlanInput {
+    pub fn new(path: impl Into<String>, digest: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            digest: digest.into(),
+        }
+    }
+}
+
+/// The only authority a staged plan action may observe.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlanAuthority {
+    pub tools: Vec<String>,
+    pub effects: Vec<BuildEffect>,
+    pub platform: String,
+}
+
+/// A typed finite action emitted by a staged plan action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanFragmentAction {
+    pub name: String,
+    pub tool: String,
+    pub args: Vec<String>,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub effects: Vec<BuildEffect>,
+    pub dependencies: Vec<String>,
+    pub platform: String,
+}
+
+impl PlanFragmentAction {
+    pub fn new(name: impl Into<String>, tool: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            tool: tool.into(),
+            args: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            env: BTreeMap::new(),
+            effects: Vec::new(),
+            dependencies: Vec::new(),
+            platform: String::new(),
+        }
+    }
+}
+
+/// Typed output of a finite staged plan action. It is lowered into the same
+/// `BuildPlan` action graph as ordinary recipes; it is not an alternate graph.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BuildPlanFragment {
+    pub actions: Vec<PlanFragmentAction>,
+}
+
+/// Metadata for one sandboxed plan action. The fragment is supplied only after
+/// the action runs, then checked against this declaration before publication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedPlanAction {
+    pub name: String,
+    pub stage: usize,
+    pub stage_bound: usize,
+    pub inputs: Vec<PlanInput>,
+    pub authority: PlanAuthority,
+}
+
+impl StagedPlanAction {
+    pub fn new(
+        name: impl Into<String>,
+        stage: usize,
+        stage_bound: usize,
+        inputs: Vec<PlanInput>,
+        authority: PlanAuthority,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            stage,
+            stage_bound,
+            inputs,
+            authority,
+        }
+    }
+
+    /// Validate the declaration before the sandbox is entered.
+    pub fn validate_declaration(&self) -> Result<(), StagedPlanError> {
+        if self.name.trim().is_empty() || has_control(&self.name) {
+            return Err(StagedPlanError::EmptyActionName);
+        }
+        if self.stage_bound == 0 {
+            return Err(StagedPlanError::InvalidStageBound);
+        }
+        if self.stage >= self.stage_bound {
+            return Err(StagedPlanError::StageOutOfBounds {
+                stage: self.stage,
+                bound: self.stage_bound,
+            });
+        }
+        if self.authority.platform.trim().is_empty() || has_control(&self.authority.platform) {
+            return Err(StagedPlanError::EmptyPlatform);
+        }
+
+        let mut declared_inputs = BTreeMap::new();
+        for input in &self.inputs {
+            validate_relative_path(&input.path)
+                .map_err(|reason| StagedPlanError::InvalidInput(input.path.clone(), reason))?;
+            if input.digest.trim().is_empty() || has_control(&input.digest) {
+                return Err(StagedPlanError::MissingInputDigest(input.path.clone()));
+            }
+            if declared_inputs
+                .insert(input.path.clone(), input.digest.clone())
+                .is_some()
+            {
+                return Err(StagedPlanError::DuplicateInput(input.path.clone()));
+            }
+        }
+
+        unique_strings(&self.authority.tools, StagedPlanError::DuplicateTool)?;
+        unique_effects(&self.authority.effects)?;
+        Ok(())
+    }
+
+    /// Validate the fragment before it can enter the executable graph.
+    pub fn validate(&self, fragment: &BuildPlanFragment) -> Result<(), StagedPlanError> {
+        self.validate_declaration()?;
+        let declared_inputs = self
+            .inputs
+            .iter()
+            .map(|input| input.path.clone())
+            .collect::<BTreeSet<_>>();
+        let authority_tools =
+            unique_strings(&self.authority.tools, StagedPlanError::DuplicateTool)?;
+        let authority_effects = unique_effects(&self.authority.effects)?;
+        let mut names = BTreeSet::new();
+        let mut output_owners = Vec::<(String, String)>::new();
+        let mut dependencies = BTreeMap::<String, Vec<String>>::new();
+        if fragment.actions.is_empty() {
+            return Err(StagedPlanError::EmptyFragment);
+        }
+
+        for action in &fragment.actions {
+            if action.name.trim().is_empty() || has_control(&action.name) {
+                return Err(StagedPlanError::EmptyFragmentActionName);
+            }
+            if !names.insert(action.name.clone()) {
+                return Err(StagedPlanError::DuplicateFragmentActionName(
+                    action.name.clone(),
+                ));
+            }
+            if action.tool.trim().is_empty() || has_control(&action.tool) {
+                return Err(StagedPlanError::EmptyFragmentTool(action.name.clone()));
+            }
+            if !authority_tools.contains(&action.tool) {
+                return Err(StagedPlanError::UnauthorizedTool {
+                    action: action.name.clone(),
+                    tool: action.tool.clone(),
+                });
+            }
+            if action.platform != self.authority.platform {
+                return Err(StagedPlanError::PlatformMismatch {
+                    action: action.name.clone(),
+                    expected: self.authority.platform.clone(),
+                    actual: action.platform.clone(),
+                });
+            }
+            let effects = unique_effects(&action.effects)?;
+            for effect in effects {
+                if !authority_effects.contains(&effect) {
+                    return Err(StagedPlanError::UnauthorizedEffect {
+                        action: action.name.clone(),
+                        effect,
+                    });
+                }
+            }
+            for input in &action.inputs {
+                validate_relative_path(input)
+                    .map_err(|reason| StagedPlanError::InvalidInput(input.clone(), reason))?;
+                if !declared_inputs.contains(input) {
+                    return Err(StagedPlanError::UndeclaredInput {
+                        action: action.name.clone(),
+                        path: input.clone(),
+                    });
+                }
+            }
+            if action.outputs.is_empty() {
+                return Err(StagedPlanError::MissingOutput(action.name.clone()));
+            }
+            for output in &action.outputs {
+                validate_relative_path(output)
+                    .map_err(|reason| StagedPlanError::InvalidOutput(output.clone(), reason))?;
+                if let Some((first, first_owner)) = output_owners
+                    .iter()
+                    .find(|(old, _)| paths_overlap(old, output))
+                {
+                    return Err(StagedPlanError::OutputConflict {
+                        first: first.clone(),
+                        first_owner: first_owner.clone(),
+                        second: output.clone(),
+                        second_owner: action.name.clone(),
+                    });
+                }
+                output_owners.push((output.clone(), action.name.clone()));
+            }
+            for dependency in &action.dependencies {
+                if dependency == &action.name || dependency.trim().is_empty() {
+                    return Err(StagedPlanError::InvalidDependency {
+                        action: action.name.clone(),
+                        dependency: dependency.clone(),
+                    });
+                }
+            }
+            dependencies.insert(action.name.clone(), action.dependencies.clone());
+            for (key, value) in &action.env {
+                if key.trim().is_empty() || has_control(key) || has_control(value) {
+                    return Err(StagedPlanError::InvalidEnvironment(action.name.clone()));
+                }
+            }
+            if action.args.iter().any(|arg| has_control(arg)) {
+                return Err(StagedPlanError::InvalidArguments(action.name.clone()));
+            }
+        }
+
+        for (action, action_dependencies) in &dependencies {
+            for dependency in action_dependencies {
+                if !names.contains(dependency) {
+                    return Err(StagedPlanError::UnknownDependency {
+                        action: action.clone(),
+                        dependency: dependency.clone(),
+                    });
+                }
+            }
+        }
+        detect_dependency_cycle(&dependencies)?;
+        Ok(())
+    }
+
+    /// Stable identity over the declaration and emitted fragment. Exact input
+    /// digests and every authority fact are part of the identity.
+    pub fn identity(&self, fragment: &BuildPlanFragment) -> Result<String, StagedPlanError> {
+        self.validate(fragment)?;
+        let mut writer = CanonicalWriter::new(STAGED_PLAN_FORMAT);
+        self.write_canonical(&mut writer);
+        fragment.write_canonical(&mut writer);
+        Ok(format!(
+            "staged-plan-sha256:{}",
+            SHA256::sha256_hex(&writer.bytes)
+        ))
+    }
+
+    pub fn fragment_digest(&self, fragment: &BuildPlanFragment) -> Result<String, StagedPlanError> {
+        self.validate(fragment)?;
+        Ok(format!(
+            "sha256-{}",
+            SHA256::sha256_hex(&fragment.canonical_bytes())
+        ))
+    }
+
+    pub fn lock(&self, fragment: &BuildPlanFragment) -> Result<StagedPlanLock, StagedPlanError> {
+        let identity = self.identity(fragment)?;
+        let fragment_digest = self.fragment_digest(fragment)?;
+        Ok(StagedPlanLock {
+            action_identity: identity,
+            fragment_digest,
+            stage: self.stage,
+            stage_bound: self.stage_bound,
+            inputs: self.inputs.clone(),
+            authority: self.authority.clone(),
+        })
+    }
+
+    fn write_canonical(&self, writer: &mut CanonicalWriter) {
+        writer.str(&self.name);
+        writer.usize(self.stage);
+        writer.usize(self.stage_bound);
+        let mut inputs = self.inputs.iter().collect::<Vec<_>>();
+        inputs.sort();
+        writer.usize(inputs.len());
+        for input in inputs {
+            writer.str(&input.path);
+            writer.str(&input.digest);
+        }
+        let mut tools = self.authority.tools.clone();
+        tools.sort();
+        writer.strs(tools.iter().map(String::as_str));
+        let mut effects = self.authority.effects.clone();
+        effects.sort();
+        writer.usize(effects.len());
+        for effect in effects {
+            writer.str(effect.flag());
+        }
+        writer.str(&self.authority.platform);
+    }
+}
+
+/// Exact facts written beside a staged fragment for offline replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedPlanLock {
+    pub action_identity: String,
+    pub fragment_digest: String,
+    pub stage: usize,
+    pub stage_bound: usize,
+    pub inputs: Vec<PlanInput>,
+    pub authority: PlanAuthority,
+}
+
+impl StagedPlanLock {
+    pub fn encode(&self) -> String {
+        let mut out = String::from("jet-staged-plan-lock-v1\n");
+        out.push_str(&format!("action_identity={}\n", self.action_identity));
+        out.push_str(&format!("fragment_digest={}\n", self.fragment_digest));
+        out.push_str(&format!("stage={}\n", self.stage));
+        out.push_str(&format!("stage_bound={}\n", self.stage_bound));
+        out.push_str(&format!("platform={}\n", self.authority.platform));
+        let mut inputs = self.inputs.clone();
+        inputs.sort();
+        for input in inputs {
+            out.push_str(&format!("input={}\t{}\n", input.path, input.digest));
+        }
+        let mut tools = self.authority.tools.clone();
+        tools.sort();
+        for tool in tools {
+            out.push_str(&format!("tool={tool}\n"));
+        }
+        let mut effects = self.authority.effects.clone();
+        effects.sort();
+        for effect in effects {
+            out.push_str(&format!("effect={}\n", effect.flag()));
+        }
+        out
+    }
+}
+
+/// Validation failures are kept in the model so evaluator and engine cannot
+/// disagree about what a finite staged fragment means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedPlanError {
+    EmptyActionName,
+    InvalidStageBound,
+    StageOutOfBounds {
+        stage: usize,
+        bound: usize,
+    },
+    EmptyPlatform,
+    InvalidInput(String, String),
+    MissingInputDigest(String),
+    DuplicateInput(String),
+    DuplicateTool(String),
+    DuplicateEffect(String),
+    EmptyFragment,
+    EmptyFragmentActionName,
+    DuplicateFragmentActionName(String),
+    EmptyFragmentTool(String),
+    UnauthorizedTool {
+        action: String,
+        tool: String,
+    },
+    UnauthorizedEffect {
+        action: String,
+        effect: BuildEffect,
+    },
+    PlatformMismatch {
+        action: String,
+        expected: String,
+        actual: String,
+    },
+    UndeclaredInput {
+        action: String,
+        path: String,
+    },
+    MissingOutput(String),
+    InvalidOutput(String, String),
+    OutputConflict {
+        first: String,
+        first_owner: String,
+        second: String,
+        second_owner: String,
+    },
+    InvalidDependency {
+        action: String,
+        dependency: String,
+    },
+    UnknownDependency {
+        action: String,
+        dependency: String,
+    },
+    DependencyCycle(Vec<String>),
+    InvalidEnvironment(String),
+    InvalidArguments(String),
+}
+
+impl fmt::Display for StagedPlanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyActionName => f.write_str("staged plan action name is empty"),
+            Self::InvalidStageBound => f.write_str("staged plan stage bound must be positive"),
+            Self::StageOutOfBounds { stage, bound } => {
+                write!(
+                    f,
+                    "staged plan stage {stage} is outside finite bound {bound}"
+                )
+            }
+            Self::EmptyPlatform => f.write_str("staged plan platform is empty"),
+            Self::InvalidInput(path, reason) => write!(f, "input `{path}` is invalid: {reason}"),
+            Self::MissingInputDigest(path) => write!(f, "input `{path}` has no digest"),
+            Self::DuplicateInput(path) => write!(f, "input `{path}` is declared more than once"),
+            Self::DuplicateTool(tool) => write!(f, "tool `{tool}` is declared more than once"),
+            Self::DuplicateEffect(effect) => {
+                write!(f, "effect `{effect}` is declared more than once")
+            }
+            Self::EmptyFragment => f.write_str("staged plan emitted no actions"),
+            Self::EmptyFragmentActionName => {
+                f.write_str("staged plan emitted an action with no name")
+            }
+            Self::DuplicateFragmentActionName(name) => {
+                write!(f, "staged plan emitted duplicate action `{name}`")
+            }
+            Self::EmptyFragmentTool(name) => write!(f, "staged action `{name}` has no tool"),
+            Self::UnauthorizedTool { action, tool } => {
+                write!(f, "staged action `{action}` uses undeclared tool `{tool}`")
+            }
+            Self::UnauthorizedEffect { action, effect } => {
+                write!(
+                    f,
+                    "staged action `{action}` uses undeclared effect `{}`",
+                    effect.flag()
+                )
+            }
+            Self::PlatformMismatch {
+                action,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "staged action `{action}` targets `{actual}`, not declared platform `{expected}`"
+            ),
+            Self::UndeclaredInput { action, path } => {
+                write!(
+                    f,
+                    "staged action `{action}` reads undeclared input `{path}`"
+                )
+            }
+            Self::MissingOutput(name) => write!(f, "staged action `{name}` has no output"),
+            Self::InvalidOutput(path, reason) => write!(f, "output `{path}` is invalid: {reason}"),
+            Self::OutputConflict {
+                first,
+                first_owner,
+                second,
+                second_owner,
+            } => write!(
+                f,
+                "staged outputs `{first}` ({first_owner}) and `{second}` ({second_owner}) overlap"
+            ),
+            Self::InvalidDependency { action, dependency } => {
+                write!(
+                    f,
+                    "staged action `{action}` has invalid dependency `{dependency}`"
+                )
+            }
+            Self::UnknownDependency { action, dependency } => {
+                write!(
+                    f,
+                    "staged action `{action}` depends on unknown action `{dependency}`"
+                )
+            }
+            Self::DependencyCycle(chain) => {
+                write!(
+                    f,
+                    "staged action graph contains a cycle: {}",
+                    chain.join(" -> ")
+                )
+            }
+            Self::InvalidEnvironment(name) => {
+                write!(f, "staged action `{name}` has invalid environment facts")
+            }
+            Self::InvalidArguments(name) => {
+                write!(f, "staged action `{name}` has invalid argument facts")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StagedPlanError {}
+
+pub const STAGED_PLAN_FORMAT: &str = "jet.staged-plan.v1";
+
+fn unique_strings(
+    values: &[String],
+    duplicate: impl Fn(String) -> StagedPlanError,
+) -> Result<BTreeSet<String>, StagedPlanError> {
+    let mut out = BTreeSet::new();
+    for value in values {
+        if value.trim().is_empty() || has_control(value) {
+            return Err(StagedPlanError::InvalidInput(
+                value.clone(),
+                "authority name is empty or contains control characters".to_string(),
+            ));
+        }
+        if !out.insert(value.clone()) {
+            return Err(duplicate(value.clone()));
+        }
+    }
+    Ok(out)
+}
+
+fn unique_effects(values: &[BuildEffect]) -> Result<BTreeSet<BuildEffect>, StagedPlanError> {
+    let mut out = BTreeSet::new();
+    for effect in values {
+        if !out.insert(*effect) {
+            return Err(StagedPlanError::DuplicateEffect(effect.flag().to_string()));
+        }
+    }
+    Ok(out)
+}
+
+fn validate_relative_path(path: &str) -> Result<(), String> {
+    if path.trim().is_empty() || has_control(path) {
+        return Err("path is empty or contains control characters".to_string());
+    }
+    if Path::new(path).is_absolute()
+        || Path::new(path).components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("path must stay below the declared sandbox root".to_string());
+    }
+    Ok(())
+}
+
+fn has_control(value: &str) -> bool {
+    value.chars().any(char::is_control)
+}
+
+fn paths_overlap(left: &str, right: &str) -> bool {
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|suffix| suffix.starts_with('/') || suffix.starts_with('\\'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|suffix| suffix.starts_with('/') || suffix.starts_with('\\'))
+}
+
+fn detect_dependency_cycle(
+    dependencies: &BTreeMap<String, Vec<String>>,
+) -> Result<(), StagedPlanError> {
+    fn visit(
+        node: &str,
+        dependencies: &BTreeMap<String, Vec<String>>,
+        states: &mut BTreeMap<String, u8>,
+        stack: &mut Vec<String>,
+    ) -> Result<(), StagedPlanError> {
+        match states.get(node).copied().unwrap_or(0) {
+            2 => return Ok(()),
+            1 => {
+                let start = stack.iter().position(|item| item == node).unwrap_or(0);
+                let mut cycle = stack[start..].to_vec();
+                cycle.push(node.to_string());
+                return Err(StagedPlanError::DependencyCycle(cycle));
+            }
+            _ => {}
+        }
+        states.insert(node.to_string(), 1);
+        stack.push(node.to_string());
+        for dependency in dependencies.get(node).into_iter().flatten() {
+            visit(dependency, dependencies, states, stack)?;
+        }
+        stack.pop();
+        states.insert(node.to_string(), 2);
+        Ok(())
+    }
+
+    let mut states = BTreeMap::new();
+    for node in dependencies.keys() {
+        visit(node, dependencies, &mut states, &mut Vec::new())?;
+    }
+    Ok(())
+}
+
+impl BuildPlanFragment {
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut writer = CanonicalWriter::new("jet.build-plan-fragment.v1");
+        self.write_canonical(&mut writer);
+        writer.bytes
+    }
+
+    fn write_canonical(&self, writer: &mut CanonicalWriter) {
+        let mut actions = self.actions.iter().collect::<Vec<_>>();
+        actions.sort_by(|left, right| left.name.cmp(&right.name));
+        writer.usize(actions.len());
+        for action in actions {
+            writer.str(&action.name);
+            writer.str(&action.tool);
+            writer.strs(action.args.iter().map(String::as_str));
+            let mut inputs = action.inputs.clone();
+            inputs.sort();
+            writer.strs(inputs.iter().map(String::as_str));
+            let mut outputs = action.outputs.clone();
+            outputs.sort();
+            writer.strs(outputs.iter().map(String::as_str));
+            writer.usize(action.env.len());
+            for (key, value) in &action.env {
+                writer.str(key);
+                writer.str(value);
+            }
+            let mut effects = action.effects.clone();
+            effects.sort();
+            writer.usize(effects.len());
+            for effect in effects {
+                writer.str(effect.flag());
+            }
+            let mut dependencies = action.dependencies.clone();
+            dependencies.sort();
+            writer.strs(dependencies.iter().map(String::as_str));
+            writer.str(&action.platform);
+        }
+    }
+}
+
+impl StagedPlanLock {
+    // Kept beside the model so the engine writes the exact same facts it keys.
+    pub fn canonical_identity(&self) -> &str {
+        &self.action_identity
+    }
 }
 
 impl BuildRecipe {

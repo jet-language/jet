@@ -989,7 +989,7 @@ pub(crate) fn check_module_bodies(
     }
     let cache_allowed = view_jobs.is_empty();
     let module_key = module.display.clone();
-    // D-FAIL-CONV2=A: the shipped `impl <CoreError> => Err` conversions are
+    // D-FAIL-CONV2=A: the shipped `impl <CoreError> -> Err` conversions are
     // demand-driven — which ones a module needs is only known once every body
     // in it has recorded its `TryConvert::Typed` facts. So the items are
     // appended at the END of this walk (see the `index == len` arm below) and
@@ -2139,7 +2139,7 @@ fn check_func_body_bundle_scoped(
     }
     // Direct ambient/foreign operations keep their precise body diagnostic.
     // User callees are checked after the shared reachability projection so an
-    // inferred-pure callee need not repeat `=[]=>`.
+    // inferred-pure callee need not repeat `-[]>`.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
@@ -2308,7 +2308,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         ret: sig.return_type.clone().map(Box::new),
         // D-CABI-CALLBACK1 / D-EFF2: a function sema proved effect-free
         // (`pure fn`, or an allocation-free panic-free scalar body) publishes
-        // the empty effect bound, so its value satisfies `=[]=>` callable
+        // the empty effect bound, so its value satisfies `-[]>` callable
         // positions without a second policing mechanism.
         effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
         param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),

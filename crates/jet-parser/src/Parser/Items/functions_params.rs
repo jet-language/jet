@@ -188,12 +188,14 @@ impl<'a> Parser<'a> {
             };
             if let Some(marker_span) = body_marker_span {
                 let value_body = !matches!(self.peek().kind, TokKind::LBrace)
-                    || (!effect_body_marker && self.brace_starts_inferred_literal());
+                    || (!effect_body_marker
+                        && self.brace_starts_record()
+                        && !matches!(self.peek2().kind, TokKind::RBrace));
                 if value_body {
                     let start = marker_span.start;
-                    // A one-expression marker accepts a non-empty brace as an
-                    // inferred literal. An effect ceiling followed by a brace
-                    // is the block form.
+                    // A one-expression marker accepts a field-led brace as an
+                    // inferred record literal. Statement-shaped braces are
+                    // callable blocks, including `return` bodies.
                     let expr = self.expr()?;
                     let expr_end = expr.span().end;
                     self.finish_stmt()?;

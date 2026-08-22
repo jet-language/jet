@@ -54,6 +54,10 @@ pub struct LockedPackage {
     /// the lock. `None` for a package that has not been realized yet or an
     /// older lock that predates the field (round-trips unchanged).
     pub envelope: Option<LockEnvelope>,
+    /// D-ECO-RECEIPT2 / D-ECO-RECEIPTSTORE1: digest of the immutable Hangar
+    /// receipt connected to this realized package. The receipt object carries
+    /// per-action evidence; it does not duplicate lock merge history.
+    pub receipt: Option<String>,
     /// D-BOUND-PROV1: one inspectable dependency provenance record. The
     /// integrity hash stays on the package/source identity; these fields are
     /// the transparency, publisher, and build evidence above that floor.
@@ -516,6 +520,9 @@ pub fn write(lock: &LockFile) -> String {
         // stays terse.
         if let Some(env) = &pkg.envelope {
             write_envelope(&mut out, env);
+        }
+        if let Some(receipt) = &pkg.receipt {
+            out.push_str(&format!("receipt = \"{}\"\n", escape_str(receipt)));
         }
         if let Some(provenance) = &pkg.provenance {
             if let Some(value) = &provenance.transparency {
@@ -1165,6 +1172,10 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "platform" => pkg.envelope_mut().platform = val.trim_matches('"').to_string(),
                 "signature" => pkg.envelope_mut().signature = val.trim_matches('"').to_string(),
                 "provenance" => pkg.envelope_mut().provenance = val.trim_matches('"').to_string(),
+                "receipt" => {
+                    let receipt = unescape_str(val);
+                    pkg.receipt = (!receipt.is_empty()).then_some(receipt);
+                }
                 "provenance-transparency" => pkg
                     .provenance_mut()
                     .transparency = Some(unescape_str(val)),
@@ -1586,6 +1597,7 @@ struct PartialPkg {
     effects: Vec<String>,
     effect_grants: Vec<String>,
     envelope: Option<LockEnvelope>,
+    receipt: Option<String>,
     provenance: Option<DependencyProvenance>,
 }
 
@@ -1619,6 +1631,7 @@ impl PartialPkg {
             effects: self.effects,
             effect_grants: self.effect_grants,
             envelope: self.envelope,
+            receipt: self.receipt,
             provenance: self.provenance,
         })
     }
@@ -1991,6 +2004,19 @@ pub fn record_nix_realization(
                 && matches!(&package.source, LockSource::Nix { .. })
         })
         .and_then(|package| package.provenance.clone());
+    let existing_receipt = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Nix { .. })
+                && package
+                    .envelope
+                    .as_ref()
+                    .is_some_and(|current| current.output_hash == envelope.output_hash)
+        })
+        .and_then(|package| package.receipt.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -2007,6 +2033,7 @@ pub fn record_nix_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        receipt: existing_receipt,
         provenance: existing_provenance,
     };
     if let Some(existing) = lock
@@ -2139,6 +2166,19 @@ pub fn record_cran_realization(
                 && matches!(&package.source, LockSource::Cran { .. })
         })
         .and_then(|package| package.provenance.clone());
+    let existing_receipt = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Cran { .. })
+                && package
+                    .envelope
+                    .as_ref()
+                    .is_some_and(|current| current.output_hash == envelope.output_hash)
+        })
+        .and_then(|package| package.receipt.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -2158,6 +2198,7 @@ pub fn record_cran_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        receipt: existing_receipt,
         provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|p| {
@@ -2232,6 +2273,19 @@ pub fn record_luarocks_realization(
                 && matches!(&package.source, LockSource::LuaRocks { .. })
         })
         .and_then(|package| package.provenance.clone());
+    let existing_receipt = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::LuaRocks { .. })
+                && package
+                    .envelope
+                    .as_ref()
+                    .is_some_and(|current| current.output_hash == envelope.output_hash)
+        })
+        .and_then(|package| package.receipt.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -2251,6 +2305,7 @@ pub fn record_luarocks_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        receipt: existing_receipt,
         provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|p| {
@@ -2326,6 +2381,19 @@ pub fn record_registry_realization(
                 && matches!(&package.source, LockSource::Registry { registry: value, .. } if value == registry)
         })
         .and_then(|package| package.provenance.clone());
+    let existing_receipt = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(&package.source, LockSource::Registry { registry: value, .. } if value == registry)
+                && package
+                    .envelope
+                    .as_ref()
+                    .is_some_and(|current| current.output_hash == envelope.output_hash)
+        })
+        .and_then(|package| package.receipt.clone());
     let entry = LockedPackage {
         name: name.to_string(),
         version: version.to_string(),
@@ -2348,6 +2416,7 @@ pub fn record_registry_realization(
         effects: Vec::new(),
         effect_grants: Vec::new(),
         envelope: Some(envelope),
+        receipt: existing_receipt,
         provenance: existing_provenance,
     };
     if let Some(existing) = lock.packages.iter_mut().find(|package| {
@@ -3042,6 +3111,7 @@ mod a4_envelope_tests {
             effects: Vec::new(),
             effect_grants: Vec::new(),
             envelope,
+            receipt: None,
             provenance: None,
         }
     }
@@ -3272,6 +3342,28 @@ priority = 2
         assert_eq!(hello.envelope, Some(e));
         assert_eq!(other.envelope, None, "other packages untouched");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn receipt_roundtrips_without_changing_other_packages() {
+        let receipt = format!("sha256-{}", "a".repeat(64));
+        let mut lock = base_lock(
+            vec![
+                pkg_with(
+                    "hello",
+                    Some(env("sha256-output", "x86_64-linux", "", "hello")),
+                ),
+                pkg_with("other", None),
+            ],
+            Vec::new(),
+        );
+        lock.packages[0].receipt = Some(receipt.clone());
+        let reloaded = parse(&write(&lock)).unwrap();
+        assert_eq!(
+            reloaded.packages[0].receipt.as_deref(),
+            Some(receipt.as_str())
+        );
+        assert_eq!(reloaded.packages[1].receipt, None);
     }
 
     /// Envelope + toolchain coexist with the older per-package fields (effects,

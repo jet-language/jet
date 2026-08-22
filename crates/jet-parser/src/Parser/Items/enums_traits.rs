@@ -235,7 +235,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
-        /// `ImplDef` path or the `impl Source => Target { body }` error-conversion path.
+        /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
         pub(in crate::Parser) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
             let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
@@ -277,7 +277,7 @@ impl<'a> Parser<'a> {
                     )
                 }
             };
-            // Detect `impl Source => Target { body }` — D-ERR-CONV as respelled
+            // Detect `impl Source -> Target { body }` — D-ERR-CONV as respelled
             // by D-ARROW-CONTROL1. Accept `->` only to emit its migration error.
             if self.at_unified_arrow() {
                 self.expect_unified_arrow("before a callable result type")?;
@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         "expected `{` to open the error-conversion body".to_string(),
-                        "an error conversion body is a block: `impl Source => Target { … }`"
+                        "an error conversion body is a block: `impl Source -> Target { … }`"
                             .to_string(),
                         "add `{` after the target type".to_string(),
                         Some(self.peek().span),
@@ -419,7 +419,7 @@ impl<'a> Parser<'a> {
                 Item::ErrorConv(ec) => Err(Diagnostic::error(
                     "E0003",
                     format!("`#Target(OS.{})` isn't valid on an error-conversion `impl`", os.name()),
-                    "`impl Source => Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
+                    "`impl Source -> Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
                     format!("remove the `#Target(OS.{})` marker", os.name()),
                     Some(ec.from_span),
                 )),

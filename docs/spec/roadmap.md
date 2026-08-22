@@ -148,7 +148,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
 - **E2-M14** — C FFI: `#Bindgen`/`#Extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
-- **E2-M16** — pure evaluation + layer 3: `fn … =[]=>`, `jet eval --pure`, package recipes, sandboxed builds.
+- **E2-M16** — pure evaluation + layer 3: `fn … -[]>`, `jet eval --pure`, package recipes, sandboxed builds.
 - **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.
 - **E2-M18** — REPL: `jet repl`, interpreter-backed, 16 transcript tests.
 
@@ -168,6 +168,9 @@ The binding parity/acceptance plan is
 [`world-class-package-manager.md`](../../docs/plans/epoch-4/world-class-package-manager.md):
 Epoch 4 closes 20 live functional package-manager lanes plus the best compatible
 features from other ecosystems and reports the actual sandbox class.
+Its tier-1 gate drives a native package through provider, lease, Hangar,
+offline, and clean-store paths on Linux, macOS, and Windows CI; missing output
+fails closed without a partial store entry.
 `D-JPK-EPOCHBOUNDARY1=B` reserves hostile Linux/macOS/Windows isolation and the
 full Nix-replacement claim for Epoch 8 card #398.
 

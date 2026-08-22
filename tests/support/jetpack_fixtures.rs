@@ -323,6 +323,30 @@ pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) 
     out_dir
 }
 
+/// Write a fixture containing the native test binary itself. This exercises
+/// executable lease handoff on every tier-1 host without depending on `sh` or
+/// a platform-specific script format.
+pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
+    fs::create_dir_all(fixtures).unwrap();
+    let bin = staging_dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let name = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+    let executable = bin.join(&name);
+    fs::copy(jetpack_bin(), &executable).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let out_dir = seed_hangar_object(root, staging_dir);
+    let json = format!(
+        "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+        out_dir.to_string_lossy()
+    );
+    fs::write(fixtures.join("nixpkgs-native-jetpack.json"), json).unwrap();
+    out_dir
+}
+
 pub fn assert_no_hangar_entry(root: &Path, name: &str) {
     let hangar = root.join("hangar");
     if let Ok(entries) = fs::read_dir(&hangar) {

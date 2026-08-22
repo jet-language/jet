@@ -92,7 +92,7 @@ The generated enum types are `ABI`, `Ability`, `FfiLanguage`, `InlineMode`,
 use core.compiler.lang as lang
 
 #Inline(lang.InlineMode.Always)
-fn parse_fast(text: String) :> Int :: text.parse() ?? 0
+fn parse_fast(text: String) Int -> text.parse() ?? 0
 ```
 
 An expected marker argument also accepts a dot literal without an import:
@@ -156,19 +156,19 @@ distinct-type arithmetic gating like `#Numeric`).
 
 | Method | Type | What it does |
 | --- | --- | --- |
-| `.map(f)` | `(T?, fn(T) :> R) :> R?` | Applies `f` to the payload if present; `None` stays `None` |
-| `.zip(other)` | `(T?, U?) :> (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
-| `Option.lift2(f, a, b)` | `(fn(T, U) :> R, T?, U?) :> R?` | Applies a two-argument function to `a`/`b` only when both are present |
+| `.map(f)` | `(T?, fn(T) R) R?` | Applies `f` to the payload if present; `None` stays `None` |
+| `.zip(other)` | `(T?, U?) (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
+| `Option.lift2(f, a, b)` | `(fn(T, U) R, T?, U?) R?` | Applies a two-argument function to `a`/`b` only when both are present |
 
 ```jet
 price: Float? :: lookup_price(id)
 qty: Float? :: lookup_qty(id)
 
 // zip: both present produces a pair; either None produces None
-total1 :: price.zip(qty).map((pair) :> pair.a * pair.b)
+total1 :: price.zip(qty).map((pair) -> pair.a * pair.b)
 
 // lift2: same idea, no explicit pair
-total2 :: Option.lift2((p, q) :> p * q, price, qty)
+total2 :: Option.lift2((p, q) -> p * q, price, qty)
 
 // total1, total2: Float? — None unless both price and qty were present
 ```
@@ -195,7 +195,7 @@ with no separate hash path. Floats, views,
 `Shared`, functions, lists, maps, sets, and payload-carrying enums remain
 ineligible; E0502 names the rule and its fix.
 
-Under D-COMPREHENSION1, a finite `loop ... :> value` executes immediately and
+Under D-COMPREHENSION1, a finite `loop ... -> value` executes immediately and
 returns `[T]`. Build maps with ordinary map operations, build sets with
 `Set.from(...)`, and use the existing iterator adapters when work must stay
 lazy. An expected type never changes the collector or evaluation time.
@@ -391,7 +391,7 @@ buffering law](../spec/spec.md#bounded-buffering-law):
 ```jet
 use core.files as files
 
-fn count_lines(path: String) :> Int IOError! {
+fn count_lines(path: String) Int IOError! -> {
     handle :: files.open(~path)?
     n := 0
     loop line in handle.lines() {
@@ -597,7 +597,7 @@ use core.http.server as server
 
 fn run() {
     mux :: server.mux()
-    mux.post("/api/:name/*path", (req: HTTPSrvReq) :>
+    mux.post("/api/:name/*path", (req: HTTPSrvReq) ->
         server.response(200, req.body())
     )
 
@@ -641,7 +641,7 @@ Server surface:
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
 | `server.mux()` | `HTTPMux` | Create a function-first router |
-| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) :> HTTPSrvResp` handlers |
+| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) HTTPSrvResp` handlers |
 | `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HTTPServer String!` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
 | `server.serve(addr, mux)` | `String!` | Serve HTTP/1.1 forever |
 | `server.serve(addr, mux, tls: server.tls(cert, key))` | `String!` | Serve HTTPS with explicit TLS material |
@@ -819,7 +819,7 @@ ordinary Jet package.
 
 ### `core.crypto.vault` — repository secrets and typed key generations
 
-`core.crypto.vault` keeps the existing `get(name) :> String?` API and adds persistent
+`core.crypto.vault` keeps the existing `get(name) String?` API and adds persistent
 typed `SigningKey` and `X25519SecretKey` generations. Every call below requires
 the `Secret` effect. `KeyRef<T>` is safe to clone, compare, hash, display, and
 persist; it contains public identity metadata, never key bytes.
@@ -828,7 +828,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn provision() :[Secret]> ! vault.VaultError {
+fn provision() ! vault.VaultError -[Secret]> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -894,7 +894,7 @@ clock := Clock.new(0)
 ttl := Duration.minutes(5) ?? return
 key := crypto.SigningKey.new_random() ?? return
 secret := vault.ExpiringSecret.new(^key, ttl, clock)
-result := secret.with((borrowed) :> borrowed.public_key())
+result := secret.with((borrowed) -> borrowed.public_key())
 ```
 
 `.with` returns `Result<R, Expired>`. Its parameter is a compiler-owned,
@@ -913,16 +913,16 @@ Examples: `examples/features/crypto/vault_keys.jet` and
 batteries. `app.auth` reuses the same Prelude symbols (one mechanism):
 
 ```jet
-verify_jwt(token, key:, audience:, issuer:, clock_skew:) :> Claims AuthError!
-verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) :> Claims AuthError!
+verify_jwt(token, key:, audience:, issuer:, clock_skew:) Claims AuthError!
+verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) Claims AuthError!
 
 register_user(user_id, password_hash) String!
-password_login(user_id, password_hash, now_ms, ttl_ms) :> Session String!
-session_validate(session_id, now_ms) :> Session String!
-magic_link_issue(user_id, now_ms, ttl_ms) :> String String!
-magic_link_consume(token, now_ms, ttl_ms) :> Session String!
-oauth_begin(provider) :> String String!
-oauth_finish(state, subject, now_ms, ttl_ms) :> Session String!
+password_login(user_id, password_hash, now_ms, ttl_ms) Session String!
+session_validate(session_id, now_ms) Session String!
+magic_link_issue(user_id, now_ms, ttl_ms) String String!
+magic_link_consume(token, now_ms, ttl_ms) Session String!
+oauth_begin(provider) String String!
+oauth_finish(state, subject, now_ms, ttl_ms) Session String!
 ```
 
 `issuer` and `clock_skew` are optional for both verifiers; `footer` and
@@ -966,8 +966,8 @@ text_new / text_set / text_edit / text_merge / text_show / text_metadata
 counter_new / counter_inc / counter_merge / counter_value
 map_new / map_set / map_get / map_merge / map_show
 list_new / list_push / list_merge / list_show
-policy_new(table, expression) :> RowPolicy String!
-policy_allows(policy, user, row_owner) :> Bool
+policy_new(table, expression) RowPolicy String!
+policy_allows(policy, user, row_owner) Bool
 ```
 
 Merges are deterministic for each carrier law. Text is an atom-set union with
@@ -1023,15 +1023,15 @@ use core.watcher as watcher
 fn run() {
     scope :: event.scope()
     files :: watcher.files("src") ?? return
-    files.on(scope, (ev) :> { print("changed: {ev.path}") })
+    files.on(scope, (ev) -> { print("changed: {ev.path}") })
     loop ev in files.poll() {
         if ev.kind == {
-            .Created :> print("created {ev.path}")
-            .Modified :> print("modified {ev.path}")
-            .Removed :> print("removed {ev.path}")
-            .Error :> print("watch error: {ev.detail}")
-            .Exited :> print("process {ev.pid} exited")
-            .Ready :> print("port {ev.port} ready")
+            .Created -> print("created {ev.path}")
+            .Modified -> print("modified {ev.path}")
+            .Removed -> print("removed {ev.path}")
+            .Error -> print("watch error: {ev.detail}")
+            .Exited -> print("process {ev.pid} exited")
+            .Ready -> print("port {ev.port} ready")
         }
     }
 }
@@ -1219,7 +1219,7 @@ struct Point {
     y: Int
 
     impl Display {
-        fn display(self) :> String {
+        fn display(self) String -> {
             return "({self.x}, {self.y})"
         }
     }
@@ -1313,7 +1313,7 @@ decoded losslessly; it never skips or replaces an entry.
 
 `EnvError` has `InvalidName`, `InvalidValue`, and `NonUnicode`. Names must be
 nonempty and contain neither NUL nor `=`; values cannot contain NUL. Current
-editions retain the source-compatible `set :> ()` signature and report an
+editions retain the source-compatible `set ()` signature and report an
 invalid call as E3001. A future major release and edition opt-in changes `set`
 to `EnvError!`.
 
@@ -1328,7 +1328,7 @@ fn run() {
     print(sys.name())           // linux, macos, windows, …
     print(sys.arch())           // x86_64, aarch64, …
     print(sys.cpu_count())      // logical CPU count
-    sys.on_interrupt(() :> {
+    sys.on_interrupt(() -> {
         print("stopping")
     })
 }
@@ -1762,12 +1762,12 @@ nonces, tokens, salts, and anything security-sensitive.
 | `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
-`fn … :[]>` cannot call them (E3403 — they break reproducibility). To use
-randomness inside a `fn … :[]>`, take a seeded `Rng` **as a parameter** and draw
+`fn … -[]>` cannot call them (E3403 — they break reproducibility). To use
+randomness inside a `fn … -[]>`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-fn roll(rng: &Rng) :[]> Int {
+fn roll(rng: &Rng) Int -[]> {
     return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
 }
 fn run() {
@@ -1844,7 +1844,7 @@ fn run() {
     scene.input.bind("jump", "Space")
     scene.component<Position>()
     scene.component<Velocity>()
-    scene.on_frame((frame) :> {
+    scene.on_frame((frame) -> {
         if frame.input.pressed("jump") {
             print("jump {frame.index}")
         }
@@ -1859,7 +1859,7 @@ fn run() {
 | `game.Scene.new(name)` | `GameScene` | Create one scene identity with assets, input, components, and frame hooks |
 | `scene.assets.image(path)` / `.sound(path)` | `GameImage String!` / `GameSound String!` | Register a typed scene asset handle; paths containing `missing` fail deterministically |
 | `scene.input.bind(action, key)` | nothing | Bind an action name to a device key name |
-| `scene.on_frame((frame) :> { ... })` | nothing | Attach frame logic to the scene |
+| `scene.on_frame((frame) -> { ... })` | nothing | Attach frame logic to the scene |
 | `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
 | `scene.component<T>()` | nothing | Register a struct-marker component type on the scene |
 | `scene.query<T...>()` | `[String]` | Return entity rows of component data for the registered types |
@@ -2091,18 +2091,18 @@ data reaches Jet.
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
 
-A `fn … :[]>` cannot call ambient `time.now()` or construct `Clock.system()`
+A `fn … -[]>` cannot call ambient `time.now()` or construct `Clock.system()`
 (E3403 — the system clock is not reproducible). `Clock.system()` is the explicit
 production-clock constructor; `time.clock(seed)` remains the manual clock for
 deterministic tests. Copying either clock creates an independent timeline at the
 same observed instant.
 
-To use time inside a `fn … :[]>`, take a seeded `Clock` **as a parameter** and
+To use time inside a `fn … -[]>`, take a seeded `Clock` **as a parameter** and
 read through it; the clock only moves when you `tick` it, so the result is
 reproducible:
 
 ```jet
-fn at(clock: Clock) :[]> Int {
+fn at(clock: Clock) -[]> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
@@ -2140,7 +2140,7 @@ produces a `Duration`.
 | `total_seconds()` | `Int` | Whole seconds in the span (truncates toward zero) |
 | `difference(other)` | `Duration` | This span minus `other` (saturating) |
 
-**Expert escape — `assume_deterministic { … }`.** Inside a `fn … :[]>`, a block
+**Expert escape — `assume_deterministic { … }`.** Inside a `fn … -[]>`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
 for its body — the "I know this is deterministic" hatch. It is a semantic
 footgun: nothing verifies the claim, so use it only when you can guarantee
@@ -2243,12 +2243,12 @@ as typed decode errors. This is the measured safety and diagnosis win. The
 executable proof is in `tests/encoding_corpus.rs::exact_typed_json_numbers` and
 `tests/encoding_parity.rs::exact_typed_json_numbers_match_aot_default_run_and_interpreter`.
 
-**`core.encoding.csv`** — `parse(text) :> [[String]] String!` (rows of fields),
-`to_string(rows) :> String`, plus bounded `reader` / `writer` handles over
+**`core.encoding.csv`** — `parse(text) [[String]] String!` (rows of fields),
+`to_string(rows) String`, plus bounded `reader` / `writer` handles over
 RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
 newlines; malformed quote closure is an error rather than a partial row.
 **`core.encoding.toml`** / **`core.encoding.yaml`**
-— `parse(text) :> TOML JSONError!` / `YAML JSONError!` (full adapters over
+— `parse(text) TOML JSONError!` / `YAML JSONError!` (full adapters over
 `DataTree`, not a flat map), `to_string(value)`.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `DataTree`
@@ -2261,7 +2261,7 @@ test vectors, and edition migrations are normative in
 
 | Module | Surface | What it does |
 |--------|---------|--------------|
-| `core.encoding.json` | `canonical` (2026 prototype / 2027 JCS+limits), `reader`, `writer` | Edition-split whole-value canonical; pull `DataEvent` streaming; shipped `events(DataTree) :> String` remains separate until migration |
+| `core.encoding.json` | `canonical` (2026 prototype / 2027 JCS+limits), `reader`, `writer` | Edition-split whole-value canonical; pull `DataEvent` streaming; shipped `events(DataTree) String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
 | `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `decode<T>`, `decode_bytes<T>`, `root`, `expanded_name`, `attribute`, `content`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, W3C C14N, and D-ENCXML-PROJECTION1=A typed helpers |
@@ -2367,20 +2367,20 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `schema(table_or_series)` | `[DataColumn]` | Column names and Jet type names for the row/value model |
 | `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
 | `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T> DataError!` | Build a typed plan; execute it only when materialized |
-| `lazy_filter(plan, row :> ok)` / `lazy_sort_by(plan, row :> key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
+| `lazy_filter(plan, row -> ok)` / `lazy_sort_by(plan, row -> key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
 | `plan(frame)` | `[String]` | Deterministic plan-step names for audit/test output |
 | `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
 | `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float DataError!` | Numeric series stats over `[Float]` (empty mean/min/max are `Empty`) |
 | `median(values)` / `quantile(values, q)` | `Float DataError!` | Sorted numeric quantiles; `q` must be finite in `0.0..=1.0` |
 | `variance(values)` / `stddev(values)` / `describe(values)` | `Float DataError!` / `DataSummary DataError!` | Population variance/stddev (Welford, divide by `n`); empty is `Empty` |
 | `rolling_mean(values, width)` | `[Float] DataError!` | Rolling window mean; width must be positive |
-| `group_count(rows, row :> row.key)` | `[DataGroup] DataError!` | Count rows by a `String` key |
-| `group_sum(rows, row :> row.key, row :> row.value)` | `[DataGroup] DataError!` | Sum a `Float` selector per key |
-| `group_mean(rows\|stream, row :> row.key, row :> row.value)` | `[DataGroup] DataError!` | Mean a `Float` selector per key; streams reuse pull limits |
-| `filter(rows, row :> ok)` / `sort_by(rows, row :> key)` | `[T]` / `[T] DataError!` | Typed in-memory row pipeline |
-| `inner_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R>] DataError!` | Stable matching row pairs with SQL join multiplicity |
-| `left_join(left, right, l :> key, r :> key)` | `[DataJoin<L, R?>] DataError!` | Stable row pairs; unmatched left rows carry `None` |
-| `pivot_sum(rows, row :> row_key, row :> col_key, row :> value)` | `[DataPivotCell] DataError!` | Distinct row/column sum cells |
+| `group_count(rows, row -> row.key)` | `[DataGroup] DataError!` | Count rows by a `String` key |
+| `group_sum(rows, row -> row.key, row -> row.value)` | `[DataGroup] DataError!` | Sum a `Float` selector per key |
+| `group_mean(rows\|stream, row -> row.key, row -> row.value)` | `[DataGroup] DataError!` | Mean a `Float` selector per key; streams reuse pull limits |
+| `filter(rows, row -> ok)` / `sort_by(rows, row -> key)` | `[T]` / `[T] DataError!` | Typed in-memory row pipeline |
+| `inner_join(left, right, l -> key, r -> key)` | `[DataJoin<L, R>] DataError!` | Stable matching row pairs with SQL join multiplicity |
+| `left_join(left, right, l -> key, r -> key)` | `[DataJoin<L, R?>] DataError!` | Stable row pairs; unmatched left rows carry `None` |
+| `pivot_sum(rows, row -> row_key, row -> col_key, row -> value)` | `[DataPivotCell] DataError!` | Distinct row/column sum cells |
 | `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
 | `require_bridge(provider)` | `DataError!` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
 | `bar_text(groups)` / `bar_svg(groups)` | `String DataError!` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
@@ -2432,7 +2432,7 @@ struct Ticket {
 
 fn run() {
     rows :: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? panic("bad csv")
-    groups :: data.group_mean(rows, t :> t.team, t :> t.minutes)
+    groups :: data.group_mean(rows, t -> t.team, t -> t.minutes)
     print(data.bar_text(groups))
 }
 ```
@@ -2557,8 +2557,8 @@ print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}
 ```
 
 **Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
-protocol as built-in derives. Write `impl T.Encode` with `encode(self) :>
-DataTree` and `impl T.Decode` with `decode(tree: DataTree) :> T [FieldError]!`.
+protocol as built-in derives. Write `impl T.Encode` with `encode(self) DataTree`
+and `impl T.Decode` with `decode(tree: DataTree) T [FieldError]!`.
 `.field` and `.at` add their field/index path; scalar accessors leave the path
 empty and a containing decoder frames them with `FieldError.under`. All return
 `[FieldError]`, so `?` chains without manual mapping. `tree.decode<T>()` dispatches any subtree
@@ -2569,7 +2569,7 @@ one mechanism.
 
 ```jet
 impl Email.Decode {
-    fn decode(tree: DataTree) :> Email [FieldError]! {
+    fn decode(tree: DataTree) Email [FieldError]! -> {
         address := FieldError.under("address", tree.text())?
         return Ok(Email{ address })
     }
@@ -2660,8 +2660,8 @@ the user never spells them. A phantom or `#Skip`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
-The expert hand-impl path is live: `impl T.Encode { fn encode(self) :> DataTree
-{ … } }` and `impl T.Decode { fn decode(tree: DataTree) :> T [FieldError]! {
+The expert hand-impl path is live: `impl T.Encode { fn encode(self) DataTree ->
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) T [FieldError]! -> {
 … } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---
@@ -2672,7 +2672,7 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 `async`/`await` and no mutex API; tasks communicate by sending owned values.
 
 ```jet
-fn sum_range(first: Int, last: Int) :> Int {
+fn sum_range(first: Int, last: Int) Int -> {
     total := 0
     loop n in first..last {
         total += n
@@ -2751,8 +2751,8 @@ them. A comma head binds the received value, and `after` takes a `Duration`:
 
 ```jet
 if {
-    value, receiver :> handle(value)
-    after 100ms :> retry()
+    value, receiver -> handle(value)
+    after 100ms -> retry()
 }
 ```
 
@@ -2956,7 +2956,7 @@ fn run() {
 | `rx.flags()` / `rx.options()` | `String` | active flag letters (`i`/`m`/`s`) |
 | `rx.names()` | `[String]` | named capture group names |
 | `rx.count(text)` | `Int` | number of non-overlapping matches |
-| `rx.replace_all_with(text, fn(Match) :> String)` | `String` | replace every match with callback output |
+| `rx.replace_all_with(text, fn(Match) String)` | `String` | replace every match with callback output |
 | `mat.group(n)` | `String?` | capture group `n` of a `Match` |
 | `mat.name(name)` | `String?` | capture group by name |
 | `mat.named_captures()` | `[[String]]` | named groups as `[name, value]` pairs |
@@ -3007,7 +3007,7 @@ fn run() {
 | `ui.mount(backend, tree[, constraint])` | — | one-call measure → layout → paint (D-UI-MOUNT1=A); default viewport is backend-sized |
 | `backend.measure/layout/paint(...)` | mixed | expert stages behind the mount pipeline |
 | `backend.on_event(ui.key_event("Tab"))` | `EventResult` | advance the backend's interactive focus order |
-| `ui.reactive_render(() :> { ... })` | — | repaint from signals read by the body |
+| `ui.reactive_render(() -> { ... })` | — | repaint from signals read by the body |
 
 Backend support is explicit rather than silently emulated:
 
@@ -3044,10 +3044,10 @@ explicit reactive values:
   from the initial value and returns a `Signal<T>`. Read with `.get()`, update
   with `.set(v)`.
 - **derived** / **computed** — a value recomputed from the signals it reads.
-  `reactive.derived(() :> expr)` returns a `Derived<T>`; `reactive.computed` is
+  `reactive.derived(() -> expr)` returns a `Derived<T>`; `reactive.computed` is
   the D-SIGNAL1 canonical alias (type name `Computed<T>`). `.get()` reflects the
   latest computation.
-- **effect** — a side effect. `reactive.effect(() :> { … })` runs the body now,
+- **effect** — a side effect. `reactive.effect(() -> { … })` runs the body now,
   and again whenever a signal it read changes, and returns an `Effect`. Call
   `.unsubscribe()` to detach it idempotently and `.is_active()` to inspect its
   state. Dropping the final handle detaches it too. **`#Reactive { … }`** (D-REACTCORE1)
@@ -3065,10 +3065,10 @@ use core.reactive as reactive
 fn run() {
     price :: reactive.signal(100)
     qty :: reactive.signal(2)
-    total :: reactive.derived(() :> (price.get() * qty.get()))
+    total :: reactive.derived(() -> (price.get() * qty.get()))
     print(total.get())                       // 200
 
-    subscription := reactive.effect(() :> {    // prints 200 now
+    subscription := reactive.effect(() -> {    // prints 200 now
         print(total.get())
     })
     price.set(150)                             // effect re-runs → 300
@@ -3080,9 +3080,9 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `reactive.signal(initial)` | `Signal<T>` | a mutable reactive source holding `T` |
-| `reactive.derived(() :> expr)` | `Derived<T>` / `Computed<T>` | a value recomputed from the signals it reads |
-| `reactive.computed(() :> expr)` | `Computed<T>` | canonical alias for `derived` (D-SIGNAL1) |
-| `reactive.effect(() :> { … })` | `Effect` | a retained side effect with explicit lifecycle |
+| `reactive.derived(() -> expr)` | `Derived<T>` / `Computed<T>` | a value recomputed from the signals it reads |
+| `reactive.computed(() -> expr)` | `Computed<T>` | canonical alias for `derived` (D-SIGNAL1) |
+| `reactive.effect(() -> { … })` | `Effect` | a retained side effect with explicit lifecycle |
 | `effect.unsubscribe()` | — | detach idempotently |
 | `effect.is_active()` | `Bool` | whether the effect remains subscribed |
 | `#Reactive { … }` | `Effect` (runtime-owned) | explicit reactive effect scope |
@@ -3109,8 +3109,8 @@ fn run() {
     scope :: event.scope()
     clicked :: event.new<Int>()
 
-    sub :: clicked.on(scope, (n) :> { print("clicked {n}") })
-    clicked.once(scope, (n) :> { print("once {n}") })
+    sub :: clicked.on(scope, (n) -> { print("clicked {n}") })
+    clicked.once(scope, (n) -> { print("once {n}") })
 
     print(clicked.emit(1).summary())
     sub.unsubscribe()
@@ -3168,7 +3168,7 @@ use core.web as web
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)
-    web.on("#new-task", "input", (ev) :> {
+    web.on("#new-task", "input", (ev) -> {
         web.storage.local.set("draft", web.value("#new-task"))
     })
 }
@@ -3192,7 +3192,7 @@ cache := Cell.new(0)
 cache.set(1)
 old :: cache.replace(2)
 current :: cache.get()
-cache.edit(value :> value += 1)
+cache.edit(value -> value += 1)
 ```
 
 | Method | Returns | What it does |
@@ -3202,8 +3202,8 @@ cache.edit(value :> value += 1)
 | `cell.set(value)` | nothing | Replace the value |
 | `cell.replace(value)` | `T` | Replace the value and return the old value |
 | `cell.get_or_set(init)` | `T` | Initialize an empty `Cell<T?>` once and copy the value |
-| `cell.read(value :> result)` | `R` | Run a closure under one read loan |
-| `cell.edit(value :> result)` | `R` | Run a closure under one edit loan |
+| `cell.read(value -> result)` | `R` | Run a closure under one read loan |
+| `cell.edit(value -> result)` | `R` | Run a closure under one edit loan |
 | `cell.guard_read()` | `CellReadGuard<T>` | Keep a read loan across calls |
 | `cell.guard_edit()` | `CellEditGuard<T>` | Keep an edit loan across calls |
 | `guard.map(project)` | projected guard | Keep the same loan for one projection |
@@ -3212,7 +3212,7 @@ cache.edit(value :> value += 1)
 Many read guards can coexist. One edit guard excludes all other guards.
 Mapped and split guards release the original loan only after the last derived
 guard drops. Runtime conflicts stop with `Cell borrow conflict`. Use
-`cell.read(value :> result)` when `T` does not support copying.
+`cell.read(value -> result)` when `T` does not support copying.
 
 A function can pass or return a guard directly. Named tuples can contain guards
 recursively, which lets split guards cross a named helper boundary. A guard
@@ -3470,7 +3470,7 @@ hi: U8 :: 200
 lo: U8 :: 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
-    print(checked(hi + lo) ?? 0)        // 0    — checked(…) :> T?, None on overflow
+    print(checked(hi + lo) ?? 0)        // 0    — checked(…) T?, None on overflow
 }
 ```
 
@@ -3919,8 +3919,8 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 
 | Module | Job | API |
 |--------|-----|-----|
-| `core.archive.gzip` | gzip byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] String!` |
-| `core.archive.zstd` | zstd byte streams | `compress([U8]) :> [U8]`, `decompress([U8]) :> [U8] String!` |
+| `core.archive.gzip` | gzip byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] String!` |
+| `core.archive.zstd` | zstd byte streams | `compress([U8]) [U8]`, `decompress([U8]) [U8] String!` |
 | `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `crc32`, `adler32`, `deflate`, `inflate`, `zip_names_json`, `zip_open`, `zip_next`, `zip_read`, `zip_write`, `zip_close`, `zip_extract`, `unzip`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for

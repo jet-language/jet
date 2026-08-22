@@ -2220,7 +2220,7 @@ impl<'a> Fmt<'a> {
 
     /// D-TRAILBLOCK2=A: trailing-block sugar is gone. The formatter still
     /// recognizes a legacy `is_trailing_block` flag defensively, but the
-    /// parser no longer sets it — ordinary `(args)` with `() => { … }` wins.
+    /// parser no longer sets it — ordinary `(args)` with `() -> { … }` wins.
     /// D-DYNARRAY1: `.view(a..b)` parses its two args from `start .. end`, not
     /// a comma list — round-trip that shape here, or `jet fmt` would silently
     /// rewrite `.view(0..9)` into the unparseable `.view(0, 9)` (own-memory

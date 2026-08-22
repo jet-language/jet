@@ -1175,7 +1175,7 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 }
 
 
-/// D-ERR-CONV: canonical Rust function name for the `impl From => To` conversion.
+/// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
 /// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
     let f = from.replace('.', "_");

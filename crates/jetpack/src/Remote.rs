@@ -1,11 +1,14 @@
 //! Package-facing view of the canonical remote execution transport.
 //!
-//! Jetpack does not define a second scheduler or trust protocol. These types
-//! are the same host-bound binding, grant policy, CAS transport, and signed
-//! result records used by the build engine.
+//! Jetpack does not define a second wire protocol, CAS, or scheduler. These
+//! types are the host-owned binding, capability model, deterministic builder
+//! selection, grant policy, and authenticated result records used by the
+//! canonical build engine.
 
 pub use jet_comptime::Comptime::Build::{
-    BuildCapability, BuildResourcePool, ContentDigest, RemoteActionRequest, RemoteBuildBinding,
-    RemoteCacheDenied, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
-    RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult,
+    remote_execution_identity, ActionKey, BuildCapability, BuildResourcePool, ContentDigest,
+    RemoteActionRequest, RemoteAttemptError, RemoteBuildBinding, RemoteBuildRequest, RemoteBuilder,
+    RemoteBuilderCapabilities, RemoteCacheDenied, RemoteCacheError, RemoteCachePolicy,
+    RemoteCacheTransport, RemoteDeniedReason, RemoteDispatch, RemoteExecutionRequest,
+    RemoteExecutionResult, RemoteSandboxProof, RemoteScheduleError, RemoteScheduler,
 };
