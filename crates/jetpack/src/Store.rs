@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::process::{Child, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod Producer;
@@ -1732,6 +1733,8 @@ pub fn realize_verified(
         ),
     };
 
+    let cache_bindings = list_cache_bindings(roots).unwrap_or_default();
+
     if let (Some(candidate), Some(expectation)) =
         (find_by_reference(roots, &reference), expectation.as_ref())
     {
@@ -1751,11 +1754,43 @@ pub fn realize_verified(
             }
             None => {
                 let proof = verify_cache_entry(roots, &candidate, &reference, expectation);
-                let mut failure = integrity_failure(roots, &candidate, expectation, proof);
-                if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
-                    failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
+                if !cache_bindings.is_empty()
+                    && try_substitute_invalid_candidate(
+                        roots,
+                        &candidate,
+                        expectation,
+                        &cache_bindings,
+                    )
+                    .map_err(RealizeError::Store)?
+                {
+                    if let Some(hit) = find_verified_by_reference(roots, &reference, expectation)
+                        .map_err(RealizeError::Store)?
+                    {
+                        if let RealizeRequest::Adapter { plan, table, .. } = &request {
+                            validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
+                                .map_err(RealizeError::Store)?;
+                        }
+                        return Ok(VerifiedRealization {
+                            entry: hit.entry,
+                            source_state: super::Provider::SourceState::Substituted,
+                            lease: hit.lease,
+                        });
+                    }
                 }
-                return Err(RealizeError::Integrity(failure));
+
+                if cache_bindings.is_empty() {
+                    let mut failure = integrity_failure(roots, &candidate, expectation, proof);
+                    if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
+                        failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
+                    }
+                    return Err(RealizeError::Integrity(failure));
+                }
+
+                if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
+                    let mut failure = integrity_failure(roots, &candidate, expectation, proof);
+                    failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
+                    return Err(RealizeError::Integrity(failure));
+                }
             }
         }
     }
@@ -1803,6 +1838,9 @@ pub fn realize_verified(
     let mut entry = record_realized_mode(roots, &realized).map_err(RealizeError::Store)?;
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
+    if realized.source_state == super::Provider::SourceState::Built {
+        publish_realized_to_bound_caches(roots, &entry);
+    }
     promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(VerifiedRealization {
@@ -1810,6 +1848,162 @@ pub fn realize_verified(
         source_state: realized.source_state,
         lease,
     })
+}
+
+/// Try every host-owned cache role before a bad local candidate is rebuilt.
+/// Cache bindings are optional: a machine with no binding keeps the existing
+/// fail-closed local-integrity behavior. A bound but unavailable/corrupt cache
+/// is a miss, so the deterministic provider path remains the source fallback.
+fn try_substitute_invalid_candidate(
+    roots: &Roots,
+    candidate: &StoreEntry,
+    expectation: &CacheExpectation,
+    bindings: &[CacheBinding],
+) -> std::io::Result<bool> {
+    let output = Path::new(&candidate.out);
+    if candidate.envelope.output_hash.is_empty()
+        || candidate.envelope.output_hash.contains('/')
+        || output
+            != roots
+                .hangar_dir()
+                .join(OBJECTS_DIR)
+                .join(&candidate.envelope.output_hash)
+    {
+        return Ok(false);
+    }
+
+    static NEXT_STAGE: AtomicU64 = AtomicU64::new(0);
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
+    let stage = objects.join(format!(
+        ".substitute-{}-{}",
+        std::process::id(),
+        NEXT_STAGE.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Keep the verified private stage inside the Hangar object directory. The
+    // production policy permits atomic publication within that sealed tree;
+    // crossing from the cache scratch tree would be rejected by the host.
+    let mut permissions = Ingest::MovePathPermissions::default();
+    permissions.make_writable(&objects, &roots.hangar_dir())?;
+    let mut substituted = false;
+    for binding in bindings {
+        discard_substitution_stage(&stage)?;
+        if substitute_cache_entry(roots, &candidate.id, &binding.role, &stage).is_ok() {
+            substituted = true;
+            break;
+        }
+    }
+    if !substituted {
+        discard_substitution_stage(&stage)?;
+        return Ok(false);
+    }
+
+    // The remote bytes are already verified and staged. Remove the invalid
+    // local projection only after that proof; then publish the complete tree
+    // at its canonical CAS path and re-register the original metadata. This
+    // keeps the local action identity, closure edges, capabilities, and
+    // provenance unchanged.
+    if let Err(error) = quarantine_invalid_entry(roots, candidate, expectation) {
+        discard_substitution_stage(&stage)?;
+        return Err(error);
+    }
+    let restored = restore_substituted_candidate(roots, candidate, &stage)?;
+    if !restored {
+        discard_substitution_stage(&stage)?;
+    }
+    Ok(restored)
+}
+
+fn restore_substituted_candidate(
+    roots: &Roots,
+    candidate: &StoreEntry,
+    stage: &Path,
+) -> std::io::Result<bool> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        if list_unlocked(roots)
+            .into_iter()
+            .any(|entry| entry.id == candidate.id)
+        {
+            return Ok(false);
+        }
+
+        let output = Path::new(&candidate.out);
+        let metadata = fs::symlink_metadata(output);
+        let output_is_valid = metadata
+            .as_ref()
+            .is_ok_and(|metadata| !metadata.file_type().is_symlink())
+            && Ingest::try_entry_output_hash(roots, candidate)
+                .is_ok_and(|actual| actual == candidate.envelope.output_hash);
+        if !output_is_valid {
+            if metadata.is_ok() {
+                return Ok(false);
+            }
+            let parent = output
+                .parent()
+                .ok_or_else(|| std::io::Error::other("substituted output has no parent"))?;
+            Ingest::ensure_real_directory(parent, "Hangar object directory")?;
+            let mut permissions = Ingest::MovePathPermissions::default();
+            permissions.make_writable(parent, &roots.hangar_dir())?;
+            let operation = (|| {
+                fs::rename(stage, output)?;
+                sync_store_directory(parent)
+            })();
+            let restored = permissions.restore();
+            match (operation, restored) {
+                (Ok(()), Ok(())) => {}
+                (Err(error), Ok(())) => return Err(error),
+                (Ok(()), Err(error)) => return Err(error),
+                (Err(error), Err(restore)) => {
+                    return Err(std::io::Error::other(format!(
+                        "{error}; restoring Hangar permissions failed: {restore}"
+                    )))
+                }
+            }
+        }
+
+        let mut entry = candidate.clone();
+        entry.last_used_at = now_secs();
+        let dir = roots.hangar_dir().join(&entry.id);
+        let created_dir = !dir.exists();
+        let gc_root = dir.join(NIX_GC_ROOT);
+        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
+        fs::create_dir_all(&dir)?;
+        let registration = (|| {
+            pin_nix_gc_root(&dir, &entry.out)?;
+            Closure::register_entry_unlocked(roots, &entry)
+        })();
+        if let Err(error) = registration {
+            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
+            return Err(error);
+        }
+        Ok(true)
+    })
+}
+
+fn discard_substitution_stage(path: &Path) -> std::io::Result<()> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        return fs::remove_file(path);
+    }
+    if metadata.is_dir() {
+        Cache::make_tree_writable_for_removal(path)?;
+        fs::remove_dir_all(path)
+    } else {
+        Err(std::io::Error::other("substitution stage is not removable"))
+    }
+}
+
+/// Publication is best-effort cache acceleration. The binding's write grant
+/// authorizes the operation; a failed mirror never turns a successful source
+/// build into a failed realization.
+fn publish_realized_to_bound_caches(roots: &Roots, entry: &StoreEntry) {
+    let Ok(bindings) = list_cache_bindings(roots) else {
+        return;
+    };
+    for binding in bindings.into_iter().filter(|binding| binding.allow_write) {
+        let _ = publish_cache_entry(roots, &entry.id, &binding.role);
+    }
 }
 
 /// Resolve every declared adapter dependency through the normal verified-store

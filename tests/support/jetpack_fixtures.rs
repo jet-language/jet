@@ -39,7 +39,6 @@ pub fn neutral_command(binary: &Path) -> Command {
     command
 }
 
-
 pub fn copy_dir_recursive(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).unwrap();
     let mut entries = fs::read_dir(src)
@@ -57,7 +56,6 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) {
         }
     }
 }
-
 
 pub fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
@@ -85,7 +83,6 @@ pub fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
     response
 }
 
-
 pub fn studio_json_string(response: &str, key: &str) -> String {
     let needle = format!("\"{key}\":\"");
     response
@@ -93,7 +90,6 @@ pub fn studio_json_string(response: &str, key: &str) -> String {
         .and_then(|(_, rest)| rest.split_once('\"').map(|(value, _)| value.to_string()))
         .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
 }
-
 
 pub fn studio_json(response: &str) -> jetpack::JSON::JSONValue {
     let body = response
@@ -104,14 +100,12 @@ pub fn studio_json(response: &str) -> jetpack::JSON::JSONValue {
         .unwrap_or_else(|error| panic!("invalid Studio JSON response: {error}: {response}"))
 }
 
-
 pub fn json_string(json: &jetpack::JSON::JSONValue, key: &str) -> String {
     json.get(key)
         .and_then(jetpack::JSON::JSONValue::as_str)
         .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
         .to_string()
 }
-
 
 #[derive(Clone)]
 pub struct StudioTestOwner {
@@ -120,17 +114,10 @@ pub struct StudioTestOwner {
     pub base_revision: String,
 }
 
-
 pub fn studio_session(addr: &str) -> String {
-    let response = studio_http(
-        addr,
-        "POST",
-        "/studio/transaction",
-        "{\"op\":\"session\"}",
-    );
+    let response = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"session\"}");
     studio_json_string(&response, "session_id")
 }
-
 
 pub fn studio_changeset_owner(response: &str, session_id: &str) -> StudioTestOwner {
     StudioTestOwner {
@@ -139,7 +126,6 @@ pub fn studio_changeset_owner(response: &str, session_id: &str) -> StudioTestOwn
         base_revision: studio_json_string(response, "base_revision"),
     }
 }
-
 
 pub fn studio_owned_transaction(addr: &str, op: &str, owner: &StudioTestOwner) -> String {
     studio_http(
@@ -153,7 +139,6 @@ pub fn studio_owned_transaction(addr: &str, op: &str, owner: &StudioTestOwner) -
     )
 }
 
-
 pub fn studio_session_transaction(addr: &str, op: &str, session_id: &str) -> String {
     studio_http(
         addr,
@@ -162,7 +147,6 @@ pub fn studio_session_transaction(addr: &str, op: &str, session_id: &str) -> Str
         &format!("{{\"op\":\"{op}\",\"session_id\":\"{session_id}\"}}"),
     )
 }
-
 
 pub fn studio_stage_option(
     addr: &str,
@@ -183,7 +167,6 @@ pub fn studio_stage_option(
     )
 }
 
-
 pub fn studio_attack_snapshot(server_pid: u32, truncate: bool) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -194,7 +177,11 @@ pub fn studio_attack_snapshot(server_pid: u32, truncate: bool) -> std::thread::J
                 .filter_map(Result::ok)
                 .find(|entry| {
                     fs::read_link(entry.path())
-                        .map(|target| target.to_string_lossy().contains("memfd:jetos-studio-source-"))
+                        .map(|target| {
+                            target
+                                .to_string_lossy()
+                                .contains("memfd:jetos-studio-source-")
+                        })
                         .unwrap_or(false)
                 })
                 .map(|entry| entry.path());
@@ -203,15 +190,20 @@ pub fn studio_attack_snapshot(server_pid: u32, truncate: bool) -> std::thread::J
                     .write(true)
                     .truncate(truncate)
                     .open(path);
-                assert!(attempt.is_err(), "sealed Studio source accepted hostile write access");
+                assert!(
+                    attempt.is_err(),
+                    "sealed Studio source accepted hostile write access"
+                );
                 return;
             }
-            assert!(std::time::Instant::now() < deadline, "Studio snapshot never appeared");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Studio snapshot never appeared"
+            );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
     })
 }
-
 
 pub fn assert_no_ephemeral_links(path: &Path) {
     let Ok(meta) = fs::symlink_metadata(path) else {
@@ -220,8 +212,16 @@ pub fn assert_no_ephemeral_links(path: &Path) {
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path).unwrap();
         let text = target.to_string_lossy();
-        assert!(!text.contains("/proc/self/fd/"), "ephemeral FD link: {} -> {text}", path.display());
-        assert!(!text.contains("/leases/"), "ephemeral lease link: {} -> {text}", path.display());
+        assert!(
+            !text.contains("/proc/self/fd/"),
+            "ephemeral FD link: {} -> {text}",
+            path.display()
+        );
+        assert!(
+            !text.contains("/leases/"),
+            "ephemeral lease link: {} -> {text}",
+            path.display()
+        );
         return;
     }
     if meta.is_dir() {
@@ -231,14 +231,12 @@ pub fn assert_no_ephemeral_links(path: &Path) {
     }
 }
 
-
 pub fn example_fixtures(root: &Path) -> PathBuf {
     realized_fixtures(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures"),
         root,
     )
 }
-
 
 pub fn realized_fixtures(committed: &Path, root: &Path) -> PathBuf {
     let fixtures = root.join("realized-fixtures");
@@ -265,18 +263,19 @@ pub fn realized_fixtures(committed: &Path, root: &Path) -> PathBuf {
         let colon = key + json[key..].find(':').unwrap() + 1;
         let value_start = colon + json[colon..].find('"').unwrap();
         let value_end = value_start + 1 + json[value_start + 1..].find('"').unwrap() + 1;
-        json.replace_range(value_start..value_end, &format!("{:?}", output.to_string_lossy()));
+        json.replace_range(
+            value_start..value_end,
+            &format!("{:?}", output.to_string_lossy()),
+        );
         fs::write(destination, json).unwrap();
     }
     fixtures
 }
 
-
 /// The committed jetpack project fixture (`env.jet` + `jet-pkgs/`).
 pub fn example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project")
 }
-
 
 fn seed_hangar_object(root: &Path, staging_dir: &Path) -> PathBuf {
     jetpack::Store::seal_local_output(staging_dir).unwrap();
@@ -302,7 +301,6 @@ fn seed_hangar_object(root: &Path, staging_dir: &Path) -> PathBuf {
     out_dir
 }
 
-
 /// Write a provider fixture whose `out` is a real content-addressed Hangar
 /// object, so closure validation can prove it before executing its binary.
 pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
@@ -325,20 +323,21 @@ pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) 
     out_dir
 }
 
-
 pub fn assert_no_hangar_entry(root: &Path, name: &str) {
     let hangar = root.join("hangar");
     if let Ok(entries) = fs::read_dir(&hangar) {
-        assert!(entries.flatten().all(|entry| {
-            !entry.file_name().to_string_lossy().starts_with(name)
-        }));
+        assert!(entries
+            .flatten()
+            .all(|entry| { !entry.file_name().to_string_lossy().starts_with(name) }));
     }
     let journal = hangar.join("closure-db/journal");
     if let Ok(entries) = fs::read_dir(journal) {
         assert_eq!(
             entries
                 .flatten()
-                .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn"))
+                .filter(
+                    |entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("txn")
+                )
                 .count(),
             0,
             "failed registration left a closure journal transaction"
@@ -346,7 +345,11 @@ pub fn assert_no_hangar_entry(root: &Path, name: &str) {
     }
     for empty in [hangar.join("objects"), root.join("leases")] {
         if let Ok(mut entries) = fs::read_dir(&empty) {
-            assert!(entries.next().is_none(), "failed registration left state in {}", empty.display());
+            assert!(
+                entries.next().is_none(),
+                "failed registration left state in {}",
+                empty.display()
+            );
         }
     }
     fn assert_no_root(path: &Path) {
@@ -354,7 +357,11 @@ pub fn assert_no_hangar_entry(root: &Path, name: &str) {
             return;
         };
         for entry in entries.flatten() {
-            assert_ne!(entry.file_name(), "nix-gc-root", "failed registration left a Nix GC root");
+            assert_ne!(
+                entry.file_name(),
+                "nix-gc-root",
+                "failed registration left a Nix GC root"
+            );
             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                 assert_no_root(&entry.path());
             }
@@ -362,7 +369,6 @@ pub fn assert_no_hangar_entry(root: &Path, name: &str) {
     }
     assert_no_root(&hangar);
 }
-
 
 /// Write a `fastfetch@nixpkgs` fixture whose `out` points at a real directory
 /// we control (see `write_runnable_fixture`).
@@ -386,7 +392,6 @@ pub fn write_fastfetch_fixture(fixtures: &Path, root: &Path, staging_dir: &Path)
     out_dir
 }
 
-
 pub fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: &str) {
     fs::create_dir_all(fixtures).unwrap();
     fs::write(
@@ -396,14 +401,12 @@ pub fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: 
     .unwrap();
 }
 
-
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
 }
-
 
 pub fn test_json_escape(value: &str) -> String {
     value
@@ -412,11 +415,9 @@ pub fn test_json_escape(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
-
 pub fn test_shell_quote(value: &Path) -> String {
     format!("'{}'", value.display().to_string().replace('\'', "'\\''"))
 }
-
 
 pub fn write_executable(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
@@ -426,7 +427,6 @@ pub fn write_executable(path: &Path, text: &str) {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
-
 
 pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
     fs::create_dir_all(bin).unwrap();
@@ -474,7 +474,6 @@ pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
         "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done < \"$last\"\n",
     );
 }
-
 
 /// Register a real, contract-valid hangar object via the production
 /// `ingest_tree` API.
@@ -546,7 +545,6 @@ pub fn write_hangar_meta(
     (dir, entry.envelope.output_hash)
 }
 
-
 pub fn write_lock_with_live_output(project: &Path, name: &str, version: &str, output_hash: &str) {
     let dot = project.join(".jet");
     fs::create_dir_all(&dot).unwrap();
@@ -558,7 +556,6 @@ pub fn write_lock_with_live_output(project: &Path, name: &str, version: &str, ou
     )
     .unwrap();
 }
-
 
 /// Build a scratch project whose `env.jet` pulls a first-party `core` package
 /// (`hello`) from a local repo. Returns `(base, proj, root)` so a test can run
@@ -596,12 +593,10 @@ pub fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     (base, proj, root)
 }
 
-
 /// The committed jetpack-config fixture dir.
 pub fn config_example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config")
 }
-
 
 pub fn assert_jetos_stderr_snapshot(name: &str, stderr: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -614,7 +609,6 @@ pub fn assert_jetos_stderr_snapshot(name: &str, stderr: &str) {
         "jetos diagnostic snapshot `{name}` changed"
     );
 }
-
 
 pub fn assert_jetos_stderr_snapshot_trimmed(name: &str, stderr: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -629,15 +623,17 @@ pub fn assert_jetos_stderr_snapshot_trimmed(name: &str, stderr: &str) {
     );
 }
 
-
-pub fn assert_jetos_stderr_snapshot_normalized(name: &str, stderr: &str, replacements: &[(&str, &str)]) {
+pub fn assert_jetos_stderr_snapshot_normalized(
+    name: &str,
+    stderr: &str,
+    replacements: &[(&str, &str)],
+) {
     let mut normalized = stderr.to_string();
     for (from, to) in replacements {
         normalized = normalized.replace(from, to);
     }
     assert_jetos_stderr_snapshot(name, &normalized);
 }
-
 
 pub fn write_cachyos_source_recipe(pkg: &Path) {
     let source = pkg.join("source");
@@ -661,18 +657,15 @@ pub fn write_cachyos_source_recipe(pkg: &Path) {
     .unwrap();
 }
 
-
 pub fn write_cachyos_source_builder(pkg: &Path, body: &str) {
     write_executable(&pkg.join("source/build.sh"), body);
 }
-
 
 pub fn write_bootlike_cachyos_artifacts(pkg: &Path) {
     fs::create_dir_all(pkg.join("boot")).unwrap();
     fs::write(pkg.join("boot/vmlinuz-cachyos"), "MZ test kernel\nHdrS\n").unwrap();
     fs::write(pkg.join("boot/initrd-cachyos"), "070701 test initrd\n").unwrap();
 }
-
 
 /// Stage a flake-root fixture plus a stub `nix` on PATH whose `eval` prints
 /// the canned live-extractor result (or fails when `output` is None).
@@ -697,9 +690,7 @@ pub fn write_live_import_fixture(src: &Path, tools: &Path, output: Option<&str>)
     write_executable(&tools.join("nix"), &body);
 }
 
-
 pub const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"stylix":true,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
-
 
 /// Scrape a string field's value out of a harness/proof JSON blob (the VM
 /// proof files are flat string fields, so a split is enough).
@@ -710,7 +701,6 @@ pub fn harness_json_field(text: &str, key: &str) -> String {
         .unwrap_or_else(|| panic!("harness JSON lacks `{key}`: {text}"));
     rest.split('"').next().unwrap().to_string()
 }
-
 
 /// The committed multi-package monorepo example dir.
 pub fn mono_example_dir() -> PathBuf {

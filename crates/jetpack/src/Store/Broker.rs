@@ -226,7 +226,7 @@ fn read_shared_store_config(layout: &BrokerLayout) -> io::Result<Option<SharedSt
 pub fn install_shared_store(roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     if !is_effective_root() {
         return Err(invalid(
-            "shared-store install requires administrator authority; run `sudo jetpack shared-store install`",
+            "shared-store install requires administrator authority; run `sudo jet shared-store install`",
         ));
     }
     let layout = admin_broker_layout();

@@ -475,6 +475,41 @@ fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
     assert!(stderr.contains(" Fix:"), "{stderr}");
 }
 
+#[cfg(unix)]
+#[test]
+fn project_parts_reports_authority_scan_failures() {
+    use std::os::unix::fs::symlink;
+
+    let dir = isolated_cwd("project_parts_authority_failure");
+    for (name, source) in [
+        ("one.jet", "module one { }\n"),
+        ("two.jet", "module two { }\n"),
+        ("three.jet", "module three { }\n"),
+        ("four.jet", "module four { }\n"),
+        ("five.jet", "module five { }\n"),
+    ] {
+        fs::write(dir.join(name), source).unwrap();
+    }
+    symlink("missing-target", dir.join("result")).unwrap();
+
+    for args in [
+        ["project", "parts"].as_slice(),
+        ["project", "parts", "--skipped"].as_slice(),
+    ] {
+        let output = Command::new(jet())
+            .args(args)
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty(), "unexpected stdout: {:?}", output.stdout);
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("Error [E1334]:") && stderr.contains("result"), "{stderr}");
+        assert!(stderr.contains(" Why:") && stderr.contains(" Fix:"), "{stderr}");
+    }
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn isolated_cwd_child_holds_executable() {

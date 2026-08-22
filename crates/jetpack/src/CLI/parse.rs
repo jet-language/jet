@@ -425,7 +425,9 @@ pub fn main(args: Vec<String>) -> i32 {
     }
     let theme = Theme::resolve_choice(color);
     // Doctor must observe state without repairing or migrating it.
-    if verb != "doctor" {
+    let read_only_shared_store_status = verb == "shared-store"
+        && parsed.positional.first().map(String::as_str) == Some("status");
+    if verb != "doctor" && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {
             Store::report_integrity(

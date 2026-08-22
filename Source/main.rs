@@ -750,7 +750,11 @@ fn esc(s: &str) -> String {
 fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
     let skipped_only = raw.iter().any(|arg| arg == "--skipped");
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let report = jet::ProjectParts::scan(&root);
+    let (report, failures) = jet::ProjectParts::scan_with_diagnostics(&root, &[]);
+    if let Some(failure) = failures.iter().find(|failure| failure.authority) {
+        emit_cli_value(failure.problem.clone(), mode.json);
+        exit(ExitCodes::USER_ERROR);
+    }
     let parts = report
         .parts
         .iter()

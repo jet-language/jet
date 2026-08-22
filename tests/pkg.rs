@@ -2894,6 +2894,14 @@ fn cli_jet_new_creates_project_structure() {
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "hello, world\n");
 
+    let update = jet_cmd(&["update", "jet"], &proj, &store);
+    assert!(
+        update.status.success(),
+        "new project toolchain pin must update:\n{}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+    assert!(proj.join(".jet/lock").is_file(), "toolchain update must write .jet/lock");
+
     let _ = fs::remove_dir_all(&tmp);
 }
 

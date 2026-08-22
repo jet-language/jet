@@ -326,6 +326,10 @@ live acceptance, and documentation. Work order is binding.
   sandbox proof, toolchain, worker facts, and builder identity.
 - Compromise, freeze, rollback, fast-forward, mix-and-match, first-root
   replacement, threshold-minus-one, and privacy-mode simulations.
+- The simulation proof runs through the production trust engine and native
+  cache transfer boundary: compromised signers, monotonic rollback, exact-expiry
+  freeze, metadata mix-and-match, changed cache keys, and revoked builders fail
+  closed with the existing signed provenance and recovery explanation.
 
 ### E4-JP7 — remote builders and execution
 

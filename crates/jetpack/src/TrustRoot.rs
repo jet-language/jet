@@ -1527,6 +1527,16 @@ impl TrustEngine {
                 detail: format!("sha256 {got} != {want}"),
             });
         }
+        if signed.signed.snapshot.length != snapshot_canonical.len() as u64 {
+            return Err(TrustError::ConsistentSnapshotMismatch {
+                role: "snapshot".into(),
+                detail: format!(
+                    "length {} != {}",
+                    signed.signed.snapshot.length,
+                    snapshot_canonical.len()
+                ),
+            });
+        }
         enforce_metadata_digest(
             self,
             MetadataRole::Timestamp,
@@ -1655,6 +1665,14 @@ pub fn canonical_targets(t: &TargetsMetadata) -> String {
     for (path, meta) in &t.targets {
         let hash = meta.hashes.get("sha256").cloned().unwrap_or_default();
         out.push_str(&format!("target.{path}={}:{}\n", meta.length, hash));
+        let length = meta.length.to_string();
+        append_framed(&mut out, "target-meta", &[path, length.as_str()]);
+        for (algorithm, hash) in &meta.hashes {
+            append_framed(&mut out, "target-hash", &[path, algorithm, hash]);
+        }
+        for (name, value) in &meta.custom {
+            append_framed(&mut out, "target-custom", &[path, name, value]);
+        }
     }
     out
 }
@@ -1670,21 +1688,48 @@ pub fn canonical_snapshot(s: &SnapshotMetadata) -> String {
             "meta.{name}={}:{hash}:{}\n",
             entry.version, entry.length
         ));
+        let version = entry.version.to_string();
+        let length = entry.length.to_string();
+        append_framed(
+            &mut out,
+            "snapshot-meta",
+            &[name, version.as_str(), length.as_str()],
+        );
+        for (algorithm, hash) in &entry.hashes {
+            append_framed(&mut out, "snapshot-hash", &[name, algorithm, hash]);
+        }
     }
     out
 }
 
 pub fn canonical_timestamp(t: &TimestampMetadata) -> String {
-    let hash = t
-        .snapshot
-        .hashes
-        .get("sha256")
-        .cloned()
-        .unwrap_or_default();
-    format!(
+    let hash = t.snapshot.hashes.get("sha256").cloned().unwrap_or_default();
+    let mut out = format!(
         "jet-tuf-timestamp-v1\nversion={}\nexpires={}\nsnapshot={}:{hash}:{}\n",
         t.version, t.expires_unix, t.snapshot.version, t.snapshot.length
-    )
+    );
+    let version = t.snapshot.version.to_string();
+    let length = t.snapshot.length.to_string();
+    append_framed(
+        &mut out,
+        "timestamp-snapshot",
+        &[version.as_str(), length.as_str()],
+    );
+    for (algorithm, hash) in &t.snapshot.hashes {
+        append_framed(&mut out, "timestamp-hash", &[algorithm, hash]);
+    }
+    out
+}
+
+fn append_framed(out: &mut String, label: &str, values: &[&str]) {
+    out.push_str(label);
+    for value in values {
+        out.push(':');
+        out.push_str(&value.len().to_string());
+        out.push(':');
+        out.push_str(value);
+    }
+    out.push('\n');
 }
 
 fn verify_role_signatures(
@@ -1804,7 +1849,7 @@ fn enforce_size(role: MetadataRole, size: usize, policy: &TrustPolicy) -> Result
 
 fn check_expiry(role: MetadataRole, expires_unix: u64, clock: &dyn TrustedClock) -> Result<(), TrustError> {
     let now = clock.now_unix();
-    if now > expires_unix {
+    if now >= expires_unix {
         return Err(TrustError::Expired {
             role,
             expires_unix,

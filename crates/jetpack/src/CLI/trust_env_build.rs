@@ -391,12 +391,7 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
             }
         }
         for secret in &task.secrets {
-            if !plan.secrets.iter().any(|declared| declared == secret) {
-                return Err(format!(
-                    "integration task `{}` lost secret `{secret}` before activation",
-                    task.name
-                ));
-            }
+            validate_task_secret_allowlist(&task.name, secret, &plan.secrets)?;
         }
         let expected_provider = match task.integration {
             ModuleEval::IntegrationKind::Android
@@ -463,6 +458,22 @@ fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
         return Err("integration host checks cannot be empty".to_string());
     }
     Ok(())
+}
+
+fn validate_task_secret_allowlist(
+    task_name: &str,
+    secret: &str,
+    declared: &[String],
+) -> Result<(), String> {
+    declared
+        .iter()
+        .any(|name| name == secret)
+        .then_some(())
+        .ok_or_else(|| {
+            format!(
+                "integration task `{task_name}` lost secret `{secret}` before activation"
+            )
+        })
 }
 
 fn validate_integration_host_check(check: &str, target: &str) -> Result<(), String> {
@@ -562,7 +573,7 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_provider_paths;
+    use super::{resolve_provider_paths, validate_task_secret_allowlist};
 
     #[test]
     fn lua_metadata_paths_resolve_inside_realized_output() {
@@ -601,6 +612,20 @@ mod tests {
                 "/legacy/a/?.lua;/legacy/b/?/init.lua",
             ),
             Some("/legacy/a/?.lua;/legacy/b/?/init.lua".into())
+        );
+    }
+
+    #[test]
+    fn activation_denies_task_secret_missing_from_declared_list() {
+        let error = validate_task_secret_allowlist(
+            "vault-check",
+            "database_password",
+            &["api_key".to_string()],
+        )
+        .expect_err("activation must deny a task secret outside its declared list");
+        assert!(
+            error.contains("lost secret `database_password` before activation"),
+            "unexpected activation denial"
         );
     }
 }

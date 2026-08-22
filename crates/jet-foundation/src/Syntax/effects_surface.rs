@@ -767,20 +767,27 @@ pub const SERVICES_VERBS: &[&str] = &[
 /// stderr.log,data/}`.
 pub const SERVICES_STATE_DIR: &str = "services";
 
-/// U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `jetpack secrets <verb>` —
-/// the encrypted-repo-secrets engine (`.jet/secrets.age`, age-style crypto
-/// bridge). `keygen` mints a local identity, `recipients add/list` manage the
-/// committed recipients file, `set`/`get` upsert/read one entry (re-encrypting
-/// the whole store each `set`).
+/// U13 (D-JPK-SECRET1/D-JPK-SECRETCRYPTO1, card #1779):
+/// `jetpack secrets <verb>` is the encrypted-repo-secrets engine
+/// (`.jet/secrets.age`, age-style crypto bridge). `keygen` mints a local
+/// identity, `recipients add/list` manage the committed recipients file,
+/// `set`/`get`/`unset` mutate or read one entry, `list` prints names only, and
+/// `import` upserts a real `.env` file without changing its source.
 pub const SECRETS_SUBCOMMAND: &str = "secrets";
 pub const SECRETS_VERB_KEYGEN: &str = "keygen";
 pub const SECRETS_VERB_SET: &str = "set";
 pub const SECRETS_VERB_GET: &str = "get";
+pub const SECRETS_VERB_UNSET: &str = "unset";
+pub const SECRETS_VERB_LIST: &str = "list";
+pub const SECRETS_VERB_IMPORT: &str = "import";
 pub const SECRETS_VERB_RECIPIENTS: &str = "recipients";
 pub const SECRETS_VERBS: &[&str] = &[
     SECRETS_VERB_KEYGEN,
     SECRETS_VERB_SET,
     SECRETS_VERB_GET,
+    SECRETS_VERB_UNSET,
+    SECRETS_VERB_LIST,
+    SECRETS_VERB_IMPORT,
     SECRETS_VERB_RECIPIENTS,
 ];
 pub const SECRETS_RECIPIENTS_VERB_ADD: &str = "add";
@@ -792,4 +799,7 @@ pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
 /// constant family — mirrors `jet registry keygen --force`'s own flag spelling
 /// (`crates/jet-cli/src/CLI.rs`), kept a plain literal there too.
 pub const SECRETS_FLAG_FORCE: &str = "--force";
+/// SecretSpec 0.18 parity: `jetpack secrets import` reads this file when no
+/// explicit source path is supplied.
+pub const SECRETS_DEFAULT_IMPORT_FILE: &str = ".env";
 use super::{CONFIG_SUBCOMMAND, OS_SUBCOMMAND, USER_SUBCOMMAND};

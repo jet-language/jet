@@ -8,9 +8,10 @@ use std::time::Duration;
 use jetpack::SHA256;
 use jetpack::TrustRoot::{
     canonical_root, canonical_snapshot, canonical_targets, fixture_threshold_root, sign_root,
-    sign_snapshot, sign_targets, sign_timestamp, BoundIdentity, FixedClock, IdentityKind,
+    sign_snapshot, sign_targets, sign_timestamp, BoundIdentity, CacheProvenance,
+    CacheReceipt, FixedClock, IdentityKind,
     PublisherIdentity, RootBootstrap, SnapshotMetaEntry, SnapshotMetadata, TargetMeta,
-    TargetsMetadata, TimestampMetadata, TrustEngine, TrustError, TrustPolicy,
+    TargetsMetadata, TimestampMetadata, TrustEngine, TrustError, TrustKey, TrustPolicy,
 };
 
 #[test]
@@ -157,4 +158,210 @@ fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
     ));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed() {
+    let now = 1_710_100_000u64;
+    let (root, keyring, keys) = fixture_threshold_root(1, now + 86_400).unwrap();
+    let signed_root = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
+    let pin = SHA256::sha256_hex(canonical_root(&root).as_bytes());
+    let bootstrap = || {
+        TrustEngine::bootstrap(
+            &signed_root,
+            keyring.clone(),
+            TrustPolicy::default(),
+            Some(&pin),
+            &FixedClock(now),
+            None,
+        )
+        .unwrap()
+    };
+
+    // A stolen or unknown root signer cannot replace the threshold.
+    let compromised = TrustKey::generate("compromised-root");
+    let forged_root = sign_root(&root, &[&keys[0], &compromised]).unwrap();
+    assert!(matches!(
+        TrustEngine::bootstrap(
+            &forged_root,
+            keyring.clone(),
+            TrustPolicy::default(),
+            Some(&pin),
+            &FixedClock(now),
+            None,
+        ),
+        Err(TrustError::ThresholdUnmet {
+            role: jetpack::TrustRoot::MetadataRole::Root,
+            have: 1,
+            need: 2
+        })
+    ));
+    let mut replacement = root.clone();
+    replacement.version = 2;
+    let replacement_root = sign_root(&replacement, &[&keys[0], &keys[1]]).unwrap();
+    assert!(matches!(
+        TrustEngine::bootstrap(
+            &replacement_root,
+            keyring.clone(),
+            TrustPolicy::default(),
+            Some(&pin),
+            &FixedClock(now),
+            None,
+        ),
+        Err(TrustError::BootstrapPinMismatch { .. })
+    ));
+
+    let mut targets = TargetsMetadata {
+        version: 1,
+        expires_unix: now + 3600,
+        targets: BTreeMap::from([(
+            "jetsrc/pkg".into(),
+            TargetMeta {
+                length: 3,
+                hashes: BTreeMap::from([("sha256".into(), SHA256::sha256_hex(b"pkg"))]),
+                custom: BTreeMap::new(),
+            },
+        )]),
+    };
+    let signed_targets = sign_targets(&targets, &[&keys[3]]).unwrap();
+    let mut engine = bootstrap();
+    engine
+        .verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now))
+        .unwrap();
+
+    // A signed older version is still a rollback and cannot become usable.
+    targets.version = 2;
+    let signed_v2 = sign_targets(&targets, &[&keys[3]]).unwrap();
+    engine
+        .verify_targets(&signed_v2, Some("jetsrc/pkg"), &FixedClock(now))
+        .unwrap();
+    let signed_old = sign_targets(
+        &TargetsMetadata {
+            version: 1,
+            ..targets.clone()
+        },
+        &[&keys[3]],
+    )
+    .unwrap();
+    assert!(matches!(
+        engine.verify_targets(&signed_old, Some("jetsrc/pkg"), &FixedClock(now)),
+        Err(TrustError::Rollback {
+            role: jetpack::TrustRoot::MetadataRole::Targets,
+            ..
+        })
+    ));
+
+    // Exact expiry is frozen, not a one-second grace period.
+    let frozen = TargetsMetadata {
+        version: 3,
+        expires_unix: now,
+        ..targets.clone()
+    };
+    assert!(matches!(
+        bootstrap().verify_targets(
+            &sign_targets(&frozen, &[&keys[3]]).unwrap(),
+            Some("jetsrc/pkg"),
+            &FixedClock(now),
+        ),
+        Err(TrustError::Expired {
+            role: jetpack::TrustRoot::MetadataRole::Targets,
+            ..
+        })
+    ));
+
+    // Custom and non-SHA metadata are part of the signed target record.
+    let mut changed_custom = signed_targets.clone();
+    changed_custom
+        .signed
+        .targets
+        .get_mut("jetsrc/pkg")
+        .unwrap()
+        .custom
+        .insert("provenance".into(), "attacker".into());
+    changed_custom.signatures = sign_targets(&changed_custom.signed, &[&keys[3]])
+        .unwrap()
+        .signatures;
+    let mut custom_engine = bootstrap();
+    custom_engine
+        .verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now))
+        .unwrap();
+    assert!(matches!(
+        custom_engine.verify_targets(&changed_custom, Some("jetsrc/pkg"), &FixedClock(now)),
+        Err(TrustError::ConsistentSnapshotMismatch { .. })
+    ));
+
+    // A timestamp may not point at a snapshot with a different byte length,
+    // even when its hash and version are otherwise copied from the chain.
+    let mut chain = bootstrap();
+    chain
+        .verify_targets(&signed_targets, Some("jetsrc/pkg"), &FixedClock(now))
+        .unwrap();
+    let targets_canonical = canonical_targets(&signed_targets.signed);
+    let snapshot = SnapshotMetadata {
+        version: 1,
+        expires_unix: now + 3600,
+        meta: BTreeMap::from([(
+            "targets".into(),
+            SnapshotMetaEntry {
+                version: 1,
+                length: targets_canonical.len() as u64,
+                hashes: BTreeMap::from([(
+                    "sha256".into(),
+                    SHA256::sha256_hex(targets_canonical.as_bytes()),
+                )]),
+            },
+        )]),
+    };
+    let signed_snapshot = sign_snapshot(&snapshot, &[&keys[4]]).unwrap();
+    chain
+        .verify_snapshot(&signed_snapshot, &targets_canonical, 1, &FixedClock(now))
+        .unwrap();
+    let snapshot_canonical = canonical_snapshot(&snapshot);
+    let timestamp = TimestampMetadata {
+        version: 1,
+        expires_unix: now + 3600,
+        snapshot: SnapshotMetaEntry {
+            version: 1,
+            length: snapshot_canonical.len() as u64 + 1,
+            hashes: BTreeMap::from([(
+                "sha256".into(),
+                SHA256::sha256_hex(snapshot_canonical.as_bytes()),
+            )]),
+        },
+    };
+    assert!(matches!(
+        chain.verify_timestamp(
+            &sign_timestamp(&timestamp, &[&keys[5]]).unwrap(),
+            &snapshot_canonical,
+            1,
+            &FixedClock(now),
+        ),
+        Err(TrustError::ConsistentSnapshotMismatch { .. })
+    ));
+
+    // Cache receipts expose the trust decision and fail closed on tamper or
+    // the exact expiry boundary.
+    let cache_key = TrustKey::generate("cache-receipt");
+    let provenance = CacheProvenance {
+        reference: "jetsrc/pkg".into(),
+        source: "git:source".into(),
+        builder: "cache-builder:trusted".into(),
+        action: "sha256:action".into(),
+        output: "sha256:output".into(),
+        platform: "linux.x86_64".into(),
+        sandbox: "sandbox:policy-bound".into(),
+        policy: "sha256:policy".into(),
+    };
+    let receipt = CacheReceipt::issue("public", provenance, 1, now, now + 60, &cache_key).unwrap();
+    receipt.verify(&cache_key, &FixedClock(now)).unwrap();
+    let mut tampered_receipt = receipt.clone();
+    tampered_receipt.provenance.output = "sha256:attacker".into();
+    assert!(matches!(
+        tampered_receipt.verify(&cache_key, &FixedClock(now)),
+        Err(TrustError::CacheReceiptInvalid { .. })
+    ));
+    assert!(matches!(
+        receipt.verify(&cache_key, &FixedClock(now + 60)),
+        Err(TrustError::CacheReceiptExpired { .. })
+    ));
 }

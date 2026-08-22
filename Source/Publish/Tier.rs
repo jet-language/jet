@@ -4,6 +4,7 @@ use crate::Diagnostics::Diagnostic;
 use std::path::{Path, PathBuf};
 
 use super::Index::IndexEntry;
+use super::NamePolicyDecision;
 
 /// The two registry channels. Core is human-reviewed. Community is open only
 /// after every machine gate passes.
@@ -86,11 +87,11 @@ impl GateStatus {
         }
     }
 
-    fn community(signature: GateState, audit: GateState) -> Self {
+    fn community_with_name(signature: GateState, audit: GateState, name: GateState) -> Self {
         Self {
             signature,
             audit,
-            name: GateState::Blocked,
+            name,
             liveness: GateState::Blocked,
             review: GateState::NotRequired,
         }
@@ -208,14 +209,13 @@ pub fn require_core_review(repo: &Path, package: &str, version: &str) -> Result<
 }
 
 /// Compute the community gate record before any artifact or index write.
-/// #1912 and #1913 remain closed until their gate implementations land. The
-/// same is true of #935 when the registry has no live metadata chain.
 pub fn community_gate_status(
     project_root: &Path,
     all_entries: &[IndexEntry],
     candidate: &IndexEntry,
     registry_name: &str,
     live_signature_chain: bool,
+    name_policy: &NamePolicyDecision,
 ) -> GateStatus {
     let signature = if live_signature_chain
         && super::verify_index_entry(all_entries, candidate, true, registry_name).is_ok()
@@ -224,7 +224,12 @@ pub fn community_gate_status(
     } else {
         GateState::Blocked
     };
-    GateStatus::community(signature, advisory_gate_status(project_root))
+    let name = if name_policy.is_blocked() {
+        GateState::Blocked
+    } else {
+        GateState::Passed
+    };
+    GateStatus::community_with_name(signature, advisory_gate_status(project_root), name)
 }
 
 pub fn community_gate_error(package: &str, version: &str, status: &GateStatus) -> Diagnostic {
@@ -298,7 +303,11 @@ mod tests {
 
     #[test]
     fn gate_status_roundtrips_and_names_closed_gates() {
-        let status = GateStatus::community(GateState::Blocked, GateState::Blocked);
+        let status = GateStatus::community_with_name(
+            GateState::Blocked,
+            GateState::Blocked,
+            GateState::Blocked,
+        );
         let parsed = GateStatus::parse(&status.summary()).expect("canonical gate status parses");
         assert_eq!(parsed, status);
         assert_eq!(

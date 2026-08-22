@@ -868,7 +868,8 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
     0
 }
 
-/// `jetpack secrets keygen|set|get|recipients` (U13, D-JPK-SECRETCRYPTO1).
+/// `jetpack secrets keygen|set|get|unset|list|import|recipients`
+/// (U13, D-JPK-SECRET1/D-JPK-SECRETCRYPTO1, SecretSpec 0.18 parity).
 pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(verb) = parsed.positional.first().cloned() else {
         theme.error(
@@ -1005,6 +1006,81 @@ pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
                 Err(msg) => {
                     theme.error(&format!("couldn't read `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_UNSET => {
+            let Some(name) = parsed.positional.get(1) else {
+                theme.error(
+                    "`jetpack secrets unset` needs a name",
+                    "",
+                    "try `jetpack secrets unset db_password`.",
+                );
+                return 2;
+            };
+            match Secrets::unset(&project_dir, name) {
+                Ok(true) => {
+                    theme.ok(&format!("unset `{name}`"));
+                    0
+                }
+                Ok(false) => {
+                    theme.error_coded(
+                        "E1263",
+                        &format!("no secret named `{name}`"),
+                        "the encrypted store doesn't have an entry with this name.",
+                        &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                    );
+                    2
+                }
+                Err(msg) => {
+                    theme.error(&format!("couldn't unset `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_LIST => {
+            match Secrets::list(&project_dir) {
+                Ok(names) => {
+                    for name in names {
+                        println!("{name}");
+                    }
+                    0
+                }
+                Err(msg) => {
+                    theme.error("couldn't list secrets", &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_IMPORT => {
+            let source = parsed
+                .positional
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(Syntax::SECRETS_DEFAULT_IMPORT_FILE));
+            match Secrets::import_dotenv(&project_dir, &source) {
+                Ok(names) => {
+                    theme.ok(&format!(
+                        "imported {} secret name(s) from `{}`",
+                        names.len(),
+                        source.display()
+                    ));
+                    for name in names {
+                        theme.detail(&format!("imported `{name}`"));
+                    }
+                    theme.detail(&format!(
+                        "left `{}` untouched; remove it after verifying the vault import",
+                        source.display()
+                    ));
+                    0
+                }
+                Err(msg) => {
+                    theme.error(
+                        &format!("couldn't import secrets from `{}`", source.display()),
+                        &msg,
+                        "fix the .env file and retry; the source file was not changed.",
+                    );
                     2
                 }
             }

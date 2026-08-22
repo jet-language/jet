@@ -218,13 +218,11 @@ pub fn suite_name_from_exe_stem(stem: &str) -> &str {
 /// opposite of a committed, named, reviewable minority. Pure, so the unit tests
 /// below drive it with synthetic input instead of the real environment.
 fn resolve_suite_budget(suite: &str, ledger: &str, env_raw: Option<&str>) -> (u64, String) {
-    let row = parse_suite_budgets(ledger)
-        .ok()
-        .and_then(|rows| {
-            rows.into_iter()
-                .find(|row| row.suite == suite)
-                .map(|row| (row.secs, row.reason.to_string()))
-        });
+    let row = parse_suite_budgets(ledger).ok().and_then(|rows| {
+        rows.into_iter()
+            .find(|row| row.suite == suite)
+            .map(|row| (row.secs, row.reason.to_string()))
+    });
     let (mut secs, mut source) = match row {
         Some((secs, reason)) => (
             secs,
@@ -258,7 +256,10 @@ fn guard_watchdog_main() {
     // committed row in the table, naming itself and its reason (#677).
     let stem = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+        .and_then(|exe| {
+            exe.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
         .unwrap_or_default();
     let suite = suite_name_from_exe_stem(&stem);
     let (secs, source) = resolve_suite_budget(
@@ -310,7 +311,10 @@ pub fn assert_test_path_on_disk(path: &Path, label: &str) {
 pub fn assert_test_environment_is_safe() {
     for (name, value) in [
         ("CARGO_TARGET_DIR", std::env::var_os("CARGO_TARGET_DIR")),
-        ("JET_TEST_SCRATCH_DIR", std::env::var_os("JET_TEST_SCRATCH_DIR")),
+        (
+            "JET_TEST_SCRATCH_DIR",
+            std::env::var_os("JET_TEST_SCRATCH_DIR"),
+        ),
         (
             "JET_DEV_ORACLE_CACHE_DIR",
             std::env::var_os("JET_DEV_ORACLE_CACHE_DIR"),
@@ -328,14 +332,11 @@ pub fn test_scratch_root(scope: &str) -> PathBuf {
     assert_test_environment_is_safe();
     let root = std::env::var_os("JET_TEST_SCRATCH_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp/jet-test-scratch")
-        });
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp/jet-test-scratch"));
     assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR");
     let path = root.join(scope);
-    fs::create_dir_all(&path).unwrap_or_else(|error| {
-        panic!("create test scratch root `{}`: {error}", path.display())
-    });
+    fs::create_dir_all(&path)
+        .unwrap_or_else(|error| panic!("create test scratch root `{}`: {error}", path.display()));
     path
 }
 
@@ -579,7 +580,9 @@ pub fn make_tree_writable(path: &Path) {
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
     }
     if meta.is_dir() {
-        let Ok(entries) = fs::read_dir(path) else { return };
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
         for entry in entries {
             let Ok(entry) = entry else { continue };
             make_tree_writable(&entry.path());
@@ -1044,9 +1047,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             let Some(next) = bytes.get(at + 1).copied() else {
                 return false;
             };
-            next == b'\\'
-                || !ident_continue(next)
-                || bytes.get(at + 2) == Some(&b'\'')
+            next == b'\\' || !ident_continue(next) || bytes.get(at + 2) == Some(&b'\'')
         }
 
         fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
@@ -1156,14 +1157,12 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             let line_start = |at: usize| src[..at].rfind('\n').map_or(0, |pos| pos + 1);
             let current_line = line_start(module_start);
             let prefix = src[current_line..module_start].trim_start();
-            let mut start = if prefix.is_empty()
-                || prefix.starts_with("pub")
-                || prefix.starts_with("#[")
-            {
-                current_line
-            } else {
-                module_start
-            };
+            let mut start =
+                if prefix.is_empty() || prefix.starts_with("pub") || prefix.starts_with("#[") {
+                    current_line
+                } else {
+                    module_start
+                };
             while start > 0 {
                 let previous_line = line_start(start.saturating_sub(1));
                 let previous = src[previous_line..start].trim();
@@ -1225,10 +1224,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
 
         fn skip_trivia(bytes: &[u8], mut at: usize) -> usize {
             loop {
-                while bytes
-                    .get(at)
-                    .is_some_and(|byte| byte.is_ascii_whitespace())
-                {
+                while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
                     at += 1;
                 }
                 if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'/') {
@@ -1323,13 +1319,12 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
                         bracket_depth = bracket_depth.saturating_sub(1);
                         i += 1;
                     }
-                    b'm'
-                        if brace_depth == 0
-                            && paren_depth == 0
-                            && bracket_depth == 0
-                            && bytes.get(i + 1..i + 3) == Some(b"od")
-                            && (i == 0 || !ident_continue(bytes[i - 1]))
-                            && bytes.get(i + 3).is_none_or(|byte| !ident_continue(*byte)) =>
+                    b'm' if brace_depth == 0
+                        && paren_depth == 0
+                        && bracket_depth == 0
+                        && bytes.get(i + 1..i + 3) == Some(b"od")
+                        && (i == 0 || !ident_continue(bytes[i - 1]))
+                        && bytes.get(i + 3).is_none_or(|byte| !ident_continue(*byte)) =>
                     {
                         let mut j = i + 3;
                         while bytes.get(j).is_some_and(|byte| byte.is_ascii_whitespace()) {
@@ -1540,13 +1535,26 @@ fn unsafe_keyword_scan_reads_code_not_data() {
         "an example's own path in a stack-frame argument is data, not an `unsafe` block"
     );
     let sentry = "        let _jet_sentry = jet_mem::jet_sentry_scope(true, \"examples/features/lowlevel/unsafe_obligations.jet\", 5, \"cell stays live\");";
-    assert!(unsafe_keyword_columns(sentry).is_empty(), "sentry reason strings are data");
+    assert!(
+        unsafe_keyword_columns(sentry).is_empty(),
+        "sentry reason strings are data"
+    );
     let user_string = "        { let _ = jet_term_write_stdout_line(&((\"unsafe gate\".to_string()).jet_show()), false); };";
-    assert!(unsafe_keyword_columns(user_string).is_empty(), "a printed string is data");
+    assert!(
+        unsafe_keyword_columns(user_string).is_empty(),
+        "a printed string is data"
+    );
     assert!(unsafe_keyword_columns("// unsafe { … } in a comment").is_empty());
-    assert!(unsafe_keyword_columns("    let unsafe_flag = 1;").is_empty(), "identifier, not keyword");
+    assert!(
+        unsafe_keyword_columns("    let unsafe_flag = 1;").is_empty(),
+        "identifier, not keyword"
+    );
 
-    assert_eq!(unsafe_keyword_columns("    unsafe {").len(), 1, "the gated block form must count");
+    assert_eq!(
+        unsafe_keyword_columns("    unsafe {").len(),
+        1,
+        "the gated block form must count"
+    );
     assert_eq!(
         unsafe_keyword_columns("unsafe extern \"C\" fn InitWindow() {}").len(),
         1,
@@ -1577,7 +1585,6 @@ pub fn strip_scheduler_native(src: &str) -> String {
         }
     }
 }
-
 
 /// D-RAYLIB1: drop the always-emitted kernel raylib FFI region. Bridge unsafe
 /// lives between `jet:raylib-begin` / `jet:raylib-end`; user functions stay
@@ -1702,14 +1709,21 @@ fn garbage_alloc_cap_env_value_clamps_to_a_sane_cap() {
     // resulting negative cap satisfies `cap < 0` forever, silently disarming
     // accounting for the rest of the process. It must clamp instead.
     let gb = parsed_cap_gb(Some("999999999999999999"));
-    assert!((1..=GUARD_CAP_CEILING_GB).contains(&gb), "gb={gb} not clamped");
+    assert!(
+        (1..=GUARD_CAP_CEILING_GB).contains(&gb),
+        "gb={gb} not clamped"
+    );
     let bytes = gb.saturating_mul(1 << 30);
     assert!(bytes > 0, "cap bytes must stay positive, got {bytes}");
 
     // A missing/unparseable value still gets the documented default.
     assert_eq!(parsed_cap_gb(None), 10);
     assert_eq!(parsed_cap_gb(Some("not a number")), 10);
-    assert_eq!(parsed_cap_gb(Some("0")), 1, "0 GB must clamp up to the 1 GB floor");
+    assert_eq!(
+        parsed_cap_gb(Some("0")),
+        1,
+        "0 GB must clamp up to the 1 GB floor"
+    );
 }
 
 #[test]
@@ -1721,22 +1735,40 @@ fn suite_budget_defaults_to_900s_and_env_can_only_tighten() {
     let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, None);
     assert_eq!(secs, 900, "an unlisted suite keeps the 900s default");
     assert!(source.contains("900s default"), "source: {source}");
-    assert!(source.contains("no `some_unit_suite` row"), "source: {source}");
+    assert!(
+        source.contains("no `some_unit_suite` row"),
+        "source: {source}"
+    );
 
     let (secs, source) = resolve_suite_budget("slow_measurement", ledger, None);
     assert_eq!(secs, 5400, "a named row is the suite's budget");
-    assert!(source.contains("committed `slow_measurement` row"), "source: {source}");
-    assert!(source.contains("ratified sample policy"), "the reason travels: {source}");
+    assert!(
+        source.contains("committed `slow_measurement` row"),
+        "source: {source}"
+    );
+    assert!(
+        source.contains("ratified sample policy"),
+        "the reason travels: {source}"
+    );
 
     // Tightening is the env var's whole job — the guard self-test runs on it.
     let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, Some("3"));
     assert_eq!(secs, 3);
-    assert!(source.starts_with("JET_TEST_DEADLINE_SECS=3, tightening"), "source: {source}");
+    assert!(
+        source.starts_with("JET_TEST_DEADLINE_SECS=3, tightening"),
+        "source: {source}"
+    );
 
     // Loosening is not. An exported deadline is granted to every target at
     // once, which is exactly the drift the committed table exists to stop.
-    assert_eq!(resolve_suite_budget("some_unit_suite", ledger, Some("36000")).0, 900);
-    assert_eq!(resolve_suite_budget("slow_measurement", ledger, Some("36000")).0, 5400);
+    assert_eq!(
+        resolve_suite_budget("some_unit_suite", ledger, Some("36000")).0,
+        900
+    );
+    assert_eq!(
+        resolve_suite_budget("slow_measurement", ledger, Some("36000")).0,
+        5400
+    );
     assert_eq!(
         resolve_suite_budget("some_unit_suite", ledger, Some("0")).0,
         900,
@@ -1746,8 +1778,14 @@ fn suite_budget_defaults_to_900s_and_env_can_only_tighten() {
     // A malformed table falls back to the strict default rather than to the
     // last row that happened to parse. tests/suite_membership.rs is what turns
     // that fallback into a reported failure.
-    assert_eq!(resolve_suite_budget("slow_measurement", "slow_measurement lots", None).0, 900);
-    assert_eq!(resolve_suite_budget("slow_measurement", "slow_measurement 5400", None).0, 900);
+    assert_eq!(
+        resolve_suite_budget("slow_measurement", "slow_measurement lots", None).0,
+        900
+    );
+    assert_eq!(
+        resolve_suite_budget("slow_measurement", "slow_measurement 5400", None).0,
+        900
+    );
 }
 
 #[test]
@@ -1759,10 +1797,16 @@ fn suite_name_comes_from_the_test_binary_cargo_built() {
         "cli_compile_latency"
     );
     // Run by hand, or by a runner that copied the binary: no hash to strip.
-    assert_eq!(suite_name_from_exe_stem("cli_compile_latency"), "cli_compile_latency");
+    assert_eq!(
+        suite_name_from_exe_stem("cli_compile_latency"),
+        "cli_compile_latency"
+    );
     // A trailing word that is not a metadata hash is part of the name.
     assert_eq!(suite_name_from_exe_stem("cli-runtime"), "cli-runtime");
-    assert_eq!(suite_name_from_exe_stem("-1a2b3c4d5e6f7a8b"), "-1a2b3c4d5e6f7a8b");
+    assert_eq!(
+        suite_name_from_exe_stem("-1a2b3c4d5e6f7a8b"),
+        "-1a2b3c4d5e6f7a8b"
+    );
 }
 
 #[test]

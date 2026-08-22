@@ -15,6 +15,7 @@
 //! `content_hash` / `fingerprint` are the exact fields already on
 //! `Lock::LockedPackage` — the index does not invent new hash names.
 
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
@@ -136,6 +137,47 @@ pub fn read_entries(repo: &Path, name: &str) -> io::Result<Vec<IndexEntry>> {
             })
         })
         .collect()
+}
+
+/// List package names present in a sparse registry index. The publish name
+/// policy compares against every package, not only the candidate's own file.
+pub fn package_names(repo: &Path) -> io::Result<Vec<String>> {
+    let root = repo.join("index");
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut names = BTreeSet::new();
+    for entry in entries {
+        let entry = entry?;
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "registry index package directory must not be a symlink",
+            ));
+        }
+        if !metadata.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        validate_index_component(&name, "package name")?;
+        let path = index_entry_path(repo, &name)?;
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("registry index for `{name}` is not a regular file"),
+            ));
+        }
+        names.insert(name);
+    }
+    Ok(names.into_iter().collect())
 }
 
 /// Find the recorded line for one exact `name`+`version`, if any.

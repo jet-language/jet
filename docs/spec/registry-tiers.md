@@ -52,6 +52,41 @@ not available.
 The community trust model still needs an owner ballot with worked options and
 ratification. This document does not open the channel or replace that ballot.
 
+## Package name policy (#1912)
+
+### Plan of record
+
+No plan was recorded on card #1912. This plan comes from the card body and its
+exit criteria:
+
+1. read every existing package name from the registry index;
+2. compare the candidate with a case-folded confusable skeleton;
+3. check the reserved suffix list;
+4. warn for the warning distance and block for the block distance;
+5. emit a teaching diagnostic before any artifact or index write;
+6. test the rule and record its thresholds here.
+
+### Mechanical rule
+
+`jet registry publish` checks the candidate against all existing index names.
+The skeleton maps common Latin, Greek, and Cyrillic lookalikes to one ASCII
+form. The check uses Levenshtein edit distance on that form.
+
+These suffixes are reserved:
+
+- `-fixed`
+- `-patched`
+- `-bin`
+
+An exact confusable match or a reserved suffix blocks publish. Edit distance 1
+blocks publish. Edit distance 2 emits `L2608` and allows the publish. A blocked
+name emits `E2608`. `--force` does not bypass this name policy.
+
+The code stores `warn=2` and `block=1` in
+`Source/Publish/NamePolicy.rs`. These values are provisional. No owner-ratified
+threshold decision is recorded in this checkout. Ratify the two values, then
+update this section and the constants before closing #1912.
+
 ## User surfaces
 
 Registry resolution writes `tier` and `gate-status` into the lock. `jet fetch`

@@ -476,6 +476,36 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         }),
     };
 
+    // #1912: compare the candidate with every existing package name before
+    // signing, artifact staging, or index mutation. A warning is visible and
+    // non-blocking; reserved suffixes, confusable names, and the block band
+    // are hard publish refusals.
+    let existing_names = match jet::Publish::Index::package_names(repo) {
+        Ok(names) => names,
+        Err(error) => fail_publish_checkout(&checkout, || {
+            let diagnostic = jet::Publish::e2607("registry index", &error.to_string());
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
+        }),
+    };
+    let name_policy = jet::Publish::assess_name(name, &existing_names);
+    if let Some(diagnostic) = name_policy.diagnostic(name) {
+        if name_policy.is_blocked() {
+            fail_publish_checkout(&checkout, || {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+                );
+            });
+        }
+        eprint!(
+            "{}",
+            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+        );
+    }
+
     // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
     // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
     // still applies unconditionally). The public key is TOFU-pinned into the
@@ -544,6 +574,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 &candidate,
                 &registry.name,
                 registry_has_metadata_chain(repo),
+                &name_policy,
             );
             if !status.community_open() {
                 fail_publish_checkout(&checkout, || {

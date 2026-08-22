@@ -286,6 +286,14 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert_eq!(published.mirror, mirror.path.display().to_string());
     let verified = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
     assert_eq!(verified.output_hash, entry.envelope.output_hash);
+    assert_eq!(verified.builder, published.builder);
+    assert_eq!(verified.provenance, published.provenance);
+    assert!(!verified.signed_fingerprint.is_empty());
+    let report_json = jetpack::Store::cache_report_json("verify", &verified);
+    assert!(report_json.contains("\"operation\":\"verify\""));
+    assert!(report_json.contains("\"signed_fingerprint\":"));
+    assert!(report_json.contains("\"builder\":"));
+    assert!(report_json.contains("\"provenance\":"));
 
     let restored = Scratch::new("cache-restored");
     jetpack::Store::substitute_cache_entry(
@@ -345,10 +353,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert!(!nar.with_extension("partial").exists());
     assert!(!info.with_extension("partial").exists());
 
-    let cache_key = jetpack::TrustRoot::TrustKey::from_secret(
-        fs::read(root.join("trust/cache-public.key")).unwrap(),
-    )
-    .unwrap();
+    let cache_key_bytes = fs::read(root.join("trust/cache-public.key")).unwrap();
+    let cache_key = jetpack::TrustRoot::TrustKey::from_secret(cache_key_bytes.clone()).unwrap();
     let clear_negative_hint = || {
         let _ = fs::remove_dir_all(mirror.join(".jet-negative"));
     };
@@ -443,6 +449,36 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     )
     .is_err());
     assert!(!rejected.join("out").exists());
+
+    // A changed cache signer is a compromise signal. The host pin rejects it
+    // before any mirror bytes can become usable.
+    fs::write(root.join("trust/cache-public.key"), vec![0x7f; 32]).unwrap();
+    let changed_key = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        changed_key.contains("cache key for `public` changed"),
+        "{changed_key}"
+    );
+    fs::write(root.join("trust/cache-public.key"), cache_key_bytes).unwrap();
+
+    // Revocation also blocks an already-published object and tells the owner
+    // to rebuild; relocation or relabeling is not a recovery path.
+    jetpack::TrustRoot::revoke_cache_builder(&root.path, &published.builder).unwrap();
+    let revoked = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(revoked.contains("revoked"), "{revoked}");
+    assert!(revoked.contains("rebuild"), "{revoked}");
+    let revoked_destination = Scratch::new("cache-revoked-rejected");
+    assert!(jetpack::Store::substitute_cache_entry(
+        &roots,
+        &entry.id,
+        "public",
+        &revoked_destination.join("out")
+    )
+    .is_err());
+    assert!(!revoked_destination.join("out").exists());
 }
 
 #[test]
@@ -4718,6 +4754,95 @@ fn jet_build_reports_source_states() {
     assert!(
         out2.contains("1 cached"),
         "summary must count the cache hit: {out2}"
+    );
+}
+
+
+#[test]
+fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
+    let (_base, proj, root) = core_hello_project("cache-source-fallback");
+    let mirror = Scratch::new("cache-source-fallback-mirror");
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    jetpack::Store::bind_cache(
+        &roots,
+        "public",
+        vec![mirror.path.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .unwrap();
+
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
+    assert!(
+        fs::read_dir(&mirror.path)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("narinfo")),
+        "source realization must publish a signed cache record"
+    );
+    make_writable(&entry.out);
+    fs::write(Path::new(&entry.out).join("bin/hello"), "tampered\n").unwrap();
+
+    let substituted = run();
+    assert!(
+        substituted.status.success(),
+        "verified cache substitution must repair the local candidate: {}",
+        String::from_utf8_lossy(&substituted.stderr)
+    );
+    let substituted_stderr = String::from_utf8_lossy(&substituted.stderr);
+    assert!(
+        substituted_stderr.contains("substituted")
+            && substituted_stderr.contains("1 substituted"),
+        "production build must report the verified substitution: {substituted_stderr}"
+    );
+    let repaired = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
+    assert_eq!(
+        fs::read_to_string(Path::new(&repaired.out).join("bin/hello")).unwrap(),
+        "hello\n"
+    );
+
+    make_writable(&repaired.out);
+    fs::write(
+        Path::new(&repaired.out).join("bin/hello"),
+        "tampered again\n",
+    )
+    .unwrap();
+    fs::remove_dir_all(&mirror.path).unwrap();
+    fs::write(&mirror.path, "cache substituter unavailable").unwrap();
+
+    let fallback = run();
+    assert!(
+        fallback.status.success(),
+        "source fallback must survive an unavailable substituter: {}",
+        String::from_utf8_lossy(&fallback.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&fallback.stderr);
+    assert!(
+        stderr.contains("built"),
+        "fallback must rebuild from source: {stderr}"
+    );
+    assert!(
+        !stderr.contains("1 cached"),
+        "an unavailable substituter must not report a cache hit: {stderr}"
     );
 }
 

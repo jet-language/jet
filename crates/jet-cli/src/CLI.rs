@@ -157,8 +157,9 @@ impl CommandSpec {
 }
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
-/// `HandlerKey::Hangar` keeps the group because that handler consumes the group word
-/// itself (`hangar path`, `hangar verify`, `hangar rollback`, `hangar generations`, `hangar du`, …).
+/// `HandlerKey::Hangar` and `HandlerKey::SharedStore` keep the group because
+/// those handlers consume the group word themselves (`hangar path`,
+/// `shared-store status`, …).
 pub struct NestedCommandSpec {
     pub name: &'static str,
     /// Canonical spelling after the group name. Multiple forms use one line each.
@@ -217,7 +218,7 @@ impl HandlerKey {
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv)
+        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv | Self::SharedStore)
     }
 }
 

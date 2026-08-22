@@ -95,7 +95,7 @@ pub fn new_template(name: &str, annotated: bool) -> String {
         format!(
             r#"name: "{name}"
 version: "0.1.0"
-jet: ">={ver}"
+jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
@@ -111,7 +111,7 @@ repository: ""
         format!(
             r#"name: "{name}"
 version: "0.1.0"
-jet: ">={ver}"
+jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""

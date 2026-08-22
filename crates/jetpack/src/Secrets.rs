@@ -21,6 +21,7 @@
 //! or a temp file — the store on disk is always ciphertext, end to end
 //! (encrypt/decrypt happen over the helper's stdin/stdout pipe, never a file).
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -370,11 +371,89 @@ pub fn set(project_dir: &Path, name: &str, value: &str) -> Result<(), String> {
     write_store_unlocked(project_dir, &pairs)
 }
 
+/// `jetpack secrets unset <name>` — remove one entry and re-encrypt the whole
+/// store. `Ok(false)` is "no such entry" (E1263 at the CLI layer).
+pub fn unset(project_dir: &Path, name: &str) -> Result<bool, String> {
+    let _guard =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
+            .map_err(|e| format!("couldn't lock secrets store: {e}"))?;
+    let mut pairs = read_store_unlocked(project_dir)?;
+    let before = pairs.len();
+    pairs.retain(|(key, _)| key != name);
+    if pairs.len() == before {
+        return Ok(false);
+    }
+    write_store_unlocked(project_dir, &pairs)?;
+    Ok(true)
+}
+
+/// `jetpack secrets list` — return declared names without returning values to
+/// the CLI output path.
+pub fn list(project_dir: &Path) -> Result<Vec<String>, String> {
+    Ok(read_store(project_dir)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect())
+}
+
+/// `jetpack secrets import <.env>` — upsert every valid assignment from a
+/// dotenv source. The source is read only; callers print cleanup advice after
+/// the encrypted write succeeds.
+pub fn import_dotenv(project_dir: &Path, source: &Path) -> Result<Vec<String>, String> {
+    let values = parse_dotenv(source)?;
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    let _guard =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
+            .map_err(|e| format!("couldn't lock secrets store: {e}"))?;
+    let mut pairs = read_store_unlocked(project_dir)?;
+    let names = values.keys().cloned().collect::<Vec<_>>();
+    for (name, value) in values {
+        match pairs.iter_mut().find(|(key, _)| key == &name) {
+            Some((_, existing)) => *existing = value,
+            None => pairs.push((name, value)),
+        }
+    }
+    write_store_unlocked(project_dir, &pairs)?;
+    Ok(names)
+}
+
 /// `jetpack secrets get <name>` — `Ok(None)` is "no such entry" (E1263 at the
 /// CLI layer), distinct from `Err` (a bridge/crypto/identity failure).
 pub fn get(project_dir: &Path, name: &str) -> Result<Option<String>, String> {
     let pairs = read_store(project_dir)?;
     Ok(pairs.into_iter().find(|(k, _)| k == name).map(|(_, v)| v))
+}
+
+fn parse_dotenv(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut values = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((name, value)) = line.split_once('=') else {
+            return Err(format!("line {} has no '='", index + 1));
+        };
+        let name = name.trim();
+        let mut bytes = name.bytes();
+        let valid_start = matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'));
+        if !valid_start || !bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()) {
+            return Err(format!("line {} has an invalid variable name", index + 1));
+        }
+        let mut value = value.trim().to_string();
+        if value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\'')))
+        {
+            value = value[1..value.len() - 1].to_string();
+        }
+        values.insert(name.to_string(), value);
+    }
+    Ok(values)
 }
 
 // ──────────────────────────────────────────────

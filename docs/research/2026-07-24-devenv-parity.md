@@ -166,6 +166,11 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Feature | Jet today | Status | Follow-up |
 |---|---|---|---|
 | Declared secrets | U13 / vault (stronger than secretspec) | **shipped** | Prefer Jet vault |
+| Secret lifecycle verbs (`list`, `unset`) | U13 / `jetpack secrets` | **shipped** | SecretSpec 0.18 delta; #1779 |
+| `.env` import | `jetpack secrets import` | **shipped** | Source stays untouched; printed cleanup advice; #1779 |
+| Per-task least-privilege secret lists | `trust_env_build.rs` activation guard | **shipped** | #1779 proof |
+| Composed / derived secrets | — | **owner ballot** | #1779; surface spelling first |
+| Per-secret metadata and generation | — | **owner ballot** | #1779; required/default/description/generated value |
 | secretspec.dev providers | — | **reject**/defer | Do not fork; map providers into vault if needed later |
 | Trust allow before activate | vision | **partial** | Prompt + allowlist |
 

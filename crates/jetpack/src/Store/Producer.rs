@@ -139,6 +139,11 @@ impl ProducerRecord {
         output: &str,
         identity: &CacheIdentity,
     ) {
+        // Providers keep the detailed recipe in the replay plan. The cache
+        // admission fact is the stable recipe fingerprint shared by the
+        // expectation, local proof, and signed narinfo.
+        self.facts
+            .insert("action.recipe".into(), identity.recipe_fingerprint.clone());
         self.facts
             .insert("cache.reference".into(), reference.into());
         self.facts
