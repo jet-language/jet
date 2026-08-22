@@ -405,7 +405,7 @@ use core.email as email
 fn run() {
     safe := email.Limits.safe()
     print("{safe.max_reply_line_bytes},{safe.max_reply_lines},{safe.max_capabilities},{safe.max_recipients},{safe.max_message_bytes},{safe.max_auth_challenge_bytes}")
-    strict := email.Limits.{
+    strict := email.Limits{
         max_reply_line_bytes: 64,
         max_reply_lines: 1,
         max_capabilities: 2,
@@ -432,14 +432,14 @@ use core.crypto as crypto
 fn run() {
     password :: crypto.Secret.from_text("not-logged")
     dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
-    dkim :: email.DkimConfig.{
+    dkim :: email.DkimConfig{
         domain: "example.com",
         selector: "login-2026",
         private_key: dkim_key,
         signed_headers: ["from", "subject", "mime-version", "content-type"],
     }
-    auth :: SMTPAuth.{ .Password.{ username: "mailer", password: password } }
-    config :: email.SMTPConfig.{
+    auth :: SMTPAuth{ .Password{ username: "mailer", password: password } }
+    config :: email.SMTPConfig{
         host: "localhost",
         port: 465,
         security: .TLS,

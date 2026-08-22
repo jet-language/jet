@@ -5,15 +5,15 @@ fn declared_conversion_reaches_default_error() {
     let source = r#"
 enum StoreErr { Missing }
 
-impl StoreErr => Err {
+impl StoreErr -> Err {
     return Err("missing")
 }
 
-fn read_store() => Int ! StoreErr {
+fn read_store() Int ! StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ! {
+fn get_user() Int ! {
     return Ok(read_store()?)
 }
 
@@ -28,11 +28,11 @@ fn run() ! {
 #[test]
 fn foreign_source_may_target_default_error() {
     let source = r#"
-impl String => Err {
+impl String -> Err {
     return Err(self)
 }
 
-fn read_store() => Int ! String {
+fn read_store() Int ! String {
     return Err("missing")
 }
 
@@ -47,7 +47,7 @@ fn run() ! {
 #[test]
 fn typed_foreign_target_keeps_the_orphan_rule() {
     let source = r#"
-impl Int => String {
+impl Int -> String {
     return "number"
 }
 
@@ -62,15 +62,15 @@ fn declared_default_conversion_reaches_web_artifact() {
     let source = r#"
 enum StoreErr { Missing }
 
-impl StoreErr => Err {
+impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() => Int ! StoreErr {
+fn read_store() Int ! StoreErr {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ! {
+fn get_user() Int ! {
     value :: read_store()?
     return Ok(value)
 }

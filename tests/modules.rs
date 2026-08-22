@@ -1,6 +1,6 @@
 //! Stage 1a — `module name { … }` declarations (U3, unified-ecosystem §4).
 //! Parser-level: the module shell (many per file, leading-`_` disable) and its
-//! typed namespace contributions (`env.dev: Env.{ … }`). Contribution *values*
+//! typed namespace contributions (`env.dev: Env{ … }`). Contribution *values*
 //! reuse the existing struct-literal expression parser.
 
 mod common;
@@ -58,7 +58,7 @@ fn assert_bodyless_module_runs(name: &str, declaration: &str) {
         ("lib.jet", lib_src.as_str()),
         (
             "helper.jet",
-            "pub fn value() => String { return \"visible\" }\n",
+            "pub fn value() String { return \"visible\" }\n",
         ),
     ];
 
@@ -80,7 +80,7 @@ fn assert_bodyless_module_runs(name: &str, declaration: &str) {
 #[test]
 fn perf_role_captures_budget_expression_and_spans() {
     let src = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "binary",
         scope: .Target("cli"),
         metric: .BinarySize,
@@ -126,7 +126,7 @@ fn perf_role_captures_budget_expression_and_spans() {
 #[test]
 fn perf_budget_sema_elaborates_defaults_and_field_spans() {
     let src = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "binary",
         metric: .BinarySize,
         limit: .AtMost(2MiB),
@@ -146,7 +146,7 @@ fn perf_budget_sema_elaborates_defaults_and_field_spans() {
     assert_eq!(spec.comparison, "Absolute");
     assert_eq!(spec.limit, "AtMost");
     assert_eq!(spec.enforcement, "Fail");
-    assert_eq!(&src[spec.span.start..spec.span.end], "Budget.{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }");
+    assert_eq!(&src[spec.span.start..spec.span.end], "Budget{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }");
     for field in ["name", "metric", "limit"] {
         let span = spec.field_spans.get(field).expect("field span");
         assert_eq!(&src[span.start..span.end], field);
@@ -164,8 +164,8 @@ fn collect_perf_specs(src: &str) -> Result<Vec<jet::Sema::BudgetSpec>, Vec<jet::
 fn perf_budget_sema_rejects_duplicate_identity_and_effective_overlap() {
     let duplicate_name = r#"module perf.release {
     budgets: [
-        Budget.{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
-        Budget.{ name: "binary", metric: .ArtifactSize, limit: .AtMost(3MiB) },
+        Budget{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+        Budget{ name: "binary", metric: .ArtifactSize, limit: .AtMost(3MiB) },
     ]
 }
 "#;
@@ -174,8 +174,8 @@ fn perf_budget_sema_rejects_duplicate_identity_and_effective_overlap() {
 
     let overlap = r#"module perf.release {
     budgets: [
-        Budget.{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
-        Budget.{ name: "shipping", metric: .BinarySize, limit: .AtMost(3MiB) },
+        Budget{ name: "binary", metric: .BinarySize, limit: .AtMost(2MiB) },
+        Budget{ name: "shipping", metric: .BinarySize, limit: .AtMost(3MiB) },
     ]
 }
 "#;
@@ -187,20 +187,20 @@ fn perf_budget_sema_rejects_duplicate_identity_and_effective_overlap() {
 fn perf_budget_sema_accepts_disjoint_target_applicability() {
     let src = r#"module perf.release {
     budgets: [
-        Budget.{
+        Budget{
             name: "linux",
             metric: .BinarySize,
             limit: .AtMost(2MiB),
-            applies: BudgetApplies.{
+            applies: BudgetApplies{
                 targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
                 profiles: .All,
             },
         },
-        Budget.{
+        Budget{
             name: "windows",
             metric: .BinarySize,
             limit: .AtMost(2MiB),
-            applies: BudgetApplies.{
+            applies: BudgetApplies{
                 targets: .Only([.Triple("x86_64-pc-windows-msvc")]),
                 profiles: .All,
             },
@@ -218,7 +218,7 @@ fn perf_budget_sema_resolves_service_scope_and_provider() {
     services: { api: { enable: true } }
 }
 module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "ready",
         scope: .Service("api"),
         metric: .ServiceReadiness,
@@ -238,7 +238,7 @@ module perf.release {
 #[test]
 fn perf_budget_sema_rejects_statistical_budget_without_provider() {
     let src = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "startup",
         scope: .Target("cli"),
         metric: .StartupTime,
@@ -257,7 +257,7 @@ fn perf_budget_sema_rejects_statistical_budget_without_provider() {
 #[test]
 fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
     let bad_percentile = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "frame",
         scope: .Scene("menu"),
         metric: .FrameTime(.P42),
@@ -274,7 +274,7 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
     );
 
     let bad_baseline = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "startup",
         scope: .Target("cli"),
         metric: .StartupTime,
@@ -290,11 +290,11 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
     );
 
     let wrong_axis = r#"module perf.release {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "binary",
         metric: .BinarySize,
         limit: .AtMost(2MiB),
-        applies: BudgetApplies.{ profiles: .Only([.Triple("x86_64-unknown-linux-gnu")]) },
+        applies: BudgetApplies{ profiles: .Only([.Triple("x86_64-unknown-linux-gnu")]) },
     }]
 }
 "#;
@@ -310,13 +310,13 @@ fn perf_budget_sema_normalizes_rate_and_retains_canonical_facts() {
     services: {{ api: {{ enable: true }} }}
 }}
 module perf.release {{
-    budgets: [Budget.{{
+    budgets: [Budget{{
         name: "throughput",
         scope: .Service("api"),
         metric: .Throughput,
         provider: .ServiceProbe("api"),
         comparison: .AbsoluteFrom("{baseline}"),
-        limit: .AtLeast(Rate.{{ count: {count}, per: {seconds}s }}),
+        limit: .AtLeast(Rate{{ count: {count}, per: {seconds}s }}),
         enforcement: .Warn,
     }}]
 }}
@@ -343,13 +343,13 @@ fn perf_budget_sema_rejects_named_and_extra_limit_arguments() {
         ("BinarySize", "", "", "Absolute", "AtMost", "2MiB"),
         ("StartupTime", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "RegressionAtMost", "3pct"),
         ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "ImprovementAtLeast", "3pct"),
-        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "AbsoluteFrom(\"ci/linux-x64\")", "AtLeast", "Rate.{ count: 100, per: 1s }"),
+        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "AbsoluteFrom(\"ci/linux-x64\")", "AtLeast", "Rate{ count: 100, per: 1s }"),
     ];
     for (metric, scope, provider, comparison, constructor, value) in cases {
-        for limit_expr in [format!(".{constructor}.{{ value: {value} }}"), format!(".{constructor}({value}, {value})")] {
+        for limit_expr in [format!(".{constructor}{{ value: {value} }}"), format!(".{constructor}({value}, {value})")] {
             let src = format!(r#"module env.dev {{ services: {{ api: {{ enable: true }} }} }}
 module perf.release {{
-    budgets: [Budget.{{
+    budgets: [Budget{{
         name: "hostile",
         {scope}
         metric: .{metric},
@@ -371,7 +371,7 @@ module perf.release {{
 fn parses_module_shell_with_contribution() {
     let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         prompt: "wordstats",
     }
 }
@@ -394,12 +394,12 @@ module dev {
 #[test]
 fn parses_nested_sources_and_imports() {
     // U8: `sources:` / `imports:` nest inside the module body, as siblings of
-    // the `env.dev: Env.{ … }` contribution (owner, 2026-06-16; amends U4).
+    // the `env.dev: Env{ … }` contribution (owner, 2026-06-16; amends U4).
     let src = r#"
 module dev {
     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     imports: find("./modules")
-    env.dev: Env.{
+    env.dev: Env{
         prompt: "wordstats",
     }
 }
@@ -444,7 +444,7 @@ module dev {
 fn module_without_sources_or_imports_has_empty_fields() {
     let src = r#"
 module dev {
-    env.dev: Env.{ prompt: "x" }
+    env.dev: Env{ prompt: "x" }
 }
 "#;
     let items = parse_items(src);
@@ -460,7 +460,7 @@ module dev {
 fn leading_underscore_opts_module_out_of_auto_discovery() {
     let src = r#"
 module _gaming {
-    system.gaming: System.{
+    system.gaming: System{
         target: linux.x64,
     }
 }
@@ -478,10 +478,10 @@ module _gaming {
 fn many_modules_per_file() {
     let src = r#"
 module laptop {
-    system.laptop: System.{ target: linux.x64 }
+    system.laptop: System{ target: linux.x64 }
 }
 module installer {
-    image.installer: Image.{ from: system.laptop, target: linux.arm64 }
+    image.installer: Image{ from: system.laptop, target: linux.arm64 }
 }
 "#;
     let items = parse_items(src);
@@ -518,7 +518,7 @@ fn bodyless_private_module_stays_hidden_outside_owner_file() {
             ("lib.jet", "module helper;\n"),
             (
                 "helper.jet",
-                "pub fn value() => String { return \"private\" }\n",
+                "pub fn value() String { return \"private\" }\n",
             ),
         ],
     );
@@ -549,7 +549,7 @@ fn bodyless_package_module_stays_hidden_across_packages() {
             ("dep/dep.jet", "pub(package) module helper;\n"),
             (
                 "dep/helper.jet",
-                "pub fn value() => String { return \"hidden\" }\n",
+                "pub fn value() String { return \"hidden\" }\n",
             ),
         ],
     );

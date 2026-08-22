@@ -31,7 +31,7 @@ struct Plain {
     value: String
 }
 
-fn identity(value: ^Plain) => Plain {
+fn identity(value: ^Plain) Plain -[]> {
     return value
 }
 
@@ -210,7 +210,7 @@ fn run() {
     child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
     if child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize.{ cols: 100, rows: 30 }) ?? panic("resize failed")
+            session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
             print("spawn: session")
         }
         .None -> { print("spawn: no session") }
@@ -262,8 +262,8 @@ fn core_process_terminal_policy_and_capabilities_are_typed_and_resizable() {
 use core.process as process
 
 fn run() {
-    policy :: TerminalPolicy.{
-        size: TerminalSize.{ cols: 120, rows: 40 },
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 120, rows: 40 },
         mode: .Raw
     }
     plan :: process.cmd(["echo", "hi"]).terminal(policy)
@@ -279,7 +279,7 @@ fn run() {
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
             print("plain child unexpectedly has terminal")
         }
         .None -> { print("plain child has no terminal") }
@@ -335,7 +335,7 @@ fn run() {
         r#"use core.process as process
 fn run() {
     child :: process.cmd(["echo", "plain"]).spawn() ?? panic("spawn failed")
-    child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })
+    child.terminal.resize(TerminalSize{ cols: 80, rows: 24 })
 }
 "#,
     )
@@ -366,11 +366,11 @@ use core.process as process
 
 fn run() {
     hostile :: "two words;*.jet"
-    expected :: Sh.{"printf <%s> {hostile}"}
+    expected :: Sh{"printf <%s> {hostile}"}
     first :: process.run(expected) ?? panic("typed-head command failed")
     print(first.output)
 
-    second :: process.run(Sh.{"printf [%s] {hostile}"}) ?? panic("second typed-head failed")
+    second :: process.run(Sh{"printf [%s] {hostile}"}) ?? panic("second typed-head failed")
     print(second.output)
 
     audited :: Sh.raw("printf raw")

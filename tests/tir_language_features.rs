@@ -21,10 +21,10 @@ fn boundary_typed_heads_keep_one_meaning_across_tiers() {
 fn run() {
     name :: "ada lovelace"
     path_part :: "ada/../etc"
-    endpoint :: URL.{"https://api.example.com/v2/{name}"}
-    opaque_endpoint :: URL.{"https://api.example.com/v2/opaque/{path_part}"}
-    log_path :: Path.{"/var/log/{path_part}.log"}
-    stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+    endpoint :: URL{"https://api.example.com/v2/{name}"}
+    opaque_endpoint :: URL{"https://api.example.com/v2/opaque/{path_part}"}
+    log_path :: Path{"/var/log/{path_part}.log"}
+    stamp :: DateTime{"2026-08-07T12:00:00Z"}
     print(endpoint.to_string())
     print(opaque_endpoint.to_string())
     print(log_path.to_string())
@@ -48,7 +48,7 @@ use core.regex as re
 fn run() {
     plain :: "\n"
     print(plain.len())
-    print(re.is_match(.{"\d+"}, "id=42"))
+    print(re.is_match({"\d+"}, "id=42"))
 }
 "#;
     tir_support::assert_tiers_agree("typed_head_raw_escape", src, "1\ntrue\n");
@@ -73,46 +73,46 @@ struct Holder {
 
 struct GenericHolder<T> {
     value: T
-    step: fn(Int) => Int
+    step: fn(Int) Int
 }
 
 impl GenericHolder {
-    fn new(value: ^T) => GenericHolder<T> {
-        return GenericHolder<T>.{ value: value, step: (n: Int) => n + 9 }
+    fn new(value: ^T) GenericHolder<T> {
+        return GenericHolder<T>{ value: value, step: (n: Int) -> n + 9 }
     }
 
-    fn marker(self) => Int {
+    fn marker(self) Int {
         return self.step(0)
     }
 }
 
 impl Counter {
-    fn new(value: Int) => Counter {
-        return Counter.{ value: value }
+    fn new(value: Int) Counter {
+        return Counter{ value: value }
     }
 }
 
-fn fresh(value: Int) => Counter {
+fn fresh(value: Int) Counter {
     return .new(value)
 }
 
-fn read(counter: Counter) => Int {
+fn read(counter: Counter) Int {
     return counter.value
 }
 
-fn increment(value: Int) => Int {
+fn increment(value: Int) Int {
     return value + 1
 }
 
 fn run() {
     bound :: Counter.new(1)
-    holder :: Holder.{ counter: .new(2) }
+    holder :: Holder{ counter: .new(2) }
     pool :: Pool<Holder>.new()
     nested_pool :: Pool<Pool<Holder>>.new()
     nested :: GenericHolder<GenericHolder<Int>>.new(.new(7))
     nested_explicit :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
     callback :: increment
-    callback_holder :: GenericHolder<fn(Int) => Int>.new(^callback)
+    callback_holder :: GenericHolder<fn(Int) Int>.new(^callback)
     explicit :: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")
@@ -139,8 +139,8 @@ struct Box<T> {
 }
 
 impl Box {
-    fn new(value: ^T) => Box<T> {
-        return Box<T>.{ value: value }
+    fn new(value: ^T) Box<T> {
+        return Box<T>{ value: value }
     }
 }
 
@@ -150,16 +150,16 @@ struct Pair<A, B> {
 }
 
 impl Pair {
-    fn new(first: ^A, second: ^B) => Pair<A, B> {
-        return Pair<A, B>.{ first: first, second: second }
+    fn new(first: ^A, second: ^B) Pair<A, B> {
+        return Pair<A, B>{ first: first, second: second }
     }
 }
 
-fn returned() => Box<Int> {
+fn returned() Box<Int> {
     return Box.new(4)
 }
 
-fn expected_box() => Box<[Int]> {
+fn expected_box() Box<[Int]> {
     return Box.new([])
 }
 
@@ -190,10 +190,10 @@ fn pure_fn() {
         return;
     }
     let src = "\
-fn double(n: Int) =[]=> Int {
+fn double(n: Int) Int -[]> {
     return (n * 2)
 }
-fn greeting(name: String) =[]=> String {
+fn greeting(name: String) String -[]> {
     return \"hi, {name}\"
 }
 fn run() {
@@ -215,10 +215,10 @@ fn todo_hole() {
         return;
     }
     let src = "\
-fn double(n: Int) => Int {
+fn double(n: Int) Int {
     return (n * 2)
 }
-fn not_yet(n: Int) => Int {
+fn not_yet(n: Int) Int {
     return #Todo
 }
 fn run() {
@@ -239,7 +239,7 @@ fn default_param_values() {
         return;
     }
     let src = "\
-fn box_dims(w: Int, h: Int = w, d: Int = h) => String {
+fn box_dims(w: Int, h: Int = w, d: Int = h) String {
     return \"{w}x{h}x{d}\"
 }
 fn run() {
@@ -261,24 +261,24 @@ fn named_args() {
         return;
     }
     let src = "\
-fn area(width: Int, height: Int) => Int {
+fn area(width: Int, height: Int) Int {
     return (width * height)
 }
-fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String {
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String {
     return \"{host} t={seconds} tls={tls}\"
 }
-fn identity<T>(value: T, *, note: String = \"unused\") => T {
+fn identity<T>(value: T, *, note: String = \"unused\") T {
     return value
 }
-fn force(*, force: Bool) => Int :: 1
-fn apply(action: fn(*, force: Bool) => Int) => Int {
+fn force(*, force: Bool) Int -> 1
+fn apply(action: fn(*, force: Bool) Int) Int {
     return action(force: true)
 }
 struct Logger {
     id: Int
 }
 impl Logger {
-    fn write(self, level: String, parts: ...String) => String {
+    fn write(self, level: String, parts: ...String) String {
         return [level, ...parts].join(\" \")
     }
 }
@@ -289,7 +289,7 @@ fn run() {
     print(connect(\"db\", tls: false))
     print(identity<Int>(note: \"generic\", value: 7))
     print(apply(force))
-    logger :: Logger.{id: 0}
+    logger :: Logger{id: 0}
     print(logger.write(parts: \"a\", level: \"L\"))
     print(logger.write(\"M\", \"b\", \"c\"))
 }
@@ -315,8 +315,8 @@ fn named_arg_diagnostic_covers_zero_parameter_calls() {
 #[test]
 fn named_arg_diagnostic_covers_unlabelled_function_values() {
     let src = "\
-fn apply(action: fn(Int) => Int) => Int { return action(value: 1) }
-fn run() { _ :: apply((value: Int) => value) }
+fn apply(action: fn(Int) Int) Int { return action(value: 1) }
+fn run() { _ :: apply((value: Int) -> value) }
 ";
     let diagnostics = jet::compile(src).expect_err("an unlabelled function type must reject labels");
     assert!(
@@ -339,7 +339,7 @@ UserId :: distinct Int;
 #Numeric Meters :: distinct Float;
 #UnitFamily(Currency) { usd }
 
-fn greet(id: UserId) => String {
+fn greet(id: UserId) String {
     return \"user {(id.raw())}\"
 }
 fn run() {
@@ -394,8 +394,8 @@ UserId :: distinct Int;
 Label :: distinct String;
 #UnitFamily(Currency) { usd }
 
-fn checked_user(value: U64) => UserId ! String { return UserId.from_u64(value) }
-fn pass_user(value: UserId ! String) => UserId ! String { return ~value }
+fn checked_user(value: U64) UserId ! String { return UserId.from_u64(value) }
+fn pass_user(value: UserId ! String) UserId ! String { return ~value }
 
 fn run() {
     fallback :: UserId.from_int(0)
@@ -443,12 +443,12 @@ fn range_type_runtime_try_and_spelled_arithmetic_gate() {
     let src = "\
 #Numeric Severity :: distinct Int(0..10);
 
-fn checked(raw: Int) => Severity ! String {
+fn checked(raw: Int) Severity ! String {
     return Ok(Severity.from_int(raw)?)
 }
 
-fn pass_checked(value: Severity ! String) => Severity ! String { return ~value }
-fn direct() => Severity { return Severity.from_u8(8) }
+fn pass_checked(value: Severity ! String) Severity ! String { return ~value }
+fn direct() Severity { return Severity.from_u8(8) }
 
 fn run() {
     a :: pass_checked(checked(4)) ?? panic(\"range\")
@@ -552,7 +552,7 @@ fn contract_breach_output_matches_aot_jit_and_interpreter() {
     assert_contract_breach_tiers(
         "contract_pre_failure",
         r#"
-#Pre(value > 0, "positive") fn checked(value: Int) => Int {
+#Pre(value > 0, "positive") fn checked(value: Int) Int {
     return value
 }
 
@@ -567,7 +567,7 @@ fn run() {
         "contract_post_failure",
         r#"
 #Post(result == 99, "must equal 99")
-fn get() => Int {
+fn get() Int {
     return 1
 }
 
@@ -583,7 +583,7 @@ fn run() {
 #[test]
 fn contract_interval_proof_erases_only_the_runtime_check() {
     let unproven = r#"
-#Pre(value > 0, "positive") fn checked(value: Int) => Int {
+#Pre(value > 0, "positive") fn checked(value: Int) Int {
     return value
 }
 
@@ -593,7 +593,7 @@ fn run() {
 "#;
     let proven = r#"
 #Numeric Positive :: distinct Int(1..10)
-#Pre(value.raw() > 0, "positive") fn checked(value: Positive) => Int {
+#Pre(value.raw() > 0, "positive") fn checked(value: Positive) Int {
     return value.raw()
 }
 
@@ -635,13 +635,13 @@ struct Boxed {
 }
 
 impl Boxed {
-    #Pre(self.value > 0, "positive") fn get(self) => Int {
+    #Pre(self.value > 0, "positive") fn get(self) Int {
         return self.value
     }
 }
 
 fn run() {
-    item :: Boxed.{value: 0}
+    item :: Boxed{value: 0}
     print(item.get())
 }
 "#,
@@ -660,8 +660,8 @@ struct Boxed {
 }
 
 impl Boxed {
-    #Pre(value > 0, "positive") fn make(value: Int) => Boxed {
-        return Boxed.{value: value}
+    #Pre(value > 0, "positive") fn make(value: Int) Boxed {
+        return Boxed{value: value}
     }
 }
 
@@ -684,7 +684,7 @@ fn named_tuples() {
         return;
     }
     let src = "\
-fn bounds() => (max: Int, min: Int) {
+fn bounds() (max: Int, min: Int) {
     return (min: 0, max: 10)
 }
 fn run() {
@@ -720,7 +720,7 @@ fn run() {
     if data == .Object(entries) {
         print(entries.len())
     }
-    obj := [String:JSON].{}
+    obj := [String:JSON]{}
     obj[\"name\"] = JSON.Text(\"jet\")
     obj[\"ok\"] = JSON.Bool(true)
     obj[\"none\"] = JSON.Null
@@ -770,7 +770,7 @@ fn regex_match_group() {
 use core.regex as re
 fn run() {
     text :: \"order 42 shipped\"
-    m :: re.match(.{\"(\\d+) shipped\"}, text)
+    m :: re.match({\"(\\d+) shipped\"}, text)
     if m == .Val(mat) {
         whole :: mat.group(0) ?? \"none\"
         print(whole)
@@ -806,7 +806,7 @@ fn comptime_const_inline() {
     let src = "\
 @version :: \"1.0\"
 @banner :: \"logbook {@version}\"
-fn wrap(s: String) => String {
+fn wrap(s: String) String {
     return \"{@banner}: {s}\"
 }
 fn run() {
@@ -841,10 +841,10 @@ pub struct Note {
     pub parent: String?
 }
 
-pub fn make_note(name: ^String, t: ^NoteType) => Note {
-    return Note.{name: name, note_type: t, parent: None}
+pub fn make_note(name: ^String, t: ^NoteType) Note {
+    return Note{name: name, note_type: t, parent: None}
 }
-pub fn kind_str(n: Note) => String {
+pub fn kind_str(n: Note) String {
     k :: ~n.note_type
     if k == {
         .User -> { return \"user\" }
@@ -861,13 +861,13 @@ enum Query {
     Tag(String)
     Kind(NoteType)
 }
-fn classify(raw: String) => Query {
+fn classify(raw: String) Query {
     if raw == \"user\" {
         return Query.Kind(NoteType.User)
     }
     return Query.Tag(~raw)
 }
-fn describe(n: Note, q: ^Query) => String {
+fn describe(n: Note, q: ^Query) String {
     if q == {
         .Tag(t) -> { return \"tag:{t}\" }
         .Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
@@ -904,11 +904,11 @@ enum Wrapped {
     Err(Int)
 }
 
-fn Ok(value: Int) => Int {
+fn Ok(value: Int) Int {
     return (value + 10)
 }
 
-fn Err(value: Int) => Int {
+fn Err(value: Int) Int {
     return (value + 20)
 }
 
@@ -944,10 +944,10 @@ struct Rect {
     height: Int
 }
 impl Rect {
-    fn new(width: Int, height: Int) => Rect {
-        return Rect.{width: width, height: height}
+    fn new(width: Int, height: Int) Rect {
+        return Rect{width: width, height: height}
     }
-    fn area(self) => Int {
+    fn area(self) Int {
         return (self.width * self.height)
     }
 }
@@ -971,7 +971,7 @@ fn ambient_input() {
         return;
     }
     let src = "\
-fn greet() => String {
+fn greet() String {
     name :: input() ?? \"world\"
     return \"hello, {name}\"
 }
@@ -999,11 +999,11 @@ fn http_router_dispatch() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle_root(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn handle_root(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"welcome\"))
 }
 
-fn handle_user(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn handle_user(req: HTTPRequest) HTTPResponse ! HTTPError {
     id :: req.param(\"id\") ?? \"unknown\"
     return Ok(server.response(200, \"user={id}\"))
 }
@@ -1030,7 +1030,7 @@ fn http_mux_unannotated_handler_lambda_is_owned_in_aot() {
 use core.http.server as server
 fn run() {
     mux :: server.mux()
-    mux.get(\"/\", (req) => Ok(server.response(200, req.path())))
+    mux.get(\"/\", (req) -> Ok(server.response(200, req.path())))
     print(\"registered\")
 }
 ";
@@ -1049,7 +1049,7 @@ fn http_router_duplicate_route_is_jet_runtime_error() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn handle(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {
@@ -1083,22 +1083,22 @@ fn http_router_named_catchall_and_encoded_marker_literals() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn asset(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn asset(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, req.param(\"path\") ?? \"missing\"))
 }
-fn literal(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn literal(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"literal\"))
 }
-fn catch(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn catch(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"catch\"))
 }
-fn param_catch(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn param_catch(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"param-catch\"))
 }
-fn param_first(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn param_first(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"param-first\"))
 }
-fn static_first(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn static_first(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"static-first\"))
 }
 fn run() {
@@ -1133,7 +1133,7 @@ fn http_router_retired_bare_catchall_is_jet_runtime_error() {
 use core.http as http
 use core.http.server as server
 use core.sys as env
-fn handle(req: HTTPRequest) => HTTPResponse ! HTTPError {
+fn handle(req: HTTPRequest) HTTPResponse ! HTTPError {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {
@@ -1188,7 +1188,7 @@ fn run() {
 #[test]
 fn caps_block() {
     let src = "\
-fn announce(label: String, n: Int) =[IO]=> {
+fn announce(label: String, n: Int) -[IO]> {
     print(\"{label}: {n}\")
 }
 fn run() {

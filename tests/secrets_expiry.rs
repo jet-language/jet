@@ -17,27 +17,27 @@ fn run() {
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
 
-    if secret.with((borrowed) => borrowed.public_key()) == .Ok(_) {
+    if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("available")
     }
     fork := ~clock
     fork.tick(1001)
-    if secret.with((borrowed) => borrowed.public_key()) == .Ok(_) {
+    if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("forked")
     }
     clock.tick(1001)
-    if secret.with((borrowed) => borrowed.public_key()) == .Err(_) {
+    if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
         print("expired")
     }
     clock.advance(0)
-    if secret.with((borrowed) => borrowed.public_key()) == .Err(_) {
+    if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
         print("sticky")
     }
 
     thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
     threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
     handle := task {
-        if threaded.with((borrowed) => borrowed.public_key()) == .Ok(_) {
+        if threaded.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
             print("threaded")
         }
     }
@@ -95,7 +95,7 @@ use core.crypto as crypto
 use core.time as time
 use core.crypto.vault as vault
 
-fn inspect_key(key: crypto.SigningKey) => VerifyKey {
+fn inspect_key(key: crypto.SigningKey) VerifyKey {
     return key.public_key()
 }
 
@@ -104,7 +104,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => inspect_key(borrowed))
+    _ := secret.with((borrowed) -> inspect_key(borrowed))
 }
 "#;
     let result = jet::compile(src);
@@ -124,7 +124,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => crypto.sign(borrowed, [1, 2]))
+    _ := secret.with((borrowed) -> crypto.sign(borrowed, [1, 2]))
 }
 "#;
     let result = jet::compile(core_call);
@@ -141,7 +141,7 @@ fn expiring_secret_loan_can_call_cross_file_read_helpers() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) => crypto.VerifyKey { return key.public_key() }\n",
+        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) crypto.VerifyKey { return key.public_key() }\n",
     )
     .unwrap();
     let src = r#"
@@ -155,7 +155,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => helper.inspect_key(borrowed))
+    _ := secret.with((borrowed) -> helper.inspect_key(borrowed))
 }
 "#;
     let main = dir.join("main.jet");
@@ -169,7 +169,7 @@ fn run() {
 
     std::fs::write(
         dir.join("fake.jet"),
-        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) => Bool { return true }\n",
+        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) Bool { return true }\n",
     )
     .unwrap();
     let hostile = r#"
@@ -183,7 +183,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => fake.inspect_key(borrowed))
+    _ := secret.with((borrowed) -> fake.inspect_key(borrowed))
 }
 "#;
     let hostile_main = dir.join("hostile.jet");
@@ -249,8 +249,8 @@ fn expiring_secret_system_observation_is_not_pure() {
 use core.crypto as crypto
 use core.crypto.vault as vault
 
-fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) =[]=> Bool {
-    return secret.with((borrowed) => borrowed.public_key()) == .Ok(_)
+fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) Bool -[]> {
+    return secret.with((borrowed) -> borrowed.public_key()) == .Ok(_)
 }
 fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
@@ -294,7 +294,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => borrowed)
+    _ := secret.with((borrowed) -> borrowed)
 }
 "#;
     let diags = jet::compile(escape).expect_err("callback loan must not escape");
@@ -312,7 +312,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => () => borrowed.public_key())
+    _ := secret.with((borrowed) -> () -> borrowed.public_key())
 }
 "#;
     let diags =
@@ -332,7 +332,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => {
+    _ := secret.with((borrowed) -> {
         saved := [borrowed]
         return saved
     })
@@ -361,7 +361,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => { consume(^borrowed); return 0 })
+    _ := secret.with((borrowed) -> { consume(^borrowed); return 0 })
 }
 "#,
         ),
@@ -377,7 +377,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => { collect(borrowed); return 0 })
+    _ := secret.with((borrowed) -> { collect(borrowed); return 0 })
 }
 "#,
         ),
@@ -392,7 +392,7 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) => {
+    _ := secret.with((borrowed) -> {
         #Unsafe("attempt to discard a loan") { consume(borrowed) }
         return 0
     })

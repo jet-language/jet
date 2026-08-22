@@ -9,7 +9,7 @@ mod tir_support;
 
 use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
 
-const SEED: &str = "fn score(n: Int) => Int {\n    return n\n}\n";
+const SEED: &str = "fn score(n: Int) Int {\n    return n\n}\n";
 
 /// D-INTDIV1=A: `7 / 2` is 3.5, and the fraction survives an average.
 #[test]
@@ -148,8 +148,8 @@ fn fixed_width_divide_by_zero_traps_with_prelude_wording() {
             "u8_div_zero",
             r#"
 fn run() {
-    a :: U8.{10}
-    zero :: U8.{0}
+    a :: U8{10}
+    zero :: U8{0}
     print(a / zero)
 }
 "#,
@@ -158,8 +158,8 @@ fn run() {
             "i8_div_zero",
             r#"
 fn run() {
-    a :: I8.{10}
-    zero :: I8.{0}
+    a :: I8{10}
+    zero :: I8{0}
     print(a / zero)
 }
 "#,
@@ -171,18 +171,18 @@ fn div(a: U8, zero: U8) {
     print(a / zero)
 }
 fn run() {
-    div(U8.{10}, U8.{0})
+    div(U8{10}, U8{0})
 }
 "#,
         ),
         (
             "u8_call_div_zero",
             r#"
-fn score(n: U8) => U8 {
+fn score(n: U8) U8 {
     return n
 }
 fn run() {
-    print(score(U8.{10}) / score(U8.{0}))
+    print(score(U8{10}) / score(U8{0}))
 }
 "#,
         ),

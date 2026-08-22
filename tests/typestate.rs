@@ -29,16 +29,16 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) => Reservation {
-        return Reservation.{ guest: ~guest }
+    #Transition(_, Pending) fn book(guest: String) Reservation -[]> {
+        return Reservation{ guest: ~guest }
     }
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation -[]> {
         return self
     }
-    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) => Reservation {
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) Reservation -[]> {
         return self
     }
-    #State(CheckedIn) fn room_key(self) => String {
+    #State(CheckedIn) fn room_key(self) String -[]> {
         return "key"
     }
 }
@@ -101,10 +101,10 @@ fn no_typestate_is_inert() {
     let src = r#"
 struct Box { n: Int }
 impl Box {
-    fn get(self) => Int { return self.n }
+    fn get(self) Int -[]> { return self.n }
 }
 fn run() {
-    b :: Box.{ n: 1 }
+    b :: Box{ n: 1 }
     print(b.get())
 }
 "#;
@@ -124,10 +124,10 @@ state Crate { Full, Empty }
 struct Crate { data: Int }
 
 impl Crate {
-    #Transition(_, Full) fn fill(data: Int) => Crate {
-        return Crate.{ data: data }
+    #Transition(_, Full) fn fill(data: Int) Crate -[]> {
+        return Crate{ data: data }
     }
-    #State(Stuffed) fn get(self) => Int {
+    #State(Stuffed) fn get(self) Int -[]> {
         return self.data
     }
 }
@@ -153,8 +153,8 @@ state Crate { Full, Empty }
 struct Crate { data: Int }
 
 impl Crate {
-    #Transition(_, Stuffed) fn fill(data: Int) => Crate {
-        return Crate.{ data: data }
+    #Transition(_, Stuffed) fn fill(data: Int) Crate -[]> {
+        return Crate{ data: data }
     }
 }
 
@@ -193,9 +193,9 @@ state Gate { Open, Closed }
 struct Gate { w: Int }
 
 impl Gate {
-    #Transition(_, Closed) fn new(w: Int) => Gate { return Gate.{ w: w } }
-    #Transition(Closed, Open) fn open(self: ^Gate) => Gate { return self }
-    #Transition(Open, Closed) fn close(self: ^Gate) => Gate { return self }
+    #Transition(_, Closed) fn new(w: Int) Gate -[]> { return Gate{ w: w } }
+    #Transition(Closed, Open) fn open(self: ^Gate) Gate -[]> { return self }
+    #Transition(Open, Closed) fn close(self: ^Gate) Gate -[]> { return self }
 }
 
 fn run() {
@@ -226,12 +226,12 @@ state Order { Draft, Confirmed, Cancelled, Closed }
 struct Order { id: Int }
 
 impl Order {
-    #Transition(_, Draft) fn start(id: Int) => Order { return Order.{ id: id } }
-    #Transition(Draft, Confirmed) fn confirm(self: ^Order) => Order { return self }
-    #Transition(Draft, Cancelled) fn cancel(self: ^Order) => Order { return self }
-    #Transition(Confirmed, Closed) fn close(self: ^Order) => Order { return self }
-    #Transition(Cancelled, Closed) fn archive(self: ^Order) => Order { return self }
-    #State(Confirmed) fn ship(self) => Int { return self.id }
+    #Transition(_, Draft) fn start(id: Int) Order -[]> { return Order{ id: id } }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) Order -[]> { return self }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) Order -[]> { return self }
+    #Transition(Confirmed, Closed) fn close(self: ^Order) Order -[]> { return self }
+    #Transition(Cancelled, Closed) fn archive(self: ^Order) Order -[]> { return self }
+    #State(Confirmed) fn ship(self) Int -[]> { return self.id }
 }
 "#;
 

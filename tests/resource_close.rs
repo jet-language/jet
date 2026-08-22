@@ -15,7 +15,7 @@ impl Resource.Close {
 }
 
 fn run() {
-    resource := Resource.{ name: "dev" }
+    resource := Resource{ name: "dev" }
     defer close(^resource)
     print("body")
 }
@@ -116,7 +116,7 @@ fn free_close_function_cannot_shadow_the_nominal_protocol() {
 struct NotClose { value: Int }
 fn close(value: ^NotClose) { print(value.value) }
 fn run() {
-    value := NotClose.{ value: 1 }
+    value := NotClose{ value: 1 }
     defer close(^value)
 }
 "#;
@@ -133,7 +133,7 @@ impl Resource.Close {
 }
 
 fn scoped() {
-    resource := Resource.{ name: "scope" }
+    resource := Resource{ name: "scope" }
     print("body {resource.name}")
 }
 fn run() { scoped() }
@@ -151,7 +151,7 @@ impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
 fn run() {
-    resource := Resource.{ name: "panic" }
+    resource := Resource{ name: "panic" }
     print("body")
     panic("stop")
 }
@@ -177,7 +177,7 @@ impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
 fn run() {
-    resource := Resource.{ name: "arithmetic" }
+    resource := Resource{ name: "arithmetic" }
     print("body")
     zero :: 0
     print(10 /% zero)
@@ -192,9 +192,9 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn missing() => Int :: #Todo
+fn missing() Int -> #Todo
 fn run() {
-    resource := Resource.{ name: "todo" }
+    resource := Resource{ name: "todo" }
     print("body")
     print(missing())
 }
@@ -208,11 +208,11 @@ struct Resource { name: String }
 impl Resource.Close {
     fn close(^self) { print("auto {self.name}") }
 }
-fn recurse(n: Int) => Int {
+fn recurse(n: Int) Int {
     return recurse(n + 1)
 }
 fn run() {
-    resource := Resource.{ name: "stack" }
+    resource := Resource{ name: "stack" }
     print("body")
     print(recurse(0))
 }
@@ -238,12 +238,12 @@ impl Resource.Close {
     fn close(^self) { print("close {self.name}") }
 }
 impl Resource {
-    fn handoff(^self) => Resource { return self }
+    fn handoff(^self) Resource { return self }
 }
-fn relay(^resource: Resource) => Resource { return resource }
+fn relay(^resource: Resource) Resource { return resource }
 fn consume(^resource: Resource) { print("consume {resource.name}") }
 fn run() {
-    first := Resource.{ name: "transfer" }
+    first := Resource{ name: "transfer" }
     second := relay(^first)
     third := second.handoff()
     consume(^third)
@@ -271,22 +271,22 @@ fn run() {
 #[test]
 fn scheduled_transfer_reuses_move_checks_for_every_second_use() {
     let use_after = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource.{{ name: \"x\" }}; defer close(^resource); print(resource.name) }}"
+        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; defer close(^resource); print(resource.name) }}"
     ));
     assert!(use_after.contains(&"E0121".into()), "{use_after:?}");
 
     let double_defer = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource.{{ name: \"x\" }}; defer close(^resource); defer close(^resource) }}"
+        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; defer close(^resource); defer close(^resource) }}"
     ));
     assert!(double_defer.contains(&"E0121".into()), "{double_defer:?}");
 
     let double_close = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource.{{ name: \"x\" }}; close(^resource); close(^resource) }}"
+        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; close(^resource); close(^resource) }}"
     ));
     assert!(double_close.contains(&"E0121".into()), "{double_close:?}");
 
     let copied = codes(&format!(
-        "{SIMPLE}\nfn bad() {{ resource := Resource.{{ name: \"x\" }}; copied := ~resource; print(copied.name) }}"
+        "{SIMPLE}\nfn bad() {{ resource := Resource{{ name: \"x\" }}; copied := ~resource; print(copied.name) }}"
     ));
     assert!(copied.contains(&"E0211".into()), "{copied:?}");
 }
@@ -302,19 +302,19 @@ impl Resource.Close {
     }
 }
 
-fn fail() => Int ! String {
+fn fail() Int ! String {
     return Err("stop")
 }
 
 fn returned() {
-    resource := Resource.{ name: "return" }
+    resource := Resource{ name: "return" }
     defer close(^resource)
     print("return body")
     return
 }
 
-fn questioned() => Int ! String {
-    resource := Resource.{ name: "question" }
+fn questioned() Int ! String {
+    resource := Resource{ name: "question" }
     defer close(^resource)
     value := fail()?
     return Ok(value)
@@ -322,7 +322,7 @@ fn questioned() => Int ! String {
 
 fn looped() {
     loop n, [0, 1] {
-        resource := Resource.{ name: if n == 0 -> "continue" else -> "break" }
+        resource := Resource{ name: if n == 0 -> "continue" else -> "break" }
         defer close(^resource)
         if n == 0 { next }
         break
@@ -330,15 +330,15 @@ fn looped() {
 }
 
 fn run() {
-    first := Resource.{ name: "a" }
+    first := Resource{ name: "a" }
     defer close(^first)
-    second := Resource.{ name: "b" }
+    second := Resource{ name: "b" }
     defer close(^second)
     print("body")
     returned()
     questioned().drop("this path intentionally proves `?` cleanup")
     looped()
-    unwind := Resource.{ name: "unwind" }
+    unwind := Resource{ name: "unwind" }
     defer close(^unwind)
     panic("boom")
 }
@@ -359,8 +359,8 @@ impl Resource.Close {
     fn close(^self) { print("close {self.name}") }
 }
 fn run() {
-    automatic := Resource.{ name: "automatic" }
-    deferred := Resource.{ name: "deferred" }
+    automatic := Resource{ name: "automatic" }
+    deferred := Resource{ name: "deferred" }
     defer close(^deferred)
     assert(true)
     print("before failure")
@@ -380,9 +380,9 @@ fn run() {
 fn ordinary_scope_drop_and_reasoned_drop_remain_separate() {
     let src = r#"
 struct Value { number: Int }
-fn maybe() => Int ! String { return Err("unused") }
+fn maybe() Int ! String { return Err("unused") }
 fn run() {
-    value := Value.{ number: 1 }
+    value := Value{ number: 1 }
     print(value.number)
     maybe().drop("best effort remains an explicit value discard")
 }

@@ -383,7 +383,7 @@ fn json_bind_generated_project_executes_typed_fields() {
         "jet inspect bind json fixtures/repo.json --type Repo",
         r#"
 fn run() {
-    repo :: Repo.{ repo_name: "jet", stars: 4, active: true, exact: 9007199254740993 }
+    repo :: Repo{ repo_name: "jet", stars: 4, active: true, exact: 9007199254740993 }
     print(repo.repo_name)
     print(repo.stars)
     print(repo.active)
@@ -411,7 +411,7 @@ fn csv_bind_generated_project_executes_typed_fields() {
         "jet inspect bind csv fixtures/people.csv --type Person",
         r#"
 fn run() {
-    person :: Person.{ name: "Ada", age: 36, active: true }
+    person :: Person{ name: "Ada", age: 36, active: true }
     print(person.name)
     print(person.age)
     print(person.active)
@@ -497,8 +497,8 @@ fn run() {
     content := root.field("children") ?? panic("content")
     middle := content.at(1) ?? panic("middle")
     book_content := middle.field("children") ?? panic("book content")
-    book := CatalogBook.{ id: "7", content: book_content, title: "Jet" }
-    catalog := Catalog.{ content: content, book: book }
+    book := CatalogBook{ id: "7", content: book_content, title: "Jet" }
+    catalog := Catalog{ content: content, book: book }
     print(catalog.book.id)
     print(catalog.book.title)
     first := catalog.content.at(0) ?? panic("first")

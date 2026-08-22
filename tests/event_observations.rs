@@ -116,37 +116,37 @@ use core.time as time
 fn run() {
     scope :: event.scope()
     executed :: event.new<String>()
-    executed.on_priority(scope, 17, (secret: String) => {})
+    executed.on_priority(scope, 17, (secret: String) -> {})
     never_called :: event.new<String>()
     if false { never_called.emit("UNEXECUTED_SECRET") }
     executed.emit("SYNC_PAYLOAD_SECRET")
 
     hook :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    hook.on_priority(scope, 9, (secret: String) => HookDecision.Fail("HOOK_FAILURE_SECRET"))
+    hook.on_priority(scope, 9, (secret: String) -> HookDecision.Fail("HOOK_FAILURE_SECRET"))
     hook.run("HOOK_PAYLOAD_SECRET")
 
     direct_scope :: event.scope()
     direct :: event.new<Int>()
-    direct_sub :: direct.on(direct_scope, (n: Int) => {})
+    direct_sub :: direct.on(direct_scope, (n: Int) -> {})
     direct_sub.unsubscribe()
 
     once_scope :: event.scope()
     once_event :: event.new<Int>()
-    once_event.once(once_scope, (n: Int) => {})
+    once_event.once(once_scope, (n: Int) -> {})
     once_event.emit(1)
     once_event.emit(2)
 
     cancel_scope :: event.scope()
     cancel_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    cancel_hook.on(cancel_scope, (n: Int) => HookDecision.Continue)
+    cancel_hook.on(cancel_scope, (n: Int) -> HookDecision.Continue)
     cancel_scope.cancel()
 
     rejected_scope :: event.scope()
     rejected_scope.cancel()
     rejected_event :: event.new<Int>()
-    rejected_event.on(rejected_scope, (n: Int) => {})
+    rejected_event.on(rejected_scope, (n: Int) -> {})
     rejected_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    rejected_hook.on(rejected_scope, (n: Int) => HookDecision.Continue)
+    rejected_hook.on(rejected_scope, (n: Int) -> HookDecision.Continue)
     print("READY")
     time.sleep(30000ms)
 }
@@ -236,7 +236,7 @@ fn run() {
     dropped :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
-    dropped.on_priority(drop_scope, 23, (n: Int) => {
+    dropped.on_priority(drop_scope, 23, (n: Int) -> {
         started_tx.send(~n)
         released :: release_rx.receive() ?? panic("release")
     })
@@ -253,14 +253,14 @@ fn run() {
 
     fail_scope :: event.scope()
     failing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    failing.on(fail_scope, (n: Int) => fail_async(n))
+    failing.on(fail_scope, (n: Int) -> fail_async(n))
     failing.emit_async(4).join() ?? panic("failing")
 
     close_scope :: event.scope()
     closing :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (close_started_tx, close_started_rx) :: channel<Int>()
     (close_release_tx, close_release_rx) :: channel<Int>()
-    closing.on(close_scope, (n: Int) => {
+    closing.on(close_scope, (n: Int) -> {
         close_started_tx.send(~n)
         released :: close_release_rx.receive() ?? panic("release")
     })
@@ -343,11 +343,11 @@ fn run() {
     rejected_scope :: event.scope()
     rejected_scope.cancel()
     rejected :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    rejected.on(rejected_scope, (n: Int) => {})
+    rejected.on(rejected_scope, (n: Int) -> {})
 
     once_scope :: event.scope()
     once_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    once_sub :: once_event.once(once_scope, (n: Int) => {})
+    once_sub :: once_event.once(once_scope, (n: Int) -> {})
     once_event.emit_async(1).join() ?? panic("join")
     once_sub.unsubscribe()
     once_scope.cancel()
@@ -393,7 +393,7 @@ use core.time as time
 fn run() {
     scope :: event.scope()
     many :: event.new<Int>()
-    many.on(scope, (n: Int) => {})
+    many.on(scope, (n: Int) -> {})
     loop i, 0..<300 { many.emit(i) }
     print("READY")
     time.sleep(30000ms)
@@ -422,7 +422,7 @@ use core.time as time
 fn run() {
     scope :: event.scope()
     concurrent :: event.async_result<Int, String>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
-    concurrent.on(scope, (n: Int) => { time.sleep(1ms) })
+    concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
     loop i, 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500ms)
     print("READY")

@@ -73,7 +73,7 @@ fn run() {
     policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
     http_server.cors(mux, policy)
     http_server.static_files(mux, "/assets", "/tmp")
-    response :: http_server.json(201, Reading.{city: "Reno", degrees: 32})
+    response :: http_server.json(201, Reading{city: "Reno", degrees: 32})
     decoded :: response.json<Reading>() ?? panic("response")
     request :: http_client.request("POST", "http://example.test/")
         .body("{{\"city\":\"Reno\",\"degrees\":31}}")
@@ -93,7 +93,7 @@ struct Reading {
     degrees: Int
 }
 
-fn any_origins() => HTTPCorsOrigins {
+fn any_origins() HTTPCorsOrigins {
     return .Any
 }
 
@@ -103,7 +103,7 @@ fn run() {
     policy :: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
     http_server.cors(mux, policy)
     http_server.static_files(mux, "/assets", "/tmp")
-    response :: http_server.json(201, Reading.{city: "Reno", degrees: 32})
+    response :: http_server.json(201, Reading{city: "Reno", degrees: 32})
     decoded :: response.json<Reading>() ?? panic("response")
     request :: http_client.request("POST", "http://example.test/")
         .body("{{\"city\":\"Reno\",\"degrees\":31}}")

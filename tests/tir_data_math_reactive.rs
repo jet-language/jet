@@ -34,7 +34,7 @@ struct P {
     x: Float
     mass: Float
 }
-fn total(ps: [P]) => Float {
+fn total(ps: [P]) Float {
     s := 0.0
     loop p, ps {
         s = s + p.mass
@@ -42,8 +42,8 @@ fn total(ps: [P]) => Float {
     return s
 }
 fn run() {
-    ps := [P].{ P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 } }
-    ps.push(P.{ x: 2.0, mass: 3.0 })
+    ps := [P]{ P{ x: 0.0, mass: 1.0 }, P{ x: 1.0, mass: 2.0 } }
+    ps.push(P{ x: 2.0, mass: 3.0 })
     print(ps.len())
     print(ps[2].x)
     print(ps[1].mass)
@@ -97,8 +97,8 @@ struct Pt { a: Int, b: Int }
 #Codable
 struct PlainPt { a: Int, b: Int }
 fn run() {
-    cs :: [Pt].{ Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 } }
-    ps :: [PlainPt].{ PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 } }
+    cs :: [Pt]{ Pt{ a: 1, b: 2 }, Pt{ a: 3, b: 4 } }
+    ps :: [PlainPt]{ PlainPt{ a: 1, b: 2 }, PlainPt{ a: 3, b: 4 } }
     print(json.to_string(cs) == json.to_string(ps))
     print(json.to_string(cs))
 }
@@ -120,11 +120,11 @@ fn run() {
 a :: Vec3(1.0, 2.0, 3.0)
 b :: Vec3(4.0, 5.0, 6.0)
     print(a.dot(b))
-c :: Vec3.{ a + b }
+c :: Vec3{ a + b }
     print(c.to_array())
     print(a.cross(b).to_array())
 scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-out :: Vec3.{ scale * a }
+out :: Vec3{ scale * a }
     print(out.to_array())
 }
 ";
@@ -147,7 +147,7 @@ fn simd_lanes_ops_and_reductions() {
 fn run() {
 v :: F32x4(1.0, 2.0, 3.0, 4.0)
 w :: F32x4(10.0, 20.0, 30.0, 40.0)
-s :: F32x4.{ v + w }
+s :: F32x4{ v + w }
     print(s.to_array())
     print(v[2])
     print(v.sum())
@@ -177,7 +177,7 @@ fn user_type_shadows_builtin_math_name() {
     let src = "\
 struct Vec3 { x: Int, y: Int }
 fn run() {
-    v :: Vec3.{ x: 3, y: 4 }
+    v :: Vec3{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
 }
@@ -198,9 +198,9 @@ fn reactive_signal_derived_effect() {
 use core.reactive as reactive
 fn run() {
     n := reactive.signal(1)
-    doubled := reactive.derived(() => (n.get() * 2))
+    doubled := reactive.derived(() -> (n.get() * 2))
     print(doubled.get())
-    subscription := reactive.effect(() => {
+    subscription := reactive.effect(() -> {
         print(doubled.get())
     })
     n.set(5)
@@ -224,7 +224,7 @@ fn reactive_scope_marker() {
 use core.reactive as reactive
 fn run() {
     n := reactive.signal(1)
-    doubled := reactive.computed(() => (n.get() * 2))
+    doubled := reactive.computed(() -> (n.get() * 2))
     print(doubled.get())
     #Reactive {
         print(doubled.get())
@@ -249,7 +249,7 @@ fn reactive_string_signal() {
 use core.reactive as reactive
 fn run() {
     name := reactive.signal(\"world\")
-    greeting := reactive.derived(() => \"hello, {name.get()}\")
+    greeting := reactive.derived(() -> \"hello, {name.get()}\")
     print(greeting.get())
     name.set(\"jet\")
     print(greeting.get())
@@ -273,7 +273,7 @@ fn run() {
     choose_left := reactive.signal(true)
     left := reactive.signal(1)
     right := reactive.signal(10)
-    subscription := reactive.effect(() => {
+    subscription := reactive.effect(() -> {
         if choose_left.get() {
             print(left.get())
         } else {
@@ -301,7 +301,7 @@ fn reactive_effect_unsubscribe_and_activity() {
 use core.reactive as reactive
 fn run() {
     value := reactive.signal(1)
-    subscription := reactive.effect(() => {
+    subscription := reactive.effect(() -> {
         print(value.get())
     })
     print(subscription.is_active())

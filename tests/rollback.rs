@@ -32,8 +32,8 @@ struct CounterSnap {
 }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) => CounterSnap {
-        return CounterSnap.{ value: self.value, ops: self.ops }
+    fn snapshot(self) CounterSnap {
+        return CounterSnap{ value: self.value, ops: self.ops }
     }
     fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
@@ -41,7 +41,7 @@ impl Counter.Rollback {
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) => Int ! Fail {
+fn bump(c: &Counter) Int ! Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -50,7 +50,7 @@ fn bump(c: &Counter) => Int ! Fail {
     return Ok(c.value)
 }
 fn run() {
-    c := Counter.{ value: 10, ops: 0 }
+    c := Counter{ value: 10, ops: 0 }
     _ :: bump(&c) ?? 0
     print(c.value)
     print(c.ops)
@@ -79,8 +79,8 @@ struct CounterSnap {
 }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) => CounterSnap {
-        return CounterSnap.{ value: self.value, ops: self.ops }
+    fn snapshot(self) CounterSnap {
+        return CounterSnap{ value: self.value, ops: self.ops }
     }
     fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
@@ -88,7 +88,7 @@ impl Counter.Rollback {
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) => Int ! Fail {
+fn bump(c: &Counter) Int ! Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -96,7 +96,7 @@ fn bump(c: &Counter) => Int ! Fail {
     return Ok(c.value)
 }
 fn run() {
-    c := Counter.{ value: 10, ops: 0 }
+    c := Counter{ value: 10, ops: 0 }
     _ :: bump(&c) ?? 0
     print(c.value)
     print(c.ops)
@@ -119,15 +119,15 @@ struct Counter {
 struct CounterSnap { value: Int }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) => CounterSnap {
-        return CounterSnap.{ value: self.value }
+    fn snapshot(self) CounterSnap {
+        return CounterSnap{ value: self.value }
     }
     fn restore(&self, snap: ^CounterSnap) {
         self.value = snap.value
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) => Int ! Fail {
+fn bump(c: &Counter) Int ! Fail {
     #Transact {
         c.value += 1
         return Err(Fail.Bad)
@@ -135,7 +135,7 @@ fn bump(c: &Counter) => Int ! Fail {
     return Ok(c.value)
 }
 fn run() {
-    c := Counter.{ value: 0 }
+    c := Counter{ value: 0 }
     _ :: bump(&c) ?? 0
     print(c.value)
 }

@@ -12,33 +12,33 @@ mod common;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() => String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
+const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() String {\n    prefix :: \"p\"\n    rows :: [PivotRow{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) -> \"{prefix}{row.team}\", (row) -> row.bucket, (row) -> row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
 const PIVOT_EXPR: &str = "pivot_view()";
-const CIVIL_FN: &str = "fn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const CIVIL_DECLS: &str = "use core.time as time\nuse core.time as date\nuse core.time as datetime\nfn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_FN: &str = "fn civil_view() String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_DECLS: &str = "use core.time as time\nuse core.time as date\nuse core.time as datetime\nfn civil_view() String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const CIVIL_EXPR: &str = "civil_view()";
-const CIVIL_DEV_DECLS: &str = "use core.time as date\nuse core.time as datetime\nfn civil_dev_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const MEASUREMENT_FN: &str = "fn measurement_math() => String {\n    a :: measurement(3.0, uncertainty: 4.0)\n    b :: measurement(0.0, uncertainty: 3.0)\n    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)\n    return \"{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const CIVIL_DEV_DECLS: &str = "use core.time as date\nuse core.time as datetime\nfn civil_dev_view() String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const MEASUREMENT_FN: &str = "fn measurement_math() String {\n    a :: measurement(3.0, uncertainty: 4.0)\n    b :: measurement(0.0, uncertainty: 3.0)\n    q :: measurement(8.0, uncertainty: 0.0) / measurement(2.0, uncertainty: 0.0)\n    return \"{(a + b).value()}|{(a + b).uncertainty()}|{(a - b).value()}|{(a - b).uncertainty()}|{(a * b).value()}|{(a * b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_DECLS: &str = MEASUREMENT_FN;
 const MEASUREMENT_EXPR: &str = "measurement_math()";
-const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) => Measurement<Float> {
+const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) Measurement<Float> {
     hits += 1
     return measurement(1.0, uncertainty: 0.0)
 }
-fn add_argument_once_view() => String {
+fn add_argument_once_view() String {
     hits := 0
     measured :: measurement(2.0, uncertainty: 0.0)
     sum :: measured + counted_measurement(&hits)
     return "{sum.value()}|{hits}"
 }"#;
-const SCALAR_DECLS: &str = r#"fn scalar_view() => String {
-    i8 :: I8.{ -12 }
-    i16 :: I16.{ -1234 }
-    i32 :: I32.{ -123456 }
-    u8 :: U8.{ 255 }
-    u16 :: U16.{ 1234 }
-    u32 :: U32.{ 123456 }
-    u64 :: U64.{ 123456789 }
+const SCALAR_DECLS: &str = r#"fn scalar_view() String {
+    i8 :: I8{ -12 }
+    i16 :: I16{ -1234 }
+    i32 :: I32{ -123456 }
+    u8 :: U8{ 255 }
+    u16 :: U16{ 1234 }
+    u32 :: U32{ 123456 }
+    u64 :: U64{ 123456789 }
     nan :: Float.parse("NaN") ?? 0.0
     infinity :: Float.parse("inf") ?? 0.0
     return "{"a@b@c".after("@")}|{"a@b@c".before("@")}|{"no-sep".after("@")}|{"no-sep".before("@")}|{"é🙂".bytes()}|{"aé🙂z".slice(1, 2)}|{nan.is_nan()}|{infinity.is_infinite()}|{1.0.is_finite()}|{i8.to_string()}|{i16.to_string()}|{i32.to_string()}|{u8.to_string()}|{u16.to_string()}|{u32.to_string()}|{u64.to_string()}"
@@ -46,53 +46,53 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() => String {
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
 const F32_MATH_DECLS: &str = r#"use core.math as math
-fn f32_math_view() => String {
-    rounded :: F32.{ 16777217.0 }
+fn f32_math_view() String {
+    rounded :: F32{ 16777217.0 }
     max :: F32.MAX
-    positive_overflow :: F32.{ max + max }
-    negative_overflow :: F32.{ -max + -max }
-    negative_zero :: F32.{ -0.0 }
+    positive_overflow :: F32{ max + max }
+    negative_overflow :: F32{ -max + -max }
+    negative_zero :: F32{ -0.0 }
     nan :: F32.NAN
-    root_input :: F32.{ 2.0 }
-    exponent :: F32.{ 3.0 }
-    low :: F32.{ 1.0 }
-    high :: F32.{ 4.0 }
-    t :: F32.{ 0.25 }
-    floor_input :: F32.{ 1.75 }
-    ceil_input :: F32.{ 1.25 }
+    root_input :: F32{ 2.0 }
+    exponent :: F32{ 3.0 }
+    low :: F32{ 1.0 }
+    high :: F32{ 4.0 }
+    t :: F32{ 0.25 }
+    floor_input :: F32{ 1.75 }
+    ceil_input :: F32{ 1.25 }
     wide :: 16777217.0
     wide_root :: 2.0
     return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{math.pow(root_input, exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(negative_zero)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
 }"#;
 const F32_MATH_EXPECTED: &str = "1266679808|1.4142135|8.0|1.0|2.0|0.9092974|0.5880026|3.6055512|1.75|1.0|4.0|2.0|2.0|true|true|true|true|0|2147483648|16777217.0|1.4142135623730951";
-const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() => String {
+const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() String {
     return "{true.to_string()}|{false.to_string()}|{'e'.to_string()}|{'é'.to_string()}"
 }"#;
 const PRIMITIVE_INSTANCE_EXPECTED: &str = "true|false|e|é";
-const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) => U8 {
+const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) U8 {
     return U8.from_int(value) ?? 0
 }
-fn bit_parameter(value: U8) => Int {
+fn bit_parameter(value: U8) Int {
     return (value).leading_zeros()
 }
-fn bit_inferred_local() => Int {
+fn bit_inferred_local() Int {
     value := U8.from_int(13) ?? 0
     return value.leading_zeros()
 }
-fn integer_bit_queries_view() => String {
+fn integer_bit_queries_view() String {
     int :: -1
-    i8 :: I8.{ -2 }
-    i16 :: I16.{ -32768 }
-    i32 :: I32.{ 0 }
-    u8 :: U8.{ 13 }
-    u16 :: U16.{ 256 }
-    u32 :: U32.{ 2147483648 }
-    u64 :: U64.{ 255 }
+    i8 :: I8{ -2 }
+    i16 :: I16{ -32768 }
+    i32 :: I32{ 0 }
+    u8 :: U8{ 13 }
+    u16 :: U16{ 256 }
+    u32 :: U32{ 2147483648 }
+    u64 :: U64{ 255 }
     return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}|{bit_parameter(13)}|{bit_inferred_local()}"
 }"#;
 const INTEGER_BIT_QUERIES_EXPECTED: &str =
     "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4|4|4";
-const BYTES_DECLS: &str = r#"fn bytes_view() => String {
+const BYTES_DECLS: &str = r#"fn bytes_view() String {
     buffer := Bytes.new()
     empty_before :: buffer.is_empty()
     buffer.write_u8(18)
@@ -110,7 +110,7 @@ const BYTES_DECLS: &str = r#"fn bytes_view() => String {
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
 const BYTES_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
-const QUEUE_DECLS: &str = r#"fn queue_view() => String {
+const QUEUE_DECLS: &str = r#"fn queue_view() String {
     queue := Queue.new()
     empty_before :: queue.is_empty()
     missing_front :: queue.peek_front() ?? -1
@@ -129,7 +129,7 @@ const QUEUE_DECLS: &str = r#"fn queue_view() => String {
     return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{queue.is_empty()}|{queue.len()}|{empty_pop}"
 }"#;
 const QUEUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
-const LRU_DECLS: &str = r#"fn lru_view() => String {
+const LRU_DECLS: &str = r#"fn lru_view() String {
     cache := Cache.new(2)
     empty_before :: cache.is_empty()
     first :: cache.add("a", 1) ?? -1
@@ -149,22 +149,22 @@ const LRU_DECLS: &str = r#"fn lru_view() => String {
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
 }"#;
 const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
-const MAP_DECLS: &str = r#"fn add_map(values: &[String:Int], key: String, value: Int) => Int {
+const MAP_DECLS: &str = r#"fn add_map(values: &[String:Int], key: String, value: Int) Int {
     return values.add(key, value) ?? -1
 }
-fn counted_map(hits: &Int) => [String:Int] {
+fn counted_map(hits: &Int) [String:Int] {
     hits += 1
     return ["a": 1]
 }
-fn map_view() => String {
-    values := [String:Int].{ "b": 2, "a": 1 }
+fn map_view() String {
+    values := [String:Int]{ "b": 2, "a": 1 }
     empty_before :: values.is_empty()
     fresh_c :: values.add("c", 3) ?? -1
     displaced_b :: add_map(&values, "b", 20)
     added_d :: values.add_new("d", 4)
     duplicate_a :: values.add_new("a", 99)
-    seen := [String].{}
-    values.each((key, value) => {
+    seen := [String]{}
+    values.each((key, value) -> {
         assert((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
         seen.push(key)
     })
@@ -179,7 +179,7 @@ fn map_view() => String {
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
 const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
-const POOL_DECLS: &str = r#"fn pool_view() => String {
+const POOL_DECLS: &str = r#"fn pool_view() String {
     pool := Pool<String>.new()
     first :: pool.add("first")
     second :: pool.add("second")
@@ -193,29 +193,29 @@ const POOL_DECLS: &str = r#"fn pool_view() => String {
     return "{removed}|{stale_remove}|{initial.len()}|{initial[0] == first}|{initial[1] == second}|{replacement == first}|{live.len()}|{live[0] == replacement}|{live[1] == second}|{replacement_value}|{second_value}|{pool.ids().len()}"
 }"#;
 const POOL_EXPECTED: &str = "first|stale|2|true|true|false|2|true|true|third|second|0";
-const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() => String {
+const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() String {
     values := [1, 2, 3, 4]
-    each_seen := [Int].{}
+    each_seen := [Int]{}
     shadow := 99
-    values.each((shadow: Int) => { each_seen.push(shadow) })
+    values.each((shadow: Int) -> { each_seen.push(shadow) })
     predicate_seen := Set.from([0])
-    has_three :: values.any((n: Int) => predicate_seen.add(n) && n == 3)
-    fold_seen := [Int:Int].{ 0: 0 }
-    total :: values.fold(0, (acc: Int, n: Int) => fold_seen.add(n, n) ?? (acc + n))
+    has_three :: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
+    fold_seen := [Int:Int]{ 0: 0 }
+    total :: values.fold(0, (acc: Int, n: Int) -> fold_seen.add(n, n) ?? (acc + n))
     partition_seen := Set.from([0])
     partition_shadow := 88
-    split :: values.partition((partition_shadow: Int) => partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
+    split :: values.partition((partition_shadow: Int) -> partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
     return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
 }"#;
 const INLINE_HOF_EXPECTED: &str =
     "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10|88|5:true:true:true:true|[1, 3]|[2, 4]";
-const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() => String {
+const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() String {
     receiver_hits := 0
     found :: counted_map(&receiver_hits).has_key("a")
     return "{found}|{receiver_hits}"
 }"#;
 const RNG_DECLS: &str = r#"use core.math.random as random
-fn rng_view() => String {
+fn rng_view() String {
     rng := random.rng(99)
     items := ["a", "b", "c", "d"]
     weights := [1.0, 2.0, 3.0, 4.0]
@@ -238,13 +238,13 @@ fn rng_view() => String {
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
 const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
-const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() => String {
+const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() String {
     first := testing.fake_rng(99)
     second := testing.fake_rng(99)
     return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
 }"#;
 const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
-const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() => String {
+const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() String {
     clock := testing.fake_clock(42)
     canonical := Clock.new(42)
     initial :: clock.now()
@@ -259,21 +259,21 @@ const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() => String {
 }"#;
 const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
 const TESTING_FAKE_CLOCK_WRITEBACK_DECLS: &str = r#"struct ClockHolder { clock: Clock }
-fn drive(clock: &Clock) => String {
+fn drive(clock: &Clock) String {
     ticked :: clock.tick(1)
     advanced :: clock.advance(10)
     duration :: Duration.milliseconds(2) ?? panic("duration")
     waited :: clock.wait(duration)
     return "{ticked}|{advanced}|{waited}|{clock.now()}"
 }
-fn counted_clock(hits: &Int) => Clock {
+fn counted_clock(hits: &Int) Clock {
     hits += 1
     return testing.fake_clock(7)
 }
-fn testing_fake_clock_writeback_view() => String {
+fn testing_fake_clock_writeback_view() String {
     clock := testing.fake_clock(5)
     borrowed :: drive(&clock)
-    holder := ClockHolder.{ clock: testing.fake_clock(5) }
+    holder := ClockHolder{ clock: testing.fake_clock(5) }
     field_tick :: holder.clock.tick(2)
     field_now :: holder.clock.now()
     receiver_hits := 0
@@ -281,10 +281,10 @@ fn testing_fake_clock_writeback_view() => String {
     return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
 }"#;
 const TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED: &str = "6|10|12|12|12;7|7|7|1";
-const BITS_DECLS: &str = r#"fn add_bit(values: &Bits, bit: Int) => Bool {
+const BITS_DECLS: &str = r#"fn add_bit(values: &Bits, bit: Int) Bool {
     return values.add(bit)
 }
-fn bits_view() => String {
+fn bits_view() String {
     bits := Bits.new()
     empty_before :: bits.is_empty()
     negative_added :: bits.add(-1)
@@ -306,11 +306,11 @@ const BITS_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true
 const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
     values.push(value)
 }
-fn counted_priority(hits: &Int) => PriorityQueue<Int> {
+fn counted_priority(hits: &Int) PriorityQueue<Int> {
     hits += 1
     return PriorityQueue.from([2, 6])
 }
-fn priority_queue_view() => String {
+fn priority_queue_view() String {
     values := PriorityQueue.from([4, 1, 7, 3, 7])
     initial_len :: values.len()
     initial_empty :: values.is_empty()
@@ -333,12 +333,12 @@ fn priority_queue_view() => String {
     return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
 }"#;
 const PRIORITY_QUEUE_EXPECTED: &str = "5|false|7|[7, 7, 4, 3, 1]|[9, 7, 7, 5, 4, 3, 1]|7|9|7|[7, 5, 4, 3, 1]|z|[z, m, a]|true|0|-1|-1|6|[8, 6, 2]|1";
-const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() => String {
+const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() String {
     receiver_hits := 0
     value :: counted_priority(&receiver_hits).peek() ?? -1
     return "{value}|{receiver_hits}"
 }"#;
-const SET_DECLS: &str = r#"fn set_view() => String {
+const SET_DECLS: &str = r#"fn set_view() String {
     values := Set.from([3, 1, 2, 3])
     initial := values.to_list()
     initial.sort()
@@ -370,14 +370,14 @@ const SET_DECLS: &str = r#"fn set_view() => String {
     return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
 }"#;
 const SET_EXPECTED: &str = "[1, 2, 3]|3|false|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|[]";
-const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) => Bool {
+const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) Bool {
     return values.add(value)
 }
-fn counted_set(hits: &Int) => Set<Int> {
+fn counted_set(hits: &Int) Set<Int> {
     hits += 1
     return Set.from([2, 6])
 }
-fn set_call_receiver_view() => String {
+fn set_call_receiver_view() String {
     values := Set.from([9, 7])
     added :: add_set(&values, 8)
     receiver_hits := 0
@@ -388,16 +388,16 @@ const TALLY_DECLS: &str = r#"enum TallyToken {
     Red
     Blue
 }
-fn add_bag(values: &Tally<Int>, value: Int) => Bool {
+fn add_bag(values: &Tally<Int>, value: Int) Bool {
     return values.add(value)
 }
-fn counted_bag(hits: &Int) => Tally<Int> {
+fn counted_bag(hits: &Int) Tally<Int> {
     hits += 1
     values := Tally<Int>.new()
     values.add(6)
     return values
 }
-fn bag_view() => String {
+fn bag_view() String {
     values := Tally<Int>.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
@@ -406,8 +406,8 @@ fn bag_view() => String {
     length_before :: values.len()
     count_four_before :: values.count(4)
     has_two :: values.has(2)
-    any_large :: values.any((value) => value > 3)
-    any_negative :: values.any((value) => value < 0)
+    any_large :: values.any((value) -> value > 3)
+    any_negative :: values.any((value) -> value < 0)
     values.remove(4)
     count_four_after_one :: values.count(4)
     values.remove(4)
@@ -420,18 +420,18 @@ fn bag_view() => String {
     tokens.add(TallyToken.Red)
     tokens.add(TallyToken.Red)
     empty := Tally<Int>.new()
-    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) => value == 0)}"
+    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) -> value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) -> value == 0)}"
 }"#;
 const TALLY_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
-const TALLY_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() => String {
+const TALLY_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() String {
     receiver_hits := 0
     count :: counted_bag(&receiver_hits).count(6)
     return "{count}|{receiver_hits}"
 }"#;
-const RANK_DECLS: &str = r#"fn add_through_param(values: &Rank<Int>, value: Int) => Bool {
+const RANK_DECLS: &str = r#"fn add_through_param(values: &Rank<Int>, value: Int) Bool {
     return values.add(value)
 }
-fn rank_view() => String {
+fn rank_view() String {
     values := Rank.from([3, 1, 2, 3])
     initial :: values.to_list()
     initial_len :: values.len()
@@ -456,9 +456,9 @@ fn rank_view() => String {
 }"#;
 const RANK_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
 const RANK_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: Rank<Int> }
-fn rank_field_view() => String {
+fn rank_field_view() String {
     values := Rank.from([9, 7])
-    holder := SortedSetHolder.{ values: values }
+    holder := SortedSetHolder{ values: values }
     added :: holder.values.add(8)
     return "{added}|{holder.values.to_list()}"
 }"#;
@@ -557,7 +557,7 @@ fn primitive_static_stringification_is_rejected_by_sema() {
 fn public_transcript_keeps_checked_types_in_imported_functions() {
     let values = exact_values(&[
         "use core.math as math",
-        r#"fn imported_g(x: U8) => Int {
+        r#"fn imported_g(x: U8) Int {
     y :: math.abs(-1.0)
     return (x).leading_zeros()
 }"#,
@@ -576,9 +576,9 @@ fn public_transcript_composes_email_and_codecs_exactly() {
         "attachment :: email.attachment(\"note.txt\", \"Text/Plain\", [104, 105]) ?? panic(\"attachment\")",
         "message :: email.message(sender, [recipient], [], \"Hello\", \"body\", \"\", [attachment]) ?? panic(\"message\")",
         "email.envelope(sender, [recipient])",
-        "fn serialized(message: Message) => Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
+        "fn serialized(message: Message) Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
         "serialized(message)",
-        "xml.canonical(xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\"), xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")",
+        "xml.canonical(xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\"), xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")",
     ]);
     assert_eq!(
         values,
@@ -898,49 +898,49 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "result/bytes",
             parity_source(
                 "email_wire()",
-                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() => String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
             ),
         ),
         (
             "result/string",
             parity_source(
                 "xml_canonical()",
-                "use core.encoding.xml as xml\nfn xml_canonical() => String {\n    tree :: xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\")\n    return xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")\n}",
+                "use core.encoding.xml as xml\nfn xml_canonical() String {\n    tree :: xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\")\n    return xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")\n}",
             ),
         ),
         (
             "xml/float-shape-error",
             parity_source(
                 "xml_shape_reason(DataTree.Float(1.5))",
-                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) => String {\n    if xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
+                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
         (
             "mime/observable-methods",
             parity_source(
                 "mime_view()",
-                "use core.net.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+                "use core.net.mime as mime\nfn mime_view() String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
             ),
         ),
         (
             "date/observable-methods",
             parity_source(
                 "date_view()",
-                "use core.time as date\nfn date_view() => String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
+                "use core.time as date\nfn date_view() String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
             ),
         ),
         (
             "time/observable-methods",
             parity_source(
                 "time_view()",
-                "use core.time as time\nfn time_view() => String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
+                "use core.time as time\nfn time_view() String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
             ),
         ),
         (
             "measurement/observable-methods",
             parity_source(
                 "measurement_view()",
-                "fn measurement_view() => String {\n    value :: measurement(12.5, uncertainty: 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+                "fn measurement_view() String {\n    value :: measurement(12.5, uncertainty: 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
             ),
         ),
     ];
@@ -954,7 +954,7 @@ fn time_plane_comptime_matches_aot_and_dev_tiers() {
     let source = parity_source(
         "time_plane_view()",
         r#"use core.time as time
-fn time_plane_view() => String {
+fn time_plane_view() String {
     wait :: 500ms
     origin :: time.instant()
     point :: origin + 5min
@@ -975,14 +975,14 @@ fn registered_shared_kernel_edges_match_all_execution_tiers() {
             "mime-one-kernel",
             parity_source(
                 "mime_view()",
-                "use core.net.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+                "use core.net.mime as mime\nfn mime_view() String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
             ),
         ),
         (
             "email-one-kernel",
             parity_source(
                 "email_wire()",
-                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() => String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
             ),
         ),
         (
@@ -993,7 +993,7 @@ fn registered_shared_kernel_edges_match_all_execution_tiers() {
 use core.data.sketch.tdigest as tdigest
 use core.data.sketch.cms as cms
 use core.data.sketch.reservoir as reservoir
-fn sketch_edges() => String {
+fn sketch_edges() String {
     cardinality := hll.new()
     empty_count :: cardinality.count()
     cardinality.add("same")
@@ -1018,7 +1018,7 @@ fn sketch_edges() => String {
                 "time_duration_edges()",
                 r#"use core.time as time
 use core.time as date
-fn time_duration_edges() => String {
+fn time_duration_edges() String {
     clamped :: date.new(2023, 2, 31)
     leap_end :: date.new(2024, 1, 31).add_months(1)
     negative_time :: time.from_unix_ms(-1)
@@ -1037,7 +1037,7 @@ fn time_duration_edges() => String {
             parity_source(
                 "time_plane_view()",
                 r#"use core.time as time
-fn time_plane_view() => String {
+fn time_plane_view() String {
     wait :: 500ms
     origin :: time.instant()
     point :: origin + 5min
@@ -1052,7 +1052,7 @@ fn time_plane_view() => String {
             parity_source(
                 "xml_edges()",
                 r#"use core.encoding.xml as xml
-fn xml_edges() => String {
+fn xml_edges() String {
     document :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
     root :: xml.root(document) ?? panic("root")
     root_name :: xml.expanded_name(root) ?? panic("root name")
@@ -1381,25 +1381,25 @@ fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpr
     );
 }
 
-const LINALG_DECLS: &str = r#"fn linalg_view() => String {
+const LINALG_DECLS: &str = r#"fn linalg_view() String {
     a :: Vec3(1.0, 2.0, 3.0)
     b :: Vec3(4.0, 5.0, 6.0)
-    sum :: Vec3.{ a + b }
-    crossed :: Vec3.{ a.cross(b) }
+    sum :: Vec3{ a + b }
+    crossed :: Vec3{ a.cross(b) }
     scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-    scaled :: Vec3.{ scale * Vec3(1.0, 2.0, 3.0) }
+    scaled :: Vec3{ scale * Vec3(1.0, 2.0, 3.0) }
     v :: F32x4(1.0, 2.0, 3.0, 4.0)
     w :: F32x4(10.0, 20.0, 30.0, 40.0)
-    added :: F32x4.{ v + w }
+    added :: F32x4{ v + w }
     d :: F64x2.from_array([1.5, 2.5])
     return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(.Max)}|{v.reduce(.Mul)}|{v.reduce(.Avg)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}|{d.reduce(.Avg)}"
 }"#;
 const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|2.5|[3.0, 5.0]|4.0|3.75|1.5|2.5|2.0";
 
-const OVERFLOW_DECLS: &str = r#"fn overflow_view() => String {
-    hi :: U8.{ 200 }
-    lo :: U8.{ 100 }
-    fallback :: U8.{ 0 }
+const OVERFLOW_DECLS: &str = r#"fn overflow_view() String {
+    hi :: U8{ 200 }
+    lo :: U8{ 100 }
+    fallback :: U8{ 0 }
     wrapped :: wrapping(hi + lo)
     saturated :: saturating(hi + lo)
     checked_miss :: checked(hi + lo) ?? fallback
@@ -1408,7 +1408,7 @@ const OVERFLOW_DECLS: &str = r#"fn overflow_view() => String {
     return "{wrapped}|{saturated}|{checked_miss}"
 }"#;
 const OVERFLOW_EXPECTED: &str = "44|255|0";
-const EXPECT_DECLS: &str = r#"fn expect_view() => String {
+const EXPECT_DECLS: &str = r#"fn expect_view() String {
     holder :: expect("ok")
     consume(holder)
     return "expect-ok"
@@ -1457,7 +1457,7 @@ fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
     assert_eq!(values, [format!("\"{EXPECT_EXPECTED}\" : String")]);
 }
 
-const SOLVER_FN: &str = r#"fn solver_view() => String {
+const SOLVER_FN: &str = r#"fn solver_view() String {
     empty := solve.Solver.new(-1)
     ok_solver := solve.Solver.new(7)
     ok_solver.require(true)
@@ -1469,7 +1469,7 @@ const SOLVER_FN: &str = r#"fn solver_view() => String {
     bad.require(true)
     return "{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
 }"#;
-const SOLVER_DECLS: &str = "use core.compute.solve as solve\nfn solver_view() => String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_DECLS: &str = "use core.compute.solve as solve\nfn solver_view() String {\n    empty := solve.Solver.new(-1)\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(false)\n    bad.require(true)\n    return \"{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
 const SOLVER_EXPECTED: &str = "ok|0|ok|0|failed|2";
 
 #[test]
@@ -1493,10 +1493,10 @@ fn public_transcript_covers_solver_exactly() {
 }
 
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
-fn archive_view() => String {
-    bytes :: [U8].{ 72, 101, 108, 108, 111 }
+fn archive_view() String {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
     zipped :: archive.zip_compress("hello.txt", bytes)
-    empty :: [U8].{}
+    empty :: [U8]{}
     tarred := archive.tar_add(empty, "hello.txt", bytes)
     tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
     zip_bytes :: archive.zip_decompress(zipped)
@@ -1506,8 +1506,8 @@ fn archive_view() => String {
 const ARCHIVE_EXPECTED: &str =
     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
 const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
-fn invalid_tar_name_view(name: String) => String {
-    empty :: [U8].{}
+fn invalid_tar_name_view(name: String) String {
+    empty :: [U8]{}
     valid :: archive.tar_add(empty, "keep.txt", [1])
     attempted :: archive.tar_add(valid, name, [2])
     return "{archive.tar_names_json(attempted)}|{archive.tar_get(attempted, "keep.txt")}|{archive.tar_get(attempted, name)}"
@@ -1549,7 +1549,7 @@ fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter(
 }
 
 const UI_DECLS: &str = r##"use core.ui as ui
-fn ui_value_view() => String {
+fn ui_value_view() String {
     point :: ui.point(1.5, -2.0)
     size :: ui.size(80.0, 24.0)
     rect :: ui.rect(1.0, 2.0, 3.0, 4.0)
@@ -1571,14 +1571,14 @@ fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
 }
 
 const CRYPTO_DECLS: &str = r#"use core.crypto.expert as expert
-fn crypto_value_view() => String {
-    ikm :: [U8].{ 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11 }
-    salt :: [U8].{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }
-    info :: [U8].{ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249 }
-    x_secret :: [U8].{ 119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42 }
-    x_public :: [U8].{ 222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79 }
-    ed_public :: [U8].{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
-    ed_signature :: [U8].{ 229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11 }
+fn crypto_value_view() String {
+    ikm :: [U8]{ 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11 }
+    salt :: [U8]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }
+    info :: [U8]{ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249 }
+    x_secret :: [U8]{ 119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42 }
+    x_public :: [U8]{ 222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79 }
+    ed_public :: [U8]{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    ed_signature :: [U8]{ 229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11 }
     output := ""
     #Unsafe("fixed RFC interop vectors") {
         derived :: expert.hkdf_sha256_raw(ikm, salt, info, 42) ?? panic("hkdf")
@@ -1605,11 +1605,11 @@ fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
     // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
     let source = r#"use core.crypto.expert as expert
 fn run() {
-    ed_seed :: [U8].{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
-    ed_public :: [U8].{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
-    key :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-    nonce :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-    msg :: [U8].{ 97, 98, 99 }
+    ed_seed :: [U8]{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
+    ed_public :: [U8]{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    key :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    nonce :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    msg :: [U8]{ 97, 98, 99 }
     #Unsafe("fixed RFC interop vectors") {
         signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
         sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
@@ -1626,7 +1626,7 @@ fn run() {
 
 const NET_STYLE_DECLS: &str = r#"use core.term as io
 use core.net as net
-fn net_style_view() => String {
+fn net_style_view() String {
     ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
     ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
     socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")

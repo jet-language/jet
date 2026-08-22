@@ -297,54 +297,54 @@ fn run() {
 
     overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
     if overflow == {
-        .Err(_) :> { print("i64-overflow") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("i64-overflow") }
+        else -> { print("accepted") }
     }
     nonfinite :: json.decode<Float>("1e400")
     if nonfinite == {
-        .Err(_) :> { print("nonfinite") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("nonfinite") }
+        else -> { print("accepted") }
     }
     invalid_nan :: json.decode<Decimal>("NaN")
     if invalid_nan == {
-        .Err(_) :> { print("nan-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("nan-rejected") }
+        else -> { print("accepted") }
     }
     invalid_infinity :: json.decode<Decimal>("Infinity")
     if invalid_infinity == {
-        .Err(_) :> { print("infinity-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("infinity-rejected") }
+        else -> { print("accepted") }
     }
     fractional_integer :: json.decode<Int>("1.5")
     if fractional_integer == {
-        .Err(_) :> { print("fractional-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("fractional-rejected") }
+        else -> { print("accepted") }
     }
     exponent_limited :: json.decode<Decimal>("1e1000001")
     if exponent_limited == {
-        .Err(_) :> { print("exponent-limit") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("exponent-limit") }
+        else -> { print("accepted") }
     }
     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
     mismatch :: json.decode<ExactNumbers>(mismatch_raw)
     if mismatch == {
-        .Err(_) :> { print("mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("mismatch") }
+        else -> { print("accepted") }
     }
     stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
     if stream_mismatch == {
-        .Err(_) :> { print("stream-mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("stream-mismatch") }
+        else -> { print("accepted") }
     }
     string_mismatch :: json.decode<String>("123")
     if string_mismatch == {
-        .Err(_) :> { print("string-mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("string-mismatch") }
+        else -> { print("accepted") }
     }
     limited :: json.decode<Decimal>(@limited_text)
     if limited == {
-        .Err(_) :> { print("limit") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("limit") }
+        else -> { print("accepted") }
     }
 }
 "#;
@@ -396,7 +396,7 @@ fn rfc8949_wire_cases_match_cbor_parse_expectations() {
             ));
         } else {
             checks.push_str(&format!(
-                "    if cbor.parse([{literal}]) == {{\n        Ok(_) -> print(false)\n        Err(_) -> print(true)\n    }}\n"
+                "    if cbor.parse([{literal}]) == {{\n        .Ok(_) -> print(false)\n        .Err(_) -> print(true)\n    }}\n"
             ));
         }
     }
@@ -429,7 +429,7 @@ use core.files as files
 fn run() {{
     text := files.read("{shown}") ?? panic("read")
     tree := xml.parse(text) ?? panic("parse")
-    options := xml.XMLCanonical.{{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }}
+    options := xml.XMLCanonical{{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }}
     print(xml.canonical(tree, options) ?? panic("canonical"))
 }}
 "#

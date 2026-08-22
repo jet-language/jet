@@ -94,7 +94,7 @@ fn run() {}
         r#"
 fn cross(cell: Cell<Int>) {
     values :: [1, 2, 3]
-    _ :: values.para_map((n: Int) => {
+    _ :: values.para_map((n: Int) -> {
         _ :: cell
         return n
     })
@@ -245,7 +245,7 @@ use core.reactive as reactive
 fn run() {
     pending := reactive.signal(0)
     values :: [1, 2, 3]
-    _ :: values.para_map((n: Int) => pending.get() + n)
+    _ :: values.para_map((n: Int) -> pending.get() + n)
 }
 "#;
     let out = jet::compile(source).expect("Signal may cross para_* via lock-ordered Arc");
@@ -265,7 +265,7 @@ fn derived_and_computed_cross_task_without_rustc_send_ice() {
 use core.reactive as reactive
 fn run() {
     base := reactive.signal(1)
-    twice := reactive.derived(() => (base.get() * 2))
+    twice := reactive.derived(() -> (base.get() * 2))
     worker :: task {
         print(twice.get())
     }
@@ -287,7 +287,7 @@ use core.reactive as reactive
 use core.tasks as tasks
 fn run() {
     base := reactive.signal(1)
-    twice := reactive.computed(() => (base.get() * 2))
+    twice := reactive.computed(() -> (base.get() * 2))
     (tx, rx) :: channel<Computed<Int>>()
     tx.send(~twice)
     got :: rx.receive() ?? panic("recv")
@@ -374,7 +374,7 @@ fn run() {
 fn run() {
     seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_map((n: Int) => { seen.push(n) })
+    values.para_map((n: Int) -> { seen.push(n) })
 }
 "#,
     )
@@ -412,9 +412,9 @@ fn every_parallel_adapter_rejects_mutable_captures() {
             "para_map",
             r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_map((n: Int) => {
+    values.para_map((n: Int) -> {
         seen.push(n)
     })
 }
@@ -424,9 +424,9 @@ fn run() {
             "para_filter",
             r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_filter((n: Int) => {
+    values.para_filter((n: Int) -> {
         seen.push(n)
     })
 }
@@ -436,9 +436,9 @@ fn run() {
             "para_partition",
             r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_partition((n: Int) => {
+    values.para_partition((n: Int) -> {
         seen.push(n)
     })
 }
@@ -448,14 +448,14 @@ fn run() {
             "para_fold",
             r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
     values.para_fold(
-        () => 0,
-        (total: Int, n: Int) => {
+        () -> 0,
+        (total: Int, n: Int) -> {
             seen.push(n)
         },
-        (left: Int, right: Int) => left + right
+        (left: Int, right: Int) -> left + right
     )
 }
 "#,
@@ -519,7 +519,7 @@ fn taskgroup_child_reads_borrowed_stack_data() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         window :: particles[0..1]
         a :: task window[0].position
@@ -535,7 +535,7 @@ fn taskgroup_children_borrow_disjoint_write_places() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}}, {{position: 30, velocity: 4}} }}
         task.group g {{
         left :: &particles[0]
         right :: &particles[2]
@@ -563,7 +563,7 @@ fn taskgroup_children_writing_one_place_are_rejected() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         one :: &particles[0]
         two :: &particles[0]
@@ -587,7 +587,7 @@ fn taskgroup_read_and_write_of_one_place_are_rejected() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         writer :: &particles[0]
         reader :: particles[0..1]
@@ -609,7 +609,7 @@ fn detached_task_still_rejects_a_borrowed_capture() {
         r#"
 {PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
     left :: &particles[0]
     worker :: task left.position
     print(worker.join() ?? panic("task failed"))
@@ -624,7 +624,7 @@ fn nested_taskgroups_track_their_own_borrows() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}}, .{{position: 30, velocity: 4}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}}, {{position: 30, velocity: 4}} }}
         task.group outer {{
         left :: &particles[0]
         a :: task {{
@@ -652,7 +652,7 @@ fn a_group_cannot_lend_an_owner_declared_inside_its_own_block() {
         r#"{PARTICLES}
 fn run() {{
         task.group g {{
-        particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+        particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         left :: &particles[0]
         a :: task {{
             left.position += 1
@@ -672,9 +672,9 @@ fn a_lent_owner_cannot_be_moved_before_the_group_joins() {
     // spawn, so the ordinary view rules end its borrow too early.
     let source = format!(
         r#"{PARTICLES}
-fn eat(ps: ^[Particle]) => Int :: ps.len()
+fn eat(ps: ^[Particle]) Int -> ps.len()
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         left :: &particles[0]
         a :: task {{
@@ -696,7 +696,7 @@ fn a_lent_place_cannot_be_written_by_the_parent_before_the_group_joins() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         left :: &particles[0]
         a :: task {{
@@ -718,7 +718,7 @@ fn a_write_lent_place_cannot_be_read_by_the_parent_before_the_group_joins() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         left :: &particles[0]
         a :: task {{
@@ -739,7 +739,7 @@ fn a_read_lent_place_stays_readable_by_the_parent() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
         task.group g {{
         window :: particles[0..1]
         a :: task window[0].position
@@ -758,7 +758,7 @@ fn a_place_the_group_never_lent_stays_writable() {
     let source = format!(
         r#"{PARTICLES}
 fn run() {{
-    particles := [Particle].{{ .{{position: 10, velocity: 2}}, .{{position: 20, velocity: 3}} }}
+    particles := [Particle]{{ {{position: 10, velocity: 2}}, {{position: 20, velocity: 3}} }}
     task.group g {{
         left :: &particles[0]
         a :: task {{
@@ -809,7 +809,7 @@ fn run() {
             r#"
 fn run() {
     values :: [1, 2, 3]
-    doubled :: values.para_map((n: Int) :> n * 2)
+    doubled :: values.para_map((n: Int) -> n * 2)
     print(doubled)
 }
 "#,
@@ -820,7 +820,7 @@ fn run() {
             r#"
 fn cross(cell: Cell<Int>) {
     values :: [1, 2, 3]
-    _ :: values.para_map((n: Int) :> {
+    _ :: values.para_map((n: Int) -> {
         _ :: cell
         return n
     })
@@ -836,7 +836,7 @@ use core.mem
 fn run() {
     fixed :: mem.Fixed.new(size: 128)
     values :: [1, 2, 3]
-    _ :: values.para_map((n: Int) :> {
+    _ :: values.para_map((n: Int) -> {
         _ :: fixed
         return n
     })
@@ -847,7 +847,7 @@ fn run() {
         (
             "safe kernel",
             r#"
-#Kernel(.parallel) fn add(left: Int, right: Int) Int :> left + right
+#Kernel(.parallel) fn add(left: Int, right: Int) Int -> left + right
 fn run() { print(add(20, 22)) }
 "#,
             None,
@@ -867,9 +867,9 @@ fn run() {
             "parallel mutable capture",
             r#"
 fn run() {
-    seen := [Int].{}
+    seen := [Int]{}
     values :: [1, 2, 3]
-    values.para_map((n: Int) :> { seen.push(n) })
+    values.para_map((n: Int) -> { seen.push(n) })
 }
 "#,
             Some("E1101"),
@@ -888,7 +888,7 @@ fn run() { print(noisy(1)) }
         (
             "kernel local cell",
             r#"
-#Kernel(.parallel) fn blocked(cell: Cell<Int>) Int :> 0
+#Kernel(.parallel) fn blocked(cell: Cell<Int>) Int -> 0
 fn run() {}
 "#,
             Some("E1102"),

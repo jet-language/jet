@@ -23,8 +23,8 @@ use core.sys as os
 use core.process as process
 
 fn run() {
-    os.on_interrupt(() => { panic("first handler failed") })
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> { panic("first handler failed") })
+    os.on_interrupt(() -> {
         print("second")
         process.exit(0)
     })

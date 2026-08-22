@@ -52,7 +52,7 @@ fn parse_codes(source: &str) -> Vec<String> {
 
 #[test]
 fn core_lang_marker_enums_accept_dot_literals_without_imports() {
-    let diagnostics = codes("#Inline(.Always)\nfn helper() => Int :: 1\nfn run() {}");
+    let diagnostics = codes("#Inline(.Always)\nfn helper() Int -> 1\nfn run() {}");
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 
@@ -474,7 +474,7 @@ fn contract_messages_use_function_parameter_types() {
     let valid = codes(
         r#"
 #[Pre(value > 0, message), Post(result > 0, message)]
-fn positive(value: Int, message: String) => Int {
+fn positive(value: Int, message: String) Int {
     return value
 }
 fn run() {}
@@ -485,7 +485,7 @@ fn run() {}
     let wrong = codes(
         r#"
 #[Pre(value > 0, message), Post(result > 0, message)]
-fn positive(value: Int, message: Int) => Int {
+fn positive(value: Int, message: Int) Int {
     return value
 }
 fn run() {}
@@ -623,8 +623,8 @@ fn sized_and_named_range_failures_share_the_index_error_shape() {
     let diagnostics = diagnostics(
         r#"
 Die :: distinct Int(1..6)
-fn sized(faces: [Int#6], index: U8) => Int { return faces[index] }
-fn named(faces: [Int#6], index: Die) => Int { return faces[index] }
+fn sized(faces: [Int#6], index: U8) Int { return faces[index] }
+fn named(faces: [Int#6], index: Die) Int { return faces[index] }
 fn run() {}
 "#,
     );

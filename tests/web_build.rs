@@ -212,9 +212,9 @@ fn web_eager_collection_adapters_match_native_shape() {
 #Target(JS)
 fn run() {
     nums :: [1, 2, 3, 4]
-    doubled :: nums.map((n: Int) => n * 2)
-    evens :: nums.filter((n: Int) => n > 2)
-    lazy_evens :: nums.lazy().filter((n: Int) => n > 2).map((n: Int) => n * 10).to_list()
+    doubled :: nums.map((n: Int) -> n * 2)
+    evens :: nums.filter((n: Int) -> n > 2)
+    lazy_evens :: nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
     print(doubled[0])
     print(doubled[3])
     print(evens[0])
@@ -1009,7 +1009,7 @@ fn web_build_publishes_maps_and_release_omits_them() {
     );
 
     // Wasm-export body must produce non-empty app.wasm.map mappings.
-    let wasm_src = "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) => Int { return a + b }\nfn run() {}\n";
+    let wasm_src = "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) Int -[]> { return a + b }\nfn run() {}\n";
     fs::write(dir.join("wasm.jet"), wasm_src).unwrap();
     let wasm_out = Command::new(&jet)
         .current_dir(&dir)
@@ -1094,9 +1094,9 @@ fn wasm_void_body_and_internal_helper_are_emitted_from_tir() {
 fn tick() {}
 #WasmExport
 fn ping() { tick() }
-fn twice(n: Int) => Int { return n * 2 }
+fn twice(n: Int) Int -[]> { return n * 2 }
 #WasmExport
-fn compute(n: Int) => Int { return twice(n) }
+fn compute(n: Int) Int -[]> { return twice(n) }
 fn run() {}
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_wasm_helpers.jet")
@@ -1114,7 +1114,7 @@ fn web_value_and_range_arm_tables_emit_on_js_and_wasm() {
     let src = r#"#Target(Web)
 
 #Target(JS)
-fn digit(n: Int) => String {
+fn digit(n: Int) String -[]> {
     if n == {
         0 -> return "0"
         1 -> return "1"
@@ -1122,14 +1122,14 @@ fn digit(n: Int) => String {
     }
 }
 #Target(JS)
-fn band(n: Int) => String {
+fn band(n: Int) String -[]> {
     if n == {
         0..9 -> return "low"
         else -> return "high"
     }
 }
 #WasmExport
-fn wasm_digit(n: Int) => String {
+fn wasm_digit(n: Int) String -[]> {
     if n == {
         0 -> return "0"
         1 -> return "1"
@@ -1137,7 +1137,7 @@ fn wasm_digit(n: Int) => String {
     }
 }
 #WasmExport
-fn wasm_band(n: Int) => String {
+fn wasm_band(n: Int) String -[]> {
     if n == {
         0..9 -> return "low"
         10..19 -> return "mid"
@@ -1181,7 +1181,7 @@ fn web_loops_and_index_assign_emit_on_js_and_wasm() {
     let src = r#"#Target(Web)
 
 #Target(JS)
-fn sum_to(n: Int) => Int {
+fn sum_to(n: Int) Int -[]> {
     total := 0
     i := 0
     loop {
@@ -1192,7 +1192,7 @@ fn sum_to(n: Int) => Int {
     return total
 }
 #Target(JS)
-fn sum_while(n: Int) => Int {
+fn sum_while(n: Int) Int -[]> {
     total := 0
     i := 0
     loop i < n {
@@ -1203,19 +1203,19 @@ fn sum_while(n: Int) => Int {
     return total
 }
 #Target(JS)
-fn sum_counted(n: Int) => Int {
+fn sum_counted(n: Int) Int -[]> {
     total := 0
     loop i, 0..<n { total += i }
     return total
 }
 #Target(JS)
-fn bump(n: Int) => Int {
+fn bump(n: Int) Int -[]> {
     xs := [n]
     xs[0] = 9
     return xs[0]
 }
 #WasmExport
-fn wasm_sum_to(n: Int) => Int {
+fn wasm_sum_to(n: Int) Int -[]> {
     total := 0
     i := 0
     loop {
@@ -1226,7 +1226,7 @@ fn wasm_sum_to(n: Int) => Int {
     return total
 }
 #WasmExport
-fn wasm_sum_while(n: Int) => Int {
+fn wasm_sum_while(n: Int) Int -[]> {
     total := 0
     i := 0
     loop i < n {
@@ -1237,13 +1237,13 @@ fn wasm_sum_while(n: Int) => Int {
     return total
 }
 #WasmExport
-fn wasm_sum_counted(n: Int) => Int {
+fn wasm_sum_counted(n: Int) Int -[]> {
     total := 0
     loop i, 0..<n { total += i }
     return total
 }
 #WasmExport
-fn wasm_bump(n: Int) => Int {
+fn wasm_bump(n: Int) Int -[]> {
     xs := [n]
     xs[0] = 9
     return xs[0]
@@ -1305,17 +1305,17 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) => Int ! String {
+fn make_result(flag: Bool) Int ! String -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(JS)
-fn make_opt(flag: Bool) => Int? {
+fn make_opt(flag: Bool) Int? -[]> {
     if flag -> return .Val(3)
     return .None
 }
 #Target(JS)
-fn classify(flag: Bool) => Int {
+fn classify(flag: Bool) Int -[]> {
     r :: make_result(flag)
     if r == {
         .Ok(n) -> return n
@@ -1323,36 +1323,36 @@ fn classify(flag: Bool) => Int {
     }
 }
 #Target(JS)
-fn maybe(flag: Bool) => Int {
+fn maybe(flag: Bool) Int -[]> {
     x :: make_opt(flag)
     if x == .None { return 0 }
     if x == .Val(n) { return n }
     return -1
 }
 #Target(JS)
-fn js_make_toggle(flag: Bool) => Toggle {
+fn js_make_toggle(flag: Bool) Toggle -[]> {
     if flag { return .On }
     return .Off
 }
 #Target(JS)
-fn js_matches_and(flag: Bool) => Int {
+fn js_matches_and(flag: Bool) Int -[]> {
     x :: make_opt(flag)
     toggle :: js_make_toggle(flag)
     if x == .Val(n) && toggle == .On && flag { return n }
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) => Int ! String {
+fn wasm_make_result(flag: Bool) Int ! String -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(Wasm)
-fn wasm_make_opt(flag: Bool) => Int? {
+fn wasm_make_opt(flag: Bool) Int? -[]> {
     if flag -> return .Val(3)
     return .None
 }
 #WasmExport
-fn wasm_classify(flag: Bool) => Int {
+fn wasm_classify(flag: Bool) Int -[]> {
     r :: wasm_make_result(flag)
     if r == {
         .Ok(n) -> return n
@@ -1360,19 +1360,19 @@ fn wasm_classify(flag: Bool) => Int {
     }
 }
 #WasmExport
-fn wasm_maybe(flag: Bool) => Int {
+fn wasm_maybe(flag: Bool) Int -[]> {
     x :: wasm_make_opt(flag)
     if x == .None { return 0 }
     if x == .Val(n) { return n }
     return -1
 }
 #Target(Wasm)
-fn wasm_make_toggle(flag: Bool) => Toggle {
+fn wasm_make_toggle(flag: Bool) Toggle -[]> {
     if flag { return .On }
     return .Off
 }
 #WasmExport
-fn wasm_matches_and(flag: Bool) => Int {
+fn wasm_matches_and(flag: Bool) Int -[]> {
     x :: wasm_make_opt(flag)
     toggle :: wasm_make_toggle(flag)
     if x == .Val(n) && toggle == .On && flag { return n }
@@ -1421,15 +1421,15 @@ fn web_declared_default_error_conversion_builds() {
     let src = r#"#Target(Web)
 enum StoreErr { Missing }
 
-impl StoreErr => Err {
+impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() => Int ! StoreErr {
+fn read_store() Int ! StoreErr -[]> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() => Int ! {
+fn get_user() Int ! -[]> {
     value :: read_store()?
     return Ok(value)
 }
@@ -1464,19 +1464,19 @@ enum Packet {
 }
 
 #Target(JS)
-fn make_packet(n: Int) => Packet :> .Data(n)
+fn make_packet(n: Int) Packet -> .Data(n)
 
 #Target(JS)
-fn make_opt(n: Int) => Int? :> .Val(n)
+fn make_opt(n: Int) Int? -> .Val(n)
 
 #Target(JS)
-fn bind_opt(n: Int) => Int {
+fn bind_opt(n: Int) Int -[]> {
     if make_opt(n) == .Val(value) { return value }
     return 0
 }
 
 #Target(JS)
-fn classify_range(n: Int) => Int {
+fn classify_range(n: Int) Int -[]> {
     packet :: make_packet(n)
     if packet == {
         .Data(1..3) -> return 1
@@ -1485,10 +1485,10 @@ fn classify_range(n: Int) => Int {
 }
 
 #Target(Wasm)
-fn wasm_packet(n: Int) => Packet :> .Data(n)
+fn wasm_packet(n: Int) Packet -> .Data(n)
 
 #WasmExport
-fn wasm_classify(n: Int) => Int {
+fn wasm_classify(n: Int) Int -[]> {
     packet :: wasm_packet(n)
     if packet == {
         .Data(1..3) -> return 1
@@ -1530,13 +1530,13 @@ fn web_js_matches_binds_subject_once() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_opt(n: Int) => Int? :> .Val(n)
+fn make_opt(n: Int) Int? -> .Val(n)
 
 #Target(JS)
-fn make_toggle() => Toggle :> .On
+fn make_toggle() Toggle -> .On
 
 #Target(JS)
-fn classify(n: Int) => Int {
+fn classify(n: Int) Int -[]> {
     opt :: make_opt(n)
     toggle :: make_toggle()
     if opt == .Val(value) && toggle == .On { return value }
@@ -1688,7 +1688,7 @@ fn web_e3001_context_matches_on_js_and_wasm() {
         (
             "e3001_js_context",
             r#"#Target(JS)
-fn missing() => Int? {
+fn missing() Int? -[]> {
     return None
 }
 
@@ -1701,7 +1701,7 @@ fn run() {
         (
             "e3001_wasm_context",
             r#"#Target(Wasm)
-fn missing() => Int? {
+fn missing() Int? -[]> {
     return None
 }
 
@@ -1759,7 +1759,7 @@ fn web_e3012_context_matches_on_js_and_wasm() {
         (
             "e3012_js_context",
             r#"#Target(JS)
-fn recurse(n: Int) => Int {
+fn recurse(n: Int) Int -[]> {
     return recurse(n + 1)
 }
 
@@ -1772,7 +1772,7 @@ fn run() {
         (
             "e3012_wasm_context",
             r#"#Target(Wasm)
-fn recurse(n: Int) => Int {
+fn recurse(n: Int) Int -[]> {
     return recurse(n + 1)
 }
 
@@ -1808,7 +1808,7 @@ try {
             "{stem} lost function context:\n{stdout}"
         );
         assert!(
-            stdout.contains("2 | fn recurse(n: Int) => Int"),
+            stdout.contains("2 | fn recurse(n: Int) Int ->"),
             "{stem} lost source-line context:\n{stdout}"
         );
         assert!(
@@ -1830,7 +1830,7 @@ fn web_todo_runs_through_shared_stop_on_js_and_wasm() {
         (
             "todo_js",
             r#"#Target(JS)
-fn missing() => Int {
+fn missing() Int -[]> {
     return #Todo
 }
 
@@ -1843,7 +1843,7 @@ fn run() {
         (
             "todo_wasm",
             r#"#Target(Wasm)
-fn missing() => Int {
+fn missing() Int -[]> {
     return #Todo
 }
 
@@ -1897,7 +1897,7 @@ fn web_contracts_execute_with_canonical_e3005_on_js_and_wasm() {
         (
             "contract_js",
             r#"#[Target(JS), Pre(value > 0, "positive"), Post(result > value, "grows")]
-fn checked(value: Int) => Int {
+fn checked(value: Int) Int -[]> {
     return value
 }
 
@@ -1913,7 +1913,7 @@ fn run() {
         (
             "contract_wasm",
             r#"#[Target(Wasm), Pre(value > 0, "positive"), Post(result > value, "grows")]
-fn checked(value: Int) => Int {
+fn checked(value: Int) Int -[]> {
     return value
 }
 
@@ -2093,7 +2093,7 @@ try {
     );
 
     let wasm_ok_source = r#"#Target(Web)
-fn run() => Int ! {
+fn run() Int ! -[]> {
     return Ok(42)
 }
 "#;
@@ -2325,12 +2325,12 @@ fn web_js_try_reaches_typed_edge() {
         return;
     }
     let source = r#"#Target(JS)
-fn load() => Int ! {
+fn load() Int ! -[]> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(JS)
-fn read() => Int ! {
+fn read() Int ! -[]> {
     value :: load()?
     return Ok(value)
 }
@@ -2390,12 +2390,12 @@ fn web_wasm_try_returns_typed_journey() {
         return;
     }
     let source = r#"#Target(Wasm)
-fn load() => Int ! {
+fn load() Int ! -[]> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(Wasm)
-fn read() => Int ! {
+fn read() Int ! -[]> {
     value :: load()?
     return Ok(value)
 }
@@ -2504,11 +2504,11 @@ fn web_two_hop_journey_matches_all_execution_tiers() {
         eprintln!("note: skipping web two-hop journey parity test (need rustc + node)");
         return;
     }
-    let source = r#"fn load() => String ! {
+    let source = r#"fn load() String ! -[]> {
     return Err("two-hop", code: "TWOHOP")
 }
 
-fn read() => String ! {
+fn read() String ! -[]> {
     value :: load()? "reading source"
     return Ok(value)
 }
@@ -2606,7 +2606,7 @@ fn web_js_enum_match_break_targets_the_enclosing_loop() {
 enum Choice { Stop Keep }
 
 #Target(JS)
-fn count(choice: Choice) => Int {
+fn count(choice: Choice) Int -[]> {
     hits := 0
     loop i, 0..<3 {
         if choice == {
@@ -2643,7 +2643,7 @@ fn web_for_in_preflight_rejects_unimplemented_iteration_fields() {
             r#"#Target(Web)
 
 #Target(JS)
-fn sum() => Int {
+fn sum() Int -[]> {
     total := 0
     loop value, [1, 2, 3], 2 { total += value }
     return total
@@ -2656,7 +2656,7 @@ fn run() {}
             r#"#Target(Web)
 
 #Target(JS)
-fn count_chars() => Int {
+fn count_chars() Int -[]> {
     total := 0
     loop ch, "abc".chars() { total += 1 }
     return total
@@ -2682,7 +2682,7 @@ fn web_if_expr_emits_safe_js_and_wasm_value_blocks() {
     }
     let src = r#"#Target(Web)
 #WasmExport
-fn wasm_pick(flag: Bool) => Int {
+fn wasm_pick(flag: Bool) Int -[]> {
     return if flag -> {
         n :: 6
         n + 1
@@ -2690,7 +2690,7 @@ fn wasm_pick(flag: Bool) => Int {
 }
 
 #Target(JS)
-fn js_pick(flag: Bool) => Int {
+fn js_pick(flag: Bool) Int -[]> {
     return if flag -> {
         n :: 6
         n + 2
@@ -2735,7 +2735,7 @@ fn web_backends_traverse_impure_regions() {
     let src = r#"#Target(Web)
 
 #Target(JS)
-fn js_value() => Int {
+fn js_value() Int -[]> {
     value := 0
     #Impure("preserve JS body") {
         value = 7
@@ -2743,7 +2743,7 @@ fn js_value() => Int {
     return value
 }
 #WasmExport
-fn wasm_value() => Int {
+fn wasm_value() Int -[]> {
     value := 0
     #Impure("preserve Wasm body") {
         value = 9
@@ -2776,11 +2776,11 @@ fn web_inline_modules_keep_qualified_function_identity() {
     let src = r#"#Target(Web)
 module left {
     #Target(JS)
-    pub fn value() => Int { return 1 }
+    pub fn value() Int -[]> { return 1 }
 }
 module right {
     #Target(JS)
-    pub fn value() => Int { return 2 }
+    pub fn value() Int -[]> { return 2 }
 }
 #Target(JS)
 fn run() { print(left.value() + right.value()) }
@@ -2800,10 +2800,10 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"#Target(Web)
-module left { pub fn value() => Int { return 1 } }
-module right { pub fn value() => Int { return 2 } }
+module left { pub fn value() Int -[]> { return 1 } }
+module right { pub fn value() Int -[]> { return 2 } }
 #WasmExport
-fn total() => Int { return left.value() + right.value() }
+fn total() Int -[]> { return left.value() + right.value() }
 #Target(JS)
 fn run() { print(total()) }
 "#;
@@ -2832,11 +2832,11 @@ fn web_file_modules_keep_qualified_js_function_identity() {
             ),
             (
                 "left.jet",
-                "#Target(JS)\npub fn value() => Int { return 1 }\n",
+                "#Target(JS)\npub fn value() Int -[]> { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(JS)\npub fn value() => Int { return 2 }\n",
+                "#Target(JS)\npub fn value() Int -[]> { return 2 }\n",
             ),
         ],
     );
@@ -2858,10 +2858,10 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() => Int { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() Int -[]> { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
             ),
-            ("left.jet", "pub fn value() => Int { return 1 }\n"),
-            ("right.jet", "pub fn value() => Int { return 2 }\n"),
+            ("left.jet", "pub fn value() Int -[]> { return 1 }\n"),
+            ("right.jet", "pub fn value() Int -[]> { return 2 }\n"),
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
@@ -2888,7 +2888,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
             ),
             (
                 "math.jet",
-                "#WasmExport\npub fn value() => Int { return 7 }\n",
+                "#WasmExport\npub fn value() Int -[]> { return 7 }\n",
             ),
         ],
     );
@@ -2931,11 +2931,11 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(JS)\nfn helper() => Int { return 1 }\n#Target(JS)\npub fn value() => Int { return helper() }\n",
+                    "#Target(JS)\nfn helper() Int -[]> { return 1 }\n#Target(JS)\npub fn value() Int -[]> { return helper() }\n",
                 ),
                 (
                     "right.jet",
-                    "fn helper() => Int { return 2 }\n#WasmExport\npub fn value() => Int { return helper() }\n",
+                    "fn helper() Int -[]> { return 2 }\n#WasmExport\npub fn value() Int -[]> { return helper() }\n",
                 ),
             ],
         );
@@ -2969,7 +2969,7 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         return;
     }
     let src = r#"#Target(Web)
-module helper { pub fn run() => Int { return 7 } }
+module helper { pub fn run() Int -[]> { return 7 } }
 #Target(JS)
 fn run() { print("top-level") }
 "#;
@@ -2984,7 +2984,7 @@ fn run() { print("top-level") }
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n\n#Target(JS)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
+    let src = "#Target(Web)\n\n#Target(JS)\nfn missing() Int -[]> { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -2993,7 +2993,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
     let src =
-        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) => [Float] { return ~xs }\nfn run() {}\n";
+        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) [Float] -[]> { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(
@@ -3004,7 +3004,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(xs: [Float]) => [Float] { return ~xs }\nfn run() {}\n";
+    let src = "#Target(Web)\nfn helper(xs: [Float]) [Float] -[]> { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(
@@ -3015,7 +3015,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n\n#Target(JS)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
+    let src = "#Target(Web)\n\n#Target(JS)\nfn browser_value() Int -[]> { return 1 }\n#WasmExport\nfn compute() Int -[]> { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
@@ -3024,8 +3024,8 @@ fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
 #[test]
 fn canvas_style_wasm_tir_control_flow_and_print_compile() {
     let src = r#"#Target(Web)
-fn square(n: Int) => Int { return n * n }
-fn summarize(limit: Int) => Int {
+fn square(n: Int) Int -[]> { return n * n }
+fn summarize(limit: Int) Int -[]> {
     total := square(limit)
     if total > 10 { return total } else { return total + 1 }
 }
@@ -3054,7 +3054,7 @@ fn dev() {
     server.serve()
 }
 module tools {
-    fn dev() => Int { return 7 }
+    fn dev() Int -[]> { return 7 }
 }
 fn run() { print("hello, web") }
 "#;
@@ -3266,7 +3266,7 @@ fn run() {
     choose_left := reactive.signal(true)
     left := reactive.signal(1)
     right := reactive.signal(10)
-    ui.reactive_render(() => {
+    ui.reactive_render(() -> {
         if choose_left.get() { print(left.get()) } else { print(right.get()) }
     })
     choose_left.set(false)
@@ -3290,7 +3290,7 @@ use core.reactive as reactive
 #Target(JS)
 fn run() {
     value := reactive.signal(1)
-    subscription := reactive.effect(() => {
+    subscription := reactive.effect(() -> {
         print(value.get())
     })
     print(subscription.is_active())
@@ -3323,7 +3323,7 @@ use core.web as web
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)
-    web.on("#new-task", "input", (ev) => {
+    web.on("#new-task", "input", (ev) -> {
         web.storage.local.set("draft", web.value("#new-task"))
     })
 }
@@ -3359,7 +3359,7 @@ fn web_trace_map_keeps_qualified_handler_identity() {
 use core.web as web
 module handlers {
     #Target(JS)
-    pub fn init() { web.on("#new-task", "input", (ev) => {}) }
+    pub fn init() { web.on("#new-task", "input", (ev) -> {}) }
 }
 #Target(JS)
 fn init() { handlers.init() }
@@ -3399,7 +3399,7 @@ fn web_grouped_use_list_wasm_bridge_roundtrip() {
 use core.math.[abs, min, max, clamp]
 
 #WasmExport
-pub fn compute() => Int {
+pub fn compute() Int -[]> {
     return abs(-8) + min(9, 4) + max(0, 0) + clamp(0, 0, 0)
 }
 

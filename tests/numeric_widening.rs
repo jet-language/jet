@@ -217,29 +217,29 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
 fn exact_widening_is_symmetric_at_operators_and_works_for_arguments() {
     let output = compile_ok(
         r#"
-fn take_i16(value: I16) => I16 {
+fn take_i16(value: I16) I16 -[]> {
     return value
 }
 
-fn return_i16(value: I8) => I16 {
+fn return_i16(value: I8) I16 -[]> {
     return value
 }
 
-fn increment(value: I32) => I32 {
+fn increment(value: I32) I32 -[]> {
     return value + 1
 }
 
 fn run() {
-    small :: I8.{1}
-    wide :: I16.{2}
+    small :: I8{1}
+    wide :: I16{2}
     _ :: small + wide
     _ :: 1 + wide
     _ :: wide + 1
     _ :: take_i16(small)
     _ :: return_i16(small)
-    assigned := I16.{0}
+    assigned := I16{0}
     assigned = small
-    narrow_decimal :: F32.{1.5}
+    narrow_decimal :: F32{1.5}
     wide_decimal :: 2.5
     _ :: narrow_decimal + wide_decimal
 }
@@ -252,24 +252,24 @@ fn run() {
 #[test]
 fn checked_and_approximate_crossings_match_aot_jit_and_interpreter() {
     let success = r#"
-fn take_float(value: Float) => Float {
+fn take_float(value: Float) Float -[]> {
     return value
 }
 
-fn return_float(value: Int) => Float {
+fn return_float(value: Int) Float -[]> {
     return value
 }
 
 fn run() {
-    exact :: Int.{9007199254740992}
-    assigned := Float.{0.0}
+    exact :: Int{9007199254740992}
+    assigned := Float{0.0}
     assigned = exact
     print(take_float(exact) == 9007199254740992.0)
     print(return_float(exact) == 9007199254740992.0)
     print(assigned == 9007199254740992.0)
     print((exact + 0.0) == 9007199254740992.0)
 
-    lossy :: Int.{9007199254740993}
+    lossy :: Int{9007199254740993}
     print((approx(lossy) + 0.0) == 9007199254740992.0)
 }
 "#;
@@ -284,7 +284,7 @@ fn run() {
 fn accept(value: {target}) {{}}
 
 fn run() {{
-    lossy :: Int.{{{value}}}
+    lossy :: Int{{{value}}}
     accept(lossy)
 }}
 "#
@@ -296,22 +296,22 @@ fn run() {{
 #[test]
 fn parenthesized_approximate_crossings_match_aot_jit_and_interpreter() {
     let source = r#"
-fn take_float(value: Float) => Float {
+fn take_float(value: Float) Float -[]> {
     return value
 }
 
-fn return_float(value: Int) => Float {
+fn return_float(value: Int) Float -[]> {
     return ((approx(value)))
 }
 
 fn run() {
-    lossy :: Int.{9007199254740993}
+    lossy :: Int{9007199254740993}
     expected :: 9007199254740992.0
 
     print((((approx(lossy))) + 0.0) == expected)
     print(take_float(((approx(lossy)))) == expected)
 
-    assigned := Float.{0.0}
+    assigned := Float{0.0}
     assigned = ((approx(lossy)))
     print(assigned == expected)
 
@@ -331,7 +331,7 @@ fn run() {
 fn numeric_arguments_widen_at_every_user_call_seam() {
     let source = r#"
 trait NumericSink {
-    fn accept(self, value: Float) => Float
+    fn accept(self, value: Float) Float
 }
 
 struct Holder {
@@ -339,34 +339,34 @@ struct Holder {
 }
 
 impl Holder.NumericSink {
-    fn accept(self, value: Float) => Float {
+    fn accept(self, value: Float) Float -[]> {
         return value
     }
 }
 
 impl Holder {
-    fn instance(self, value: Float) => Float {
+    fn instance(self, value: Float) Float -[]> {
         return value
     }
 
-    fn static(value: Float) => Float {
+    fn static(value: Float) Float -[]> {
         return value
     }
 }
 
 module numeric_helpers {
-    pub fn accept(value: Float) => Float {
+    pub fn accept(value: Float) Float -[]> {
         return value
     }
 }
 
-fn accept_float(value: Float) => Float {
+fn accept_float(value: Float) Float -[]> {
     return value
 }
 
 fn run() {
-    narrow :: I32.{7}
-    holder :: Holder.{seed: 0}
+    narrow :: I32{7}
+    holder :: Holder{seed: 0}
     callback :: accept_float
 
     print(holder.instance(narrow) == 7.0)
@@ -396,7 +396,7 @@ fn numeric_arguments_widen_across_imported_call_seams() {
 use "./helper" as helper
 
 fn run() {
-    narrow :: I32.{7}
+    narrow :: I32{7}
     print(helper.accept(narrow) == 7.0)
 }
 "#,
@@ -404,7 +404,7 @@ fn run() {
         (
             "helper.jet",
             r#"
-pub fn accept(value: Float) => Float {
+pub fn accept(value: Float) Float -[]> {
     return value
 }
 "#,
@@ -417,30 +417,30 @@ pub fn accept(value: Float) => Float {
 fn numeric_multi_producer_joins_widen_every_producer_across_tiers() {
     let source = r#"
 fn run() {
-    small :: U8.{1}
-    wide :: U16.{2}
+    small :: U8{1}
+    wide :: U16{2}
     choose_first :: true
 
     small_first :: if choose_first -> small else -> wide
     wide_first :: if choose_first -> wide else -> small
-    print(small_first == U16.{1})
-    print(wide_first == U16.{2})
+    print(small_first == U16{1})
+    print(wide_first == U16{2})
 
     small_first_list :: [small, wide]
     wide_first_list :: [wide, small]
-    print(small_first_list[0] == U16.{1})
-    print(small_first_list[1] == U16.{2})
-    print(wide_first_list[0] == U16.{2})
-    print(wide_first_list[1] == U16.{1})
+    print(small_first_list[0] == U16{1})
+    print(small_first_list[1] == U16{2})
+    print(wide_first_list[0] == U16{2})
+    print(wide_first_list[1] == U16{1})
 
-    exact :: Int.{9007199254740992}
-    decimal :: Float.{1.0}
+    exact :: Int{9007199254740992}
+    decimal :: Float{1.0}
     exact_if :: if choose_first -> exact else -> decimal
     exact_list :: [exact, decimal]
     print(exact_if == 9007199254740992.0)
     print(exact_list[0] == 9007199254740992.0)
 
-    lossy :: Int.{9007199254740993}
+    lossy :: Int{9007199254740993}
     rounded :: 9007199254740992.0
     approx_if :: if choose_first -> approx(lossy) else -> decimal
     approx_list :: [approx(lossy), decimal]
@@ -462,8 +462,8 @@ fn widening_does_not_search_for_a_third_type_or_narrow() {
     let no_join = compile_error(
         r#"
 fn run() {
-    unsigned :: U8.{1}
-    signed :: I8.{1}
+    unsigned :: U8{1}
+    signed :: I8{1}
     _ :: unsigned + signed
 }
 "#,
@@ -478,7 +478,7 @@ fn run() {
         r#"
 fn take_i8(value: I8) {}
 fn run() {
-    wide :: I16.{1}
+    wide :: I16{1}
     take_i8(wide)
 }
 "#,
@@ -488,8 +488,8 @@ fn run() {
     let spread_widening = compile_error(
         r#"
 fn run() {
-    small :: [U8.{1}]
-    _ :: [...small, U16.{2}]
+    small :: [U8{1}]
+    _ :: [...small, U16{2}]
 }
 "#,
     );
@@ -504,21 +504,21 @@ fn run() {
 fn bare_whole_literals_take_the_minimal_width_before_operator_join() {
     let source = r#"
 fn run() {
-    byte :: U8.{1}
-    signed :: I8.{1}
+    byte :: U8{1}
+    signed :: I8{1}
     left :: byte + 256
     right :: 256 + byte
-    print(left == U16.{257})
-    print(right == U16.{257})
-    print((signed + 1) == I8.{2})
-    print((1 + signed) == I8.{2})
-    print((byte + 1) == U8.{2})
-    print((1 + byte) == U8.{2})
-    print((I8.{0} + 127) == I8.{127})
-    print((I16.{0} + 128) == I16.{128})
-    print((I8.{0} + -128) == I8.{-128})
-    print((I16.{0} + -129) == I16.{-129})
-    print((U64.{0} + 9223372036854775807) == U64.{9223372036854775807})
+    print(left == U16{257})
+    print(right == U16{257})
+    print((signed + 1) == I8{2})
+    print((1 + signed) == I8{2})
+    print((byte + 1) == U8{2})
+    print((1 + byte) == U8{2})
+    print((I8{0} + 127) == I8{127})
+    print((I16{0} + 128) == I16{128})
+    print((I8{0} + -128) == I8{-128})
+    print((I16{0} + -129) == I16{-129})
+    print((U64{0} + 9223372036854775807) == U64{9223372036854775807})
 }
 
 "#;
@@ -529,21 +529,21 @@ fn run() {
         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
     );
 
-    let rendered = compile_error("fn run() { _ :: U8.{256} }");
+    let rendered = compile_error("fn run() { _ :: U8{256} }");
     assert!(
         rendered.contains("[E1003]") && rendered.contains("U8") && rendered.contains("255"),
         "{rendered}"
     );
 
     for value in ["18446744073709551616"] {
-        let rendered = compile_error(&format!("fn run() {{ _ :: U64.{{{value}}} }}"));
+        let rendered = compile_error(&format!("fn run() {{ _ :: U64{{{value}}} }}"));
         assert!(
             rendered.contains("[E1003]")
                 && rendered.contains("a U64 holds 0..18446744073709551615"),
             "{rendered}"
         );
     }
-    let rendered = compile_error("fn run() { _ :: I64.{9223372036854775808} }");
+    let rendered = compile_error("fn run() { _ :: I64{9223372036854775808} }");
     assert!(
         rendered.contains("[E1003]")
             && rendered.contains("an I64 holds -9223372036854775808..9223372036854775807"),
@@ -555,9 +555,9 @@ fn run() {
 fn fixed_width_overflow_methods_match_all_execution_tiers() {
     let source = r#"
 fn run() {
-    a :: U8.{200}
-    b :: U8.{100}
-    fb :: U8.{0}
+    a :: U8{200}
+    b :: U8{100}
+    fb :: U8{0}
     print(a.wrapping_add(b))
     print(a.saturating_add(b))
     print(a.checked_add(b) ?? fb)

@@ -546,8 +546,8 @@ fn context_is_package_ref(src: &str, offset: usize) -> Option<(String, String)> 
 
 fn context_is_option_field(src: &str, offset: usize) -> Option<String> {
     let before = &src[..offset.min(src.len())];
-    let service = before.rfind("Service.{");
-    let env = before.rfind("Env.{");
+    let service = before.rfind("Service{");
+    let env = before.rfind("Env{");
     let marker = match (service, env) {
         (Some(a), Some(b)) => Some(a.max(b)),
         (Some(a), None) | (None, Some(a)) => Some(a),

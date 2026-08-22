@@ -10,7 +10,7 @@ use std::fs;
 const OUTER_GROUP_HELPER: &str = r#"
 struct Gate { step: Int }
 
-fn spawn_later(group: Group) => Shared<Gate> {
+fn spawn_later(group: Group) Shared<Gate> {
     gate :: shared Gate{ step: 0 }
     task {
         gate.step += 1
@@ -195,11 +195,11 @@ fn taskgroup_type_is_second_class() {
         // that stay banned must teach with the E1110 family instead of the bare
         // "there is no type called `Group`" fall-through (E0119).
         (
-            "fn bad() => Group { return 0 }\nfn run() {}\n",
+            "fn bad() Group { return 0 }\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         (
-            "struct Bad { step: Int\n    fn bad(self) => Group { return 0 }\n}\nfn run() {}\n",
+            "struct Bad { step: Int\n    fn bad(self) Group { return 0 }\n}\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
         (
@@ -207,7 +207,7 @@ fn taskgroup_type_is_second_class() {
             &["E0003"][..],
         ),
         (
-            "fn run() { f :: (group: Group) => 0 }\n",
+            "fn run() { f :: (group: Group) -> 0 }\n",
             &["E0119"][..],
         ),
         (
@@ -234,10 +234,10 @@ fn taskgroup_type_is_second_class() {
 #[test]
 fn taskgroup_cannot_escape_in_a_closure() {
     let source = r#"
-fn use_group(group: Group) => Int :: 1
+fn use_group(group: Group) Int -> 1
 
-fn escape(group: Group) => fn() => Int {
-    return () => use_group(group)
+fn escape(group: Group) fn() Int {
+    return () -> use_group(group)
 }
 
 fn run() {}
@@ -248,13 +248,13 @@ fn run() {}
     // parameter is admitted, and the lambda escape door it could otherwise open
     // stays shut with the same teaching error.
     let method_escape = r#"
-fn use_group(group: Group) => Int :: 1
+fn use_group(group: Group) Int -> 1
 
 struct Crawler {
     step: Int
 
-    fn escape(self, group: Group) => fn() => Int {
-        return () => use_group(group)
+    fn escape(self, group: Group) fn() Int {
+        return () -> use_group(group)
     }
 }
 
@@ -286,7 +286,7 @@ struct Crawler {
 
 fn run() {
     task.group group {
-        crawler :: Crawler.{step: 2}
+        crawler :: Crawler{step: 2}
         values :: [40]
         crawler.drain(group, ^values)
     }
@@ -317,12 +317,12 @@ fn evaluator_supports_taskgroup_combinators() {
     let source = r#"
 use core.time as time
 
-fn slow_seven() => Int {
+fn slow_seven() Int {
     time.sleep(30ms)
     return 7
 }
 
-fn slow_eleven() => Int {
+fn slow_eleven() Int {
     time.sleep(30ms)
     return 11
 }
@@ -527,7 +527,7 @@ fn native_panicked_wait_closes_group_before_caller_continues() {
     let source = r#"
 struct Gate { step: Int }
 
-fn slow_value(gate: Shared<Gate>) => Int {
+fn slow_value(gate: Shared<Gate>) Int {
     gate.step = 1
     total := 0
     loop n, 0..<2000000 { total += n }
@@ -535,7 +535,7 @@ fn slow_value(gate: Shared<Gate>) => Int {
     return 1
 }
 
-fn fail_after_start(gate: Shared<Gate>) => Int {
+fn fail_after_start(gate: Shared<Gate>) Int {
     loop gate.step == 0 {}
     panic("wait failed")
     return 0
@@ -607,7 +607,7 @@ fn spawn_bad(group: Group) {
     bad :: task panic("child")
 }
 
-fn leave() => Int {
+fn leave() Int {
     task.group group {
         spawn_bad(group)
         total := 0

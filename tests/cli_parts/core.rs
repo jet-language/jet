@@ -4,7 +4,7 @@ use super::*;
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
     let file = dir.join("main.jet");
-    fs::write(&file, "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
+    fs::write(&file, "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
     let human = Command::new(jet()).args(["inspect", "unsafe", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
     let human = String::from_utf8(human.stdout).unwrap();
@@ -65,7 +65,7 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     let runner = dir.join("runner");
     fs::create_dir(&runner).unwrap();
     fs::write(&main, "use \"helper\"\nfn run() {}\n").unwrap();
-    fs::write(&helper, "use core.mem\n#Unsafe(\"helper\", obligations: .Track) fn unsafe_run() {\n    value :: 7\n    pointer :: *Int.{*value}\n}\n").unwrap();
+    fs::write(&helper, "use core.mem\n#Unsafe(\"helper\", obligations: .Track) fn unsafe_run() {\n    value :: 7\n    pointer :: *Int{*value}\n}\n").unwrap();
 
     let human = Command::new(jet()).args(["inspect", "unsafe", main.to_str().unwrap()]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(human.status.code(), Some(1), "{}", String::from_utf8_lossy(&human.stderr));
@@ -80,7 +80,7 @@ fn inspect_unsafe_reports_sema_diagnostics_with_loaded_module_sources() {
     assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
     assert!(stdout.contains("\"code\":\"E3107\"") && stdout.contains("helper.jet") && stdout.contains("\"line\":4,\"col\":16"), "{stdout}");
     // D-REPORT-MACHINE1: `--json` emits JSON Lines — one complete report per
-    // line. `*Int.{*value}` is two `raw_pointer` operations (the same shape is
+    // line. `*Int{*value}` is two `raw_pointer` operations (the same shape is
     // blessed twice in tests/ui/unsafe_obligation_missing.stderr), so this
     // inspection prints two reports; each line must parse on its own.
     let lines = stdout.lines().collect::<Vec<_>>();
@@ -157,7 +157,7 @@ fn epoch3_string_and_set_surface_runs_on_default_tier() {
     print(Rank.from(["z", "z", "a"]).len())
     print(Rank.from(["z", "a"]).first() ?? "none")
     print(Rank.from(["z", "a"]).last() ?? "none")
-    typed_words := Rank<String>.{Rank.new()}
+    typed_words := Rank<String>{Rank.new()}
     print(typed_words.add("z"))
     print(typed_words.add("z"))
     print(typed_words.first() ?? "none")
@@ -237,7 +237,7 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     fs::copy(example.join("ops.lua"),dir.join("ops.lua")).unwrap();fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","lua","ops.lua","--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Lua bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/lua");assert!(cache.join("libjet_lua_ops.a").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"));
-    let generated=fs::read_to_string(cache.join("ops.jet")).unwrap();assert!(generated.contains("pub struct TableView")&&generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) => TableView ! LuaError")&&generated.contains("pub fn view_get_int(view: TableView, key: String) => Int ! LuaError")&&generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) => Bool ! LuaError"));
+    let generated=fs::read_to_string(cache.join("ops.jet")).unwrap();assert!(generated.contains("pub struct TableView")&&generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) TableView ! LuaError ->")&&generated.contains("pub fn view_get_int(view: TableView, key: String) Int ! LuaError ->")&&generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) Bool ! LuaError ->"));
     let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded Lua binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::copy(root.join("tests/fixtures/lua_lifecycle.c"),dir.join("lifecycle.c")).unwrap();let lua_dir=fs::read_to_string(cache.join("ops.lua-path")).unwrap();let lua_dir=lua_dir.trim();let link_dir=format!("-L{lua_dir}");let rpath=format!("-Wl,-rpath,{lua_dir}");
     let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/lua","-l:libjet_lua_ops.a"]).arg(link_dir).arg(rpath).args(["-llua","-lpthread","-ldl","-lm","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Lua lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"Lua lifecycle probe failed: {:?}",lifecycle.status.code());

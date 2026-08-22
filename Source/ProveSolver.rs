@@ -2186,7 +2186,7 @@ mod tests {
     fn marks_machine_arithmetic_postconditions_unknown_without_range_facts() {
         let source = r#"
 #[Pre(value > 0, "positive"), Post(result > value, "grows")]
-fn grow(value: Int) => Int {
+fn grow(value: Int) Int {
     next :: value + 1
     return next
 }
@@ -2211,10 +2211,10 @@ fn grow(value: Int) => Int {
     fn carries_dominating_affine_bindings_into_a_call_precondition() {
         let source = r#"
 #Pre(value > 0, "positive")
-fn checked(value: Int) => Int { return value }
+fn checked(value: Int) Int { return value }
 
 #Pre(input > 0, "positive input")
-fn caller(input: Int) => Int {
+fn caller(input: Int) Int {
     shifted :: input
     return checked(shifted)
 }
@@ -2237,10 +2237,10 @@ fn caller(input: Int) => Int {
     fn marks_machine_arithmetic_call_unknown_without_range_facts() {
         let source = r#"
 #Pre(value > 0, "positive")
-fn checked(value: Int) => Int { return value }
+fn checked(value: Int) Int { return value }
 
 #Pre(input > 0, "positive input")
-fn caller(input: Int) => Int {
+fn caller(input: Int) Int {
     shifted :: input + 1
     return checked(shifted)
 }
@@ -2265,10 +2265,10 @@ fn caller(input: Int) => Int {
     fn does_not_reuse_affine_facts_after_control_flow() {
         let source = r#"
 #Pre(value > 0, "positive")
-fn checked(value: Int) => Int { return value }
+fn checked(value: Int) Int { return value }
 
 #Pre(input > 0, "positive input")
-    fn caller(input: Int) => Int {
+    fn caller(input: Int) Int {
         shifted :: input
         if input > 0 { }
         return checked(shifted)
@@ -2294,7 +2294,7 @@ fn checked(value: Int) => Int { return value }
     fn marks_an_uncovered_postcondition_body_unknown_instead_of_disproving_it() {
         let source = r#"
 #Post(result > value, "grows")
-fn nonlinear(value: Int) => Int {
+fn nonlinear(value: Int) Int {
     return value * value
 }
 "#;

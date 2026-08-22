@@ -16,21 +16,21 @@ use core.encoding.xml as xml
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn keep_error(v: ^encoding.EncodingError) => encoding.EncodingError {{ return v }}
-fn keep_cause(v: ^encoding.EncodingCause) => encoding.EncodingCause {{ return v }}
-fn keep_event(v: ^encoding.DataEvent) => encoding.DataEvent {{ return v }}
-fn keep_format(v: ^encoding.EncodingFormat) => encoding.EncodingFormat {{ return v }}
-fn keep_kind(v: ^encoding.EncodingErrorKind) => encoding.EncodingErrorKind {{ return v }}
-fn keep_json_reader(v: ^json.JSONReader) => json.JSONReader {{ return v }}
-fn keep_json_writer(v: ^json.JSONWriter) => json.JSONWriter {{ return v }}
-fn keep_jsonl_reader(v: ^jsonl.JSONLReader) => jsonl.JSONLReader {{ return v }}
-fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) => jsonl.JSONLWriter {{ return v }}
-fn keep_csv_reader(v: ^csv.CSVReader) => csv.CSVReader {{ return v }}
-fn keep_csv_writer(v: ^csv.CSVWriter) => csv.CSVWriter {{ return v }}
-fn keep_xml_reader(v: ^xml.XMLReader) => xml.XMLReader {{ return v }}
-fn keep_xml_writer(v: ^xml.XMLWriter) => xml.XMLWriter {{ return v }}
-fn keep_cbor_reader(v: ^cbor.CBORReader) => cbor.CBORReader {{ return v }}
-fn keep_cbor_writer(v: ^cbor.CBORWriter) => cbor.CBORWriter {{ return v }}
+fn keep_error(v: ^encoding.EncodingError) encoding.EncodingError {{ return v }}
+fn keep_cause(v: ^encoding.EncodingCause) encoding.EncodingCause {{ return v }}
+fn keep_event(v: ^encoding.DataEvent) encoding.DataEvent {{ return v }}
+fn keep_format(v: ^encoding.EncodingFormat) encoding.EncodingFormat {{ return v }}
+fn keep_kind(v: ^encoding.EncodingErrorKind) encoding.EncodingErrorKind {{ return v }}
+fn keep_json_reader(v: ^json.JSONReader) json.JSONReader {{ return v }}
+fn keep_json_writer(v: ^json.JSONWriter) json.JSONWriter {{ return v }}
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) jsonl.JSONLReader {{ return v }}
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) jsonl.JSONLWriter {{ return v }}
+fn keep_csv_reader(v: ^csv.CSVReader) csv.CSVReader {{ return v }}
+fn keep_csv_writer(v: ^csv.CSVWriter) csv.CSVWriter {{ return v }}
+fn keep_xml_reader(v: ^xml.XMLReader) xml.XMLReader {{ return v }}
+fn keep_xml_writer(v: ^xml.XMLWriter) xml.XMLWriter {{ return v }}
+fn keep_cbor_reader(v: ^cbor.CBORReader) cbor.CBORReader {{ return v }}
+fn keep_cbor_writer(v: ^cbor.CBORWriter) cbor.CBORWriter {{ return v }}
 
 fn run() {{
     limits := encoding.EncodingLimits.safe()
@@ -39,12 +39,12 @@ fn run() {{
     print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
     print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
 
-    cause := encoding.EncodingCause.{{ kind: "io", os_code: None, message: "nope" }}
+    cause := encoding.EncodingCause{{ kind: "io", os_code: None, message: "nope" }}
     kept_cause := keep_cause(^cause)
     print(kept_cause.kind)
     print(kept_cause.message)
 
-    err := encoding.EncodingError.{{
+    err := encoding.EncodingError{{
         format: encoding.EncodingFormat.JSON,
         kind: encoding.EncodingErrorKind.Limit,
         byte_offset: 0,
@@ -498,7 +498,7 @@ fn run() {{
 
     bytes_output :: files.create("{}") ?? panic("create bytes")
     bytes_writer :: json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
-    bytes :: [U8].{{ U8.from_int(1) ?? panic("byte") }}
+    bytes :: [U8]{{ U8.from_int(1) ?? panic("byte") }}
     if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {{
         .Ok(_) -> print("bytes accepted")
         .Err(error) -> print(error.reason)
@@ -1313,7 +1313,7 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) => DataTree {{
+fn xml_name(local: String) DataTree {{
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -1322,7 +1322,7 @@ fn xml_name(local: String) => DataTree {{
     ])
 }}
 
-fn document_start() => DataTree {{
+fn document_start() DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("document_start"),
         "encoding": DataTree.Null,
@@ -1330,11 +1330,11 @@ fn document_start() => DataTree {{
     ])
 }}
 
-fn document_end() => DataTree {{
+fn document_end() DataTree {{
     return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
 }}
 
-fn element_start(empty_style: String) => DataTree {{
+fn element_start(empty_style: String) DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("element_start"),
         "name": xml_name("r"),
@@ -1468,7 +1468,7 @@ fn run() {{
     write_unfinished("{partial}")
     // Same-path reopen after Drop: incomplete leftover still here (empty wire).
     leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
-    empty :: [U8].{{}}
+    empty :: [U8]{{}}
     print(leftover == empty)
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
@@ -1476,7 +1476,7 @@ fn run() {{
     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
-    null_wire :: [U8].{{ 246 }}
+    null_wire :: [U8]{{ 246 }}
     print(finished == null_wire)
     // Honesty: unfinished Drop wire ≠ finished complete root.
     print(leftover != finished)
@@ -1787,7 +1787,7 @@ fn run() {{
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
-    expected_whole :: [U8].{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
+    expected_whole :: [U8]{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
     if after == {{
@@ -1923,7 +1923,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
     repeated :: reader.next()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -1932,7 +1932,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2153,7 +2153,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
+fn terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
     repeated :: writer.finish()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2214,7 +2214,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) Bool {{
     repeated :: reader.next()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2223,7 +2223,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) Bool {{
     repeated :: writer.flush()
     if repeated == {{
         .Err(error) -> return error.reason == reason
@@ -2286,19 +2286,19 @@ use core.encoding.cbor as cbor
 struct Packet { id: Int, payload: [U8] }
 
 fn run() {
-    packet := Packet.{ id: 7, payload: [222, 173] }
+    packet := Packet{ id: 7, payload: [222, 173] }
     wire := cbor.to_bytes(packet) ?? panic("encode")
     stable := cbor.to_bytes_canonical(packet) ?? panic("canonical encode")
-    back := Packet.{ cbor.decode<Packet>(wire) ?? panic("decode") }
+    back := Packet{ cbor.decode<Packet>(wire) ?? panic("decode") }
     raw_wire := cbor.to_bytes([1, 2, 255]) ?? panic("byte encode")
-    raw := [U8].{ cbor.decode<[U8]>(raw_wire) ?? panic("byte decode") }
+    raw := [U8]{ cbor.decode<[U8]>(raw_wire) ?? panic("byte decode") }
     print(wire)
     print(stable == wire)
     print(back.id)
     print(back.payload)
     print(raw)
 
-    strict := cbor.CBOROptions.{
+    strict := cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,
         max_bytes: 1073741824,
@@ -2307,7 +2307,7 @@ fn run() {
     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
     rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
     print(rejected.int() ?? -2)
-    strict_decode := cbor.CBOROptions.{
+    strict_decode := cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,
         max_bytes: 1073741824,
@@ -2393,7 +2393,7 @@ fn cbor_whole_live_allocation_and_preferred_float_validation() {
 use core.encoding.cbor as cbor
 
 fn run() {
-    strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
     if cbor.parse([249, 62, 0], ~strict) == {
         .Ok(value) -> print(value.float() ?? -1.0)
         .Err(_) -> print(-2.0)
@@ -2411,7 +2411,7 @@ fn run() {
         .Err(_) -> print(false)
     }
 
-    tiny := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
+    tiny := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
     if cbor.parse([130, 1, 2], tiny) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
@@ -2439,17 +2439,17 @@ use core.encoding.cbor as cbor
 struct Packet { name: String, data: [U8] }
 
 fn run() {
-    array := [Int].{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
+    array := [Int]{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
     text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
     print(array)
     print(text.text() ?? "bad")
 
     // {_ "name": (_ "J", "et"), "data": (_ h'0102', h'03')}
-    packet := Packet.{ cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode") }
+    packet := Packet{ cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode") }
     print(packet.name)
     print(packet.data)
 
-    strict := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
     if cbor.parse([159, 1, 255], ~strict) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
@@ -2459,17 +2459,17 @@ fn run() {
         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }
 
-    item_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    item_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
     if cbor.parse([159, 1, 2, 255], item_limited) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 2 && e.path == "$[1]" && e.reason == "max_items 2 exceeded")
     }
-    chunk_limited := cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
+    chunk_limited := cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1024, require_canonical: false }
     if cbor.parse([127, 97, 97, 97, 98, 255], chunk_limited) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 3 && e.path == "$" && e.reason == "max_items 2 exceeded")
     }
-    depth_limited := cbor.CBOROptions.{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
+    depth_limited := cbor.CBOROptions{ max_depth: 1, max_items: 100, max_bytes: 64, require_canonical: false }
     if cbor.parse([159, 127, 97, 120, 255, 255], depth_limited) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]" && e.reason == "max_depth 1 exceeded")
@@ -2513,15 +2513,15 @@ fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
     let source = r#"
 use core.encoding.cbor as cbor
 
-fn wire(values: [Int]) => [U8] {
-    bytes := [U8].{}
+fn wire(values: [Int]) [U8] {
+    bytes := [U8]{}
     loop value, values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
     return bytes
 }
 
-fn accepted(values: [Int]) => Bool {
+fn accepted(values: [Int]) Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return true
         .Err(_) -> return false
@@ -2529,7 +2529,7 @@ fn accepted(values: [Int]) => Bool {
     return false
 }
 
-fn rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
+fn rejected(values: [Int], offset: Int, path: String, reason: String) Bool {
     if cbor.parse(wire(values)) == {
         .Ok(_) -> return false
         .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
@@ -2537,8 +2537,8 @@ fn rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
     return false
 }
 
-fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
-    strict := cbor.CBOROptions.{
+fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) Bool {
+    strict := cbor.CBOROptions{
         max_depth: 256,
         max_items: 1000000,
         max_bytes: 1073741824,
@@ -2552,7 +2552,7 @@ fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) 
 }
 
 fn run() {
-    empty := [Int].{}
+    empty := [Int]{}
     // RFC 8949 argument widths, scalar families, nested containers, preferred
     // floats, and every supported normal-mode indefinite family.
     print(accepted([0]))
@@ -2635,7 +2635,7 @@ fn cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling() {
 use core.encoding.cbor as cbor
 
 fn run() {
-    options := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
+    options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
     value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
     indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
@@ -2643,7 +2643,7 @@ fn run() {
         .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
-    roomy := cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
+    roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
     if cbor.parse([129, 130, 97, 120], ~roomy) == {
         .Ok(_) -> panic("nested truncation accepted")
         .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")

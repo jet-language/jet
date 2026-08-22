@@ -141,10 +141,10 @@ struct Node {
 fn moving_a_pinned_place_is_e0219() {
     let src = format!(
         r#"{NODE}
-fn consume(n: ^Node) => Int {{ return n.payload }}
+fn consume(n: ^Node) Int {{ return n.payload }}
 
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
     taken :: consume(^node)
     print("{{taken}} {{(pinned.payload)}}")
@@ -159,9 +159,9 @@ fn replacing_a_pinned_place_is_e0219() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
-    node = Node.{{payload: 9, hops: 0}}
+    node = Node{{payload: 9, hops: 0}}
     print("{{(pinned.payload)}}")
 }}
 "#
@@ -174,7 +174,7 @@ fn pinning_a_value_instead_of_a_place_is_e0218() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     pinned :: mem.pin(node)
     print("{{(node.payload)}}")
 }}
@@ -189,10 +189,10 @@ fn the_promise_ends_with_the_pin_scope() {
     // contract is a loan, not a permanent property of the place.
     let src = format!(
         r#"{NODE}
-fn consume(n: ^Node) => Int {{ return n.payload }}
+fn consume(n: ^Node) Int {{ return n.payload }}
 
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     if true {{
         pinned :: mem.pin(&node)
         pinned.hops += 1
@@ -212,7 +212,7 @@ fn editing_through_a_pin_reaches_the_owner_on_every_tier() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 41, hops: 0}}
+    node := Node{{payload: 41, hops: 0}}
     pinned :: mem.pin(&node)
     pinned.hops += 1
     pinned.payload += 1
@@ -238,10 +238,10 @@ struct Queue {{
 }}
 
 fn run() {{
-    node := Node.{{payload: 41, hops: 0}}
+    node := Node{{payload: 41, hops: 0}}
     pinned :: mem.pin(&node)
     pinned.hops += 1
-    queue :: Queue.{{label: "ready", head: mem.pin(&node)}}
+    queue :: Queue{{label: "ready", head: mem.pin(&node)}}
     print("{{(queue.label)}} {{(queue.head.payload)}} {{(queue.head.hops)}}")
 }}
 "#
@@ -261,11 +261,11 @@ struct Queue {{
     head: Pin<Node>
 }}
 
-fn takes_pin(n: ^Pin<Node>) => Int {{ return n.payload }}
+fn takes_pin(n: ^Pin<Node>) Int {{ return n.payload }}
 
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
-    queue :: Queue.{{head: mem.pin(&node)}}
+    node := Node{{payload: 7, hops: 0}}
+    queue :: Queue{{head: mem.pin(&node)}}
     seen :: takes_pin(^mem.pin(&queue.head))
     print("{{seen}}")
 }}
@@ -280,8 +280,8 @@ fn run() {{
 fn a_pin_cannot_escape_its_owner_scope() {
     let src = format!(
         r#"{NODE}
-fn make() => Pin<Node> {{
-    node := Node.{{payload: 7, hops: 0}}
+fn make() Pin<Node> {{
+    node := Node{{payload: 7, hops: 0}}
     return mem.pin(&node)
 }}
 
@@ -305,7 +305,7 @@ fn a_pin_survives_a_branch_and_reads_of_the_owner() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 41, hops: 0}}
+    node := Node{{payload: 41, hops: 0}}
     pinned :: mem.pin(&node)
     pinned.hops += 1
     if pinned.payload > 0 {{
@@ -334,9 +334,9 @@ struct Pair {{
 }}
 
 fn run() {{
-    pair := Pair.{{left: Node.{{payload: 1, hops: 0}}, right: Node.{{payload: 2, hops: 0}}}}
+    pair := Pair{{left: Node{{payload: 1, hops: 0}}, right: Node{{payload: 2, hops: 0}}}}
     first :: mem.pin(&pair.left)
-    pair.left = Node.{{payload: 9, hops: 0}}
+    pair.left = Node{{payload: 9, hops: 0}}
     print("{{(first.hops)}}")
 }}
 "#
@@ -349,7 +349,7 @@ fn pinning_an_index_place_records_the_element() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    nodes := [Node.{{payload: 1, hops: 0}}, Node.{{payload: 2, hops: 0}}]
+    nodes := [Node{{payload: 1, hops: 0}}, Node{{payload: 2, hops: 0}}]
     first :: mem.pin(&nodes[0])
     first.hops += 1
     print("{{(first.hops)}} {{(first.payload)}}")
@@ -375,7 +375,7 @@ struct Pair {{
 }}
 
 fn run() {{
-    pair := Pair.{{left: Node.{{payload: 1, hops: 0}}, right: Node.{{payload: 2, hops: 0}}}}
+    pair := Pair{{left: Node{{payload: 1, hops: 0}}, right: Node{{payload: 2, hops: 0}}}}
     first :: mem.pin(&pair.left)
     second :: mem.pin(&pair.right)
     first.hops += 1
@@ -398,7 +398,7 @@ fn a_pin_taken_each_iteration_is_a_fresh_loan() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 0, hops: 0}}
+    node := Node{{payload: 0, hops: 0}}
     loop i, 0..2 {{
         pinned :: mem.pin(&node)
         pinned.hops += 1
@@ -421,7 +421,7 @@ fn a_pin_cannot_cross_a_task_boundary() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
     handle :: task pinned.payload
     print("{{(handle.join() ?? 0)}}")
@@ -446,12 +446,12 @@ struct Queue {{
     head: Pin<Node>
 }}
 
-fn attach(label: String, node: &Node) => Queue from node {{
-    return Queue.{{label: ~label, head: mem.pin(&node)}}
+fn attach(label: String, node: &Node) Queue from node {{
+    return Queue{{label: ~label, head: mem.pin(&node)}}
 }}
 
 fn run() {{
-    node := Node.{{payload: 41, hops: 0}}
+    node := Node{{payload: 41, hops: 0}}
     queue :: attach("ready", &node)
     queue.head.hops += 1
     queue.head.payload += 1
@@ -473,7 +473,7 @@ fn reading_the_owner_while_a_pin_is_live_is_e0220() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 41, hops: 0}}
+    node := Node{{payload: 41, hops: 0}}
     pinned :: mem.pin(&node)
     if node.payload > 0 {{
         pinned.hops += 1
@@ -499,7 +499,7 @@ struct SelfNode {
     self_addr: Int
 }
 
-fn wire_self(node: &SelfNode) => Pin<SelfNode> {
+fn wire_self(node: &SelfNode) Pin<SelfNode> {
     #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
         node.self_addr = mem.address_of(node.payload)
     }
@@ -507,7 +507,7 @@ fn wire_self(node: &SelfNode) => Pin<SelfNode> {
 }
 
 fn run() {
-    node := SelfNode.{payload: 7, self_addr: 0}
+    node := SelfNode{payload: 7, self_addr: 0}
     pinned :: wire_self(&node)
     pinned.payload += 1
     print("{(pinned.payload)} {(pinned.self_addr != 0)}")
@@ -545,8 +545,8 @@ struct Node {
 }
 
 fn run() {
-    guard := Guard.{name: "pin"}
-    node := Node.{payload: 1, hops: 0}
+    guard := Guard{name: "pin"}
+    node := Node{payload: 1, hops: 0}
     pinned :: mem.pin(&node)
     pinned.hops += 1
     print("body {(pinned.hops)}")
@@ -569,7 +569,7 @@ fn cancelling_a_task_cannot_smuggle_a_pin_across_the_boundary() {
     let src = format!(
         r#"{NODE}
 fn run() {{
-    node := Node.{{payload: 7, hops: 0}}
+    node := Node{{payload: 7, hops: 0}}
     pinned :: mem.pin(&node)
     handle :: task {{
         pinned.hops += 1
@@ -601,12 +601,12 @@ struct Node {
 
 fn run() {
     fixed :: mem.Fixed.new(size: 256)
-    fixed_node :: fixed.alloc(Node.{payload: 3, hops: 0})
+    fixed_node :: fixed.alloc(Node{payload: 3, hops: 0})
     fixed_pin :: mem.pin(&fixed_node)
     fixed_pin.hops += 1
 
     arena :: mem.Arena.new(capacity: 1024)
-    arena_node :: arena.alloc(Node.{payload: 5, hops: 0})
+    arena_node :: arena.alloc(Node{payload: 5, hops: 0})
     arena_pin :: mem.pin(&arena_node)
     arena_pin.hops += 2
 

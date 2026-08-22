@@ -189,7 +189,7 @@ pub fn budget_project(tag: &str, limit: u64) -> PathBuf {
     fs::write(
         dir.join("src/run.jet"),
         format!(r#"module perf.package {{
-    budgets: [Budget.{{
+    budgets: [Budget{{
         name: "public-api",
         scope: .Package,
         metric: .PublicApiItems,
@@ -220,7 +220,7 @@ pub fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
     fs::write(
         dir.join("src/run.jet"),
         format!(r#"module perf.package {{
-    budgets: [Budget.{{
+    budgets: [Budget{{
         name: "binary",
         scope: .Package,
         metric: .BinarySize,
@@ -247,14 +247,14 @@ pub fn mixed_budget_project(tag: &str) -> PathBuf {
         dir.join("src/run.jet"),
         r#"module perf.package {
     budgets: [
-        Budget.{
+        Budget{
             name: "binary",
             scope: .Package,
             metric: .BinarySize,
             comparison: .Absolute,
             limit: .AtMost(100000000B),
         },
-        Budget.{
+        Budget{
             name: "public-api",
             scope: .Package,
             metric: .PublicApiItems,
@@ -276,7 +276,7 @@ pub fn benchmark_budget_project(tag: &str) -> PathBuf {
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(dir.join("src/run.jet"), r#"module perf.package {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "parse",
         scope: .Test("parse"),
         metric: .BenchTime(.P50),
@@ -303,7 +303,7 @@ pub fn allocation_budget_project(tag: &str) -> PathBuf {
     fs::write(dir.join("src/run.jet"), r#"use core.mem
 module perf.package {
     budgets: [
-        Budget.{
+        Budget{
             name: "arena-count",
             scope: .Test("arena"),
             metric: .AllocationCount,
@@ -312,7 +312,7 @@ module perf.package {
             limit: .AtMost(2),
             enforcement: .Warn,
         },
-        Budget.{
+        Budget{
             name: "arena-bytes",
             scope: .Test("arena"),
             metric: .AllocationBytes,
@@ -640,7 +640,7 @@ module perf.game {
 fn run() {
     scene := game.Scene.new("main")
     counter := 0
-    scene.on_frame((frame) => {
+    scene.on_frame((frame) -> {
         counter = counter + 1
     })
     transcript :: game.run(scene)

@@ -20,7 +20,7 @@ fn budget_workspace(name: &str) -> PathBuf {
     // Bare `jet budget check` resolves the canonical `run.jet` entry
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     fs::write(root.join("src/run.jet"), r#"module perf.package {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "public-api",
         scope: .Package,
         metric: .PublicApiItems,
@@ -55,8 +55,8 @@ fn prove_projects_compatible_canonical_budget_identity_without_measuring() {
 #[test]
 fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
     let root = workspace("report");
-    fs::write(root.join("b.jet"), "fn b() => Int { return 2 }\n").unwrap();
-    fs::write(root.join("a.jet"), "fn a() => Int { return 1 }\n").unwrap();
+    fs::write(root.join("b.jet"), "fn b() Int -[]> { return 2 }\n").unwrap();
+    fs::write(root.join("a.jet"), "fn a() Int -[]> { return 1 }\n").unwrap();
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let report = String::from_utf8(out.stdout).unwrap();
@@ -467,11 +467,11 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     let root = workspace("contract_runtime");
     fs::write(
         root.join("a_contract_pass.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract pass\") { assert_eq(checked(1), 1) }\n",
+        "#Pre(value > 0, \"positive\") fn checked(value: Int) Int -[]> { return value }\n#Test(\"contract pass\") { assert_eq(checked(1), 1) }\n",
     ).unwrap();
     fs::write(
         root.join("b_contract_fail.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
+        "#Pre(value > 0, \"positive\") fn checked(value: Int) Int -[]> { return value }\n#Test(\"contract fail\") { checked(0) }\n",
     ).unwrap();
     fs::write(
         root.join("c_panic.jet"),
@@ -517,8 +517,8 @@ fn prove_reports_real_property_cases_shrinks_and_continues() {
 #[test]
 fn prove_reports_real_doctests_and_continues() {
     let root = workspace("doctests");
-    fs::write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
-    fs::write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
+    fs::write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() Int -[]> { return 4 }\n").unwrap();
+    fs::write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() Int -[]> { return 4 }\n").unwrap();
     fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { assert(true) }\n").unwrap();
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
@@ -598,7 +598,7 @@ fn prove_solver_lens_emits_checked_certificate_evidence() {
     let root = workspace("solver_lens");
     fs::write(
         root.join("checked.jet"),
-        "#[Pre(value > 0, \"positive\"), Post(result == value, \"unchanged\")] fn checked(value: Int) => Int { return value }\n",
+        "#[Pre(value > 0, \"positive\"), Post(result == value, \"unchanged\")] fn checked(value: Int) Int -[]> { return value }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -634,7 +634,7 @@ fn prove_solver_counterexample_is_checked_producer_evidence() {
     let root = workspace("solver_counterexample_producer");
     fs::write(
         root.join("bad.jet"),
-        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) => Int { return value }\n",
+        "#[Pre(value > 0, \"positive\"), Post(result > value, \"fee grows\")] fn add_fee(value: Int) Int -[]> { return value }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -756,7 +756,7 @@ fn prove_solver_lens_reports_a_verified_counterexample() {
     let root = workspace("solver_counterexample");
     fs::write(
         root.join("bad.jet"),
-        "#Post(result > value, \"grows\") fn unchanged(value: Int) => Int { return value }\n",
+        "#Post(result > value, \"grows\") fn unchanged(value: Int) Int -[]> { return value }\n",
     )
     .unwrap();
     let out = Command::new(jet())

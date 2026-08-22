@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const MEMORY_DENIAL_SOURCE: &str = r#"
-fn run() :[!Mem.Alloc]> {
+fn run() -[!Mem.Alloc]> {
     print("memory denial")
 }
 "#;
@@ -14,7 +14,7 @@ fn run() :[!Mem.Alloc]> {
 const MEMORY_COMPTIME_SOURCE: &str = r#"
 @answer :: "memory denial"
 
-fn run() :[!Mem.Alloc]> {
+fn run() -[!Mem.Alloc]> {
     print(@answer)
 }
 "#;
@@ -41,7 +41,7 @@ fn memory_denial_parser_keeps_the_canonical_effect_row() {
         .collect::<Vec<_>>();
     assert_eq!(effects, vec!["!Mem.Alloc"]);
 
-    let (tokens, lexer_diagnostics) = jet::Lexer::lex("fn run() :[Mem.Alloc(above: 1)]> {}");
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex("fn run() -[Mem.Alloc(above: 1)]> {}");
     assert!(lexer_diagnostics.is_empty(), "lex positive row: {lexer_diagnostics:?}");
     let diagnostics = jet::Parser::parse(&tokens).expect_err("bounded rights are denial-only");
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -58,7 +58,7 @@ fn memory_denial_sema_and_tir_share_one_erased_contract() {
 #[test]
 fn parameterized_memory_rights_are_denials_not_positive_effects() {
     let error = jet::Package::PackageFacts::parse(
-        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Mem.Alloc(above: 65536)] } }\n",
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Mem.Alloc(above: 65536)] } }\n",
         "test",
     )
     .expect_err("a bounded memory right must be a denial");
@@ -75,7 +75,7 @@ fn manifest_memory_denial_reaches_the_same_sema_fact_pass() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("package.jet"),
-        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [Mem.Alloc] } }\n",
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [Mem.Alloc] } }\n",
     )
     .unwrap();
     std::fs::write(root.join("main.jet"), "fn run() { print(\"frame {1}\") }\n").unwrap();
@@ -133,7 +133,7 @@ fn memory_denial_matches_comptime() {
 fn memory_denial_matches_repl() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "fn denied() :[!Mem.Alloc]> { print(\"memory denial\") }",
+            "fn denied() -[!Mem.Alloc]> { print(\"memory denial\") }",
             "denied()",
         ],
         None,
@@ -299,14 +299,14 @@ struct Score {
     base: Int
     bonus: Int
     #Memo
-    total: Int => if enabled -> {
+    total: Int -> if enabled -> {
         subtotal :: base + bonus
         subtotal
     } else -> base
 }
 
 fn run() {
-    score := Score.{enabled: true, base: 10, bonus: 2}
+    score := Score{enabled: true, base: 10, bonus: 2}
     print(score.total)
     score.bonus = 7
     print(score.total)
@@ -412,7 +412,7 @@ enum Link {
     Next(Link)
 }
 
-fn promoted_cycle() => Link {
+fn promoted_cycle() Link {
     first := Link.Next(Link.End(1))
     second := Link.Next(first)
     first = Link.Next(second)

@@ -12,7 +12,7 @@ const SOURCE: &str = r#"
 use core.mem
 
 fn run() {
-    bytes := [U8#4].{ uninit }
+    bytes := [U8#4]{ uninit }
     bytes[0] = 65
     bytes[1] = 66
     bytes[2] = 67
@@ -24,14 +24,14 @@ fn run() {
 const WHOLE_VALUE_SOURCE: &str = r#"
 use core.mem
 
-fn make() => [U8#2] {
-    bytes := [U8#2].{ uninit }
+fn make() [U8#2] {
+    bytes := [U8#2]{ uninit }
     bytes[0] = 7
     bytes[1] = 9
     return bytes
 }
 
-fn first(bytes: [U8#2]) => U8 {
+fn first(bytes: [U8#2]) U8 {
     index :: 0
     return bytes[index]
 }
@@ -49,13 +49,13 @@ fn set_first(bytes: &[U8#2]) {
     bytes[0] = 8
 }
 
-fn first(bytes: [U8#2]) => U8 {
+fn first(bytes: [U8#2]) U8 {
     index :: 0
     return bytes[index]
 }
 
 fn run() {
-    bytes := [U8#2].{ uninit }
+    bytes := [U8#2]{ uninit }
     bytes[0] = 1
     bytes[1] = 2
     set_first(&bytes)
@@ -156,7 +156,7 @@ fn initialized_fixed_storage_mutating_borrow_writes_back() {
 #[test]
 fn scalar_uninit_storage_never_emits_user_unsafe() {
     let source =
-        "use core.mem\nfn run() {\n    flag := Bool.{ uninit }\n    flag = true\n    print(flag)\n}\n";
+        "use core.mem\nfn run() {\n    flag := Bool{ uninit }\n    flag = true\n    print(flag)\n}\n";
     let generated = jet::compile(source).expect("scalar uninit should compile");
     let user = strip_vetted_prelude_modules(&generated.rust);
     assert!(user.contains("JetUninit::<bool>"), "{user}");
@@ -173,7 +173,7 @@ fn scalar_uninit_storage_never_emits_user_unsafe() {
 
 #[test]
 fn fixed_uninit_reuses_vetted_storage_on_web() {
-    let source = "use core.mem\nfn run() {\n    bytes := [U8#2].{ uninit }\n    bytes[0] = 1\n    bytes[1] = 2\n}\n";
+    let source = "use core.mem\nfn run() {\n    bytes := [U8#2]{ uninit }\n    bytes[0] = 1\n    bytes[1] = 2\n}\n";
     let web = jet::compile_web_with_path(source, "tests/fixtures/web_uninit_fixed.jet")
         .expect("fixed uninit should compile for the web target")
         .web
@@ -218,7 +218,7 @@ fn fixed_uninit_reuses_vetted_storage_on_web() {
 #[test]
 fn fixed_uninit_requires_every_slot_before_read() {
     let diagnostics = jet::compile(
-        "use core.mem\nfn run() {\n    bytes := [U8#2].{ uninit }\n    bytes[0] = 1\n    print(bytes[0])\n}\n",
+        "use core.mem\nfn run() {\n    bytes := [U8#2]{ uninit }\n    bytes[0] = 1\n    print(bytes[0])\n}\n",
     )
     .expect_err("a partially initialized fixed list must not be readable");
     assert!(
@@ -232,7 +232,7 @@ fn fixed_uninit_requires_every_slot_before_read() {
 #[test]
 fn write_argument_does_not_claim_an_uninit_buffer_was_filled() {
     let diagnostics = jet::compile(
-        "use core.mem\nfn noop(bytes: &[U8#2]) {}\nfn run() {\n    bytes := [U8#2].{ uninit }\n    noop(&bytes)\n    print(bytes[0])\n}\n",
+        "use core.mem\nfn noop(bytes: &[U8#2]) {}\nfn run() {\n    bytes := [U8#2]{ uninit }\n    noop(&bytes)\n    print(bytes[0])\n}\n",
     )
     .expect_err("a no-op write callee cannot prove definite initialization");
     assert!(
@@ -249,7 +249,7 @@ fn write_argument_does_not_claim_an_uninit_buffer_was_filled() {
 #[test]
 fn every_path_initialising_a_slot_makes_it_written() {
     let out = jet::compile(
-        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2].{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n            bytes[1] = 4\n        }\n    }\n    print(bytes[0])\n}\nfn run() { decide(true) }\n",
+        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2]{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n            bytes[1] = 4\n        }\n    }\n    print(bytes[0])\n}\nfn run() { decide(true) }\n",
     );
     assert!(
         out.is_ok(),
@@ -264,7 +264,7 @@ fn every_path_initialising_a_slot_makes_it_written() {
 #[test]
 fn a_slot_written_on_one_path_only_stays_unwritten() {
     let diagnostics = jet::compile(
-        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2].{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n        }\n    }\n    print(bytes[1])\n}\nfn run() { decide(true) }\n",
+        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2]{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n        }\n    }\n    print(bytes[1])\n}\nfn run() { decide(true) }\n",
     )
     .expect_err("one path leaves a slot unwritten");
     assert!(

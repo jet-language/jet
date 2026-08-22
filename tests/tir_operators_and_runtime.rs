@@ -27,52 +27,52 @@ struct NestedRank<T: Comparable> {
 struct Adder<T: Add> { value: T }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) => Vec2 {
-        return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
+    fn add(self, rhs: Vec2) Vec2 {
+        return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 
 impl Vec2.Equatable {
-    fn equal(self, rhs: Vec2) => Bool { return self.x == rhs.x && self.y == rhs.y }
+    fn equal(self, rhs: Vec2) Bool { return self.x == rhs.x && self.y == rhs.y }
 }
 
 impl Vec2.Comparable {
-    fn compare(self, rhs: Vec2) => Ordering {
+    fn compare(self, rhs: Vec2) Ordering {
         if self.x < rhs.x { return Ordering.Less }
         if self.x > rhs.x { return Ordering.Greater }
         return Ordering.Equal
     }
 }
 
-fn add_generic<T: Add>(left: T, right: T) => T { return left + right }
-fn equal_generic<T: Equatable>(left: T, right: T) => Bool { return left == right }
-fn less_generic<T: Comparable>(left: T, right: T) => Bool { return left < right }
+fn add_generic<T: Add>(left: T, right: T) T { return left + right }
+fn equal_generic<T: Equatable>(left: T, right: T) Bool { return left == right }
+fn less_generic<T: Comparable>(left: T, right: T) Bool { return left < right }
 
-fn marked(x: Int) => Vec2 {
+fn marked(x: Int) Vec2 {
     print("marked {x}")
-    return Vec2.{ x: x, y: 0 }
+    return Vec2{ x: x, y: 0 }
 }
 
 fn run() {
-    a :: Vec2.{ x: 1, y: 2 }
-    b :: Vec2.{ x: 3, y: 4 }
+    a :: Vec2{ x: 1, y: 2 }
+    b :: Vec2{ x: 3, y: 4 }
     c :: add_generic(a, b)
-    d := Vec2.{ x: 1, y: 2 }
-    d = .{ x: 1, y: 2 }
-    d += .{ x: 3, y: 4 }
-    holder := Holder.{ value: Vec2.{ x: 1, y: 2 } }
-    holder.value = .{ x: 1, y: 2 }
-    holder.value += .{ x: 3, y: 4 }
-    box := EqBox<Int>.{ value: 1 }
-    box = .{ value: 7 }
+    d := Vec2{ x: 1, y: 2 }
+    d = { x: 1, y: 2 }
+    d += { x: 3, y: 4 }
+    holder := Holder{ value: Vec2{ x: 1, y: 2 } }
+    holder.value = { x: 1, y: 2 }
+    holder.value += { x: 3, y: 4 }
+    box := EqBox<Int>{ value: 1 }
+    box = { value: 7 }
     chain :: marked(1) < marked(2) < marked(3)
-    boxes_equal :: equal_generic(EqBox<Int>.{ value: 7 }, EqBox<Int>.{ value: 7 })
-    ranks_ordered :: less_generic(Rank<Int>.{ value: 1 }, Rank<Int>.{ value: 2 })
+    boxes_equal :: equal_generic(EqBox<Int>{ value: 7 }, EqBox<Int>{ value: 7 })
+    ranks_ordered :: less_generic(Rank<Int>{ value: 1 }, Rank<Int>{ value: 2 })
     nested_ordered :: less_generic(
-        NestedRank<Int>.{ head: Val(1), tail: [2, 3] },
-        NestedRank<Int>.{ head: Val(1), tail: [2, 4] }
+        NestedRank<Int>{ head: Val(1), tail: [2, 3] },
+        NestedRank<Int>{ head: Val(1), tail: [2, 4] }
     )
-    cell := Adder<Int>.{ value: 4 }
+    cell := Adder<Int>{ value: 4 }
     cell.value += 3
     print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
 }
@@ -96,7 +96,7 @@ fn spaceship_and_ordering_route_through_tir() {
 struct Score { points: Int }
 
 impl Score.Comparable {
-    fn compare(self, rhs: Score) => Ordering {
+    fn compare(self, rhs: Score) Ordering {
         if self.points < rhs.points { return Ordering.Less }
         if self.points > rhs.points { return Ordering.Greater }
         return Ordering.Equal
@@ -104,8 +104,8 @@ impl Score.Comparable {
 }
 
 fn run() {
-    low :: Score.{ points: 10 }
-    high :: Score.{ points: 20 }
+    low :: Score{ points: 10 }
+    high :: Score{ points: 20 }
     int_cmp :: 1 <=> 2
     text_cmp :: "alpha" <=> "beta"
     chained :: (low <=> high).then(high <=> high)
@@ -113,9 +113,9 @@ fn run() {
     reverse_greater :: (high <=> low).reverse()
     reverse_equal :: (low <=> low).reverse()
     numbers := [3, 1, 2]
-    numbers.sort_by((left: Int, right: Int) => left <=> right)
-    scores := [Score.{ points: 30 }, Score.{ points: 10 }, Score.{ points: 20 }]
-    scores.sort_by((left: Score, right: Score) => left.compare(right))
+    numbers.sort_by((left: Int, right: Int) -> left <=> right)
+    scores := [Score{ points: 30 }, Score{ points: 10 }, Score{ points: 20 }]
+    scores.sort_by((left: Score, right: Score) -> left.compare(right))
     print("{(low < high)} {(low <= high)} {(high > low)} {(high >= low)} {(low == low)} {(low != high)}")
     print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
     print("{numbers[0]} {numbers[1]} {numbers[2]}")
@@ -147,7 +147,7 @@ fn show(msg: String) {
 fn bump(n: &Int) {
     n += 1
 }
-fn archive(name: ^String) => String {
+fn archive(name: ^String) String {
     return name
 }
 fn run() {
@@ -172,7 +172,7 @@ fn list_destructure() {
         return;
     }
     let src = "\
-fn double(n: Int) => Int {
+fn double(n: Int) Int {
     return (n * 2)
 }
 fn run() {
@@ -195,28 +195,28 @@ fn fn_value_and_struct_fn_field() {
         return;
     }
     let src = "\
-fn apply_twice(f: fn(Int) => Int, x: Int) => Int {
+fn apply_twice(f: fn(Int) Int, x: Int) Int {
     return f(f(x))
 }
-fn double(x: Int) => Int {
+fn double(x: Int) Int {
     return (x * 2)
 }
 struct Worker {
-    step: fn(Int) => Int
+    step: fn(Int) Int
 }
 struct TextWorker {
-    step: fn(String) => Int
+    step: fn(String) Int
 }
-fn text_len(text: String) => Int {
+fn text_len(text: String) Int {
     return text.len()
 }
 fn run() {
     double_fn :: double
     print(apply_twice(double_fn, 3))
-    print(apply_twice((x: Int) => (x + 1), 5))
-    w :: Worker.{step: (n: Int) => (n * n)}
+    print(apply_twice((x: Int) -> (x + 1), 5))
+    w :: Worker{step: (n: Int) -> (n * n)}
     print(w.step(4))
-    text_worker :: TextWorker.{step: text_len}
+    text_worker :: TextWorker{step: text_len}
     text :: \"read\"
     print(text_worker.step(text))
     print(text)
@@ -235,32 +235,32 @@ fn sized_integers() {
     }
     let src = "\
 fn run() {
-red :: U8.{ 255 }
-channel :: I32.{ 100000 }
-depth :: I8.{ -120 }
+red :: U8{ 255 }
+channel :: I32{ 100000 }
+depth :: I8{ -120 }
     print(red)
     print(channel)
     print(depth)
-total :: I64.{ 9000000000 }
+total :: I64{ 9000000000 }
     print(total + 1)
-half :: U8.{ 100 }
+half :: U8{ 100 }
     print(half + half)
-bytes :: [U8].{ 104, 105, 33 }
+bytes :: [U8]{ 104, 105, 33 }
     print(bytes)
-wide :: I64.{ Int.from_u8(red) }
+wide :: I64{ Int.from_u8(red) }
     print(wide)
 clamped :: U8.from_i32(channel) ?? 255
     print(clamped)
     print(U8.MAX)
     print(I32.MIN)
-flags :: U8.{ 13 }
+flags :: U8{ 13 }
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
-hi :: U8.{ 200 }
-lo :: U8.{ 100 }
+hi :: U8{ 200 }
+lo :: U8{ 100 }
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-fallback :: U8.{ 0 }
+fallback :: U8{ 0 }
     print(checked(hi + lo) ?? fallback)
 }
 ";

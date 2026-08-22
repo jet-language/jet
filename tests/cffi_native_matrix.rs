@@ -134,25 +134,25 @@ enum Packet {{ Ping(Int) = 3; Data(x: Int, y: Int) = 7 }}
 #Layout(c)
 struct Record {{ id: U64; flags: U32 }}
 
-fn increment(x: I32) =[]=> I32 {{ return x + 1 }}
+fn increment(x: I32) I32 -[]> {{ return x + 1 }}
 
 #Extern module c.jetmatrix {{
-    fn coord_sum(p: Coord) => Int = "coord_sum"
-    fn status_value(s: Status) => I32 = "status_value"
-    fn packet_value(p: Packet) => I32 = "packet_value"
-    fn packet_size() => I32 = "packet_size"
-    fn packet_align() => I32 = "packet_align"
-    fn packet_payload_offset() => I32 = "packet_payload_offset"
-    fn callback_twice(cb: fn(I32) =[]=> I32, x: I32) => I32 = "callback_twice"
-    fn callback_parallel(cb: fn(I32) =[]=> I32) => I32 = "callback_parallel"
-    fn load_record(id: U64, out: *Record) => I32 = "load_record"
-    fn abi_default(a: I32, b: I32) => I32 = "abi_default"
-    {explicit_abi}fn abi_explicit(a: I32, b: I32) => I32 = "abi_explicit"
+    fn coord_sum(p: Coord) Int = "coord_sum"
+    fn status_value(s: Status) I32 = "status_value"
+    fn packet_value(p: Packet) I32 = "packet_value"
+    fn packet_size() I32 = "packet_size"
+    fn packet_align() I32 = "packet_align"
+    fn packet_payload_offset() I32 = "packet_payload_offset"
+    fn callback_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = "callback_twice"
+    fn callback_parallel(cb: fn(I32) I32 -[]>) I32 = "callback_parallel"
+    fn load_record(id: U64, out: *Record) I32 = "load_record"
+    fn abi_default(a: I32, b: I32) I32 = "abi_default"
+    {explicit_abi}fn abi_explicit(a: I32, b: I32) I32 = "abi_explicit"
 }}
 
-fn load(id: U64) => Record ! String {{
-    slot := Record.{{id: 0, flags: 0}}
-    status := I32.{{ 1 }}
+fn load(id: U64) Record ! String -[]> {{
+    slot := Record{{id: 0, flags: 0}}
+    status := I32{{ 1 }}
     #Unsafe("live non-null out slot; read only after status zero") {{
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = c.load_record(id, p)
@@ -163,7 +163,7 @@ fn load(id: U64) => Record ! String {{
 }}
 
 fn run() {{
-    print(c.coord_sum(Coord.{{x: 3, y: 4}}))
+    print(c.coord_sum(Coord{{x: 3, y: 4}}))
     print(c.status_value(Status.Lost))
     print(c.packet_value(Packet.Ping(41)))
     print(c.packet_size())

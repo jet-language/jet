@@ -13,24 +13,24 @@ fn run() {
 "#;
 
 const COMPOSITE_IF_SOURCE: &str = r#"
-struct Work { callback: fn() => Int }
+struct Work { callback: fn() Int }
 fn both(values: &[Int], work: Work) { values.push(work.callback()) }
 fn run() {
     values := [1, 2]
     both(&values, if true -> {
-        work :: Work.{ callback: () => values.len() }
+        work :: Work{ callback: () -> values.len() }
         work
     } else -> {
-        Work.{ callback: () => 0 }
+        Work{ callback: () -> 0 }
     })
 }
 "#;
 
 const COMPOSITE_FALLBACK_SOURCE: &str = r#"
-fn both(values: &[Int], callback: fn() => Int) { values.push(callback()) }
+fn both(values: &[Int], callback: fn() Int) { values.push(callback()) }
 fn run() {
     values := [1, 2]
-    both(&values, Val(() => values.len()) ?? () => 0)
+    both(&values, Val(() -> values.len()) ?? () -> 0)
 }
 "#;
 
@@ -49,39 +49,39 @@ struct LineCache {
 }
 
 fn mapped_read(cell: Cell<Pair>) {
-    left :: cell.guard_read().map(pair => pair.left)
+    left :: cell.guard_read().map(pair -> pair.left)
     print(left.get())
 }
 
 fn split_read(cell: Cell<Pair>) {
     (left, right) :: cell.guard_read().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
     print(left.get() + right.get())
 }
 
 fn mapped_edit(cell: Cell<Pair>) {
-    left :: cell.guard_edit().map(pair => pair.left)
+    left :: cell.guard_edit().map(pair -> pair.left)
     left.set(9)
 }
 
 fn split_edit(cell: Cell<Pair>) {
     (left, right) :: cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
     left.set(10)
     right.set(11)
 }
 
-fn make_edit_guards(cell: Cell<Pair>) => (
+fn make_edit_guards(cell: Cell<Pair>) (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
 ) {
     return cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
 }
 
@@ -98,13 +98,13 @@ fn edit_then_return(cell: Cell<Int>) {
 }
 
 fn run() {
-    cell :: Cell.new(Pair.{ left: 1, right: 2 })
-    print(cell.read(pair => pair.left + pair.right))
-    cell.edit(pair => pair.left += 3)
+    cell :: Cell.new(Pair{ left: 1, right: 2 })
+    print(cell.read(pair -> pair.left + pair.right))
+    cell.edit(pair -> pair.left += 3)
     print(cell.get().left)
-    old :: cell.replace(Pair.{ left: 5, right: 6 })
+    old :: cell.replace(Pair{ left: 5, right: 6 })
     print(old.left)
-    cell.set(Pair.{ left: 7, right: 8 })
+    cell.set(Pair{ left: 7, right: 8 })
     mapped_read(cell)
     split_read(cell)
     mapped_edit(cell)
@@ -114,18 +114,18 @@ fn run() {
     edit_returned_split(cell)
     print(cell.get().left + cell.get().right)
 
-    cache :: ValueCache.{ value: Cell.new(None) }
-    print(cache.value.get_or_set(() => "built"))
-    print(cache.value.get_or_set(() => "unused"))
+    cache :: ValueCache{ value: Cell.new(None) }
+    print(cache.value.get_or_set(() -> "built"))
+    print(cache.value.get_or_set(() -> "unused"))
 
-    lines :: LineCache.{ value: Cell.new(None) }
-    print(lines.value.get_or_set(() => [0, 8, 15]).len())
-    print(lines.value.get_or_set(() => [99]).len())
+    lines :: LineCache{ value: Cell.new(None) }
+    print(lines.value.get_or_set(() -> [0, 8, 15]).len())
+    print(lines.value.get_or_set(() -> [99]).len())
 
     early :: Cell.new(1)
     edit_then_return(early)
     print(early.get())
-    early.edit(value => value += 1)
+    early.edit(value -> value += 1)
     print(early.get())
 }
 "#;
@@ -164,7 +164,7 @@ fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
 }
 
 const JIT_ENTRY_SOURCE: &str = r#"
-fn twice(n: Int) => Int {
+fn twice(n: Int) Int {
     return n + n
 }
 fn run() {
@@ -271,7 +271,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
 
 fn parenthesized_source(levels: usize) -> String {
     format!(
-        "fn nested() => Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
+        "fn nested() Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
         "(".repeat(levels),
         ")".repeat(levels)
     )

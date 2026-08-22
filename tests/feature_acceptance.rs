@@ -217,7 +217,7 @@ use core.encoding.json as json
 #Codable
 struct Point { x: Int }
 fn run() {
-    p := Point.{ x: 7 }
+    p := Point{ x: 7 }
     print(json.to_string(p))
 }
 "#;
@@ -586,30 +586,30 @@ fn static_guarantees_shared_engine() {
 Die :: distinct Int(1..6)
 
 #[Pre(n >= 0, "n non-negative"), Post(result >= 0, "result non-negative")]
-fn absish(n: Int) => Int {
+fn absish(n: Int) Int {
     return n
 }
 
-#Scrub(Input) fn clean(raw: #Input String) => String {
+#Scrub(Input) fn clean(raw: #Input String) String {
     return raw
 }
 
-#Replayable fn add(a: Int, b: Int) => Int {
+#Replayable fn add(a: Int, b: Int) Int {
     return a + b
 }
 
-fn stamp(path: String) =[FS]=> String ! {
+fn stamp(path: String) String ! -[FS]> {
     return path
 }
 
-fn pick(faces: [String#6], roll: Die) => String {
+fn pick(faces: [String#6], roll: Die) String {
     return faces[roll.raw() - 1]
 }
 
 fn run() {
     dirty :: #Input "x"
     safe := clean(dirty)
-    faces :: [String#6].{ "a", "b", "c", "d", "e", "f" }
+    faces :: [String#6]{ "a", "b", "c", "d", "e", "f" }
     print(pick(faces, Die.from_int(1)))
     print(absish(3))
     print(add(1, 2))

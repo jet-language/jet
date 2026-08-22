@@ -77,8 +77,8 @@ fn qualified_io_input_or_return() {
     }
     let src = "\
 use core.term as io
-fn collect() => [String] {
-    out := [String].{}
+fn collect() [String] -[IO]> {
+    out := [String]{}
     loop true {
         line :: io.input(\"> \") ?? return ~out
         if line == \"\" {
@@ -123,17 +123,17 @@ fn generic_fns_and_trait_object_dispatch() {
     }
     let src = "\
 trait Shape {
-    fn area(self) => Float
-    fn name(self) => String
+    fn area(self) Float
+    fn name(self) String
 }
 struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) => Float {
+        fn area(self) Float -[]> {
             return ((3.14159 * self.radius) * self.radius)
         }
-        fn name(self) => String {
+        fn name(self) String -[]> {
             return \"circle\"
         }
     }
@@ -142,14 +142,14 @@ struct Square {
     side: Float
 }
 impl Square.Shape {
-    fn area(self) => Float {
+    fn area(self) Float -[]> {
         return (self.side * self.side)
     }
-    fn name(self) => String {
+    fn name(self) String -[]> {
         return \"square\"
     }
 }
-fn largest<T: Comparable>(xs: [T]) => (T?) {
+fn largest<T: Comparable>(xs: [T]) (T?) -[]> {
     if xs.len() == 0 {
         return None
     }
@@ -171,14 +171,14 @@ struct Score {
     points: Int
 }
 fn run() {
-shapes :: [Shape].{ Circle.{radius: 1.0}, Square.{side: 2.0} }
-    shapes.each((s) => {
+shapes :: [Shape]{ Circle{radius: 1.0}, Square{side: 2.0} }
+    shapes.each((s) -> {
         print_area(s)
     })
     nums :: [3, 1, 4, 1, 5]
     print(largest(nums))
-    scores := [Score.{points: 10}, Score.{points: 20}]
-    scores.sort_by((s: Score) => s.points)
+    scores := [Score{points: 10}, Score{points: 20}]
+    scores.sort_by((s: Score) -> s.points)
     print(scores[0].points)
 }
 ";
@@ -198,20 +198,20 @@ fn trait_object_list_boxes_local_implementing_values() {
     }
     let src = "\
 trait Sink {
-    fn absorb(self, value: Float) => Float
+    fn absorb(self, value: Float) Float
 }
 struct Holder {
     offset: Float
 
     impl Sink {
-        fn absorb(self, value: Float) => Float {
+        fn absorb(self, value: Float) Float -[]> {
             return value + self.offset
         }
     }
 }
 fn run() {
-    holder :: Holder.{ offset: 1.0 }
-    sinks :: [Sink].{ holder }
+    holder :: Holder{ offset: 1.0 }
+    sinks :: [Sink]{ holder }
     print(sinks.len())
 }
 ";
@@ -232,8 +232,8 @@ struct Ledger {
     }
 }
 fn run() {
-    data :: [Int].{ 1, 2, 3 }
-    ledger := Ledger.{ rows: [] }
+    data :: [Int]{ 1, 2, 3 }
+    ledger := Ledger{ rows: [] }
     ledger.put_back(data)
     print(ledger.rows[0])
     print(ledger.rows[1])
@@ -253,11 +253,11 @@ fn borrowed_parameter_option_fallback_materializes_copy() {
 struct Config {
     path: String?
 }
-fn selected(config: Config) => String {
+fn selected(config: Config) String -[]> {
     return config.path ?? \"default.toml\"
 }
 fn run() {
-    print(selected(Config.{ path: None }))
+    print(selected(Config{ path: None }))
 }
 ";
     let (code, stdout) = build_and_run("tir_borrowed_parameter_option_copy", src);
@@ -284,7 +284,7 @@ struct Counter {
     }
 }
 fn run() {
-    c := Counter.{ n: 0 }
+    c := Counter{ n: 0 }
     c.bump()
     c.add(10)
     print(c.n)
@@ -307,11 +307,11 @@ fn mut_self_whole_reassignment() {
 struct Counter {
     n: Int
     fn reset(&self) {
-        self = Counter.{ n: 0 }
+        self = Counter{ n: 0 }
     }
 }
 fn run() {
-    c := Counter.{ n: 9 }
+    c := Counter{ n: 9 }
     c.reset()
     print(c.n)
 }
@@ -342,7 +342,7 @@ impl Counter.Bumpable {
     }
 }
 fn run() {
-    c := Counter.{ n: 0 }
+    c := Counter{ n: 0 }
     c.bump()
     c.bump()
     print(c.n)
@@ -370,11 +370,11 @@ struct Tree {
     child: Tree?
 }
 fn run() {
-    root :: Tree.{
+    root :: Tree{
         value: 3,
-        child: Val(Tree.{
+        child: Val(Tree{
             value: 2,
-            child: Val(Tree.{ value: 1, child: None })
+            child: Val(Tree{ value: 1, child: None })
         })
     }
     print(root.value)
@@ -399,7 +399,7 @@ fn unqualified_foreign_struct_literal() {
     let main_src = "\
 use \"notes\"
 fn run() {
-    n :: Note.{ text: \"hi\" }
+    n :: Note{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -435,16 +435,16 @@ fn read_text(text: String) { print(text) }
 fn read_list(values: [Int]) { print(values.len()) }
 fn read_generic<T>(value: T) { print(7) }
 fn read_nested(branch: Branch) { print(branch.leaf.text) }
-fn apply(f: fn(Int) => Int, value: Int) => Int { return f(value) }
-fn increment(value: Int) => Int { return value + 1 }
+fn apply(f: fn(Int) Int, value: Int) Int -[]> { return f(value) }
+fn increment(value: Int) Int -[]> { return value + 1 }
 fn edit(values: &[Int]) { values[0] = 9 }
 fn consume(text: ^String) { print(text) }
 
 fn run() {
     text :: "hello"
     values := [1, 2]
-    parcel :: Parcel.{ label: "parcel" }
-    branch :: Branch.{ leaf: Leaf.{ text: "nested" } }
+    parcel :: Parcel{ label: "parcel" }
+    branch :: Branch{ leaf: Leaf{ text: "nested" } }
     callback :: increment
     read_text(text)
     read_list(values)
@@ -452,7 +452,7 @@ fn run() {
     read_generic(callback)
     read_nested(branch)
     parcel.show()
-    print(apply((n: Int) => (n + 1), 41))
+    print(apply((n: Int) -> (n + 1), 41))
     edit(&values)
     print(values[0])
     consume(^text)
@@ -470,30 +470,30 @@ fn generic_inherent_methods_use_per_method_clone_bounds() {
     }
     let src = r#"
 trait Measure {
-    fn measure(self) => Int
+    fn measure(self) Int
 }
 
 struct Holder<T> {
-    reader: fn(T) => Int
+    reader: fn(T) Int
 
-    fn inspect(self) => Int {
+    fn inspect(self) Int -[]> {
         return 1
     }
 
-    fn copy_tagged(self, value: #Input T) => #Input T {
+    fn copy_tagged(self, value: #Input T) #Input T -[]> {
         return ~value
     }
 }
 
-fn increment(value: Int) => Int { return value + 1 }
-fn read_callback(value: fn(Int) => Int) => Int { return 1 }
-fn read_measure(value: Measure) => Int { return 2 }
-fn read_string(value: String) => Int { return value.len() }
+fn increment(value: Int) Int -[]> { return value + 1 }
+fn read_callback(value: fn(Int) Int) Int -[]> { return 1 }
+fn read_measure(value: Measure) Int -[]> { return 2 }
+fn read_string(value: String) Int -[]> { return value.len() }
 
 fn run() {
-    callbacks :: Holder<fn(Int) => Int>.{reader: read_callback}
-    measures :: Holder<Measure>.{reader: read_measure}
-    strings :: Holder<String>.{reader: read_string}
+    callbacks :: Holder<fn(Int) Int>{reader: read_callback}
+    measures :: Holder<Measure>{reader: read_measure}
+    strings :: Holder<String>{reader: read_string}
     print(callbacks.inspect())
     print(measures.inspect())
     copied :: strings.copy_tagged(#Input "copy")

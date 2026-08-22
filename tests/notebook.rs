@@ -22,7 +22,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .notebook
         .add_cell(
             CellKind::Jet,
-            "fn comptime_reader() => Int { return @future_answer }",
+            "fn comptime_reader() Int { return @future_answer }",
         )
         .id
         .clone();
@@ -35,7 +35,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .notebook
         .add_cell(
             CellKind::Jet,
-            "fn caller() => Int { return helper().value }",
+            "fn caller() Int { return helper().value }",
         )
         .id
         .clone();
@@ -43,7 +43,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .notebook
         .add_cell(
             CellKind::Jet,
-            "fn helper() => Answer { return Answer.{ value: 42 } }",
+            "fn helper() Answer { return Answer{ value: 42 } }",
         )
         .id
         .clone();

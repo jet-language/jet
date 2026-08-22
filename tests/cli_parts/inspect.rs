@@ -117,7 +117,7 @@ fn hardened_release_sentry_reaches_a_foreign_dependency() {
     .unwrap();
     fs::write(
         dependency.join("dep.jet"),
-        "use core.mem\n#Unsafe(\"intentionally invalid address\")\npub fn read() => Int {\n    p :: mem.Ptr<Int>.from_addr(1)\n    return mem.volatile_read(p)\n}\n",
+        "use core.mem\n#Unsafe(\"intentionally invalid address\")\npub fn read() Int -[]> {\n    p :: mem.Ptr<Int>.from_addr(1)\n    return mem.volatile_read(p)\n}\n",
     )
     .unwrap();
 

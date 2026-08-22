@@ -1132,7 +1132,7 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
     let dir = bare_package_project("bare_package", &jet);
     fs::write(
         dir.join("math.jet"),
-        "fn double(n: Int) => Int :: (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
+        "fn double(n: Int) Int -> (n * 2)\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet).arg("test").current_dir(&dir).output().unwrap();
@@ -1160,7 +1160,7 @@ fn bare_jet_test_reports_no_tests_once_for_a_testless_package() {
         return;
     }
     let dir = bare_package_project("bare_testless", &jet);
-    fs::write(dir.join("math.jet"), "fn double(n: Int) => Int :: (n * 2)\n").unwrap();
+    fs::write(dir.join("math.jet"), "fn double(n: Int) Int -> (n * 2)\n").unwrap();
     let out = Command::new(&jet)
         .arg("test")
         .current_dir(&dir)

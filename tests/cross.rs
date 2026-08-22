@@ -413,7 +413,7 @@ fn run() {
     app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
     app.paint(first)
     save := app.button("Save")
-    app.on_click(save, () => {
+    app.on_click(save, () -> {
         clicks.set(clicks.get() + 1)
     })
     app.set_text(save, "__JET_TEST_CLICK__")

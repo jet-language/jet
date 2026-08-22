@@ -500,7 +500,7 @@ struct Row {
     value: Int
 }
 
-fn json_parse_error() => String {
+fn json_parse_error() String -[]> {
     result :: json.parse("\n{oops")
     if result == {
         .Err(error) -> return "{error.line}|{error.message}"
@@ -508,7 +508,7 @@ fn json_parse_error() => String {
     }
 }
 
-fn json_decode_error() => String {
+fn json_decode_error() String -[]> {
     result :: json.decode<Row>("\n{oops")
     if result == {
         .Err(errors) -> return "{errors[0].path}|{errors[0].reason}"
@@ -516,7 +516,7 @@ fn json_decode_error() => String {
     }
 }
 
-fn toml_parse_error() => String {
+fn toml_parse_error() String -[]> {
     result :: toml.parse("value = ")
     if result == {
         .Err(error) -> return error.message
@@ -524,7 +524,7 @@ fn toml_parse_error() => String {
     }
 }
 
-fn yaml_parse_error() => String {
+fn yaml_parse_error() String -[]> {
     result :: yaml.parse("key: value\nbad")
     if result == {
         .Err(error) -> return error.message
@@ -577,14 +577,14 @@ struct Packet {
     payload: [U8]
 }
 
-@root :: hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
-@packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+@root :: hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
+@packet :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
-fn gap() => String {
+fn gap() String -[]> {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    actual_root := hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
-    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    actual_root := hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root"))
+    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet"))
     return "{actual_root}|{actual_packet}"
 }
 
@@ -634,16 +634,16 @@ use core.text as text
 struct Token { raw: String }
 
 impl Token.Encode {
-    fn encode(self) => DataTree :: DataTree.Text("wire")
+    fn encode(self) DataTree -> DataTree.Text("wire")
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) => Token ! [FieldError] {
+    fn decode(tree: DataTree) Token ! [FieldError] -[]> {
         value :: tree.text()?
         if value != "wire" {
-            return Err([FieldError.{ path: "$xml_event", reason: "bad token" }])
+            return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
         }
-        return Ok(Token.{ raw: "decoded" })
+        return Ok(Token{ raw: "decoded" })
     }
 }
 
@@ -671,14 +671,14 @@ struct Packet {
     letter: Char
 }
 
-fn resident() => String {
-    value := Packet.{
+fn resident() String -[]> {
+    value := Packet{
         display_name: "Ada",
-        token: Token.{ raw: "ignored" },
+        token: Token{ raw: "ignored" },
         event: Event.Count(7),
         bytes: [222, 173],
         numbers: [-2, 3],
-        labels: [String:Int].{ "x": 6 },
+        labels: [String:Int]{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
         letter: 'Z'
@@ -686,22 +686,22 @@ fn resident() => String {
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    boxed := cbor.decode<Wrap<Int>>([U8].{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
     boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
-fn forced_deopt() => String {
+fn forced_deopt() String -[]> {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    value := Packet.{
+    value := Packet{
         display_name: "Ada",
-        token: Token.{ raw: "ignored" },
+        token: Token{ raw: "ignored" },
         event: Event.Count(7),
         bytes: [222, 173],
         numbers: [-2, 3],
-        labels: [String:Int].{ "x": 6 },
+        labels: [String:Int]{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
         letter: 'Z'
@@ -709,7 +709,7 @@ fn forced_deopt() => String {
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    boxed := cbor.decode<Wrap<Int>>([U8].{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
     boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
     boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
     return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
@@ -784,15 +784,15 @@ migration Profile {
 
 migration Profile {
     rename name => display_name
-    change score: Int => Rank via { (n) => Rank.{ value: n } }
+    change score: Int => Rank via { (n) -> Rank{ value: n } }
 }
 
 migration Profile {
     add host_name: String = "localhost"
 }
 
-fn decode_old() => String {
-    bytes :: [U8].{
+fn decode_old() String -[]> {
+    bytes :: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -805,9 +805,9 @@ fn decode_old() => String {
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn forced_deopt() => String {
+fn forced_deopt() String -[]> {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
-    bytes :: [U8].{
+    bytes :: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -820,8 +820,8 @@ fn forced_deopt() => String {
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
-fn failed_change() => String {
-    bytes :: [U8].{
+fn failed_change() String -[]> {
+    bytes :: [U8]{
         0xa3,
         0x64, 0x6e, 0x61, 0x6d, 0x65,
         0x63, 0x41, 0x64, 0x61,
@@ -928,17 +928,17 @@ struct Strict {
     known: Int
 }
 
-fn published() => String {
+fn published() String -[]> {
     value :: json.decode<Published>("{{\"middle\":2,\"known\":7,\"future\":1,\"tail\":3}}") ?? panic("published decode")
     return json.to_string(value)
 }
 
-fn plain() => String {
+fn plain() String -[]> {
     value :: json.decode<Plain>("{{\"future\":1,\"known\":7,\"middle\":2}}") ?? panic("plain decode")
     return json.to_string(value)
 }
 
-fn strict() => String {
+fn strict() String -[]> {
     result :: json.decode<Strict>("{{\"known\":7,\"extra\":1}}")
     if result == {
         .Err(errors) -> return errors[0].reason
@@ -946,7 +946,7 @@ fn strict() => String {
     }
 }
 
-fn malformed() => String {
+fn malformed() String -[]> {
     result :: json.decode<Published>("{{\"known\":7")
     if result == {
         .Err(_) -> return "malformed rejected"
@@ -954,7 +954,7 @@ fn malformed() => String {
     }
 }
 
-fn forced_deopt() => String {
+fn forced_deopt() String -[]> {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     return published()
 }
@@ -1002,7 +1002,7 @@ fn u64_codable_is_rejected_before_backend_selection() {
             r#"
 use core.encoding.cbor as cbor
 fn run() {
-    value := U64.{ 1 }
+    value := U64{ 1 }
     cbor.to_bytes(value)
 }
 "#,
@@ -1013,7 +1013,7 @@ fn run() {
             r#"
 use core.encoding.cbor as cbor
 fn run() {
-    cbor.decode<U64>([U8].{ 0x01 })
+    cbor.decode<U64>([U8]{ 0x01 })
 }
 "#,
             "U64 can't be decoded",
@@ -1070,69 +1070,69 @@ use core.text as text
 #CodableAsBase
 Severity :: distinct Int(0..10)
 
-fn invalid_i8_rejected() => Bool {
-    if cbor.decode<I8>([U8].{ 0x18, 0x80 }) == {
+fn invalid_i8_rejected() Bool -[]> {
+    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
         .Ok(_) -> return false
         .Err(_) -> return true
     }
 }
 
-fn invalid_u32_rejected() => Bool {
-    if cbor.decode<U32>([U8].{ 0x20 }) == {
+fn invalid_u32_rejected() Bool -[]> {
+    if cbor.decode<U32>([U8]{ 0x20 }) == {
         .Ok(_) -> return false
         .Err(_) -> return true
     }
 }
 
-fn invalid_f32_rejected() => Bool {
-    if cbor.decode<F32>([U8].{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) == {
+fn invalid_f32_rejected() Bool -[]> {
+    if cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) == {
         .Ok(_) -> return false
         .Err(_) -> return true
     }
 }
 
-fn invalid_fixed_rejected() => Bool {
-    if cbor.decode<[Int#2]>([U8].{ 0x81, 0x01 }) == {
+fn invalid_fixed_rejected() Bool -[]> {
+    if cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) == {
         .Ok(_) -> return false
         .Err(_) -> return true
     }
 }
 
-fn invalid_range_rejected() => Bool {
-    if cbor.decode<Severity>([U8].{ 0x0b }) == {
+fn invalid_range_rejected() Bool -[]> {
+    if cbor.decode<Severity>([U8]{ 0x0b }) == {
         .Ok(_) -> return false
         .Err(_) -> return true
     }
 }
 
-fn invalid_i8_error() => String {
-    if cbor.decode<I8>([U8].{ 0x18, 0x80 }) == {
+fn invalid_i8_error() String -[]> {
+    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
         .Ok(_) -> return "accepted"
         .Err(error) -> return error[0].reason
     }
 }
 
-fn invalid_u8_error() => String {
-    if cbor.decode<U8>([U8].{ 0x19, 0x01, 0x00 }) == {
+fn invalid_u8_error() String -[]> {
+    if cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) == {
         .Ok(_) -> return "accepted"
         .Err(error) -> return error[0].reason
     }
 }
 
-fn invalid_fixed_bytes_error() => String {
-    if cbor.decode<[U8#2]>([U8].{ 0x41, 0xde }) == {
+fn invalid_fixed_bytes_error() String -[]> {
+    if cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) == {
         .Ok(_) -> return "accepted"
         .Err(error) -> return error[0].reason
     }
 }
 
-fn forced_deopt() => String {
+fn forced_deopt() String -[]> {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
-    signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8.{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
-    unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32.{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
-    narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32.{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
-    pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2].{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
-    bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2].{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
+    signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
+    unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
+    narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
+    pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
+    bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
     tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
     tree_n := (tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
@@ -1294,7 +1294,7 @@ struct Sale {
 }
 
 fn run() {
-    sales :: [Sale.{item: "pen", qty: 3}, Sale.{item: "ink", qty: 5}]
+    sales :: [Sale{item: "pen", qty: 3}, Sale{item: "ink", qty: 5}]
     typed :: csv.to_string(sales)
     print("typed-len: {typed.len()}")
     print(typed)
@@ -1505,7 +1505,7 @@ fn run() {
     assert_aot_dev_stream_parity("csv-stream", &stream_fixture("csv", csv));
 
     let xml = r#"
-fn xml_name(local: String) => DataTree {
+fn xml_name(local: String) DataTree -[]> {
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -1736,7 +1736,7 @@ use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 
-fn terminal_limit_probe() => String {
+fn terminal_limit_probe() String -[FS]> {
     bad_path := "@DIR@/bad.json"
     limits := encoding.EncodingLimits.safe()
     limits.max_total_bytes = Val(5)
@@ -1757,7 +1757,7 @@ fn terminal_limit_probe() => String {
     return "unreachable"
 }
 
-fn malformed_reader_probe() => String {
+fn malformed_reader_probe() String -[FS]> {
     files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
     input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
@@ -1881,54 +1881,54 @@ fn run() {
 
     overflow :: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
     if overflow == {
-        .Err(_) :> { print("i64-overflow") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("i64-overflow") }
+        else -> { print("accepted") }
     }
     nonfinite :: json.decode<Float>("1e400")
     if nonfinite == {
-        .Err(_) :> { print("nonfinite") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("nonfinite") }
+        else -> { print("accepted") }
     }
     invalid_nan :: json.decode<Decimal>("NaN")
     if invalid_nan == {
-        .Err(_) :> { print("nan-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("nan-rejected") }
+        else -> { print("accepted") }
     }
     invalid_infinity :: json.decode<Decimal>("Infinity")
     if invalid_infinity == {
-        .Err(_) :> { print("infinity-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("infinity-rejected") }
+        else -> { print("accepted") }
     }
     fractional_integer :: json.decode<Int>("1.5")
     if fractional_integer == {
-        .Err(_) :> { print("fractional-rejected") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("fractional-rejected") }
+        else -> { print("accepted") }
     }
     exponent_limited :: json.decode<Decimal>("1e1000001")
     if exponent_limited == {
-        .Err(_) :> { print("exponent-limit") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("exponent-limit") }
+        else -> { print("accepted") }
     }
     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
     mismatch :: json.decode<ExactNumbers>(mismatch_raw)
     if mismatch == {
-        .Err(_) :> { print("mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("mismatch") }
+        else -> { print("accepted") }
     }
     stream_mismatch :: data.json<ExactNumbers>("[{mismatch_raw}]")
     if stream_mismatch == {
-        .Err(_) :> { print("stream-mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("stream-mismatch") }
+        else -> { print("accepted") }
     }
     string_mismatch :: json.decode<String>("123")
     if string_mismatch == {
-        .Err(_) :> { print("string-mismatch") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("string-mismatch") }
+        else -> { print("accepted") }
     }
     limited :: json.decode<Decimal>(@limited_text)
     if limited == {
-        .Err(_) :> { print("limit") }
-        else :> { print("accepted") }
+        .Err(_) -> { print("limit") }
+        else -> { print("accepted") }
     }
 }
 "#;

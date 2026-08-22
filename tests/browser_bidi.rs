@@ -687,7 +687,7 @@ fn native_bidi_io_handle_methods_record_net_effect() {
     let validators = r#"
 use core.web.browser as browser
 
-fn validators() =[]=> {
+fn validators() -[]> {
     profile :: browser.profile("bidi-2025.5") ?? return
     timeout :: browser.timeout(500) ?? return
 }
@@ -698,34 +698,34 @@ fn run() { validators() }
     let source = r#"
 use core.web.browser as browser
 
-fn connect() =[FS]=> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
-fn context(session: Browser) =[FS]=> Unit { session.context() ?? return }
-fn subscribe(session: Browser) =[FS]=> Unit { session.subscribe("log.entryAdded") ?? return }
-fn next(session: Browser, timeout: BrowserTimeout) =[FS]=> Unit { session.next_event(timeout) ?? return }
-fn add_intercept(session: Browser) =[FS]=> Unit { session.add_intercept("beforeRequestSent") ?? return }
-fn add_intercept_url(session: Browser) =[FS]=> Unit {
+fn connect() Unit -[FS]> { browser.connect("ws://127.0.0.1:1") ?? return }
+fn context(session: Browser) Unit -[FS]> { session.context() ?? return }
+fn subscribe(session: Browser) Unit -[FS]> { session.subscribe("log.entryAdded") ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) Unit -[FS]> { session.next_event(timeout) ?? return }
+fn add_intercept(session: Browser) Unit -[FS]> { session.add_intercept("beforeRequestSent") ?? return }
+fn add_intercept_url(session: Browser) Unit -[FS]> {
     session.add_intercept_url("beforeRequestSent", "https://example.test/*") ?? return
 }
-fn continue_request(session: Browser) =[FS]=> Unit { session.continue_request("req-1") ?? return }
-fn fail_request(session: Browser) =[FS]=> Unit { session.fail_request("req-1") ?? return }
-fn fulfill_request(session: Browser) =[FS]=> Unit {
+fn continue_request(session: Browser) Unit -[FS]> { session.continue_request("req-1") ?? return }
+fn fail_request(session: Browser) Unit -[FS]> { session.fail_request("req-1") ?? return }
+fn fulfill_request(session: Browser) Unit -[FS]> {
     session.fulfill_request("req-1", 200, "blocked") ?? return
 }
-fn protocol(session: Browser) =[FS]=> Unit { session.protocol("bidi") ?? return }
-fn close(session: Browser) =[FS]=> Unit { session.close() ?? return }
-fn page(context: BrowserContext) =[FS]=> Unit { context.page() ?? return }
-fn tab(context: BrowserContext) =[FS]=> Unit { context.tab() ?? return }
-fn goto(page: BrowserPage) =[FS]=> Unit { page.goto("https://example.test") ?? return }
-fn frames(page: BrowserPage) =[FS]=> Unit { page.frames() ?? return }
-fn frame_close(frame: BrowserFrame) =[FS]=> Unit { frame.close() ?? return }
-fn wait(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait(timeout) ?? return }
-fn wait_gone(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait_gone(timeout) ?? return }
-fn click(locator: BrowserLocator) =[FS]=> Unit { locator.click() ?? return }
-fn hover(locator: BrowserLocator) =[FS]=> Unit { locator.hover() ?? return }
-fn fill(locator: BrowserLocator) =[FS]=> Unit { locator.fill("value") ?? return }
-fn press(locator: BrowserLocator) =[FS]=> Unit { locator.press("Enter") ?? return }
-fn remove(intercept: BrowserIntercept) =[FS]=> Unit { intercept.remove() ?? return }
-fn send(protocol: BrowserProtocol) =[FS]=> Unit { protocol.send("session.status", "{{}}") ?? return }
+fn protocol(session: Browser) Unit -[FS]> { session.protocol("bidi") ?? return }
+fn close(session: Browser) Unit -[FS]> { session.close() ?? return }
+fn page(context: BrowserContext) Unit -[FS]> { context.page() ?? return }
+fn tab(context: BrowserContext) Unit -[FS]> { context.tab() ?? return }
+fn goto(page: BrowserPage) Unit -[FS]> { page.goto("https://example.test") ?? return }
+fn frames(page: BrowserPage) Unit -[FS]> { page.frames() ?? return }
+fn frame_close(frame: BrowserFrame) Unit -[FS]> { frame.close() ?? return }
+fn wait(locator: BrowserLocator, timeout: BrowserTimeout) Unit -[FS]> { locator.wait(timeout) ?? return }
+fn wait_gone(locator: BrowserLocator, timeout: BrowserTimeout) Unit -[FS]> { locator.wait_gone(timeout) ?? return }
+fn click(locator: BrowserLocator) Unit -[FS]> { locator.click() ?? return }
+fn hover(locator: BrowserLocator) Unit -[FS]> { locator.hover() ?? return }
+fn fill(locator: BrowserLocator) Unit -[FS]> { locator.fill("value") ?? return }
+fn press(locator: BrowserLocator) Unit -[FS]> { locator.press("Enter") ?? return }
+fn remove(intercept: BrowserIntercept) Unit -[FS]> { intercept.remove() ?? return }
+fn send(protocol: BrowserProtocol) Unit -[FS]> { protocol.send("session.status", "{{}}") ?? return }
 fn run() {}
 "#;
     let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
@@ -978,7 +978,7 @@ fn native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks() {
     let source = r#"
 use core.web.browser as browser
 
-fn connect_outcome(endpoint: String) => String {
+fn connect_outcome(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
@@ -986,17 +986,17 @@ fn connect_outcome(endpoint: String) => String {
     return "unexpected-success"
 }
 
-fn profile_outcome() => String {
+fn profile_outcome() String {
     profile :: browser.profile("rolling") ?? return "caught"
     return "unexpected-success"
 }
 
-fn timeout_outcome() => String {
+fn timeout_outcome() String {
     timeout :: browser.timeout(0) ?? return "caught"
     return "unexpected-success"
 }
 
-fn cdp_outcome(endpoint: String) => String {
+fn cdp_outcome(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -1004,7 +1004,7 @@ fn cdp_outcome(endpoint: String) => String {
     return "unexpected-success"
 }
 
-fn valid_outcome(endpoint: String) => String {
+fn valid_outcome(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
@@ -1012,7 +1012,7 @@ fn valid_outcome(endpoint: String) => String {
     return "connected"
 }
 
-fn closed_protocol_outcome(endpoint: String) => String {
+fn closed_protocol_outcome(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -1315,7 +1315,7 @@ fn run() {
     let source = r#"
 use core.web.browser as browser
 
-fn outcome(endpoint: String) => String {
+fn outcome(endpoint: String) String {
     session :: browser.connect(endpoint) ?? return "caught"
     session.close() ?? return "close-error"
     return "connected"
@@ -2389,7 +2389,7 @@ fn native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire() 
     let source = r#"
 use core.web.browser as browser
 
-fn missing_cdp(endpoint: String) => String {
+fn missing_cdp(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2398,7 +2398,7 @@ fn missing_cdp(endpoint: String) => String {
     return "unexpected-open"
 }
 
-fn hostile_cdp(endpoint: String) => String {
+fn hostile_cdp(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2749,7 +2749,7 @@ fn native_bidi_privacy_receipt_hostile_and_closed_paths() {
     let source = r#"
 use core.web.browser as browser
 
-fn hostile(endpoint: String) => String {
+fn hostile(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2757,7 +2757,7 @@ fn hostile(endpoint: String) => String {
     return "unexpected-success"
 }
 
-fn closed_receipt(endpoint: String) => String {
+fn closed_receipt(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3133,12 +3133,12 @@ fn native_bidi_browser_surface_hostile_matrix() {
     let source = r#"
 use core.web.browser as browser
 
-fn bad_profile() => String {
+fn bad_profile() String {
     browser.profile("not-a-profile") ?? return "caught-profile"
     return "unexpected-profile"
 }
 
-fn missing_cdp(endpoint: String) => String {
+fn missing_cdp(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3146,7 +3146,7 @@ fn missing_cdp(endpoint: String) => String {
     return "unexpected-cdp"
 }
 
-fn wire_error(endpoint: String) => String {
+fn wire_error(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3154,7 +3154,7 @@ fn wire_error(endpoint: String) => String {
     return "unexpected-wire"
 }
 
-fn closed_ops(endpoint: String) => String {
+fn closed_ops(endpoint: String) String {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"

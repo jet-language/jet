@@ -12,12 +12,12 @@ mod common;
 fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
     let source = r#"fn run() {
     values :: [1, 2, 3, 4]
-    print(values.para_map((n: Int) => n * 2))
-    print(values.para_filter((n: Int) => n % 2 == 0))
-    split :: values.para_partition((n: Int) => n % 2 == 0)
+    print(values.para_map((n: Int) -> n * 2))
+    print(values.para_filter((n: Int) -> n % 2 == 0))
+    split :: values.para_partition((n: Int) -> n % 2 == 0)
     print(split.false_)
     print(split.true_)
-    print(values.para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right))
+    print(values.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right))
 }
 "#;
     let dir = common::unique_tmp("jet_para_dev_matrix");
@@ -45,18 +45,18 @@ fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
 fn repl_list_and_fixed_list_sequence_methods_are_exact() {
     let out = run_transcript(
         &[
-            "[1, 2, 3].all((n: Int) => n > 0)",
-            "[1, 2, 3].any((n: Int) => n == 2)",
+            "[1, 2, 3].all((n: Int) -> n > 0)",
+            "[1, 2, 3].any((n: Int) -> n == 2)",
             "[1, 2, 3, 4, 5].chunks(2)",
-            "[1, 2, 3, 4].count_by((n: Int) => \"{n % 2}\")",
+            "[1, 2, 3, 4].count_by((n: Int) -> \"{n % 2}\")",
             "[1, 1, 2, 2, 1].dedup()",
             "[4, 5].indexed()",
-            "[\"1\", \"bad\", \"2\"].filter_map((s: String) => Int.parse(s))",
+            "[\"1\", \"bad\", \"2\"].filter_map((s: String) -> Int.parse(s))",
             "[7, 8].first()",
-            "[1, 2, 3].flat_map((n: Int) => [n, n * 10])",
+            "[1, 2, 3].flat_map((n: Int) -> [n, n * 10])",
             "[[1, 2], [3], [4, 5]].flatten()",
-            "[1, 2, 3].fold(10, (acc: Int, n: Int) => acc + n)",
-            "[1, 2, 3, 4].group_by((n: Int) => \"{n % 2}\")",
+            "[1, 2, 3].fold(10, (acc: Int, n: Int) -> acc + n)",
+            "[1, 2, 3, 4].group_by((n: Int) -> \"{n % 2}\")",
             "[4, 5, 6].index_of(5)",
             "inserted := [1, 3]",
             "inserted.insert(1, 2)",
@@ -64,35 +64,35 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
             "[1, 2, 3].intersperse(0)",
             "[7, 8].last()",
             "[3, 9, 2].max()",
-            "[\"bbb\", \"a\", \"cc\"].max_by((s: String) => s.len())",
+            "[\"bbb\", \"a\", \"cc\"].max_by((s: String) -> s.len())",
             "[3, 9, 2].min()",
-            "[\"bbb\", \"a\", \"cc\"].min_by((s: String) => s.len())",
+            "[\"bbb\", \"a\", \"cc\"].min_by((s: String) -> s.len())",
             "[true, false, true].min()",
             "[true, false, true].max()",
-            "[true, false, true].min_by((b: Bool) => b)",
-            "[true, false, true].max_by((b: Bool) => b)",
-            "[1, 2, 3, 4].para_filter((n: Int) => n % 2 == 0)",
-            "[1, 2, 3].para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right)",
-            "[1, 2, 3].para_map((n: Int) => n * 2)",
-            "[1, 2, 3, 4].para_partition((n: Int) => n % 2 == 0)",
-            "[1, 2, 3, 4].partition((n: Int) => n % 2 == 0)",
-            "[4, 5, 6].position((n: Int) => n == 5)",
+            "[true, false, true].min_by((b: Bool) -> b)",
+            "[true, false, true].max_by((b: Bool) -> b)",
+            "[1, 2, 3, 4].para_filter((n: Int) -> n % 2 == 0)",
+            "[1, 2, 3].para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)",
+            "[1, 2, 3].para_map((n: Int) -> n * 2)",
+            "[1, 2, 3, 4].para_partition((n: Int) -> n % 2 == 0)",
+            "[1, 2, 3, 4].partition((n: Int) -> n % 2 == 0)",
+            "[4, 5, 6].position((n: Int) -> n == 5)",
             "[2, 3, 4].product()",
-            "[1, 2, 3].scan(0, (acc: Int, n: Int) => acc + n)",
+            "[1, 2, 3].scan(0, (acc: Int, n: Int) -> acc + n)",
             "[1, 2, 3, 4].skip(2)",
-            "[1, 2, 3, 4].skip_while((n: Int) => n < 3)",
+            "[1, 2, 3, 4].skip_while((n: Int) -> n < 3)",
             "[1, 2, 3, 4, 5].step_by(2)",
             "[1, 2, 3, 4].sum()",
             "[1, 2, 3, 4].take(2)",
-            "[1, 2, 3, 4].take_while((n: Int) => n < 3)",
-            "[\"1\", \"2\"].map((s: String) => Int.parse(s)).try_collect()",
+            "[1, 2, 3, 4].take_while((n: Int) -> n < 3)",
+            "[\"1\", \"2\"].map((s: String) -> Int.parse(s)).try_collect()",
             "[(a: 1, b: \"x\"), (a: 2, b: \"y\")].unzip()",
             "[1, 2, 3, 4].windows(3)",
             "[1, 2, 3].zip([\"a\", \"b\"])",
             "fixed: [Int#4] :: [1, 2, 3, 4]",
-            "fixed.all((n: Int) => n > 0)",
+            "fixed.all((n: Int) -> n > 0)",
             "fixed.chunks(3)",
-            "fixed.fold(0, (acc: Int, n: Int) => acc + n)",
+            "fixed.fold(0, (acc: Int, n: Int) -> acc + n)",
             "fixed.zip([9, 8, 7])",
         ],
         None,
@@ -161,9 +161,9 @@ fn repl_eager_collection_adapters_and_lazy_opt_in_are_exact() {
     let out = run_transcript(
         &[
             "values := [1, 2, 3]",
-            "values.map((n: Int) => n * 2)",
-            "values.filter((n: Int) => n > 1)",
-            "values.lazy().map((n: Int) => n * 10).to_list()",
+            "values.map((n: Int) -> n * 2)",
+            "values.filter((n: Int) -> n > 1)",
+            "values.lazy().map((n: Int) -> n * 10).to_list()",
         ],
         None,
     );
@@ -195,8 +195,8 @@ fn repl_view_and_view_mut_sequence_methods_are_exact() {
             "view.last()",
             "view.contains(30)",
             "view.index_of(40)",
-            "view.fold(0, (acc: Int, n: Int) => acc + n)",
-            "view.map((n: Int) => n / 10)",
+            "view.fold(0, (acc: Int, n: Int) -> acc + n)",
+            "view.map((n: Int) -> n / 10)",
             "edit :: &values[0..1]",
             "edit.len()",
             "edit.is_empty()",
@@ -205,8 +205,8 @@ fn repl_view_and_view_mut_sequence_methods_are_exact() {
             "edit.last()",
             "edit.contains(20)",
             "edit.index_of(20)",
-            "edit.fold(0, (acc: Int, n: Int) => acc + n)",
-            "edit.map((n: Int) => n / 10)",
+            "edit.fold(0, (acc: Int, n: Int) -> acc + n)",
+            "edit.map((n: Int) -> n / 10)",
         ],
         None,
     );
@@ -247,102 +247,102 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         return;
     }
     let cases = [
-        ("scalar", "", "[1, 2, 3].all((n: Int) => n > 0)"),
+        ("scalar", "", "[1, 2, 3].all((n: Int) -> n > 0)"),
         (
             "float-literal-receiver",
             "",
-            "[1.5, 2.5].all((n: Float) => n > 1.0)",
+            "[1.5, 2.5].all((n: Float) -> n > 1.0)",
         ),
         (
             "bool-literal-receiver",
             "",
-            "[true, false].any((b: Bool) => b)",
+            "[true, false].any((b: Bool) -> b)",
         ),
         (
             "float-fold-seed",
             "",
-            "[1.5, 2.5].fold(0.5, (a: Float, n: Float) => a + n)",
+            "[1.5, 2.5].fold(0.5, (a: Float, n: Float) -> a + n)",
         ),
         (
             "bool-fold-seed",
             "",
-            "[true, false].fold(true, (a: Bool, b: Bool) => a && b)",
+            "[true, false].fold(true, (a: Bool, b: Bool) -> a && b)",
         ),
         (
             "float-reduce-seed",
             "",
-            "[1.5, 2.5].reduce(0.5, (a: Float, n: Float) => a + n)",
+            "[1.5, 2.5].reduce(0.5, (a: Float, n: Float) -> a + n)",
         ),
         (
             "bool-scan-seed",
             "",
-            "[true, false].scan(true, (a: Bool, b: Bool) => a && b)",
+            "[true, false].scan(true, (a: Bool, b: Bool) -> a && b)",
         ),
         (
             "float-para-fold-seed",
             "",
-            "[1.5, 2.5].para_fold(() => 0.5, (a: Float, n: Float) => a + n, (left: Float, right: Float) => left + right)",
+            "[1.5, 2.5].para_fold(() -> 0.5, (a: Float, n: Float) -> a + n, (left: Float, right: Float) -> left + right)",
         ),
         (
             "empty-float-sum",
-            "fn empty_sum() => Float {\n\
-                 empty :: [Float].{}\n\
+            "fn empty_sum() Float {\n\
+                 empty :: [Float]{}\n\
                  return empty.sum()\n\
              }",
             "empty_sum()",
         ),
         (
             "empty-float-product",
-            "fn empty_product() => Float {\n\
-                 empty :: [Float].{}\n\
+            "fn empty_product() Float {\n\
+                 empty :: [Float]{}\n\
                  return empty.product()\n\
              }",
             "empty_product()",
         ),
         (
             "f32-nonempty-sum",
-            "fn f32_values() => [F32] { return [16777217.0, 1.0, 1.0] }",
+            "fn f32_values() [F32] { return [16777217.0, 1.0, 1.0] }",
             "f32_values().sum()",
         ),
         (
             "f32-nonempty-product",
-            "fn f32_values() => [F32] { return [16777217.0, 2.0] }",
+            "fn f32_values() [F32] { return [16777217.0, 2.0] }",
             "f32_values().product()",
         ),
         (
             "f32-fold",
-            "fn f32_values() => [F32] { return [16777217.0, 1.0] }\n\
-             fn f32_zero() => F32 { return 0.0 }",
-            "f32_values().fold(f32_zero(), (a: F32, n: F32) => a + n)",
+            "fn f32_values() [F32] { return [16777217.0, 1.0] }\n\
+             fn f32_zero() F32 { return 0.0 }",
+            "f32_values().fold(f32_zero(), (a: F32, n: F32) -> a + n)",
         ),
         (
             "f32-map",
-            "fn f32_values() => [F32] { return [16777217.0, 1.0] }\n\
-             fn f32_one() => F32 { return 1.0 }",
-            "f32_values().map((n: F32) => n + f32_one())",
+            "fn f32_values() [F32] { return [16777217.0, 1.0] }\n\
+             fn f32_one() F32 { return 1.0 }",
+            "f32_values().map((n: F32) -> n + f32_one())",
         ),
         (
             "f32-min",
-            "fn f32_values() => [F32] { return [16777217.0, 1.0] }",
+            "fn f32_values() [F32] { return [16777217.0, 1.0] }",
             "f32_values().min()",
         ),
         (
             "f32-max",
-            "fn f32_values() => [F32] { return [16777217.0, 1.0] }",
+            "fn f32_values() [F32] { return [16777217.0, 1.0] }",
             "f32_values().max()",
         ),
         (
             "empty-f32-sum",
-            "fn empty_f32_sum() => F32 {\n\
-                 empty :: [F32].{}\n\
+            "fn empty_f32_sum() F32 {\n\
+                 empty :: [F32]{}\n\
                  return empty.sum()\n\
              }",
             "empty_f32_sum()",
         ),
         (
             "empty-f32-product",
-            "fn empty_f32_product() => F32 {\n\
-                 empty :: [F32].{}\n\
+            "fn empty_f32_product() F32 {\n\
+                 empty :: [F32]{}\n\
                  return empty.product()\n\
              }",
             "empty_f32_product()",
@@ -350,7 +350,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ("optional", "", "[3, 1, 2].min()"),
         ("owned-list", "", "[1, 2, 3].take(2)"),
         ("nested-list", "", "[1, 2, 3, 4].chunks(3)"),
-        ("map", "", "[1, 2, 3].group_by((n: Int) => \"{n % 2}\")"),
+        ("map", "", "[1, 2, 3].group_by((n: Int) -> \"{n % 2}\")"),
         ("tuple", "", "[(a: 1, b: \"x\"), (a: 2, b: \"y\")].unzip().a"),
         (
             "result",
@@ -359,16 +359,16 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         ),
         (
             "view",
-            "fn view_sum(xs: [Int]) => Int {\n\
+            "fn view_sum(xs: [Int]) Int {\n\
                  view :: xs[0..1]\n\
-                 return view.fold(0, (a: Int, n: Int) => a + n)\n\
+                 return view.fold(0, (a: Int, n: Int) -> a + n)\n\
              }",
             "view_sum([10, 20, 30])",
         ),
         (
             "range-fixed-index",
             "Die :: distinct Int(1..6)\n\
-             fn pick(faces: [Int#6], roll: Die) => Int {\n\
+             fn pick(faces: [Int#6], roll: Die) Int {\n\
                  return faces[roll.raw() - 1]\n\
              }",
             "pick([0, 1, 2, 3, 4, 5], Die.from_int(3))",

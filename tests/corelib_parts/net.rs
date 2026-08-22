@@ -628,7 +628,7 @@ fn run() {
     client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
     address :: net.udp_local_addr(server) ?? panic("server address")
     budget :: Duration.seconds(1) ?? panic("deadline")
-    payload :: [U8].{ 0, 255, 1, 2, 3 }
+    payload :: [U8]{ 0, 255, 1, 2, 3 }
     sent :: client.send_to(payload, address, deadline: budget) ?? panic("send")
     packet :: server.receive(3, deadline: budget) ?? panic("receive")
     print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
@@ -755,7 +755,7 @@ fn run() {
         .Ok(_) -> panic("expired read succeeded")
         .Err(error) -> print(net.error_operation(error))
     }
-    byte :: [U8].{ 1 }
+    byte :: [U8]{ 1 }
     if client.write(byte, deadline: expired) == {
         .Ok(_) -> panic("expired write succeeded")
         .Err(error) -> print(net.error_operation(error))
@@ -785,11 +785,11 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ! IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] ! IOError -[IO]> {
     return stream.read(limit)
 }
 
-fn send_four<T: Writer>(&stream: T) => Int ! IOError {
+fn send_four<T: Writer>(&stream: T) Int ! IOError -[IO]> {
     stream.write_all([1, 2, 3, 4])?
     return .Ok(4)
 }
@@ -838,11 +838,11 @@ fn core_net_unix_stream_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ! IOError {{
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] ! IOError -[IO]> {{
     return stream.read(limit)
 }}
 
-fn send_four<T: Writer>(&stream: T) => Int ! IOError {{
+fn send_four<T: Writer>(&stream: T) Int ! IOError -[IO]> {{
     first :: stream.write([1, 2])?
     stream.write_all([3, 4])?
     return .Ok(first)
@@ -932,7 +932,7 @@ fn run() {{
         .Ok(_) -> panic("expired readiness succeeded")
         .Err(error) -> print(net.error_operation(error))
     }}
-    payload :: [U8].{{ 7 }}
+    payload :: [U8]{{ 7 }}
     client.write_all(payload, deadline: budget) ?? panic("write")
     print(server.read(1, deadline: budget) ?? panic("read"))
     client.close() ?? panic("close")
@@ -1022,11 +1022,11 @@ use core.files as fs
 use core.net as net
 use core.process as process
 
-fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ! IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] ! IOError -[IO]> {
     return stream.read(limit)
 }
 
-fn operation_name(operation: IOOperation) => String {
+fn operation_name(operation: IOOperation) String -[]> {
     if operation == {
         .Read -> return "read"
         .Write -> return "write"
@@ -1130,12 +1130,12 @@ fn core_ioerror_debug_renders_in_aot_and_dev() {
     fs::create_dir_all(&dir).unwrap();
     // Direct core values alone do not emit `jet_std`; this unused helper keeps the AOT prelude present.
     let source = r#"
-fn activate_core() => String {
+fn activate_core() String -[IO]> {
     return input() ?? ""
 }
 
-fn fail() => Int ! IOError {
-    return .Err(IOError.InvalidInput(IOContext.{
+fn fail() Int ! IOError -[]> {
+    return .Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
         os_code: None,
@@ -1143,8 +1143,8 @@ fn fail() => Int ! IOError {
     }))
 }
 
-fn fail_other() => Int ! IOError {
-    return .Err(IOError.Other(IOContext.{
+fn fail_other() Int ! IOError -[]> {
+    return .Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),
         resource: Val("out.txt"),
@@ -1453,18 +1453,18 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
 use core.net as net
 use core.net.tls as tls
 
-fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ! IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] ! IOError -[IO]> {
     return stream.read(limit)
 }
 
 
-fn send<T: Writer>(&stream: T, bytes: [U8]) => Int ! IOError {
+fn send<T: Writer>(&stream: T, bytes: [U8]) Int ! IOError -[IO]> {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
     return .Ok(empty_count)
 }
 
-fn zero_rejected<T: Reader>(&stream: T) => Bool {
+fn zero_rejected<T: Reader>(&stream: T) Bool -[IO]> {
     if stream.read(0) == {
         .Ok(_) -> return false
         .Err(error) -> {
@@ -1482,13 +1482,13 @@ fn run() {
     budget :: Duration.seconds(1) ?? panic("deadline")
     cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"]) ?? panic("ALPN")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
-    request :: [U8].{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }
+    request :: [U8]{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }
     interest :: NetReadyInterest.Write
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
     print(net.ready_readable(readiness))
     print(net.ready_writable(readiness))
     print(zero_rejected(&secure))
-    empty :: [U8].{}
+    empty :: [U8]{}
     empty_count :: send(&secure, empty) ?? panic("empty write")
     secure.write_all(request, deadline: budget) ?? panic("write bytes")
     print(empty_count)
@@ -1584,15 +1584,15 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
 use core.net as net
 use core.net.tls as tls
 
-fn invalid_alpn() => [String] {{
+fn invalid_alpn() [String] -[]> {{
     return [""]
 }}
 
 fn run() {{
-    ca :: [U8].{{ {} }}
-    client_cert :: [U8].{{ {} }}
-    client_key :: [U8].{{ {} }}
-    wrong_key :: [U8].{{ {} }}
+    ca :: [U8]{{ {} }}
+    client_cert :: [U8]{{ {} }}
+    client_key :: [U8]{{ {} }}
+    wrong_key :: [U8]{{ {} }}
     roots :: tls.RootCertificates.from_pem(ca) ?? panic("root validation")
     identity :: tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: client_key) ?? panic("identity validation")
     if tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: wrong_key) == {{
@@ -1633,11 +1633,11 @@ fn run() {{
     print(peer.leaf.valid_from_unix_ms < peer.leaf.valid_until_unix_ms)
     print(peer.leaf.subject.contains("CN=T") && peer.leaf.subject.contains("\\xc3"))
     print(peer.leaf.issuer.len() > 0)
-    request :: [U8].{{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }}
+    request :: [U8]{{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }}
     secure.write_all(request, deadline: budget) ?? panic("request")
     secure.close_write(deadline: budget) ?? panic("close write")
     secure.close_write(deadline: budget) ?? panic("repeat close write")
-    one :: [U8].{{ 1 }}
+    one :: [U8]{{ 1 }}
     if secure.write_all(one, deadline: budget) == {{
         .Ok(_) -> panic("write after close_write succeeded")
         .Err(error) -> if error == {{

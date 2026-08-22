@@ -142,11 +142,11 @@ fn compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate
     let source = r#"
 use core.compute as compute
 
-fn vec_rank(value: Vec<3>) => Int {
+fn vec_rank(value: Vec<3>) Int -[GPU]> {
     return compute.rank(value)
 }
 
-fn matrix_rank(value: Matrix<2, 3>) => Int {
+fn matrix_rank(value: Matrix<2, 3>) Int -[GPU]> {
     return compute.rank(value)
 }
 

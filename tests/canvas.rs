@@ -80,11 +80,11 @@ fn variant_name(chunk: &str) -> Option<&str> {
     Some(&line[..end])
 }
 
-const CANVAS_FIXTURE: &str = r#"fn square(n: Int) => Int {
+const CANVAS_FIXTURE: &str = r#"fn square(n: Int) Int {
     return n * n
 }
 
-fn summarize(limit: Int) => Int {
+fn summarize(limit: Int) Int {
     total := square(limit)
     if total > 10 { return total } else { return total + 1 }
 }
@@ -94,7 +94,7 @@ fn run() {
 }
 "#;
 
-const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) => Int {
+const CANVAS_COVERAGE_FIXTURE: &str = r#"fn coverage(limit: Int) Int {
     total := 0
     loop i, 0..<limit {
         if i == 2 {
@@ -123,8 +123,8 @@ enum Choice {
     Skip
 }
 
-fn make(n: Int) => Int {
-    p :: Point.{x: n, y: n + 1}
+fn make(n: Int) Int {
+    p :: Point{x: n, y: n + 1}
     c :: Choice.Pick(p.x)
     return p.y
 }
@@ -134,11 +134,11 @@ fn run() {
 }
 "#;
 
-const CANVAS_PIN_AUTHORING_FIXTURE: &str = r#"fn to_int(n: Int) => Int {
+const CANVAS_PIN_AUTHORING_FIXTURE: &str = r#"fn to_int(n: Int) Int {
     return n
 }
 
-fn choose(limit: Int) => Int {
+fn choose(limit: Int) Int {
     if limit > 1 {
         return limit
     } else {
@@ -151,7 +151,7 @@ fn run() {
 }
 "#;
 
-const CANVAS_WIRE_FIXTURE: &str = r#"fn pick(a: Int, b: Int) => Int {
+const CANVAS_WIRE_FIXTURE: &str = r#"fn pick(a: Int, b: Int) Int {
     return a
 }
 
@@ -200,7 +200,7 @@ fn run() {
 }
 "#;
 
-const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) => Int {
+const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) Int {
     if x == Val(n) {
         return n
     } else {
@@ -208,13 +208,13 @@ const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) => Int {
     }
 }
 
-fn list_total() => Int {
+fn list_total() Int {
     xs :: [1, 2, 3]
     ys :: [to_int(1), to_int(2)]
     return xs[0] + ys[0]
 }
 
-fn to_int(n: Int) => Int {
+fn to_int(n: Int) Int {
     return n
 }
 
@@ -225,7 +225,7 @@ fn run() {
 "#;
 
 const CANVAS_FUNCTION_EVENT_FIXTURE: &str = r#"/// Starts the scene.
-pub fn on_start(limit: Int = 1) => Int {
+pub fn on_start(limit: Int = 1) Int {
     total := limit + 1
     return total
 }
@@ -263,7 +263,7 @@ fn canvas_parity_matrix_tracks_ast_language_forms() {
     }
 }
 
-const CANVAS_COLLAPSE_FIXTURE: &str = r#"fn compute(limit: Int) => Int {
+const CANVAS_COLLAPSE_FIXTURE: &str = r#"fn compute(limit: Int) Int {
     return limit + 1
 }
 
@@ -279,11 +279,11 @@ const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() ! {
 
 const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
 
-fn maybe() => Int ! String {
+fn maybe() Int ! String {
     return Ok(1)
 }
 
-fn checked() => Int ! String {
+fn checked() Int ! String {
     n :: maybe()?
     return Ok(n)
 }
@@ -310,7 +310,7 @@ const CANVAS_POLICY_FIXTURE: &str = r#"fn run() {
 }
 "#;
 
-const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() => Int {
+const CANVAS_TASK_RAIL_FIXTURE: &str = r#"fn worker() Int {
     return 1
 }
 
@@ -336,18 +336,18 @@ struct Resource {
 }
 
 fn run() {
-    resource := Resource.{ id: 1 }
+    resource := Resource{ id: 1 }
     resource.on()
     resource.close()
     resource.cancel()
     scope :: event.scope()
     clicked :: event.new<Int>()
-    clicked.on(scope, (n) => { print("clicked {n}") })
-    clicked.once(scope, (n) => { print("once {n}") })
-    clicked.on_priority(scope, 10, (n) => { print("priority {n}") })
+    clicked.on(scope, (n) -> { print("clicked {n}") })
+    clicked.once(scope, (n) -> { print("once {n}") })
+    clicked.on_priority(scope, 10, (n) -> { print("priority {n}") })
     print(clicked.emit(1).summary())
-    jobs :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
-    jobs.on(scope, (n) => { print("job {n}") })
+    jobs :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    jobs.on(scope, (n) -> { print("job {n}") })
     report :: jobs.emit_async(2)
     print(jobs.queued_count())
     jobs.close()
@@ -356,7 +356,7 @@ fn run() {
 "#;
 
 const CANVAS_TRAIT_INTERFACE_FIXTURE: &str = r#"trait Drawable {
-    fn render(self) => String
+    fn render(self) String
 }
 
 struct Badge {
@@ -370,7 +370,7 @@ fn run() {
 
 const CANVAS_TASK_FLOW_FIXTURE: &str = r#"use core.tasks as tasks
 
-fn work() => Int {
+fn work() Int {
     return 1
 }
 
@@ -1091,7 +1091,7 @@ fn canvas_pattern_arm_and_multi_input_transactions_write_source() {
     C(Int)
 }
 
-fn choose(x: Choice) => Int {
+fn choose(x: Choice) Int {
     if x == {
         .A(n) -> { return n }
         else -> { return 0 }
@@ -1149,7 +1149,7 @@ fn run() {
     A(Int)
 }
 
-fn choose(x: Choice) => Int {
+fn choose(x: Choice) Int {
     if x == {
         .A(n) -> { return n }
     }
@@ -1175,11 +1175,11 @@ fn run() {
 
     let multi_path = write_fixture(
         "multi_input_tx",
-        r#"fn to_int(n: Int) => Int {
+        r#"fn to_int(n: Int) Int {
     return n
 }
 
-fn demo() => Int {
+fn demo() Int {
     xs :: [1, 2, 3]
     return xs[0] + to_int(1)
 }
@@ -1307,7 +1307,7 @@ fn canvas_projects_and_edits_subjectless_guard_arms() {
 fn canvas_classic_pattern_branch_transactions_use_canonical_switch() {
     let path = write_fixture(
         "classic_pattern_transactions",
-        r#"fn choose(x: Int?) => Int {
+        r#"fn choose(x: Int?) Int {
     if x == Val(_) { return 1 } else { return 0 }
 }
 
@@ -1528,7 +1528,7 @@ fn canvas_collapse_extract_preview_and_inline_are_source_refactors() {
         "{preview_out}"
     );
     assert!(
-        preview_out.contains("+fn inc_limit(limit: Int) => Int"),
+        preview_out.contains("+fn inc_limit(limit: Int) Int"),
         "{preview_out}"
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), expanded);
@@ -1537,7 +1537,7 @@ fn canvas_collapse_extract_preview_and_inline_are_source_refactors() {
     jet::Canvas::apply_transaction_json(&path, &extract).expect("extract inline");
     let extracted = fs::read_to_string(&path).unwrap();
     assert!(
-        extracted.contains("fn inc_limit(limit: Int) => Int"),
+        extracted.contains("fn inc_limit(limit: Int) Int"),
         "{extracted}"
     );
     assert!(extracted.contains("return inc_limit(limit)"), "{extracted}");
@@ -1745,9 +1745,9 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"version\":\"unpackaged\"",
         "\"project_functions\"",
         "\"name\":\"square\"",
-        "\"signature\":\"fn square(n: Int) => Int\"",
+        "\"signature\":\"fn square(n: Int) Int\"",
         "\"name\":\"summarize\"",
-        "\"signature\":\"fn summarize(limit: Int) => Int\"",
+        "\"signature\":\"fn summarize(limit: Int) Int\"",
         "\"name\":\"run\"",
         "\"signature\":\"fn run()\"",
         "\"name\":\"run\",\"signature\":\"fn run()\",\"callee\":\"run\"",
@@ -2023,7 +2023,7 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
     for field in [
         "\"title\":\"on_start\"",
         "\"function\":{\"name\":\"on_start\"",
-        "\"signature\":\"pub fn on_start(limit: Int = 1) => Int\"",
+        "\"signature\":\"pub fn on_start(limit: Int = 1) Int\"",
         "\"visibility\":\"public\"",
         "\"docs\":\"Starts the scene.\"",
         "\"returns\":\"Int\"",
@@ -2044,11 +2044,11 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
 fn canvas_preserves_via_effect_row_for_signature_edits() {
     let path = write_fixture(
         "function_via_effect",
-        "fn invoke(act: fn() =[IO]=>) =[via act]=> { act() }\nfn run() {}\n",
+        "fn invoke(act: fn() -[IO]>) -[via act]> { act() }\nfn run() {}\n",
     );
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     assert!(
-        graph.contains("\"signature\":\"fn invoke(act: fn() =[IO]=>) =[via act]=>\""),
+        graph.contains("\"signature\":\"fn invoke(act: fn() -[IO]>) -[via act]>\""),
         "{graph}"
     );
     assert!(graph.contains("\"effect_via\":\"act\""), "{graph}");
@@ -2086,13 +2086,13 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     let revision = jet::Canvas::source_revision(&src);
 
     let edit_signature = format!(
-        "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"signature\":\"fn square(n: Int = 1) => Int\"}}",
+        "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"signature\":\"fn square(n: Int = 1) Int\"}}",
         revision, square_graph_id
     );
     jet::Canvas::apply_transaction_json(&path, &edit_signature).expect("edit signature");
     let after_signature = fs::read_to_string(&path).unwrap();
     assert!(
-        after_signature.contains("fn square(n: Int = 1) => Int"),
+        after_signature.contains("fn square(n: Int = 1) Int"),
         "{after_signature}"
     );
 
@@ -2104,7 +2104,7 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     jet::Canvas::apply_transaction_json(&path, &rename).expect("rename function");
     let after_rename = fs::read_to_string(&path).unwrap();
     assert!(
-        after_rename.contains("fn area(n: Int = 1) => Int"),
+        after_rename.contains("fn area(n: Int = 1) Int"),
         "{after_rename}"
     );
     assert!(
@@ -2126,7 +2126,7 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     jet::Canvas::apply_transaction_json(&path, &create).expect("create function");
     let after_create = fs::read_to_string(&path).unwrap();
     assert!(
-        after_create.contains("fn helper(value: Int) => Int"),
+        after_create.contains("fn helper(value: Int) Int"),
         "{after_create}"
     );
     assert!(after_create.contains("return 1"), "{after_create}");
@@ -2232,7 +2232,7 @@ fn canvas_source_control_reports_project_file_set() {
         .expect("git commit");
 
     fs::write(&entry, "fn run() {\n    print(\"changed\")\n}\n").unwrap();
-    fs::write(dir.join("helper.jet"), "fn helper() => Int {\n    return 7\n}\n").unwrap();
+    fs::write(dir.join("helper.jet"), "fn helper() Int {\n    return 7\n}\n").unwrap();
     let scm = jet::Canvas::source_control_json_for_entry(&entry);
     assert!(
         scm.contains("\"protocol\":\"jet.canvas.source_control\""),
@@ -2247,7 +2247,7 @@ fn canvas_source_control_reports_project_file_set() {
     assert!(scm.contains("\"path\":\"helper.jet\""), "{scm}");
     assert!(scm.contains("+    print(\\\"changed\\\")"), "{scm}");
     assert!(scm.contains("?? helper.jet"), "{scm}");
-    assert!(scm.contains("+fn helper() => Int"), "{scm}");
+    assert!(scm.contains("+fn helper() Int"), "{scm}");
 }
 
 #[test]
@@ -2328,7 +2328,7 @@ fn canvas_proof_projects_canonical_budget_report_read_only() {
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     let entry = dir.join("src/run.jet");
     fs::write(&entry, r#"module perf.package {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "public-api",
         scope: .Package,
         metric: .PublicApiItems,
@@ -2386,12 +2386,12 @@ fn canvas_and_semindex_share_composed_package_facts() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: .{ run: app }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\n",
     )
     .unwrap();
     fs::write(
         dir.join("release.jet"),
-        "Config.{ outputs: .{ app: .Executable.{ entry: run } } }\n",
+        "Config{ outputs: { app: .Executable{ entry: run } } }\n",
     )
     .unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
@@ -2424,7 +2424,7 @@ fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_project
     .unwrap();
     fs::write(
         dir.join("one.jet"),
-        "pub dev :: Config.{ version: \"1\" }\n",
+        "pub dev :: Config{ version: \"1\" }\n",
     )
     .unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
@@ -2436,7 +2436,7 @@ fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_project
 
     fs::write(
         dir.join("two.jet"),
-        "pub dev :: Config.{ version: \"2\" }\n",
+        "pub dev :: Config{ version: \"2\" }\n",
     )
     .unwrap();
     let ambiguous = jet::Canvas::project_json_for_entry(&entry);
@@ -2513,7 +2513,7 @@ fn canvas_project_discovery_requires_declared_workspace_membership() {
     fs::write(&unlisted_entry, "fn run() {\n    print(\"scratch\")\n}\n").unwrap();
     fs::write(
         unlisted.join("helper.jet"),
-        "fn helper() => Int {\n    return 1\n}\n",
+        "fn helper() Int {\n    return 1\n}\n",
     )
     .unwrap();
     let loose_entry = loose.join("main.jet");
@@ -2734,7 +2734,7 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     .unwrap();
     let entry = hello.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
-    fs::write(ranker.join("lib.jet"), "fn score() => Int {\n    return 1\n}\n").unwrap();
+    fs::write(ranker.join("lib.jet"), "fn score() Int {\n    return 1\n}\n").unwrap();
 
     let json = jet::Canvas::project_json_for_entry(&entry);
     assert!(json.contains("\"protocol\":\"jet.canvas.project\""), "{json}");
@@ -2760,7 +2760,7 @@ fn canvas_projects_typed_member_after_package_transition() {
     let dir = temp_dir("package_transition_canvas_member");
     fs::write(
         dir.join("package.jet"),
-        "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n",
+        "name: \"workspace\"\napp :: Config{ version: \"1\" }\n",
     )
     .unwrap();
     fs::write(
@@ -2821,7 +2821,7 @@ fn canvas_project_json_projects_env_services_and_diagnostics() {
     assert!(json.contains("\"path\":\"env.jet\""), "{json}");
     assert!(json.contains("\"kind\":\"env\""), "{json}");
 
-    fs::write(dir.join("env.jet"), "module dev { env.dev: System.{} }\n").unwrap();
+    fs::write(dir.join("env.jet"), "module dev { env.dev: System{} }\n").unwrap();
     let json = jet::Canvas::project_json_for_entry(&entry);
     assert!(json.contains("\"diagnostics\":[{\"code\":\"E0966\""), "{json}");
 }
@@ -2850,7 +2850,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     .unwrap();
     let entry = app.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
-    fs::write(app.join("helper.jet"), "fn helper() => Int {\n    return 1\n}\n").unwrap();
+    fs::write(app.join("helper.jet"), "fn helper() Int {\n    return 1\n}\n").unwrap();
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
@@ -2864,12 +2864,12 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(preview.contains("\"protocol\":\"jet.canvas.project.edit\""), "{preview}");
     assert!(preview.contains("\"preview\":true"), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("+deps: .{"), "{preview}");
+    assert!(preview.contains("+deps: {"), "{preview}");
     assert!(preview.contains("+    logging: ../logging,"), "{preview}");
     let before_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");
 
-    fs::write(app.join("helper.jet"), "fn helper() => Int {\n    return 2\n}\n").unwrap();
+    fs::write(app.join("helper.jet"), "fn helper() Int {\n    return 2\n}\n").unwrap();
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect("unrelated project change should not block touched-file-safe apply");
@@ -3038,7 +3038,7 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
     assert!(targeted.contains("\"op\":\"add_target\""), "{targeted}");
     let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(
-        manifest.contains("app: Output :: .Executable.{ name: \"app\", entry: run }"),
+        manifest.contains("app: Output :: .Executable{ name: \"app\", entry: run }"),
         "{manifest}"
     );
     assert!(
@@ -3205,7 +3205,7 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     let entry = dir.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"main\")\n}\n").unwrap();
     let helper = dir.join("helper.jet");
-    fs::write(&helper, "fn helper() => Int {\n    return 7\n}\n").unwrap();
+    fs::write(&helper, "fn helper() Int {\n    return 7\n}\n").unwrap();
 
     let graph = jet::Canvas::graph_json_for_entry_source(&entry, Some("helper.jet"))
         .expect("helper graph");
@@ -3252,7 +3252,7 @@ fn canvas_project_source_id_rejects_existing_unprojected_file() {
     .unwrap();
     let entry = dir.join("packages/app/main.jet");
     fs::write(&entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
-    fs::write(dir.join("stray.jet"), "fn stray() => Int {\n    return 1\n}\n").unwrap();
+    fs::write(dir.join("stray.jet"), "fn stray() Int {\n    return 1\n}\n").unwrap();
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     assert!(!project.contains("\"path\":\"stray.jet\""), "{project}");
@@ -3627,7 +3627,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     loop i, 0..3, 2 {
         total += i
     }
-    counts := [String:Int].{ "one": 1 }
+    counts := [String:Int]{ "one": 1 }
     loop entry, counts {
         total += entry.value
     }
@@ -3716,7 +3716,7 @@ fn canvas_projects_data_construction_as_nodes() {
         "\"kind\":\"variant\"",
         "\"title\":\"construct\"",
         "\"title\":\"Pick\"",
-        "Point.{x: n, y: n + 1}",
+        "Point{x: n, y: n + 1}",
     ] {
         assert!(graph.contains(field), "data graph missing {field}: {graph}");
     }
@@ -3826,7 +3826,7 @@ fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
         "\"interfaces\"",
         "\"kind\":\"trait_interface\"",
         "\"trait\":\"Drawable\"",
-        "\"signature\":\"fn render(self) => String\"",
+        "\"signature\":\"fn render(self) String\"",
         "\"create_trait_impl\"",
     ] {
         assert!(
@@ -3845,7 +3845,7 @@ fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
     assert!(out.contains("\"changed\":true"), "{out}");
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("impl Badge.Drawable"), "{after}");
-    assert!(after.contains("fn render(self) => String"), "{after}");
+    assert!(after.contains("fn render(self) String"), "{after}");
     assert!(after.contains("return \"canvas\""), "{after}");
     let graph = jet::Canvas::graph_json_for_file(&path).expect("trait impl graph");
     assert!(graph.contains("\"kind\":\"trait_impl\""), "{graph}");
@@ -4114,7 +4114,7 @@ fn canvas_blueprint_parity_matrix_is_classified() {
 fn canvas_reconstructs_checked_output_callable_from_semindex() {
     let path = write_fixture(
         "output_callable",
-        "app: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch() { print(\"ok\") }\n",
+        "app: Output :: .Executable{ name: \"demo\", entry: launch };\n\nfn launch() { print(\"ok\") }\n",
     );
     let graph = jet::Canvas::graph_json_for_file(&path).expect("Output Canvas graph");
     for field in [

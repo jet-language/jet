@@ -18,8 +18,8 @@ fn choose() Int {
     sender.send(7)
     result := 0
     if {
-        value, receiver :> result = value
-        after 0ms :> result = -1
+        value, receiver -> result = value
+        after 0ms -> result = -1
     }
     return result
 }
@@ -34,8 +34,8 @@ fn run() {
 const REPL_SOURCE: &str = r#"
 fn wait_for_value(receiver: Receiver<Int>) {
     if {
-        value, receiver :> print(value)
-        after 0ms :> print(-1)
+        value, receiver -> print(value)
+        after 0ms -> print(-1)
     }
 }
 

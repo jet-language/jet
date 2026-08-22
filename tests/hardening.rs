@@ -49,13 +49,13 @@ fn instance_method_args_keep_read_convention() {
 struct Greeter {
     prefix: String
 
-    fn greet(self, name: String) => String {
+    fn greet(self, name: String) String {
         return "{self.prefix} {name}"
     }
 }
 
 fn run() {
-    g :: Greeter.{ prefix: "hi" }
+    g :: Greeter{ prefix: "hi" }
     name :: "bob"
     print(g.greet(name))
 }
@@ -76,7 +76,7 @@ struct P {
 }
 
 fn run() {
-    p :: P.{ name: "x" }
+    p :: P{ name: "x" }
     s :: p.name
     t :: p.name
     print(s)
@@ -94,12 +94,12 @@ fn run() {
 #[test]
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
-fn maybe() => (Int?) {
+fn maybe() (Int?) {
     return None
 }
 
 fn run() {
-    m := [String:Int].{}
+    m := [String:Int]{}
     m["k"] = 7
     x :: maybe() ?? m["k"]
     print(x)
@@ -116,7 +116,7 @@ fn run() {
 #[test]
 fn bare_question_return_uses_default_error() {
     let src = r#"
-fn parse_count(raw: String) => Int ! {
+fn parse_count(raw: String) Int ! {
     if raw == "" {
         return Err("empty")
     }
@@ -144,7 +144,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -166,7 +166,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     print(s.scores.len())
 }
 "#;
@@ -187,7 +187,7 @@ struct Crate {
 }
 
 fn run() {
-    b :: Crate.{ n: 1 }
+    b :: Crate{ n: 1 }
     b.poke()
 }
 "#,
@@ -280,7 +280,7 @@ struct Crate {
 }
 
 fn run() {
-    b := Crate.{ items: [0] }
+    b := Crate{ items: [0] }
     b.add(5)
     print(b.items.len())
 }
@@ -323,7 +323,7 @@ fn eat(v: ^NoClone) {
 }
 
 fn run() {
-    v :: NoClone.{ n: 1 }
+    v :: NoClone{ n: 1 }
     eat(v)
 }
 "#;
@@ -365,7 +365,7 @@ fn bump(n: &Int) {
 }
 
 fn run() {
-    s :: S.{ n: 1 }
+    s :: S{ n: 1 }
     bump(&s.n)
 }
 "#,
@@ -392,7 +392,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
     fs::write(
         dir.join("my-utils.jet"),
-        "pub fn helper() => Int {\n    return 42\n}\n",
+        "pub fn helper() Int {\n    return 42\n}\n",
     )
     .unwrap();
     fs::write(
@@ -418,7 +418,7 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"shapes\"\nfn run() {\n    p :: shapes.Point.{ x: 1, y: 2 }\n    print(p.x)\n}\n",
+        "use \"shapes\"\nfn run() {\n    p :: shapes.Point{ x: 1, y: 2 }\n    print(p.x)\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -441,12 +441,12 @@ fn duplicate_file_stems_get_unique_module_names() {
     fs::create_dir_all(dir.join("b")).unwrap();
     fs::write(
         dir.join("a/util.jet"),
-        "pub fn one() => Int {\n    return 1\n}\n",
+        "pub fn one() Int {\n    return 1\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("b/util.jet"),
-        "pub fn two() => Int {\n    return 2\n}\n",
+        "pub fn two() Int {\n    return 2\n}\n",
     )
     .unwrap();
     fs::write(

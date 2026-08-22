@@ -30,11 +30,11 @@ fn root_receiver_calls_share_the_direct_call_path() {
     let file = dir.join("root_calls.jet");
     fs::write(
         &file,
-        r#"fn scale(#Root value: Int, factor: Int) => Int {
+        r#"fn scale(#Root value: Int, factor: Int) Int -[]> {
     return value * factor
 }
 
-fn add_half(#Root value: Float) => Float {
+fn add_half(#Root value: Float) Float -[]> {
     return value + 0.5
 }
 
@@ -277,8 +277,8 @@ fn expert_terminal_model_runs_resident_and_fails_closed() {
         r#"use core.process as process
 
 fn run() {
-    policy :: TerminalPolicy.{
-        size: TerminalSize.{ cols: 120, rows: 40 },
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 120, rows: 40 },
         mode: .Raw
     }
     plan :: process.cmd(["echo", "terminal"]).terminal(policy)
@@ -294,7 +294,7 @@ fn run() {
     terminal_child :: process.cmd(["printf", "child"]).terminal().spawn() ?? panic("terminal spawn failed")
     if terminal_child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
             print("terminal present")
         }
         .None -> { print("terminal absent") }
@@ -304,7 +304,7 @@ fn run() {
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
         .Val(session) -> {
-            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
             print("terminal present")
         }
         .None -> { print("terminal absent") }
@@ -543,7 +543,7 @@ fn prompt_helpers_preserve_behavior_through_named_deopt() {
         r##"use core.term as io
 use core.text as text
 
-fn prompt_gap() => String {
+fn prompt_gap() String -[IO]> {
     confirmed :: io.confirm("Continue?")
     choice :: io.choose("Choose:", ["staging", "production"]) ?? panic("choose failed")
     secret_kind := "unexpected"
@@ -869,10 +869,10 @@ fn iter_adapter_latches_emit_dominating_clif() {
         &file,
         r#"fn run() {
     jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
-    print(jagged.chunk_while((a: Int, b: Int) => (b == a + 1)).to_list())
+    print(jagged.chunk_while((a: Int, b: Int) -> (b == a + 1)).to_list())
     parities :: [2, 4, 6, 1, 3, 8, 10]
-    print(parities.dedup_by((n: Int) => (n % 2)).to_list())
-    print(jagged.is_sorted_by((n: Int) => n))
+    print(parities.dedup_by((n: Int) -> (n % 2)).to_list())
+    print(jagged.is_sorted_by((n: Int) -> n))
 }
 "#,
     )
@@ -986,7 +986,7 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
     repeats :: [5, 3, 1, 3, 9]
     print(repeats.last_index_of(3))
     print(repeats.last_index_of(7))
-    counts := [String:Int].{ "words": 4 }
+    counts := [String:Int]{ "words": 4 }
     print(counts.pop("words") ?? -1)
     print(counts.pop("words") ?? -1)
     priorities := PriorityQueue.from([2, 9, 4])

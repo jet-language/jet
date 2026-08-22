@@ -29,27 +29,27 @@ fn run() {
 
     scope :: event.scope()
     transformed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    transformed.on_priority(scope, 10, (value: String) => {
+    transformed.on_priority(scope, 10, (value: String) -> {
         print("first {value}")
         HookDecision.Transform("{value}-one")
     })
-    transformed.on(scope, (value: String) => {
+    transformed.on(scope, (value: String) -> {
         print("second {value}")
         HookDecision.Continue
     })
     show(transformed.run("start"))
 
     cancelled :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    cancelled.on_priority(scope, 10, (value: String) => HookDecision.Cancel)
-    cancelled.on(scope, (value: String) => {
+    cancelled.on_priority(scope, 10, (value: String) -> HookDecision.Cancel)
+    cancelled.on(scope, (value: String) -> {
         print("must not run {value}")
         HookDecision.Continue
     })
     show(cancelled.run("stop"))
 
     failed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    failed.on_priority(scope, 10, (value: String) => HookDecision.Fail("denied {value}"))
-    failed.on(scope, (value: String) => {
+    failed.on_priority(scope, 10, (value: String) -> HookDecision.Fail("denied {value}"))
+    failed.on(scope, (value: String) -> {
         print("must not run {value}")
         HookDecision.Continue
     })
@@ -77,21 +77,21 @@ use core.event as event
 fn run() {
     scope :: event.scope()
     hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    late :: hook.on(scope, (value: Int) => {
+    late :: hook.on(scope, (value: Int) -> {
         print("late {value}")
         HookDecision.Continue
     })
-    hook.on_priority(scope, 10, (value: Int) => {
+    hook.on_priority(scope, 10, (value: Int) -> {
         print("first {value}")
         late.unsubscribe()
         HookDecision.Transform(value + 1)
     })
-    hook.once(scope, (value: Int) => {
+    hook.once(scope, (value: Int) -> {
         print("once {value}")
         if value == 2 { hook.run(10) }
         HookDecision.Continue
     })
-    hook.on(scope, (value: Int) => {
+    hook.on(scope, (value: Int) -> {
         print("last {value}")
         HookDecision.Continue
     })
@@ -104,7 +104,7 @@ fn run() {
     owned :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
     if true {
         owner :: event.scope()
-        owned.on(owner, (value: Int) => {
+        owned.on(owner, (value: Int) -> {
             print("leaked {value}")
             HookDecision.Continue
         })

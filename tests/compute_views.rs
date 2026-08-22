@@ -110,7 +110,7 @@ fn run() {
     print(compute.to_list(tensor))
     print(compute.to_list(copied))
 
-    holder := Holder.{ value: ~tensor }
+    holder := Holder{ value: ~tensor }
     aliased :: holder.value
     aliased_edit :: &aliased[0..1]
     aliased_edit[0] = 8.0

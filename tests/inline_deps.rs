@@ -67,7 +67,7 @@ fn write_textkit_fixture(project: &Path) {
     write(
         project,
         ".jet/inline-deps/textkit/1.4.2/textkit.jet",
-        "pub fn shout(s: String) => String {\n    return ~s;\n}\n",
+        "pub fn shout(s: String) String {\n    return ~s;\n}\n",
     );
 }
 

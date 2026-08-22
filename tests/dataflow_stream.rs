@@ -100,12 +100,12 @@ fn run() {{
         Val(row) -> print("first:{{row.service}}:{{row.latency_ms}}")
         None -> panic("expected row")
     }}
-    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
     if groups == {{
         Ok(_) -> print("groups:ok")
         Err(error) -> print("groups:{{error.operation}}:{{error.reason}}")
     }}
-    empty := data.mean([Float].{{}})
+    empty := data.mean([Float]{{}})
     if empty == {{
         Ok(_) -> print("mean:ok")
         Err(error) -> print("mean:{{error.operation}}:{{error.reason}}")

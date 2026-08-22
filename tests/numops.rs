@@ -13,7 +13,7 @@ fn unsigned_addition_overflow_traps() {
     if !have_rustc() {
         return;
     }
-    let src = "fn run() {\n    a :: U8.{ 200 }\n    b :: U8.{ 100 }\n    print(a + b)\n}\n";
+    let src = "fn run() {\n    a :: U8{ 200 }\n    b :: U8{ 100 }\n    print(a + b)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_add_overflow", src);
     assert_eq!(
         code, 70,
@@ -34,7 +34,7 @@ fn generic_add_bound_keeps_checked_overflow() {
     if !have_rustc() {
         return;
     }
-    let src = "fn add<T: Add>(left: T, right: T) => T { return left + right }\nfn run() {\n    a :: U8.{ 255 }\n    b :: U8.{ 1 }\n    print(add(a, b))\n}\n";
+    let src = "fn add<T: Add>(left: T, right: T) T { return left + right }\nfn run() {\n    a :: U8{ 255 }\n    b :: U8{ 1 }\n    print(add(a, b))\n}\n";
     let (code, stdout, stderr) = build_and_run("generic_u8_add_overflow", src);
     assert_eq!(
         code, 70,
@@ -53,7 +53,7 @@ fn generic_div_bound_keeps_source_location() {
     if !have_rustc() {
         return;
     }
-    let src = "fn divide<T: Div>(left: T, right: T) => T { return left / right }\nfn run() {\n    print(divide(1, 0))\n}\n";
+    let src = "fn divide<T: Div>(left: T, right: T) T { return left / right }\nfn run() {\n    print(divide(1, 0))\n}\n";
     let (code, stdout, stderr) = build_and_run("generic_int_div_zero", src);
     assert_eq!(code, 70, "generic Div by zero should trap, stdout={stdout:?} stderr={stderr:?}");
     assert!(stderr.contains("dividing by zero"), "panic should explain division: {stderr}");
@@ -81,7 +81,7 @@ fn arithmetic_within_range_succeeds() {
     if !have_rustc() {
         return;
     }
-    let src = "fn run() {\n    a :: U8.{ 100 }\n    b :: U8.{ 50 }\n    print(a + b)\n}\n";
+    let src = "fn run() {\n    a :: U8{ 100 }\n    b :: U8{ 50 }\n    print(a + b)\n}\n";
     let (code, stdout, _stderr) = build_and_run("u8_add_ok", src);
     assert_eq!(code, 0, "in-range arithmetic should succeed");
     assert_eq!(stdout.trim(), "150");
@@ -94,7 +94,7 @@ fn overflow_opt_ins_do_not_trap() {
     }
     // 200 + 100 overflows U8 (max 255): wrapping → 44, saturating → 255,
     // checked → null (here fallen back to 0).
-    let src = "fn run() {\n    a :: U8.{ 200 }\n    b :: U8.{ 100 }\n    fb :: U8.{ 0 }\n    \
+    let src = "fn run() {\n    a :: U8{ 200 }\n    b :: U8{ 100 }\n    fb :: U8{ 0 }\n    \
                print(wrapping(a + b))\n    print(saturating(a + b))\n    \
                print(checked(a + b) ?? fb)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_opt_ins", src);
@@ -112,7 +112,7 @@ fn fixed_width_overflow_methods_do_not_trap() {
     if !have_rustc() {
         return;
     }
-    let src = "fn run() {\n    a :: U8.{ 200 }\n    b :: U8.{ 100 }\n    fb :: U8.{ 0 }\n    \
+    let src = "fn run() {\n    a :: U8{ 200 }\n    b :: U8{ 100 }\n    fb :: U8{ 0 }\n    \
                print(a.wrapping_add(b))\n    print(a.saturating_add(b))\n    \
                print(a.checked_add(b) ?? fb)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_overflow_methods", src);
@@ -127,8 +127,8 @@ fn bit_operators_and_mixed_width_shift() {
     }
     // `&`/`~|` and the separately ratified `|=` keep the U8 width; a shift count
     // may be any integer and the result keeps the left side's width.
-    let src = "fn run() {\n    a :: U8.{ 12 }\n    b :: U8.{ 10 }\n    \
-               print(a & b)\n    c := U8.{ a }\n    c |= b\n    print(c)\n    print(a ~| b)\n    \
+    let src = "fn run() {\n    a :: U8{ 12 }\n    b :: U8{ 10 }\n    \
+               print(a & b)\n    c := U8{ a }\n    c |= b\n    print(c)\n    print(a ~| b)\n    \
                print(a << 2)\n    print(a >> 1)\n}\n";
     let (code, stdout, stderr) = build_and_run("u8_bitops", src);
     assert_eq!(code, 0, "bit ops should succeed: {stderr}");
@@ -148,7 +148,7 @@ fn over_width_shift_traps_cleanly() {
     // Shifting a U8 by 200 bits is past its width — it must trap with a Jet
     // panic (exit 70), NOT leak a raw Rust "shift overflow" panic (I2). The
     // shift goes through a function so the count is a runtime value.
-    let src = "fn shift_it(a: U8, n: U8) => U8 {\n    r :: U8.{ a << n }\n    return r\n}\n\
+    let src = "fn shift_it(a: U8, n: U8) U8 {\n    r :: U8{ a << n }\n    return r\n}\n\
                fn run() {\n    print(shift_it(4, 200))\n}\n";
     let (code, _stdout, stderr) = build_and_run("u8_overshift", src);
     assert_eq!(code, 70, "over-width shift should trap (exit 70): {stderr}");

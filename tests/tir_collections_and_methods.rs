@@ -22,7 +22,7 @@ fn run() {
     loop (list_index, list_item), xs {
         print("{list_index}:{list_item}")
     }
-    counts := [String:Int].{}
+    counts := [String:Int]{}
     counts[k] = value
     loop (map_key, map_value), counts {
         print("{map_key}={map_value}")
@@ -54,7 +54,7 @@ fn list_literal_index_slice_and_iteration() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) => Int {
+fn total(xs: [Int]) Int -[]> {
     sum := 0
     loop x, xs {
         sum = (sum + x)
@@ -88,7 +88,7 @@ fn run() {
     loop i, xs.indexes() {
         print(i)
     }
-    empty := [Int].{}
+    empty := [Int]{}
     count := 0
     loop i, empty.indexes() {
         count = (count + 1)
@@ -137,7 +137,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn run() {
-    counts := [String:Int].{}
+    counts := [String:Int]{}
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -160,7 +160,7 @@ fn run() {
 fn map_get_update_is_total_for_missing_key() {
     let src = r#"
 fn run() {
-    counts := [String:Int].{}
+    counts := [String:Int]{}
     counts["missing"] = (counts.get("missing") ?? 0) + 1
     counts["other"] = (counts.get("other") ?? 0) - 1
     print(counts["missing"])
@@ -186,11 +186,11 @@ struct Person {
     name: String
     age: Int
 }
-fn name_of(p: Person) => String {
+fn name_of(p: Person) String -[]> {
     return ~p.name
 }
 fn run() {
-    p :: Person.{ name: \"Grace\", age: 40 }
+    p :: Person{ name: \"Grace\", age: 40 }
     print(name_of(p))
 }
 ";
@@ -212,15 +212,15 @@ fn user_method_with_scalar_args() {
 struct Calc {
     base: Int
 
-    fn add(self, x: Int, y: Int) => Int {
+    fn add(self, x: Int, y: Int) Int -[]> {
         return ((self.base + x) + y)
     }
 }
-fn calc(c: Calc) => Int {
+fn calc(c: Calc) Int -[]> {
     return c.add(10, 20)
 }
 fn run() {
-    c :: Calc.{ base: 1 }
+    c :: Calc{ base: 1 }
     print(calc(c))
 }
 ";
@@ -241,16 +241,16 @@ fn user_method_with_string_arg_implicit_clone() {
 struct Crate {
     label: String
 
-    fn combine(self, other: String) => String {
+    fn combine(self, other: String) String -[]> {
         return \"{self.label}-{other}\"
     }
 }
-fn calc(b: Crate) => String {
+fn calc(b: Crate) String -[..E]> {
     name :: \"x\"
     return b.combine(name)
 }
 fn run() {
-    b :: Crate.{ label: \"t\" }
+    b :: Crate{ label: \"t\" }
     print(calc(b))
 }
 ";
@@ -269,21 +269,21 @@ fn trait_impl_method_call_no_mangle() {
     }
     let src = "\
 trait Named {
-    fn label(self) => String
+    fn label(self) String
 }
 struct Dog {
     sound: String
 }
 impl Dog.Named {
-    fn label(self) => String {
+    fn label(self) String -[]> {
         return \"dog\"
     }
 }
-fn describe(d: Dog) => String {
+fn describe(d: Dog) String -[]> {
     return d.label()
 }
 fn run() {
-    d :: Dog.{ sound: \"woof\" }
+    d :: Dog{ sound: \"woof\" }
     print(describe(d))
 }
 ";
@@ -304,14 +304,14 @@ enum Light {
     Red
     Green
 
-    fn code(self) => Int {
+    fn code(self) Int -[]> {
         if self == {
             .Red -> { return 1 }
             .Green -> { return 2 }
         }
     }
 }
-fn calc(l: Light) => Int {
+fn calc(l: Light) Int -[]> {
     return l.code()
 }
 fn run() {
@@ -331,7 +331,7 @@ fn map_literal_with_entries() {
         return;
     }
     let src = "\
-fn scores() => [String:Int] {
+fn scores() [String:Int] -[]> {
     return [\"a\": 1, \"b\": 2]
 }
 fn run() {
@@ -363,10 +363,10 @@ fn static_constructor_and_self_getter() {
 struct Counter {
     n: Int
 
-    fn make(v: Int) => Counter {
-        return Counter.{ n: v }
+    fn make(v: Int) Counter -[]> {
+        return Counter{ n: v }
     }
-    fn value(self) => Int {
+    fn value(self) Int -[]> {
         return self.n
     }
 }
@@ -391,12 +391,12 @@ fn mut_self_method_body() {
 struct Acc {
     total: Int
 
-    fn doubled(&self) => Int {
+    fn doubled(&self) Int -[]> {
         return (self.total + self.total)
     }
 }
 fn run() {
-    a := Acc.{ total: 7 }
+    a := Acc{ total: 7 }
     print(a.doubled())
 }
 ";
@@ -418,10 +418,10 @@ enum Sign {
     Neg
     Zero
 
-    fn make_pos() => Sign {
+    fn make_pos() Sign -[]> {
         return Sign.Pos
     }
-    fn to_num(self) => Int {
+    fn to_num(self) Int -[]> {
         if self == {
             .Pos -> { return 1 }
             .Neg -> { return 0 }
@@ -452,14 +452,14 @@ struct Vec2 {
     x: Int
     y: Int
 
-    fn make(x: Int, y: Int) => Vec2 {
-        return Vec2.{ x: x, y: y }
+    fn make(x: Int, y: Int) Vec2 -[]> {
+        return Vec2{ x: x, y: y }
     }
-    fn sum(self) => Int {
+    fn sum(self) Int -[]> {
         return (self.x + self.y)
     }
-    fn shifted(self, dx: Int) => Vec2 {
-        return Vec2.{ x: (self.x + dx), y: self.y }
+    fn shifted(self, dx: Int) Vec2 -[]> {
+        return Vec2{ x: (self.x + dx), y: self.y }
     }
 }
 fn run() {
@@ -488,7 +488,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) => Int ! ParseError {
+fn parse_age(raw: Int) Int ! ParseError -[]> {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -497,7 +497,7 @@ fn parse_age(raw: Int) => Int ! ParseError {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) => Int ! ParseError {
+fn load(raw: Int) Int ! ParseError -[]> {
     n :: parse_age(raw)?
     return Ok((n + 1))
 }
@@ -522,13 +522,13 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) => Int ! Err {
+fn checked(x: Int) Int ! Err -[]> {
     if x == 0 {
         return Err(\"zero\")
     }
     return Ok((100 /% x))
 }
-fn safe(x: Int) => Int {
+fn safe(x: Int) Int -[]> {
     return checked(x) ?? return -1
 }
 fn run() {
@@ -549,7 +549,7 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) => (Int?) {
+fn first_even(limit: Int) (Int?) -[]> {
     loop i, 1..limit {
         if (i % 2) == 0 {
             return Val(i)
@@ -582,12 +582,12 @@ struct Profile {
 struct Account {
     details: Profile
 }
-fn handle_of(a: (Account?)) => (String?) {
+fn handle_of(a: (Account?)) (String?) -[]> {
     return a?.details?.handle
 }
 fn run() {
-    p :: Profile.{ handle: Val(\"jay\") }
-    acct :: Account.{ details: p }
+    p :: Profile{ handle: Val(\"jay\") }
+    acct :: Account{ details: p }
     print(handle_of(Val(acct)) ?? \"none\")
     print(handle_of(None) ?? \"none\")
 }
@@ -610,7 +610,7 @@ fn list_builtin_methods() {
         return;
     }
     let src = "\
-fn build() => [Int] {
+fn build() [Int] -[]> {
     xs := [3, 1, 2]
     xs.push(5)
     xs.insert(0, 0)
@@ -710,7 +710,7 @@ fn set_algebra_methods() {
         return;
     }
     let src = "\
-fn sorted(xs: [Int]) => [Int] {
+fn sorted(xs: [Int]) [Int] -[]> {
     ys := ~xs
     ys.sort()
     return ys
@@ -774,10 +774,10 @@ fn run() {
 fn map_builtin_methods() {
     let src = r#"
 fn run() {
-    probe := [String:Int].{ "k": 41 }
+    probe := [String:Int]{ "k": 41 }
     print(probe.add("k", 5) ?? 0)
     print(probe.add("new", 9) ?? -99)
-    m := [String:Int].{}
+    m := [String:Int]{}
     print(m.add("banana", 3) ?? 0)
     print(m.add("apple", 5) ?? 0)
     print(m.add("apple", 7) ?? 0)
@@ -812,7 +812,7 @@ fn run() {
     xs := [10, 20, 30]
     print(xs.pop() ?? -1)
     print(xs.replace(0, 99))
-    counts := [String:Int].{ \"words\": 4 }
+    counts := [String:Int]{ \"words\": 4 }
     print(counts.pop(\"words\") ?? -1)
     seen := Set.from([7, 8])
     print(seen.pop(8) ?? -1)
@@ -832,21 +832,21 @@ fn run() {
 #[test]
 fn eager_container_adapters_and_lazy_opt_in() {
     let src = "\
-fn count_and_keep(n: Int, visits: Cell<Int>) => Bool {
-    visits.edit(count => count += 1)
+fn count_and_keep(n: Int, visits: Cell<Int>) Bool -[]> {
+    visits.edit(count -> count += 1)
     return n % 2 == 0
 }
 fn run() {
     nums := [1, 2, 3, 4]
-    mapped := nums.map((n: Int) => n + 1)
+    mapped := nums.map((n: Int) -> n + 1)
     print(mapped)
     print(mapped.len())
     visits := Cell.new(0)
     visits_copy :: ~visits
-    even := nums.map((n: Int) => n + 1).filter((n: Int) => count_and_keep(n, visits_copy))
+    even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy))
     print(even)
     print(visits.get())
-    lazy_values := nums.lazy().filter((n: Int) => n > 2).map((n: Int) => n * 10).to_list()
+    lazy_values := nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
     print(lazy_values)
     parts := \"a,b,c\".split(\",\")
     print(parts.to_list())
@@ -895,19 +895,19 @@ fn list_and_map_remove() {
         return;
     }
     let src = "\
-fn drop_first(xs: [Int]) => Int {
+fn drop_first(xs: [Int]) Int -[]> {
     ys := ~xs
     r := ys.remove(0, .Slot)
     return ys.len()
 }
-fn drop_key(m: [String:Int]) => Int {
+fn drop_key(m: [String:Int]) Int -[]> {
     m2 := ~m
     r := m2.remove(\"a\")
     return m2.len()
 }
 fn run() {
     print(drop_first([10, 20, 30]))
-    counts := [String:Int].{}
+    counts := [String:Int]{}
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))
@@ -1066,7 +1066,7 @@ fn fallible_when_match() {
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) => Int ! ClassifyError {
+fn classify(x: Int) Int ! ClassifyError -[]> {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }

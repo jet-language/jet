@@ -43,8 +43,8 @@ fn inline_range_comptime_and_repl_accept_legal_inputs() {
     // file-wide comptime check above; it is not legal at a statement site.
     let transcript = jet::REPL::run_transcript(
         &[
-            "fn set_brightness(level: Int(0..100)) => Int(0..100) :: level",
-            "fn checked_inline(raw: Int) => Int(0..100) ! String :: Int(0..100).from_int(raw)",
+            "fn set_brightness(level: Int(0..100)) Int(0..100) -> level",
+            "fn checked_inline(raw: Int) Int(0..100) ! String -> Int(0..100).from_int(raw)",
             "print(set_brightness(42))",
             "print(checked_inline(3) ?? Int(0..100).from_int(0))",
         ],
@@ -78,7 +78,7 @@ fn inline_range_example_matches_aot_default_run_and_interpreter() {
 #[test]
 fn inline_range_web_runtime_matches_the_shared_value() {
     let source = r#"#Target(Web)
-fn set_brightness(level: Int(0..100)) => Int(0..100) :: level
+fn set_brightness(level: Int(0..100)) Int(0..100) -> level
 
 fn run() {
     print(set_brightness(42))

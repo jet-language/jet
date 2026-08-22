@@ -147,7 +147,7 @@ fn realized_library_is_consumed_with_use() {
     );
     write(
         &producer.join("jsonutil.jet"),
-        "module jsonutil { }\npub fn parse(raw: String) => Int {\n    return 42;\n}\n",
+        "module jsonutil { }\npub fn parse(raw: String) Int -> 42\n",
     );
 
     let realized = realize_into_hangar(&roots, &producer, "jsonutil");

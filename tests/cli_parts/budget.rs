@@ -166,7 +166,7 @@ fn budget_effect_count_uses_solved_effects_not_import_count() {
     let dir = budget_project("budget_effect_truth", 10);
     fs::write(dir.join("src/run.jet"), r#"use core.files as files
 module perf.package {
-    budgets: [Budget.{ name: "effects", scope: .Package, metric: .EffectCount, comparison: .Absolute, limit: .AtMost(0) }],
+    budgets: [Budget{ name: "effects", scope: .Package, metric: .EffectCount, comparison: .Absolute, limit: .AtMost(0) }],
 }
 fn run() {}
 "#).unwrap();
@@ -182,7 +182,7 @@ fn budget_generated_unsafe_rejects_proxy_before_artifact() {
     let dir = budget_project("budget_unsafe_truth", 10);
     fs::write(dir.join("src/run.jet"), r#"use core.mem as mem
 module perf.package {
-    budgets: [Budget.{ name: "unsafe", scope: .Package, metric: .GeneratedUnsafe, comparison: .Absolute, limit: .AtMost(0) }],
+    budgets: [Budget{ name: "unsafe", scope: .Package, metric: .GeneratedUnsafe, comparison: .Absolute, limit: .AtMost(0) }],
 }
 fn run() {}
 "#).unwrap();
@@ -313,7 +313,7 @@ fn budget_imported_declaration_reports_owning_module_location() {
     let dir = budget_project("budget_imported_source", 10);
     fs::write(dir.join("src/run.jet"), "module perf_defs;\nfn run() {}\n").unwrap();
     fs::write(dir.join("src/perf_defs.jet"), r#"module perf.package {
-    budgets: [Budget.{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
+    budgets: [Budget{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
 }
 pub fn imported() {}
 "#).unwrap();

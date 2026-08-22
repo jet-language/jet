@@ -64,7 +64,7 @@ fn bump(c: Counter) {
     c.n = c.n + 1
 }
 fn run() {
-    c :: Counter.{ n: 0 }
+    c :: Counter{ n: 0 }
     bump(c)
 }
 "#;
@@ -83,9 +83,9 @@ fn run() {
 #[test]
 fn generic_clone_bound_is_usage_sensitive() {
     let src = r#"
-fn inspect<T>(value: T) => Int { return 1 }
-fn duplicate<T>(value: T) => T { return ~value }
-fn increment(value: Int) => Int { return value + 1 }
+fn inspect<T>(value: T) Int -> 1
+fn duplicate<T>(value: T) T -[..E]> { return ~value }
+fn increment(value: Int) Int -[]> { return value + 1 }
 
 fn run() {
     callback :: increment
@@ -113,7 +113,7 @@ struct Leaf { text: String }
 struct Branch { leaf: Leaf }
 fn show(branch: Branch) { print(branch.leaf.text) }
 fn run() {
-    branch :: Branch.{leaf: Leaf.{text: "read"}}
+    branch :: Branch{leaf: Leaf{text: "read"}}
     show(branch)
 }
 "#;
@@ -188,7 +188,7 @@ impl Jobs {
         self.items.push(value)
     }
 
-    fn count(self) => Int {
+    fn count(self) Int -[]> {
         return self.items.len()
     }
 }
@@ -288,7 +288,7 @@ fn run() {
 #[test]
 fn returned_public_guard_is_read_only_without_write_helper_access() {
     let src = r#"
-fn acquire(handle: Shared<Int>) => SharedGuard<Int> {
+fn acquire(handle: Shared<Int>) SharedGuard<Int> -[]> {
     return handle.guard_edit()
 }
 
@@ -315,13 +315,13 @@ struct Pair { left: Int, right: Int }
 
 fn run() {
     first := shared Pair{ left: 1, right: 2 }
-    mapped :: first.guard_edit().map(value => value.left)
+    mapped :: first.guard_edit().map(value -> value.left)
     mapped.value += 1
 
     second := shared Pair{ left: 3, right: 4 }
     (left, right) :: second.guard_edit().split(
-        value => value.left,
-        value => value.right
+        value -> value.left,
+        value -> value.right
     )
     left.value += 1
     right.value += 1
@@ -338,7 +338,7 @@ struct Pair { left: Int, right: Int }
 fn run() {
     cell := shared Pair{ left: 1, right: 2 }
     guard :: cell.guard_edit()
-    _ :: guard.split(value => value.left, value => value.left)
+    _ :: guard.split(value -> value.left, value -> value.left)
 }
 "#;
     let diagnostics = jet::compile(src).expect_err("split guard projections must be disjoint");
@@ -373,7 +373,7 @@ fn run() {
     cell := shared 1
     changed := Condition.new()
     guard :: cell.guard_read()
-    _ :: guard.wait(changed, value => value == 1)
+    _ :: guard.wait(changed, value -> value == 1)
 }
 "#;
     let diagnostics =
@@ -388,7 +388,7 @@ fn run() {
     cell := shared 1
     changed := Condition.new()
     guard :: cell.guard_edit()
-    _ :: guard.wait(changed, value => value)
+    _ :: guard.wait(changed, value -> value)
 }
 "#;
     let diagnostics =
@@ -433,14 +433,14 @@ fn run() {
 fn local_cell_surface_uses_read_receivers_and_host_borrows() {
     let source = r#"
 struct Pair { left: Int, right: Int }
-fn update(cell: Cell<Pair>) => Int {
-    cell.set(Pair.{ left: 2, right: 3 })
-    old :: cell.replace(Pair.{ left: 4, right: 5 })
-    cell.edit(pair => pair.left += old.left)
-    return cell.read(pair => pair.left + pair.right)
+fn update(cell: Cell<Pair>) Int -[]> {
+    cell.set(Pair{ left: 2, right: 3 })
+    old :: cell.replace(Pair{ left: 4, right: 5 })
+    cell.edit(pair -> pair.left += old.left)
+    return cell.read(pair -> pair.left + pair.right)
 }
 fn run() {
-    cell :: Cell.new(Pair.{ left: 0, right: 1 })
+    cell :: Cell.new(Pair{ left: 0, right: 1 })
     print(update(cell))
 }
 "#;
@@ -608,13 +608,13 @@ fn local_cell_guard_mapping_and_splitting_keep_projected_types() {
     let source = r#"
 struct Pair { left: Int, right: Int }
 fn inspect(cell: Cell<Pair>) {
-    mapped :: cell.guard_read().map(pair => pair.left)
+    mapped :: cell.guard_read().map(pair -> pair.left)
     print(mapped.get())
 }
 fn edit_pair(cell: Cell<Pair>) {
     (left, right) :: cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
     left.set(7)
     right.set(8)
@@ -635,7 +635,7 @@ fn local_cell_guard_map_rejects_detached_values() {
     let source = r#"
 struct Pair { left: Int, right: Int }
 fn inspect(cell: Cell<Pair>) {
-    _ :: cell.guard_read().map(pair => pair.left + pair.right)
+    _ :: cell.guard_read().map(pair -> pair.left + pair.right)
 }
 fn run() {}
 "#;
@@ -653,7 +653,7 @@ fn run() {}
 #[test]
 fn local_cell_get_rejects_values_without_copy_semantics() {
     let source = r#"
-fn inspect(cell: Cell<fn() => Int>) {
+fn inspect(cell: Cell<fn() Int>) {
     _ :: cell.get()
 }
 fn run() {}
@@ -675,8 +675,8 @@ fn local_cell_edit_guard_split_rejects_overlapping_paths() {
 struct Pair { left: Int, right: Int }
 fn edit_pair(cell: Cell<Pair>) {
     _ :: cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.left
+        pair -> pair.left,
+        pair -> pair.left
     )
 }
 fn run() {}
@@ -816,7 +816,7 @@ fn run() {
 #[test]
 fn nested_call_argument_cannot_read_an_active_write_place() {
     let src = r#"
-fn see(x: Int) => Int { return x }
+fn see(x: Int) Int -[]> { return x }
 fn both(a: &Int, b: Int) { a += b }
 
 fn run() {
@@ -851,11 +851,11 @@ fn run() {
 #[test]
 fn lambda_capture_cannot_read_an_active_write_place() {
     let src = r#"
-fn both(a: &String, callback: fn() => String) { print(a); print(callback()) }
+fn both(a: &String, callback: fn() String) { print(a); print(callback()) }
 
 fn run() {
     x := "jet"
-    both(&x, () => x)
+    both(&x, () -> x)
 }
 "#;
     let diags = jet::compile(src).expect_err("lambda capture must fail in sema before rustc");
@@ -875,7 +875,7 @@ fn both(callback: fn(), values: [Int]) {
 
 fn run() {
     values := [1, 2]
-    both(() => values.push(3), values)
+    both(() -> values.push(3), values)
 }
 "#;
     let diags =
@@ -889,12 +889,12 @@ fn run() {
 #[test]
 fn nested_lambda_forms_use_the_enclosing_call_access_frame() {
     let composite = r#"
-struct Work { callback: fn() => Int }
+struct Work { callback: fn() Int }
 fn both(values: &[Int], work: Work) { values.push(work.callback()) }
 
 fn run() {
     values := [1, 2]
-    both(&values, Work.{ callback: () => values.len() })
+    both(&values, Work{ callback: () -> values.len() })
 }
 "#;
     let diags =
@@ -906,7 +906,7 @@ fn both(values: &[Int], count: Int) { values.push(count) }
 
 fn run() {
     values := [1, 2]
-    both(&values, (() => values.len()).call())
+    both(&values, (() -> values.len()).call())
 }
 "#;
     let diags = jet::compile(immediate_callee)
@@ -917,10 +917,10 @@ fn run() {
 #[test]
 fn move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places() {
     let copy_move = r#"
-fn both(callback: fn() => Int, value: &Int) { value += callback() }
+fn both(callback: fn() Int, value: &Int) { value += callback() }
 fn run() {
     value := 1
-    both(() => value, &value)
+    both(() -> value, &value)
 }
 "#;
     jet::compile(copy_move).expect("a read-only move closure copies a scalar before the write");
@@ -929,8 +929,8 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(() => pair.right.push(3), pair.left)
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> pair.right.push(3), pair.left)
 }
 "#;
     jet::compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately");
@@ -939,8 +939,8 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(() => pair.right.push(3), pair.right)
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> pair.right.push(3), pair.right)
 }
 "#;
     let diags =
@@ -954,8 +954,8 @@ fn move_lambda_capture_identity_matches_rust_2021_places() {
 struct Pair { left: String, right: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    pair := Pair.{ left: "jet", right: [1, 2] }
-    both(() => { print(pair.left) }, pair.right)
+    pair := Pair{ left: "jet", right: [1, 2] }
+    both(() -> { print(pair.left) }, pair.right)
 }
 "#;
     jet::compile(disjoint_owned_field)
@@ -965,8 +965,8 @@ fn run() {
 struct Pair { count: Int, values: [Int] }
 fn both(callback: fn(), pair: Pair) { callback(); print(pair.count) }
 fn run() {
-    pair := Pair.{ count: 2, values: [1, 2] }
-    both(() => { print(pair.count) }, pair)
+    pair := Pair{ count: 2, values: [1, 2] }
+    both(() -> { print(pair.count) }, pair)
 }
 "#;
     jet::compile(copy_field).expect("capturing a Copy field must not move its owner");
@@ -976,7 +976,7 @@ fn call(callback: fn()) { callback() }
 fn run() {
     values := [1, 2]
     first :: values[0..1]
-    call(() => { print(first.len()) })
+    call(() -> { print(first.len()) })
     print(values.len())
 }
 "#;
@@ -986,8 +986,8 @@ fn run() {
 struct Pair { left: String, right: [Int] }
 fn both(callback: fn(), text: String) { callback(); print(text) }
 fn run() {
-    pair := Pair.{ left: "jet", right: [1, 2] }
-    both(() => { print(pair.left) }, pair.left)
+    pair := Pair{ left: "jet", right: [1, 2] }
+    both(() -> { print(pair.left) }, pair.left)
 }
 "#;
     let diags =
@@ -999,7 +999,7 @@ fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
     values := [1, 2]
     first :: values[0..1]
-    both(&values, () => { print(first.len()) })
+    both(&values, () -> { print(first.len()) })
 }
 "#;
     let diags = jet::compile(conflicting_view_alias)
@@ -1007,11 +1007,11 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let reverse_view_alias = r#"
-fn both(callback: fn() => Int, values: &[Int]) { values.push(callback()) }
+fn both(callback: fn() Int, values: &[Int]) { values.push(callback()) }
 fn run() {
     values := [1, 2]
     first :: values[0..1]
-    both(() => first.len(), &values)
+    both(() -> first.len(), &values)
 }
 "#;
     let diags = jet::compile(reverse_view_alias)
@@ -1026,7 +1026,7 @@ fn move_lambda_index_and_slice_captures_stop_at_the_rust_prefix() {
 fn call(callback: fn()) { callback() }
 fn run() {
     values := [1, 2]
-    call(() => { print(values[0]) })
+    call(() -> { print(values[0]) })
     print(values.len())
 }
 "#,
@@ -1034,7 +1034,7 @@ fn run() {
 fn call(callback: fn()) { callback() }
 fn run() {
     values := [1, 2]
-    call(() => { print(values[0..1].len()) })
+    call(() -> { print(values[0..1].len()) })
     print(values.len())
 }
 "#,
@@ -1048,8 +1048,8 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn call(callback: fn()) { callback() }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    call(() => { print(pair.left[0]) })
+    pair := Pair{ left: [1], right: [2] }
+    call(() -> { print(pair.left[0]) })
     print(pair.right.len())
 }
 "#;
@@ -1074,8 +1074,8 @@ fn run() {
 struct Pair { left: String, right: [Int] }
 fn call(callback: fn()) { callback() }
 fn run() {
-    pair := Pair.{ left: "jet", right: [1] }
-    call(() => { print(pair.left) })
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair.left) })
     pair.left = "again"
     print(pair.left)
     print(pair.right.len())
@@ -1087,8 +1087,8 @@ fn run() {
 struct Pair { left: String, right: [Int] }
 fn call(callback: fn()) { callback() }
 fn run() {
-    pair := Pair.{ left: "jet", right: [1] }
-    call(() => { print(pair.left) })
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair.left) })
     pair.right = [2]
     print(pair.left)
 }
@@ -1101,8 +1101,8 @@ fn run() {
 struct Pair { left: String, right: [Int] }
 fn call(callback: fn()) { callback() }
 fn run() {
-    pair := Pair.{ left: "jet", right: [1] }
-    call(() => { print(pair) })
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair) })
     pair.left = "again"
 }
 "#;
@@ -1152,11 +1152,11 @@ fn run() {
 #[test]
 fn deferred_lambda_capture_reports_once() {
     let src = r#"
-fn see(value: String) => String { return value }
-fn both(value: &String, callback: fn() => String) { print(value); print(callback()) }
+fn see(value: String) String -[]> { return value }
+fn both(value: &String, callback: fn() String) { print(value); print(callback()) }
 fn run() {
     value := "jet"
-    both(&value, () => see(value))
+    both(&value, () -> see(value))
 }
 "#;
     let diags = jet::compile(src).expect_err("the deferred capture conflicts with the active write");
@@ -1181,10 +1181,10 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let shadow = r#"
-fn both(value: &Int, callback: fn(Int) => Int) { value += callback(2) }
+fn both(value: &Int, callback: fn(Int) Int) { value += callback(2) }
 fn run() {
     value := 1
-    both(&value, (value: Int) => value)
+    both(&value, (value: Int) -> value)
 }
 "#;
     jet::compile(shadow).expect("a lambda-local shadow must not capture the outer write-borrowed place");
@@ -1196,8 +1196,8 @@ fn lambda_capture_access_is_projection_specific_and_transitive() {
 struct Pair { left: [Int], right: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.left)
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> { print(pair.left.len()); pair.right.push(3) }, pair.left)
 }
 "#;
     jet::compile(mixed).expect("reading left and mutating right keeps projection modes separate");
@@ -1206,21 +1206,21 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.right)
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> { print(pair.left.len()); pair.right.push(3) }, pair.right)
 }
 "#;
     let diags = jet::compile(conflict).expect_err("the mutated projection remains write-borrowed");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let transitive = r#"
-fn both(value: &String, callback: fn() => fn() => String) {
+fn both(value: &String, callback: fn() fn() String) {
     print(value)
     print(callback().call())
 }
 fn run() {
     value := "jet"
-    both(&value, () => () => value)
+    both(&value, () -> () -> value)
 }
 "#;
     let diags =
@@ -1231,15 +1231,15 @@ fn run() {
 #[test]
 fn composite_lambda_capture_walks_if_prefix_and_fallback_values() {
     let if_prefix = r#"
-struct Work { callback: fn() => Int }
+struct Work { callback: fn() Int }
 fn both(values: &[Int], work: Work) { values.push(work.callback()) }
 fn run() {
     values := [1, 2]
     both(&values, if true -> {
-        work :: Work.{ callback: () => values.len() }
+        work :: Work{ callback: () -> values.len() }
         work
     } else -> {
-        Work.{ callback: () => 0 }
+        Work{ callback: () -> 0 }
     })
 }
 "#;
@@ -1248,10 +1248,10 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let fallback = r#"
-fn both(values: &[Int], callback: fn() => Int) { values.push(callback()) }
+fn both(values: &[Int], callback: fn() Int) { values.push(callback()) }
 fn run() {
     values := [1, 2]
-    both(&values, Val(() => values.len()) ?? () => 0)
+    both(&values, Val(() -> values.len()) ?? () -> 0)
 }
 "#;
     let diags = jet::compile(fallback)
@@ -1283,7 +1283,7 @@ fn run() {
         r#"
 fn run() {
     values := [2, 1]
-    values.sort_by((value: Int) => value + values.len())
+    values.sort_by((value: Int) -> value + values.len())
 }
 "#,
         r#"
@@ -1312,8 +1312,8 @@ fn semantic_capture_events_drive_retention_and_deferred_clone_modes() {
 struct Bucket { values: [Int] }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    bucket := Bucket.{ values: [1, 2] }
-    both(() => { bucket.values = [3] }, bucket.values)
+    bucket := Bucket{ values: [1, 2] }
+    both(() -> { bucket.values = [3] }, bucket.values)
 }
 "#;
     let diags =
@@ -1327,8 +1327,8 @@ impl Bucket {
 }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
-    bucket := Bucket.{ values: [1, 2] }
-    both(() => bucket.clear(), bucket.values)
+    bucket := Bucket{ values: [1, 2] }
+    both(() -> bucket.clear(), bucket.values)
 }
 "#;
     let diags = jet::compile(user_method)
@@ -1339,7 +1339,7 @@ fn run() {
 fn both(callback: fn(), values: &[Int]) { callback(); values.push(4) }
 fn run() {
     values := [1, 2]
-    both(() => {
+    both(() -> {
         #Reactive { values.push(3) }
     }, &values)
 }
@@ -1357,11 +1357,11 @@ fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
     values := [1, 2]
     changed := [0]
-    incident := Incident.{ count: 2, label: "jet" }
-    both(&values, () => {
+    incident := Incident{ count: 2, label: "jet" }
+    both(&values, () -> {
         changed.push(1)
         if incident == {
-            .{ count: values.len(), label, .. } -> print(label)
+            { count: values.len(), label, .. } -> print(label)
             else -> {}
         }
     })
@@ -1375,9 +1375,9 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
+    pair := Pair{ left: [1], right: [2] }
     changed := [0]
-    both(&pair.right, () => {
+    both(&pair.right, () -> {
         changed.push(1)
         #Reactive { pair.left.push(3) }
     })
@@ -1394,8 +1394,8 @@ fn reactive_root_capture_replaces_existing_owner_projections() {
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(&pair.right, () => {
+    pair := Pair{ left: [1], right: [2] }
+    both(&pair.right, () -> {
         print(pair.left.len())
         #Reactive { pair.right.push(4) }
     })
@@ -1409,8 +1409,8 @@ fn run() {
 struct Pair { left: [Int], right: [Int] }
 fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
-    both(&pair.right, () => {
+    pair := Pair{ left: [1], right: [2] }
+    both(&pair.right, () -> {
         pair.left.push(4)
         #Reactive { print(pair.right.len()) }
     })
@@ -1426,7 +1426,7 @@ fn reactive_codegen_clones_the_whole_root_before_running() {
     let source = r#"
 struct Pair { left: [Int], right: [Int] }
 fn run() {
-    pair := Pair.{ left: [1], right: [2] }
+    pair := Pair{ left: [1], right: [2] }
     #Reactive {
         pair.left.push(3)
         print(pair.left.len())
@@ -1480,14 +1480,14 @@ fn move_lambda_construction_consumes_owned_nonscalar_captures() {
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
     values := [1, 2]
-    both(() => values.len(), values)
+    both(() -> values.len(), values)
 }
 "#, "E0121"),
         (r#"
 fn both(values: [Int], callback: fn()) { print(values.len()); callback() }
 fn run() {
     values := [1, 2]
-    both(values, () => values.len())
+    both(values, () -> values.len())
 }
 "#, "E0204"),
     ] {
@@ -1503,7 +1503,7 @@ fn run() {
 fn both(callback: fn(), value: Int) { callback(); print(value) }
 fn run() {
     value := 2
-    both(() => { print(value) }, value)
+    both(() -> { print(value) }, value)
 }
 "#;
     jet::compile(scalar_copy).expect("Copy scalar captures remain usable");
@@ -1512,11 +1512,11 @@ fn run() {
 #[test]
 fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
     let fallback = r#"
-fn missing() => Int? { return null }
+fn missing() Int? -[]> { return null }
 fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
     values := [1, 2]
-    both(&values, () => {
+    both(&values, () -> {
         found :: missing() ?? panic("length {values.len()}")
         print(found)
     })
@@ -1545,7 +1545,7 @@ fn wrapped_and_branch_returned_views_stay_live_through_outer_calls() {
     ] {
         let src = format!(
             r#"
-fn first(values: [Int]) => View<Int> {{
+fn first(values: [Int]) View<Int> -[]> {{
     return values[0..1]
 }}
 fn both(view: View<Int>, values: &[Int]) {{
@@ -1567,9 +1567,9 @@ fn run() {{
 fn return_fallback_view_does_not_reach_the_enclosing_call() {
     let source = r#"
 struct View<T> { value: T }
-fn first(values: [Int]) => View<Int> { return values[0..1] }
+fn first(values: [Int]) View<Int> -[]> { return values[0..1] }
 fn both(view: View<Int>, values: &[Int]) { values.push(view[0]) }
-fn choose(other: [Int], values: &[Int]) => View<Int> {
+fn choose(other: [Int], values: &[Int]) View<Int> -[..E]> {
     both(Val(first(other)) ?? return first(values), &values)
     return first(other)
 }
@@ -1589,11 +1589,11 @@ fn generic_constructor_nested_argument_sees_active_write_place() {
     let src = r#"
 struct Pair<T> { value: T }
 impl Pair {
-    fn new(first: &T, second: T) => Pair<T> {
-        return Pair<T>.{ value: second }
+    fn new(first: &T, second: T) Pair<T> -[]> {
+        return Pair<T>{ value: second }
     }
 }
-fn see(value: Int) => Int { return value }
+fn see(value: Int) Int -[]> { return value }
 
 fn run() {
     x := 1
@@ -2223,7 +2223,7 @@ impl Editor {
     fn clash(self, other: &Editor) { print(other.id) }
 }
 fn run() {
-    editor := Editor.{ id: 1 }
+    editor := Editor{ id: 1 }
     editor.clash(&editor)
 }
 "#,
@@ -2237,7 +2237,7 @@ fn conflict(editor: &Edit) {
 fn run() {}
 "#,
         r#"
-fn length(value: String) => Int { return value.len() }
+fn length(value: String) Int -[]> { return value.len() }
 fn both(value: &String, count: Int) { print(value); print(count) }
 fn run() {
     callback :: length
@@ -2272,7 +2272,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn invoke(editor: Edit) {
-    call(() => { editor.change() })
+    call(() -> { editor.change() })
 }
 fn run() {}
 "#;
@@ -2286,7 +2286,7 @@ trait Edit {
 }
 fn call(callback: fn()) { callback() }
 fn invoke(editor: &Edit) {
-    call(() => { editor.change() })
+    call(() -> { editor.change() })
 }
 fn run() {}
 "#;
@@ -2305,7 +2305,7 @@ trait Edit {
 fn call(callback: fn()) { callback() }
 fn inspect_all(items: ...[Inspect, Edit]) {
     loop item, items {
-        call(() => { item.touch() })
+        call(() -> { item.touch() })
     }
 }
 fn run() {}
@@ -2323,7 +2323,7 @@ trait Edit {
 fn call(callback: fn()) { callback() }
 fn edit_all(items: ...[Edit, Inspect]) {
     loop item, items {
-        call(() => { item.touch() })
+        call(() -> { item.touch() })
     }
 }
 fn run() {}
@@ -2450,7 +2450,7 @@ fn consume(s: ^String) {
     print(s)
 }
 
-fn maybe(b: Bool) => Bool { return b }
+fn maybe(b: Bool) Bool -[]> { return b }
 
 fn run() {
 msg :: "hello"
@@ -2482,7 +2482,7 @@ fn consume(s: ^String) {
     print(s)
 }
 
-fn maybe(b: Bool) => Bool { return b }
+fn maybe(b: Bool) Bool -[]> { return b }
 
 fn run() {
 msg :: "hello"
@@ -2632,7 +2632,7 @@ fn run() {
     whole_edit :: &whole
     whole_edit = 2
 
-    cell := Slot.{ value: 3 }
+    cell := Slot{ value: 3 }
     field_edit :: &cell.value
     field_edit = 4
 
@@ -2699,7 +2699,7 @@ fn run() {
 #[test]
 fn write_window_rejects_call_result_place() {
     let src = r#"
-fn make() => [Int] { return [1, 2] }
+fn make() [Int] -[]> { return [1, 2] }
 fn run() { edit :: &make()[0]; print(edit) }
 "#;
     let diags = jet::compile(src).expect_err("call result has no stable owner place");
@@ -2775,15 +2775,15 @@ struct Particle { position: Int, velocity: Int }
 struct Tile { force: Int }
 
 fn run() {
-    particles := [Particle].{
-        Particle.{ position: 10, velocity: 2 },
-        Particle.{ position: 20, velocity: 3 },
-        Particle.{ position: 30, velocity: 4 }
+    particles := [Particle]{
+        Particle{ position: 10, velocity: 2 },
+        Particle{ position: 20, velocity: 3 },
+        Particle{ position: 30, velocity: 4 }
     }
-    grid :: [Tile].{
-        Tile.{ force: 5 },
-        Tile.{ force: 7 },
-        Tile.{ force: 11 }
+    grid :: [Tile]{
+        Tile{ force: 5 },
+        Tile{ force: 7 },
+        Tile{ force: 11 }
     }
 
     middle_before :: ~particles[1]
@@ -2819,9 +2819,9 @@ fn update_pair(particles: &[Particle], left_index: Int, right_index: Int) {
 }
 
 fn run() {
-    particles := [Particle].{
-        Particle.{ position: 10 },
-        Particle.{ position: 20 }
+    particles := [Particle]{
+        Particle{ position: 10 },
+        Particle{ position: 20 }
     }
     update_pair(&particles, 0, 1)
 }
@@ -2847,9 +2847,9 @@ fn indexed_simulation_rejects_hostile_overlap() {
 struct Particle { position: Int }
 
 fn run() {
-    particles := [Particle].{
-        Particle.{ position: 10 },
-        Particle.{ position: 20 }
+    particles := [Particle]{
+        Particle{ position: 10 },
+        Particle{ position: 20 }
     }
     first :: &particles[0]
     duplicate :: &particles[0]
@@ -2907,17 +2907,17 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) => View<Book> :: lib.books[i..i]
+fn book_at(lib: Library, i: Int) View<Book> -> lib.books[i..i]
 
-fn edit_at(lib: &Library, i: Int) => ViewMut<Book> {
+fn edit_at(lib: &Library, i: Int) ViewMut<Book> -[]> {
     return &lib.books[i..i]
 }
 
 fn run() {
-    lib := Library.{
+    lib := Library{
         books: [
-            Book.{ title: "Dune", pages: 412 },
-            Book.{ title: "Neuromancer", pages: 271 }
+            Book{ title: "Dune", pages: 412 },
+            Book{ title: "Neuromancer", pages: 271 }
         ]
     }
     first :: book_at(lib, 0)
@@ -2971,17 +2971,17 @@ struct Library {
     books: [Book]
 }
 
-fn book_at(lib: Library, i: Int) => View<Book> :: lib.books[i..i]
+fn book_at(lib: Library, i: Int) View<Book> -> lib.books[i..i]
 
 fn run() {
-    lib := Library.{
+    lib := Library{
         books: [
-            Book.{ title: "Dune", pages: 412 },
-            Book.{ title: "Neuromancer", pages: 271 }
+            Book{ title: "Dune", pages: 412 },
+            Book{ title: "Neuromancer", pages: 271 }
         ]
     }
     first :: book_at(lib, 0)
-    lib.books.push(Book.{ title: "Snow Crash", pages: 480 })
+    lib.books.push(Book{ title: "Snow Crash", pages: 480 })
     print(first[0].title)
 }
 "#;
@@ -3010,14 +3010,14 @@ struct TitleView {
     value: View<str>
 }
 
-fn first_title(lib: Library) => TitleView {
+fn first_title(lib: Library) TitleView -[]> {
     value :: lib.books[0].title
-    return TitleView.{ value: value }
+    return TitleView{ value: value }
 }
 
 fn run() {
-    lib :: Library.{
-        books: [Book.{ title: "Dune", pages: 412 }]
+    lib :: Library{
+        books: [Book{ title: "Dune", pages: 412 }]
     }
     print(first_title(lib).value)
 }
@@ -3042,8 +3042,8 @@ fn run() {
 #[test]
 fn local_owned_view_return_reports_e2305_once() {
     let src = r#"
-fn make() => View<Int> {
-    incidents := [Int].{1, 2, 3, 4, 5}
+fn make() View<Int> -[]> {
+    incidents := [Int]{1, 2, 3, 4, 5}
     return incidents[0..2]
 }
 
@@ -3071,7 +3071,7 @@ fn run() {
 #[test]
 fn string_view_as_owned_return_materializes_copy_once() {
     let src = r#"
-fn make() => String {
+fn make() String -[]> {
     email := "nate@jet.dev"
     d :: email.after("@")
     return d
@@ -3144,7 +3144,7 @@ fn disjoint_struct_fields_use_native_structural_borrows() {
     let src = r#"
 struct Pair { left: Int, right: Int }
 fn run() {
-    pair := Pair.{ left: 1, right: 2 }
+    pair := Pair{ left: 1, right: 2 }
     left :: &pair.left
     right :: &pair.right
     left = 3
@@ -3190,7 +3190,7 @@ fn run() {
 #[test]
 fn generic_place_range_is_a_read_window() {
     let src = r#"
-fn inspect<T>(xs: [T]) => Int {
+fn inspect<T>(xs: [T]) Int -[]> {
     window :: xs[0..0]
     return window.len()
 }
@@ -3259,7 +3259,7 @@ fn run() {
 #[test]
 fn write_window_return_uses_mutable_parameter_provenance() {
     let src = r#"
-fn edit_first(xs: &[Int]) => ViewMut<Int> {
+fn edit_first(xs: &[Int]) ViewMut<Int> -[]> {
     return &xs[0..1]
 }
 fn run() { print(0) }
@@ -3281,7 +3281,7 @@ struct Holder { window: ViewMut<Int> }
 fn run() {
     xs := [1, 2, 3]
     edit :: &xs[0..1]
-    holder :: Holder.{ window: edit }
+    holder :: Holder{ window: edit }
     print(holder.window.len())
 }
 "#;
@@ -3399,7 +3399,7 @@ struct Bucket {
 }
 
 fn run() {
-    bucket := Bucket.{ values: [1, 2, 3] }
+    bucket := Bucket{ values: [1, 2, 3] }
     window :: bucket.values[0..1]
     bucket.values.push(4)
     print(window.len())
@@ -3417,7 +3417,7 @@ struct Bucket {
 }
 
 fn run() {
-    bucket := Bucket.{ values: [1, 2, 3] }
+    bucket := Bucket{ values: [1, 2, 3] }
     window :: bucket.values[0..1]
     bucket.values = [4, 5]
     print(window.len())
@@ -3457,7 +3457,7 @@ impl Editor {
 }
 
 fn run() {
-    editor :: Editor.{ id: 0 }
+    editor :: Editor{ id: 0 }
     values := [1, 2, 3]
     window :: values[0..2]
     editor.touch(&values)
@@ -3508,7 +3508,7 @@ impl Editor {
 }
 
 fn run() {
-    editor :: Editor.{ id: 0 }
+    editor :: Editor{ id: 0 }
     viewed := [1, 2, 3]
     changed := [4, 5, 6]
     window :: viewed[0..2]
@@ -3522,7 +3522,7 @@ fn run() {
 #[test]
 fn returned_parameter_view_uses_stable_parameter_provenance() {
     let src = r#"
-fn first(xs: [Int], other: [Int]) => View<Int> {
+fn first(xs: [Int], other: [Int]) View<Int> -[]> {
     return xs[0..1]
 }
 
@@ -3539,11 +3539,11 @@ fn run() {
 #[test]
 fn returned_view_composes_through_wrapper_call() {
     let src = r#"
-fn first(left: [Int], right: [Int]) => View<Int> {
+fn first(left: [Int], right: [Int]) View<Int> -[]> {
     return left[0..1]
 }
 
-fn wrapper(left: [Int], right: [Int]) => View<Int> {
+fn wrapper(left: [Int], right: [Int]) View<Int> -[]> {
     return first(left, right)
 }
 
@@ -3567,13 +3567,13 @@ struct Token {
     rest: View<str>
 }
 
-fn scan(source: String) => Token {
+fn scan(source: String) Token -[]> {
     text :: source.before(":")
     rest :: source.after(":")
-    return Token.{ text: text, rest: rest }
+    return Token{ text: text, rest: rest }
 }
 
-fn parse(source: String) => Token {
+fn parse(source: String) Token -[]> {
     return scan(source)
 }
 
@@ -3609,11 +3609,11 @@ struct Token {
     rest: View<str>
 }
 
-fn parse_owned() => Token {
+fn parse_owned() Token -[]> {
     source := "name:value"
     text :: source.before(":")
     rest :: source.after(":")
-    return Token.{ text: text, rest: rest }
+    return Token{ text: text, rest: rest }
 }
 
 fn run() {
@@ -3639,21 +3639,21 @@ struct Token {
     rest: View<str>
 }
 
-fn scan(source: String) => Token {
+fn scan(source: String) Token -[]> {
     text :: source.before(":")
     rest :: source.after(":")
-    return Token.{ text: text, rest: rest }
+    return Token{ text: text, rest: rest }
 }
 
-fn parse(source: String) => Token {
+fn parse(source: String) Token -[]> {
     return scan(source)
 }
 
-fn parse_text(source: String) => View<str> {
+fn parse_text(source: String) View<str> -[]> {
     return parse(source).text
 }
 
-fn parse_rest(source: String) => View<str> {
+fn parse_rest(source: String) View<str> -[]> {
     return parse(source).rest
 }
 
@@ -3697,7 +3697,7 @@ fn zero_copy_parser_example_covers_production_pipeline() {
 #[test]
 fn returned_string_view_uses_parameter_provenance() {
     let src = r#"
-fn domain(email: String) => View<str> {
+fn domain(email: String) View<str> -[]> {
     result :: email.after("@")
     return result
 }
@@ -3716,7 +3716,7 @@ fn run() { print(domain("user@example.com")) }
 #[test]
 fn returned_string_view_cannot_outlive_local_owner() {
     let src = r#"
-fn bad() => View<str> {
+fn bad() View<str> -[]> {
     email := "user@example.com"
     result :: email.after("@")
     return result
@@ -3732,9 +3732,9 @@ fn returned_aggregate_stabilizes_string_view_field_provenance() {
     let src = r#"
 struct Domain { value: View<str> }
 
-fn domain(email: String) => Domain {
+fn domain(email: String) Domain -[]> {
     result :: email.after("@")
-    return Domain.{ value: result }
+    return Domain{ value: result }
 }
 fn run() { print(domain("user@example.com").value) }
 "#;
@@ -3751,10 +3751,10 @@ struct Token {
     rest: View<str>
 }
 
-fn scan(source: String) => Token {
+fn scan(source: String) Token -[]> {
     text :: source.before(":")
     rest :: source.after(":")
-    return Token.{ text: text, rest: rest }
+    return Token{ text: text, rest: rest }
 }
 
 fn run() {
@@ -3783,10 +3783,10 @@ fn returned_string_view_field_cannot_outlive_local_owner() {
     let src = r#"
 struct Domain { value: View<str> }
 
-fn bad() => Domain {
+fn bad() Domain -[]> {
     email := "user@example.com"
     result :: email.after("@")
-    return Domain.{ value: result }
+    return Domain{ value: result }
 }
 fn run() { print(bad().value) }
 "#;
@@ -3797,7 +3797,7 @@ fn run() { print(bad().value) }
 #[test]
 fn returned_string_view_rejects_temporary_call_owner_before_codegen() {
     let src = r#"
-fn domain(email: String) => View<str> {
+fn domain(email: String) View<str> -[]> {
     result :: email.after("@")
     return result
 }
@@ -3813,11 +3813,11 @@ fn run() {
 #[test]
 fn returned_view_summary_is_independent_of_declaration_order() {
     let src = r#"
-fn wrapper(left: [Int], right: [Int]) => View<Int> {
+fn wrapper(left: [Int], right: [Int]) View<Int> -[]> {
     return first(left, right)
 }
 
-fn first(left: [Int], right: [Int]) => View<Int> {
+fn first(left: [Int], right: [Int]) View<Int> -[]> {
     return left[0..1]
 }
 
@@ -3829,14 +3829,14 @@ fn run() { print(0) }
 #[test]
 fn mutually_recursive_view_summaries_stabilize() {
     let src = r#"
-fn first(values: [Int], recurse: Bool) => View<Int> {
+fn first(values: [Int], recurse: Bool) View<Int> -[]> {
     if recurse {
         return second(values, false)
     }
     return values[0..1]
 }
 
-fn second(values: [Int], recurse: Bool) => View<Int> {
+fn second(values: [Int], recurse: Bool) View<Int> -[]> {
     if recurse {
         return first(values, false)
     }
@@ -3854,17 +3854,17 @@ fn returned_view_composes_through_inherent_method() {
 struct Selector { marker: Int }
 
 impl Selector {
-    fn first(self, left: [Int], right: [Int]) => View<Int> {
+    fn first(self, left: [Int], right: [Int]) View<Int> -[]> {
         return left[0..1]
     }
 }
 
-fn wrapper(selector: Selector, left: [Int], right: [Int]) => View<Int> {
+fn wrapper(selector: Selector, left: [Int], right: [Int]) View<Int> -[]> {
     return selector.first(left, right)
 }
 
 fn run() {
-    selector :: Selector.{ marker: 0 }
+    selector :: Selector{ marker: 0 }
     left := [7, 8]
     right := [9, 10]
     result :: wrapper(selector, left, right)
@@ -3878,17 +3878,17 @@ fn run() {
 fn trait_view_summary_is_independent_of_impl_order() {
     let src = r#"
 trait Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int>
+    fn select(self, left: [Int], right: [Int]) View<Int>
 }
 
 struct First { marker: Int }
 
-fn wrapper(selector: First, left: [Int], right: [Int]) => View<Int> {
+fn wrapper(selector: First, left: [Int], right: [Int]) View<Int> -[]> {
     return selector.select(left, right)
 }
 
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int> {
+    fn select(self, left: [Int], right: [Int]) View<Int> -[]> {
         return left[0..1]
     }
 }
@@ -3902,19 +3902,19 @@ fn run() { print(0) }
 fn trait_view_contract_unions_compatible_implementation_sources() {
     let src = r#"
 trait Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int>
+    fn select(self, left: [Int], right: [Int]) View<Int>
 }
 
 struct First {}
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int> {
+    fn select(self, left: [Int], right: [Int]) View<Int> -[]> {
         return left[0..1]
     }
 }
 
 struct Last {}
 impl Last.Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int> {
+    fn select(self, left: [Int], right: [Int]) View<Int> -[]> {
         return right[0..1]
     }
 }
@@ -3930,10 +3930,10 @@ fn aggregate_trait_view_contract_stabilizes_through_wrapper_in_either_impl_order
 struct Pair { left: View<Int>, right: View<Int> }
 
 trait Select {
-    fn select(self, left: [Int], right: [Int]) => Pair
+    fn select(self, left: [Int], right: [Int]) Pair -[]>
 }
 
-fn wrapper(selector: Select, left: [Int], right: [Int]) => Pair {
+fn wrapper(selector: Select, left: [Int], right: [Int]) Pair -[]> {
     return selector.select(left, right)
 }
 
@@ -3944,20 +3944,20 @@ fn run() { print(0) }
     let first = r#"
 struct First {}
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) => Pair {
+    fn select(self, left: [Int], right: [Int]) Pair -[]> {
         left_view :: left[0..1]
         right_view :: right[0..1]
-        return Pair.{ left: left_view, right: right_view }
+        return Pair{ left: left_view, right: right_view }
     }
 }
 "#;
     let last = r#"
 struct Last {}
 impl Last.Select {
-    fn select(self, left: [Int], right: [Int]) => Pair {
+    fn select(self, left: [Int], right: [Int]) Pair -[]> {
         left_view :: left[0..1]
         right_view :: right[0..1]
-        return Pair.{ left: left_view, right: right_view }
+        return Pair{ left: left_view, right: right_view }
     }
 }
 "#;
@@ -3973,7 +3973,7 @@ fn aggregate_trait_view_contract_unions_sources_in_either_impl_order() {
 struct Pair { left: View<Int>, right: View<Int> }
 
 trait Select {
-    fn select(self, left: [Int], right: [Int]) => Pair
+    fn select(self, left: [Int], right: [Int]) Pair
 }
 
 $IMPLS
@@ -3983,20 +3983,20 @@ fn run() { print(0) }
     let first = r#"
 struct First {}
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) => Pair {
+    fn select(self, left: [Int], right: [Int]) Pair -[]> {
         left_view :: left[0..1]
         right_view :: right[0..1]
-        return Pair.{ left: left_view, right: right_view }
+        return Pair{ left: left_view, right: right_view }
     }
 }
 "#;
     let last = r#"
 struct Last {}
 impl Last.Select {
-    fn select(self, left: [Int], right: [Int]) => Pair {
+    fn select(self, left: [Int], right: [Int]) Pair -[]> {
         left_view :: left[0..1]
         right_view :: left[0..1]
-        return Pair.{ left: left_view, right: right_view }
+        return Pair{ left: left_view, right: right_view }
     }
 }
 "#;
@@ -4010,7 +4010,7 @@ impl Last.Select {
 #[test]
 fn returned_view_provenance_transfers_on_binding_move() {
     let src = r#"
-fn first(values: [Int]) => View<Int> {
+fn first(values: [Int]) View<Int> -[]> {
     initial :: values[0..1]
     moved :: initial
     return moved
@@ -4030,9 +4030,9 @@ fn returned_aggregate_stabilizes_view_field_provenance() {
     let src = r#"
 struct Window { values: View<Int> }
 
-fn window(values: [Int]) => Window {
+fn window(values: [Int]) Window -[]> {
     selected :: values[0..1]
-    return Window.{ values: selected }
+    return Window{ values: selected }
 }
 
 fn run() {
@@ -4057,9 +4057,9 @@ fn nested_returned_aggregate_stabilizes_each_view_output_slot() {
 struct Inner { values: View<Int> }
 struct Outer { inner: Inner }
 
-fn outer(values: [Int]) => Outer {
+fn outer(values: [Int]) Outer -[]> {
     selected :: values[0..1]
-    return Outer.{ inner: Inner.{ values: selected } }
+    return Outer{ inner: Inner{ values: selected } }
 }
 
 fn run() {
@@ -4096,19 +4096,19 @@ struct Window { values: View<Int> }
 struct Holder { maybe: Window? }
 struct GenericHolder<T> { value: T, maybe: Window? }
 
-fn maybe(values: [Int]) => (Window?) {
+fn maybe(values: [Int]) (Window?) -[]> {
     selected :: values[0..1]
-    return Val(Window.{ values: selected })
+    return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) => Window ! String {
+fn result(values: [Int]) Window ! String -[]> {
     selected :: values[0..1]
-    return Ok(Window.{ values: selected })
+    return Ok(Window{ values: selected })
 }
 
-fn tuple(values: [Int]) => (window: Window, count: Int) {
+fn tuple(values: [Int]) (window: Window, count: Int) -[]> {
     selected :: values[0..1]
-    return (window: Window.{ values: selected }, count: 1)
+    return (window: Window{ values: selected }, count: 1)
 }
 
 fn run() { print(0) }
@@ -4150,26 +4150,26 @@ enum Selection {
 struct PairViews { left: View<Int>, right: View<Int> }
 struct Edit { values: ViewMut<Int> }
 
-fn select(left: [Int], right: [Int], pair: Bool) => Selection {
+fn select(left: [Int], right: [Int], pair: Bool) Selection -[]> {
     if pair {
         left_view :: left[0..1]
         right_view :: right[0..1]
-        return Selection.Pair(PairViews.{ left: left_view, right: right_view })
+        return Selection.Pair(PairViews{ left: left_view, right: right_view })
     }
     selected :: right[0..1]
     return Selection.One(selected)
 }
 
-fn first(selection: Selection) => View<Int> {
+fn first(selection: Selection) View<Int> -[]> {
     if selection == {
         .One(values) -> { return values }
         .Pair(values) -> { return values.left }
     }
 }
 
-fn edit(values: &[Int]) => Edit {
+fn edit(values: &[Int]) Edit -[]> {
     selected :: &values[0..1]
-    return Edit.{ values: selected }
+    return Edit{ values: selected }
 }
 
 fn run() {
@@ -4236,9 +4236,9 @@ fn mutable_view_aggregates_are_not_cloneable() {
     let src = r#"
 struct Edit { values: ViewMut<Int> }
 
-fn edit(values: &[Int]) => Edit {
+fn edit(values: &[Int]) Edit -[]> {
     selected :: &values[0..1]
-    return Edit.{ values: selected }
+    return Edit{ values: selected }
 }
 
 fn run() {
@@ -4255,7 +4255,7 @@ fn run() {
 #[test]
 fn disjoint_mutable_views_can_travel_in_a_list_and_write_through() {
     let src = r#"
-fn edits(values: &[Int]) => [ViewMut<Int>] {
+fn edits(values: &[Int]) [ViewMut<Int>] -[]> {
     return [&values[0..1], &values[2..3]]
 }
 
@@ -4468,7 +4468,7 @@ fn run() {
     parts.left[0] = 10
     parts.right[1] = 40
 
-    values.edit_disjoint([0, 2], (left, right) => {
+    values.edit_disjoint([0, 2], (left, right) -> {
         left[0] = left[0] + 1
         right[0] = right[0] + 2
     }) ?? panic("edit failed")
@@ -4548,7 +4548,7 @@ fn runtime_disjoint_views_reject_alias_storage_and_owner_invalidation() {
 fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    saved := [ViewMut<Int>].{}
+    saved := [ViewMut<Int>]{}
     loop edit, selected {
         saved.push(edit)
     }
@@ -4600,7 +4600,7 @@ fn run() {
 fn run() {
     values := [1, 2]
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
-    held := [ViewMut<Int>].{}
+    held := [ViewMut<Int>]{}
     loop edit, selected { held = [edit] }
 }
 "#,
@@ -4619,7 +4619,7 @@ fn run() {
         (
             "return",
             r#"
-fn leak(values: &[Int]) => ViewMut<Int> {
+fn leak(values: &[Int]) ViewMut<Int> -[]> {
     selected :: values.get_disjoint_write([0, 1]) ?? panic("selection failed")
     loop edit, selected { return edit }
     panic("unreachable")
@@ -4649,7 +4649,7 @@ fn edit_disjoint_callback_views_reject_every_retaining_boundary() {
             r#"
 fn run() {
     values := [1, 2]
-    values.edit_disjoint([0, 1], (left, right) => {
+    values.edit_disjoint([0, 1], (left, right) -> {
         held :: [left, right]
     })
 }
@@ -4660,8 +4660,8 @@ fn run() {
             r#"
 fn run() {
     values := [1, 2]
-    held := [ViewMut<Int>].{}
-    values.edit_disjoint([0, 1], (left, right) => {
+    held := [ViewMut<Int>]{}
+    values.edit_disjoint([0, 1], (left, right) -> {
         held = [left, right]
     })
 }
@@ -4673,7 +4673,7 @@ fn run() {
 fn retain(view: ViewMut<Int>) {}
 fn run() {
     values := [1, 2]
-    values.edit_disjoint([0, 1], (left, right) => {
+    values.edit_disjoint([0, 1], (left, right) -> {
         retain(left)
     })
 }
@@ -4682,8 +4682,8 @@ fn run() {
         (
             "return",
             r#"
-fn leak(values: &[Int]) => ViewMut<Int> {
-    return values.edit_disjoint([0, 1], (left, right) => {
+fn leak(values: &[Int]) ViewMut<Int> -[]> {
+    return values.edit_disjoint([0, 1], (left, right) -> {
         return left
     }) ?? panic("selection failed")
 }
@@ -4713,15 +4713,15 @@ enum Choice {
     Second(ViewMut<Int>)
 }
 
-fn edit(values: &[Int]) => Edit {
-    return Edit.{ values: &values[0..1] }
+fn edit(values: &[Int]) Edit -[]> {
+    return Edit{ values: &values[0..1] }
 }
 
-fn maybe(values: &[Int]) => ViewMut<Int>? {
+fn maybe(values: &[Int]) ViewMut<Int>? -[]> {
     return Val(&values[0..1])
 }
 
-fn choose(values: &[Int], first: Bool) => Choice {
+fn choose(values: &[Int], first: Bool) Choice -[]> {
     if first { return Choice.First(&values[0..1]) }
     return Choice.Second(&values[0..1])
 }
@@ -4784,8 +4784,8 @@ fn mutable_view_extraction_retires_the_source_aggregate() {
     let struct_src = r#"
 struct Edit { values: ViewMut<Int> }
 
-fn edit(values: &[Int]) => Edit {
-    return Edit.{ values: &values[0..1] }
+fn edit(values: &[Int]) Edit -[]> {
+    return Edit{ values: &values[0..1] }
 }
 
 fn run() {
@@ -4801,7 +4801,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 
     let option_src = r#"
-fn maybe(values: &[Int]) => ViewMut<Int>? {
+fn maybe(values: &[Int]) ViewMut<Int>? -[]> {
     return Val(&values[0..1])
 }
 
@@ -4860,7 +4860,7 @@ fn run() {
 #[test]
 fn mutable_view_list_elements_must_be_disjoint() {
     let src = r#"
-fn duplicate(values: &[Int]) => [ViewMut<Int>] {
+fn duplicate(values: &[Int]) [ViewMut<Int>] -[]> {
     return [&values[0..1], &values[0..1]]
 }
 
@@ -4876,7 +4876,7 @@ fn enum_pattern_payload_keeps_its_original_owner_live() {
     let src = r#"
 enum Selection { One(View<Int>) }
 
-fn select(values: [Int]) => Selection {
+fn select(values: [Int]) Selection -[]> {
     selected :: values[0..1]
     return Selection.One(selected)
 }
@@ -4900,7 +4900,7 @@ fn run() {
 #[test]
 fn recursive_view_summaries_converge_to_every_possible_owner() {
     let src = r#"
-fn alpha(left: [Int], right: [Int], choose_left: Bool) => View<Int> {
+fn alpha(left: [Int], right: [Int], choose_left: Bool) View<Int> -[]> {
     if choose_left {
         selected :: left[0..1]
         return selected
@@ -4908,7 +4908,7 @@ fn alpha(left: [Int], right: [Int], choose_left: Bool) => View<Int> {
     return beta(left, right, choose_left)
 }
 
-fn beta(left: [Int], right: [Int], choose_left: Bool) => View<Int> {
+fn beta(left: [Int], right: [Int], choose_left: Bool) View<Int> -[]> {
     if !choose_left {
         selected :: right[0..1]
         return selected
@@ -4934,9 +4934,9 @@ fn recursive_view_aggregate_graph_terminates_without_ice() {
     let src = r#"
 struct Node { next: Node?, values: View<Int> }
 
-fn node(values: [Int]) => Node {
+fn node(values: [Int]) Node -[]> {
     selected :: values[0..1]
-    return Node.{ next: None, values: selected }
+    return Node{ next: None, values: selected }
 }
 
 fn run() { print(0) }
@@ -4951,10 +4951,10 @@ fn returned_aggregate_accepts_distinct_sources_per_output_slot() {
     let src = r#"
 struct Pair { left: View<Int>, right: View<Int> }
 
-fn pair(left: [Int], right: [Int]) => Pair {
+fn pair(left: [Int], right: [Int]) Pair -[]> {
     left_view :: left[0..1]
     right_view :: right[0..1]
-    return Pair.{ left: left_view, right: right_view }
+    return Pair{ left: left_view, right: right_view }
 }
 
 fn run() {
@@ -4974,10 +4974,10 @@ fn multi_source_returned_aggregate_still_blocks_owner_invalidation() {
         let src = r#"
 struct Pair { left: View<Int>, right: View<Int> }
 
-fn pair(left: [Int], right: [Int]) => Pair {
+fn pair(left: [Int], right: [Int]) Pair -[]> {
     left_view :: left[0..1]
     right_view :: right[0..1]
-    return Pair.{ left: left_view, right: right_view }
+    return Pair{ left: left_view, right: right_view }
 }
 
 fn run() {
@@ -5004,13 +5004,13 @@ fn aggregate_view_slot_composes_through_parameter_projection() {
     let src = r#"
 struct Pair { left: View<Int>, right: View<Int> }
 
-fn pair(left: [Int], right: [Int]) => Pair {
+fn pair(left: [Int], right: [Int]) Pair -[]> {
     left_view :: left[0..1]
     right_view :: right[0..1]
-    return Pair.{ left: left_view, right: right_view }
+    return Pair{ left: left_view, right: right_view }
 }
 
-fn first(pair: Pair) => View<Int> {
+fn first(pair: Pair) View<Int> -[]> {
     return pair.left
 }
 
@@ -5033,14 +5033,14 @@ fn returned_view_aggregate_cannot_cross_task_boundary() {
     let src = r#"
 struct Window { values: View<Int> }
 
-fn window(values: [Int]) => Window {
+fn window(values: [Int]) Window -[]> {
     selected :: values[0..1]
-    return Window.{ values: selected }
+    return Window{ values: selected }
 }
 
 fn run() {
     handle :: task window([7, 8])
-    print((handle.join() ?? Window.{ values: [] }).values[0])
+    print((handle.join() ?? Window{ values: [] }).values[0])
 }
 "#;
     let diags = jet::compile(src).expect_err("view aggregates are not task-sendable");
@@ -5050,7 +5050,7 @@ fn run() {
 #[test]
 fn nested_returned_view_paths_with_same_source_compile() {
     let src = r#"
-fn choose(xs: [Int]) => View<Int> {
+fn choose(xs: [Int]) View<Int> -[]> {
     if true {
         return xs[0..1]
     }
@@ -5067,7 +5067,7 @@ fn run() {
 #[test]
 fn returned_view_paths_form_a_safe_source_union() {
     let src = r#"
-fn choose(left: [Int], right: [Int], first: Bool) => View<Int> {
+fn choose(left: [Int], right: [Int], first: Bool) View<Int> -[]> {
     if first {
         return left[0..1]
     }
@@ -5129,7 +5129,7 @@ fn run() {
 #[test]
 fn generic_borrowed_parameter_materializes_an_owned_return() {
     let src = r#"
-fn identity<T>(value: T) => T {
+fn identity<T>(value: T) T -[]> {
     return value
 }
 
@@ -5196,19 +5196,19 @@ fn read_generic<T>(value: T) {
     print(0)
 }
 
-fn apply(f: fn(Int) => Int, value: Int) => Int {
+fn apply(f: fn(Int) Int, value: Int) Int -[]> {
     return f(value)
 }
 
 fn run() {
     text :: "hello"
     values :: [1, 2, 3]
-    parcel :: Parcel.{ label: "parcel" }
+    parcel :: Parcel{ label: "parcel" }
     read_text(text)
     read_list(values)
     read_parcel(parcel)
     read_generic(text)
-    print(apply((n: Int) => (n + 1), 41))
+    print(apply((n: Int) -> (n + 1), 41))
 }
 "#;
     let out = jet::compile(src).expect("all plain parameters are read borrows");
@@ -5236,9 +5236,9 @@ fn run() {
 #[test]
 fn function_value_calls_preserve_plain_parameter_read_borrows() {
     let src = r#"
-fn inspect(value: String) => Int { return value.len() }
+fn inspect(value: String) Int -[]> { return value.len() }
 
-fn apply(f: fn(String) => Int, value: String) => Int {
+fn apply(f: fn(String) Int, value: String) Int -[]> {
     return f(value)
 }
 
@@ -5267,7 +5267,7 @@ fn run() {
 #[test]
 fn function_value_returning_view_preserves_owner_provenance() {
     let src = r#"
-fn first(values: [Int]) => View<Int> {
+fn first(values: [Int]) View<Int> -[]> {
     return values[0..1]
 }
 
@@ -5297,13 +5297,13 @@ fn run() {
 #[test]
 fn parameter_rooted_lambda_and_generic_callback_preserve_view_provenance() {
     let src = r#"
-fn apply(callback: fn([Int]) => View<Int>, values: [Int]) => View<Int> {
+fn apply(callback: fn([Int]) View<Int>, values: [Int]) View<Int> -[]> {
     return callback(values)
 }
 
 fn run() {
     values := [7, 8]
-    selected :: apply((items: [Int]) => items[0..1], values)
+    selected :: apply((items: [Int]) -> items[0..1], values)
     print(selected[0])
 }
 "#;
@@ -5337,7 +5337,7 @@ fn run() {
 #[test]
 fn function_values_keep_exact_view_owner_identity() {
     let src = r#"
-fn first(left: [Int], right: [Int]) => View<Int> {
+fn first(left: [Int], right: [Int]) View<Int> -[]> {
     return left[0..1]
 }
 
@@ -5366,7 +5366,7 @@ fn lambdas_keep_exact_view_owner_identity() {
 fn run() {
     left := [7, 8]
     right := [9]
-    callback :: (first: [Int], second: [Int]) => first[0..1]
+    callback :: (first: [Int], second: [Int]) -> first[0..1]
     selected :: callback(left, right)
     right.push(10)
     print(selected[0])
@@ -5385,13 +5385,13 @@ fn run() {
 #[test]
 fn stored_lambda_returning_view_is_rejected_before_codegen() {
     let src = r#"
-fn first(values: [Int]) => View<Int> {
+fn first(values: [Int]) View<Int> -[]> {
     return values[0..1]
 }
 
 fn run() {
     values := [7, 8]
-    callback :: () => first(values)
+    callback :: () -> first(values)
     print(0)
 }
 "#;
@@ -5404,11 +5404,11 @@ fn returned_view_composes_from_receiver_field() {
     let src = r#"
 struct Bucket { values: [Int] }
 impl Bucket {
-    fn first(self) => View<Int> {
+    fn first(self) View<Int> -[]> {
         return self.values[0..1]
     }
 }
-fn wrapper(bucket: Bucket) => View<Int> {
+fn wrapper(bucket: Bucket) View<Int> -[]> {
     return bucket.first()
 }
 fn run() { print(0) }
@@ -5420,10 +5420,10 @@ fn run() { print(0) }
 #[test]
 fn generic_returned_view_composes_through_wrapper() {
     let src = r#"
-fn first<T>(values: [T]) => View<T> {
+fn first<T>(values: [T]) View<T> -[]> {
     return values[0..1]
 }
-fn wrapper(values: [Int]) => View<Int> {
+fn wrapper(values: [Int]) View<Int> -[]> {
     return first(values)
 }
 fn run() {
@@ -5439,9 +5439,9 @@ fn run() {
 fn open_dynamic_trait_view_dispatch_is_rejected() {
     let src = r#"
 trait Select {
-    fn select(self, left: [Int], right: [Int]) => View<Int>
+    fn select(self, left: [Int], right: [Int]) View<Int>
 }
-fn wrapper(selector: Select, left: [Int], right: [Int]) => View<Int> {
+fn wrapper(selector: Select, left: [Int], right: [Int]) View<Int> -[]> {
     return selector.select(left, right)
 }
 fn run() { print(0) }
@@ -5454,7 +5454,7 @@ fn run() { print(0) }
 fn returned_view_blocks_owner_resize_and_move() {
     for action in ["values.push(4)", "consume(^values)"] {
         let src = format!(
-            r#"fn first(values: [Int]) => View<Int> {{
+            r#"fn first(values: [Int]) View<Int> -[]> {{
     return values[0..1]
 }}
 fn consume(values: ^[Int]) {{ print(values.len()) }}
@@ -5475,9 +5475,9 @@ fn run() {{
 fn returned_view_aggregate_blocks_owner_resize() {
     let src = r#"
 struct Window { values: View<Int> }
-fn window(values: [Int]) => Window {
+fn window(values: [Int]) Window -[]> {
     selected :: values[0..1]
-    return Window.{ values: selected }
+    return Window{ values: selected }
 }
 fn run() {
     values := [1, 2, 3]
@@ -5493,7 +5493,7 @@ fn run() {
 #[test]
 fn returned_mutable_view_conflicts_with_overlapping_view() {
     let src = r#"
-fn edit(values: &[Int]) => ViewMut<Int> {
+fn edit(values: &[Int]) ViewMut<Int> -[]> {
     return &values[0..1]
 }
 fn run() {
@@ -5510,7 +5510,7 @@ fn run() {
 #[test]
 fn returned_view_can_be_carried_in_a_list() {
     let src = r#"
-fn first(values: [Int]) => View<Int> {
+fn first(values: [Int]) View<Int> -[]> {
     return values[0..1]
 }
 fn run() {
@@ -5529,7 +5529,7 @@ fn stored_view_field_cannot_be_rebound_to_different_owner() {
 struct Window { values: View<Int> }
 fn replace(left: [Int], right: [Int]) {
     first :: left[0..1]
-    holder := Window.{ values: first }
+    holder := Window{ values: first }
     second :: right[0..1]
     holder.values = second
     print(holder.values[0])
@@ -5593,12 +5593,12 @@ fn borrowed_parameter_subplaces_copy_in_owning_positions() {
         r#"
 struct Parcel { label: String }
 struct Holder { value: String }
-fn wrap(parcel: Parcel) => Holder { return Holder.{ value: parcel.label } }
+fn wrap(parcel: Parcel) Holder -[]> { return Holder{ value: parcel.label } }
 fn run() { print(0) }
 "#,
         r#"
 enum Wrapped { Val(String) }
-fn wrap(values: [String]) => Wrapped { return Wrapped.Val(values[0]) }
+fn wrap(values: [String]) Wrapped -[]> { return Wrapped.Val(values[0]) }
 fn run() { print(0) }
 "#,
         r#"
@@ -5635,7 +5635,7 @@ fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
     callback(parcel.label, 1)
     alias :: parcel.label
 }
-fn run() { apply_to(Parcel.{ label: "hello" }, inspect) }
+fn run() { apply_to(Parcel{ label: "hello" }, inspect) }
 "#;
     let out = jet::compile(src).expect("bare parameter subplace is a read window");
     assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
@@ -5694,7 +5694,7 @@ fn run() { print(0) }
     assert!(take.fix.contains("^value"), "{take:?}");
 
     let callback_src = r#"
-fn keep(f: fn(Int) => Int) => fn(Int) => Int { return f }
+fn keep(f: fn(Int) Int) fn(Int) Int -[]> { return f }
 fn run() { print(0) }
 "#;
     let escape = jet::compile(callback_src).expect_err("plain callback parameter cannot escape");
@@ -5705,8 +5705,8 @@ fn run() { print(0) }
 fn borrowed_parameter_fills_an_owned_struct_field_with_an_implicit_copy() {
     let src = r#"
 struct Holder { value: String }
-fn wrap(value: String) => Holder {
-    return Holder.{ value: value }
+fn wrap(value: String) Holder -[]> {
+    return Holder{ value: value }
 }
 fn run() { print(0) }
 "#;
@@ -5716,9 +5716,9 @@ fn run() { print(0) }
 #[test]
 fn stored_lambda_materializes_a_read_view_capture() {
     let src = r#"
-fn store(text: String) => fn() => String {
+fn store(text: String) fn() String -[..E]> -[..E]> {
     domain :: text.after("@")
-    return () => domain
+    return () -> domain
 }
 fn run() {
     callback :: store("nate@jet.dev")
@@ -5741,7 +5741,7 @@ fn run() {
 #[test]
 fn owning_collection_elements_materialize_read_views_without_expected_type() {
     let src = r#"
-fn collect(text: String) => [String] {
+fn collect(text: String) [String] -[]> {
     domain :: text.after("@")
     values :: [domain]
     return values
@@ -5759,7 +5759,7 @@ fn borrowed_parameter_can_feed_stored_lambda_after_explicit_copy() {
     let src = r#"
 fn store(text: String) {
     owned :: ~text
-    callback :: () => owned.len()
+    callback :: () -> owned.len()
     print(callback())
 }
 fn run() { store("read") }
@@ -5810,7 +5810,7 @@ fn run() {
 fn mutable_task_list_drain_discharges_linear_duty() {
     let src = r#"
 fn run() {
-    workers := [Task<Int>].{}
+    workers := [Task<Int>]{}
     workers.push(task 1)
     loop workers.len() > 0 {
         worker :: workers.pop() ?? panic("missing worker")
@@ -5825,7 +5825,7 @@ fn run() {
 fn task_list_drain_that_reinserts_still_owes_consume() {
     let src = r#"
 fn run() {
-    workers := [Task<Int>].{}
+    workers := [Task<Int>]{}
     workers.push(task 1)
     loop workers.len() > 0 {
         worker :: workers.pop() ?? panic("missing worker")
@@ -5842,7 +5842,7 @@ fn run() {
 #[test]
 fn moved_task_list_parameter_loop_compiles() {
     let src = r#"
-fn drain(hs: ^[Task<Int>]) => Int {
+fn drain(hs: ^[Task<Int>]) Int -[]> {
     total := 0
     loop h, hs { total += h.join() ?? 0 }
     total
@@ -5858,7 +5858,7 @@ fn run() {
 #[test]
 fn two_binding_borrowed_task_list_reports_e0120() {
     let src = r#"
-fn drain(hs: [Task<Int>]) => Int {
+fn drain(hs: [Task<Int>]) Int -[]> {
     total := 0
     loop (i, h), hs { total += (h.join() ?? 0) + i }
     total
@@ -5897,7 +5897,7 @@ fn run() {
 #[test]
 fn stream_reuse_after_loop_reports_e0121() {
     let src = r#"
-fn count(n: Int) => Stream<Int> {
+fn count(n: Int) Stream<Int> -[]> {
     i := 0
     loop i < n {
         yield i
@@ -5925,7 +5925,7 @@ fn lone_write_borrow_matches_on_jit_and_aot() {
             r#"
 struct P { position: Int }
 fn run() {
-  ps := [P.{ position: 10 }, P.{ position: 20 }]
+  ps := [P{ position: 10 }, P{ position: 20 }]
   a :: &ps[0]
   a.position += 2
   print(ps[0].position)
@@ -5938,7 +5938,7 @@ fn run() {
             r#"
 struct P { position: Int }
 fn run() {
-  ps := [P.{ position: 1 }, P.{ position: 2 }]
+  ps := [P{ position: 1 }, P{ position: 2 }]
   a :: &ps[0]
   a.position = 42
   print(ps[0].position)
@@ -5956,7 +5956,7 @@ fn bump(w: &W) {
   a.position = 42
 }
 fn run() {
-  w := W.{ ps: [P.{ position: 1 }] }
+  w := W{ ps: [P{ position: 1 }] }
   bump(&w)
   print(w.ps[0].position)
 }
@@ -6035,7 +6035,7 @@ fn declared_trait_from_allows_dyn_view_return_on_jit() {
         &path,
         r#"
 trait Slice {
-    fn head(self) => View<Int> from self
+    fn head(self) View<Int> from self -[]>
 }
 
 struct Packet {
@@ -6043,15 +6043,15 @@ struct Packet {
 }
 
 impl Packet.Slice {
-    fn head(self) => View<Int> from self :: self.data[0..1]
+    fn head(self) View<Int> from self -> self.data[0..1]
 }
 
-fn first(s: Slice) => View<Int> from s {
+fn first(s: Slice) View<Int> from s -[..E]> {
     return s.head()
 }
 
 fn run() {
-    boxed :: [Slice].{Packet.{ data: [9, 8, 7] }}
+    boxed :: [Slice]{Packet{ data: [9, 8, 7] }}
     print(first(boxed[0])[0])
 }
 "#,
@@ -6078,12 +6078,12 @@ fn run() {
 #[test]
 fn undeclared_view_callback_freezes_every_non_scalar_argument() {
     let src = r#"
-fn pick_first(line: String, noise: String) => View<str> {
+fn pick_first(line: String, noise: String) View<str> -[]> {
     text :: line.before(":")
     return text
 }
 
-fn apply(f: fn(String, String) => View<str>, a: String, b: String) => View<str> {
+fn apply(f: fn(String, String) View<str>, a: String, b: String) View<str> -[]> {
     return f(a, b)
 }
 
@@ -6111,12 +6111,12 @@ fn run() {
 #[test]
 fn declared_view_callback_from_freezes_only_named_source() {
     let src = r#"
-fn pick_first(line: String, noise: String) => View<str> {
+fn pick_first(line: String, noise: String) View<str> -[]> {
     text :: line.before(":")
     return text
 }
 
-fn apply(f: fn(line: String, noise: String) => View<str> from line, a: String, b: String) => View<str> {
+fn apply(f: fn(line: String, noise: String) View<str> from line, a: String, b: String) View<str> -[]> {
     return f(a, b)
 }
 

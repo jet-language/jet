@@ -96,19 +96,19 @@ fn option_zip_and_lift2_combinators() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
-fn missing_float() => Float? :: None
-fn multiply_options(x: Float, y: Float) => Float {
+fn missing_float() Float? -> None
+fn multiply_options(x: Float, y: Float) Float {
     return x * y
 }
-fn choose_multiplier() => fn(Float, Float) => Float {
+fn choose_multiplier() fn(Float, Float) Float {
     print("choose")
     return multiply_options
 }
 fn run() {
     both_a :: Val(2.0)
     both_b :: Val(5.0)
-    print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
-    print(Option.lift2((x, y) => x * y, both_a, both_b))
+    print(both_a.zip(both_b).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, both_a, both_b))
     print(Option.lift2(multiply_options, both_a, both_b))
     multiplier :: multiply_options
     print(Option.lift2(multiplier, both_a, both_b))
@@ -116,14 +116,14 @@ fn run() {
 
     a_only :: Val(2.0)
     b_missing :: missing_float()
-    print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
-    print(Option.lift2((x, y) => x * y, a_only, b_missing))
+    print(a_only.zip(b_missing).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, a_only, b_missing))
     print(Option.lift2(choose_multiplier(), a_only, b_missing))
 
     both_missing_a :: missing_float()
     both_missing_b :: missing_float()
-    print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
-    print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
+    print(both_missing_a.zip(both_missing_b).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, both_missing_a, both_missing_b))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(
@@ -186,10 +186,10 @@ fn run() {
     let web_source = r#"
 #Target(Web)
 #Target(JS)
-fn add(x: Int, y: Int) => Int { return x + y }
+fn add(x: Int, y: Int) Int { return x + y }
 
 #Target(JS)
-fn choose() => fn(Int, Int) => Int {
+fn choose() fn(Int, Int) Int {
     print("choose")
     return add
 }
@@ -228,16 +228,16 @@ use core.event as event
 fn run() {
     scope :: event.scope()
     ev :: event.with_policy<Int>(event.policy_sync())
-    sub :: ev.on(scope, (n) => { print("low {n}") })
-    ev.on_priority(scope, 10, (n) => { print("high {n}") })
-    ev.once(scope, (n) => { print("once {n}") })
+    sub :: ev.on(scope, (n) -> { print("low {n}") })
+    ev.on_priority(scope, 10, (n) -> { print("high {n}") })
+    ev.once(scope, (n) -> { print("once {n}") })
     print(ev.emit(1).summary())
     sub.unsubscribe()
     print(ev.emit(2).summary())
     print(scope.active_count())
 
     hook :: event.hook<Int, String>("base")
-    hook.on(scope, (n) => "seen {n}")
+    hook.on(scope, (n) -> "seen {n}")
     print(hook.run(7, "fallback"))
     scope.cancel()
     print(hook.run(8, "fallback"))
@@ -274,16 +274,16 @@ enum LocalState { Closed }
 fn run() {
     local :: LocalState.Closed
     print("local={local == .Closed}")
-    bad :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 0, overflow: .Block }, .Collect)
+    bad :: event.async_result<Int, String>(AsyncPolicy{ capacity: 0, overflow: .Block }, .Collect)
     if bad == {
         .Ok(_) -> print("bad accepted")
         .Err(_) -> print("invalid capacity")
     }
     scope :: event.scope()
-    ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    ev :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
-    ev.on(scope, (n: Int) => {
+    ev.on(scope, (n: Int) -> {
         started_tx.send(~n)
         released :: release_rx.receive() ?? panic("release")
     })
@@ -339,10 +339,10 @@ fn panic_ignore_handler(n: Int) ! String {
 
 fn run() {
     newest_scope :: event.scope()
-    newest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    newest :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
     (newest_started_tx, newest_started_rx) :: channel<Int>()
     (newest_release_tx, newest_release_rx) :: channel<Int>()
-    newest.on(newest_scope, (n: Int) => {
+    newest.on(newest_scope, (n: Int) -> {
         newest_started_tx.send(~n)
         released_newest :: newest_release_rx.receive() ?? panic("release")
     })
@@ -359,10 +359,10 @@ fn run() {
     newest_second.join()
 
     oldest_scope :: event.scope()
-    oldest :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
+    oldest :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
     (oldest_started_tx, oldest_started_rx) :: channel<Int>()
     (oldest_release_tx, oldest_release_rx) :: channel<Int>()
-    oldest.on(oldest_scope, (n: Int) => {
+    oldest.on(oldest_scope, (n: Int) -> {
         oldest_started_tx.send(~n)
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
     })
@@ -379,16 +379,16 @@ fn run() {
     oldest_third.join()
 
     once_scope :: event.scope()
-    once_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    once_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
     (once_started_tx, once_started_rx) :: channel<Int>()
     (once_release_tx, once_release_rx) :: channel<Int>()
-    once_event.on_priority(once_scope, 10, (n: Int) => {
+    once_event.on_priority(once_scope, 10, (n: Int) -> {
         if n == 1 {
             once_started_tx.send(~n)
             released_once :: once_release_rx.receive() ?? panic("release")
         }
     })
-    once_event.once(once_scope, (n: Int) => {})
+    once_event.once(once_scope, (n: Int) -> {})
     once_first :: once_event.emit_async(1)
     once_started :: once_started_rx.receive() ?? panic("started")
     once_second :: once_event.emit_async(2)
@@ -398,40 +398,40 @@ fn run() {
     print("once first={once_first_report.delivered_handlers()} second={once_second_report.delivered_handlers()}")
 
     failure_scope :: event.scope()
-    collect :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    collect.on_priority(failure_scope, 10, (n: Int) => .Err("high"))
-    collect.on_priority(failure_scope, 0, (n: Int) => .Err("low"))
+    collect :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    collect.on_priority(failure_scope, 10, (n: Int) -> .Err("high"))
+    collect.on_priority(failure_scope, 0, (n: Int) -> .Err("low"))
     collected :: collect.emit_async(1).join()
     print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
     print(collected.trace().summary())
 
-    stop :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
-    stop.on_priority(failure_scope, 10, (n: Int) => .Err("first"))
-    stop.on_priority(failure_scope, 0, (n: Int) => {})
+    stop :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
+    stop.on_priority(failure_scope, 10, (n: Int) -> .Err("first"))
+    stop.on_priority(failure_scope, 0, (n: Int) -> {})
     stopped :: stop.emit_async(1).join()
     print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
 
-    log_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
-    log_errors.on_priority(failure_scope, 10, (n: Int) => .Err("logged secret"))
-    log_errors.on_priority(failure_scope, 0, (n: Int) => {})
+    log_errors :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    log_errors.on_priority(failure_scope, 10, (n: Int) -> .Err("logged secret"))
+    log_errors.on_priority(failure_scope, 0, (n: Int) -> {})
     logged_error :: log_errors.emit_async(1).join()
     print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
 
-    ignore_errors :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
-    ignore_errors.on_priority(failure_scope, 10, (n: Int) => .Err("ignored secret"))
-    ignore_errors.on_priority(failure_scope, 0, (n: Int) => {})
+    ignore_errors :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    ignore_errors.on_priority(failure_scope, 10, (n: Int) -> .Err("ignored secret"))
+    ignore_errors.on_priority(failure_scope, 0, (n: Int) -> {})
     ignored_error :: ignore_errors.emit_async(1).join()
     print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")
 
-    panic_log :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
-    panic_log.on_priority(failure_scope, 10, (n: Int) => panic_log_handler(n))
-    panic_log.on_priority(failure_scope, 0, (n: Int) => {})
+    panic_log :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    panic_log.on_priority(failure_scope, 10, (n: Int) -> panic_log_handler(n))
+    panic_log.on_priority(failure_scope, 0, (n: Int) -> {})
     logged_panic :: panic_log.emit_async(1).join()
     print("panic log={logged_panic.state() == .HandlerFailed} handlers={logged_panic.delivered_handlers()} failures={logged_panic.failures().len()} traced={logged_panic.trace().summary().contains("panic:log boom")}")
 
-    panic_ignore :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
-    panic_ignore.on_priority(failure_scope, 10, (n: Int) => panic_ignore_handler(n))
-    panic_ignore.on_priority(failure_scope, 0, (n: Int) => {})
+    panic_ignore :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    panic_ignore.on_priority(failure_scope, 10, (n: Int) -> panic_ignore_handler(n))
+    panic_ignore.on_priority(failure_scope, 0, (n: Int) -> {})
     ignored_panic :: panic_ignore.emit_async(1).join()
     print("panic ignore={ignored_panic.state() == .HandlerFailed} handlers={ignored_panic.delivered_handlers()} failures={ignored_panic.failures().len()} traced={ignored_panic.trace().summary().contains("panic:ignore boom")}")
 }
@@ -462,12 +462,12 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn owner_teardown_task() => Task<DispatchReport<String>> {
+fn owner_teardown_task() Task<DispatchReport<String>> {
     owner_scope :: event.scope()
-    ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    ev :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
-    ev.on(owner_scope, (n: Int) => {
+    ev.on(owner_scope, (n: Int) -> {
         started_tx.send(~n)
         held_sender :: ~release_tx
         released :: release_rx.receive() ?? panic("release")
@@ -480,10 +480,10 @@ fn owner_teardown_task() => Task<DispatchReport<String>> {
 
 fn run() {
     cancel_scope :: event.scope()
-    cancelled :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    cancelled :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (cancel_started_tx, cancel_started_rx) :: channel<Int>()
     (cancel_release_tx, cancel_release_rx) :: channel<Int>()
-    cancelled.on(cancel_scope, (n: Int) => {
+    cancelled.on(cancel_scope, (n: Int) -> {
         cancel_started_tx.send(~n)
         released :: cancel_release_rx.receive() ?? panic("release")
     })
@@ -502,10 +502,10 @@ fn run() {
     print("after-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
 
     queued_scope :: event.scope()
-    queued_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    queued_deadline :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (queued_started_tx, queued_started_rx) :: channel<Int>()
     (queued_release_tx, queued_release_rx) :: channel<Int>()
-    queued_deadline.on(queued_scope, (n: Int) => {
+    queued_deadline.on(queued_scope, (n: Int) -> {
         queued_started_tx.send(~n)
         released :: queued_release_rx.receive() ?? panic("release")
     })
@@ -520,10 +520,10 @@ fn run() {
     queued_running.join()
 
     pending_scope :: event.scope()
-    pending_deadline :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    pending_deadline :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (pending_started_tx, pending_started_rx) :: channel<Int>()
     (pending_release_tx, pending_release_rx) :: channel<Int>()
-    pending_deadline.on(pending_scope, (n: Int) => {
+    pending_deadline.on(pending_scope, (n: Int) -> {
         pending_started_tx.send(~n)
         released :: pending_release_rx.receive() ?? panic("release")
     })
@@ -604,11 +604,11 @@ fn run() {
     cancel_gate_started :: cancel_gate_started_rx.receive() ?? panic("cancel gate start")
 
     cancel_scope :: event.scope()
-    cancel_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    cancel_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     #Context(deadline: time.now() + 100000) {
         cancel_queued :: cancel_event.emit_async(1)
         cancel_pending :: cancel_event.emit_async(2)
-        cancel_event.on(cancel_scope, (n: Int) => {})
+        cancel_event.on(cancel_scope, (n: Int) -> {})
         cancel_scope.cancel()
         cancel_gate_release_tx.send(1)
         queued_report :: cancel_queued.join()
@@ -627,8 +627,8 @@ fn run() {
     close_gate_started :: close_gate_started_rx.receive() ?? panic("close gate start")
 
     close_scope :: event.scope()
-    close_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    close_event.on(close_scope, (n: Int) => {})
+    close_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    close_event.on(close_scope, (n: Int) -> {})
     #Context(deadline: time.now() + 100000) {
         close_queued :: close_event.emit_async(3)
         close_pending :: close_event.emit_async(4)
@@ -672,23 +672,23 @@ use core.event as event
 fn run() {
     scope :: event.scope()
     ev :: event.new<Int>()
-    late :: ev.on(scope, (n) => { print("late {n}") })
-    ev.on_priority(scope, 10, (n) => { print("killer {n}"); late.unsubscribe() })
+    late :: ev.on(scope, (n) -> { print("late {n}") })
+    ev.on_priority(scope, 10, (n) -> { print("killer {n}"); late.unsubscribe() })
     print(ev.emit(1).summary())
     print("listeners={ev.listener_count()}")
 
     additions :: event.scope()
     growing :: event.new<Int>()
-    growing.on(additions, (n) => {
+    growing.on(additions, (n) -> {
         print("root {n}")
-        _ :: growing.on(additions, (m: Int) => { print("added {m}") })
+        _ :: growing.on(additions, (m: Int) -> { print("added {m}") })
     })
     print(growing.emit(1).summary())
     print(growing.emit(2).summary())
 
     nested_scope :: event.scope()
     nested :: event.new<Int>()
-    nested.once(nested_scope, (n) => {
+    nested.once(nested_scope, (n) -> {
         print("once {n}")
         if n == 1 { nested.emit(2) }
     })
@@ -698,34 +698,34 @@ fn run() {
     owned :: event.new<Int>()
     if true {
         owner :: event.scope()
-        owned.on(owner, (n) => { print("leaked {n}") })
+        owned.on(owner, (n) -> { print("leaked {n}") })
     }
     print(owned.emit(9).summary())
 
     cancelled :: event.scope()
     stopped :: event.new<Int>()
     cancelled.cancel()
-    stopped_sub :: stopped.on(cancelled, (n) => { print("cancelled event {n}") })
+    stopped_sub :: stopped.on(cancelled, (n) -> { print("cancelled event {n}") })
     print("cancelled-active={stopped_sub.is_active()}")
     print(stopped.emit(10).summary())
     stopped_hook :: event.hook<Int, String>("base")
-    stopped_hook.on(cancelled, (n) => "cancelled hook {n}")
+    stopped_hook.on(cancelled, (n) -> "cancelled hook {n}")
     print(stopped_hook.run(10, "fallback"))
 
     order_scope :: event.scope()
     ordered :: event.new<Int>()
-    ordered.on_priority(order_scope, 5, (n) => { print("first {n}") })
-    ordered.on_priority(order_scope, 5, (n) => { print("second {n}") })
-    ordered.on(order_scope, (n) => { print("low {n}") })
+    ordered.on_priority(order_scope, 5, (n) -> { print("first {n}") })
+    ordered.on_priority(order_scope, 5, (n) -> { print("second {n}") })
+    ordered.on(order_scope, (n) -> { print("low {n}") })
     print(ordered.emit(3).summary())
 
     depth_scope :: event.scope()
     depth :: event.new<Int>()
-    depth.on_priority(depth_scope, 5, (n) => {
+    depth.on_priority(depth_scope, 5, (n) -> {
         print("enter {n}")
         if n == 1 { print(depth.emit(2).summary()) }
     })
-    depth.on(depth_scope, (n) => { print("leave {n}") })
+    depth.on(depth_scope, (n) -> { print("leave {n}") })
     print(depth.emit(1).summary())
 }
 "#,
@@ -894,10 +894,10 @@ use core.game as game
 
 module perf.game {
     budgets: [
-        Budget.{ name: "frame", scope: .Scene("arcade"), metric: .FrameTime(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(16ms) },
-        Budget.{ name: "memory", scope: .Scene("arcade"), metric: .MemoryHighWater, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(96MiB) },
-        Budget.{ name: "assets", scope: .Scene("arcade"), metric: .SceneAssetBytes, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(256KiB) },
-        Budget.{ name: "draws", scope: .Scene("arcade"), metric: .DrawCalls(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(4) },
+        Budget{ name: "frame", scope: .Scene("arcade"), metric: .FrameTime(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(16ms) },
+        Budget{ name: "memory", scope: .Scene("arcade"), metric: .MemoryHighWater, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(96MiB) },
+        Budget{ name: "assets", scope: .Scene("arcade"), metric: .SceneAssetBytes, provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(256KiB) },
+        Budget{ name: "draws", scope: .Scene("arcade"), metric: .DrawCalls(.P99), provider: .SceneProbe("arcade"), comparison: .AbsoluteFrom("local/arcade"), limit: .AtMost(4) },
     ]
 }
 
@@ -922,7 +922,7 @@ fn run() {
         n += 1
     }
     print("budget {n}")
-    scene.on_frame((frame) => {
+    scene.on_frame((frame) -> {
         if frame.input.pressed("jump") {
             print("hook jump {frame.index}")
         }
@@ -971,7 +971,7 @@ fn core_auth_strict_jwt_and_paseto_hostile_matrix() {
 use core.auth as auth
 
 fn run() {
-    jwt_key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    jwt_key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     no_skew :: Duration.milliseconds(0) ?? panic("duration")
     valid_jwt := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
     wrong_aud := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImJpbGxpbmciLCJleHAiOjQxMDI0NDQ4MDB9.4HckXFIKTMLaJr8Zjz8hYC0NQ9gO1xbLzZwoNxU1ew4"
@@ -1065,18 +1065,18 @@ fn run() {
             }
         }
     }
-    weak_key :: [U8].{ 115, 104, 111, 114, 116 }
+    weak_key :: [U8]{ 115, 104, 111, 114, 116 }
     if auth.verify_jwt(valid_jwt, key: weak_key, audience: "gateway") == { .Ok(_) -> { print("weak-key-accepted") } .Err(error) -> { if error == { .WeakKey -> { print("weak-key-rejected") } else -> { print("weak-key-wrong-error") } } } }
 
-    public_key :: [U8].{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
-    footer :: [U8].{ 107, 105, 100, 45, 49 }
-    implicit :: [U8].{ 116, 101, 110, 97, 110, 116, 45, 97 }
+    public_key :: [U8]{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
+    footer :: [U8]{ 107, 105, 100, 45, 49 }
+    implicit :: [U8]{ 116, 101, 110, 97, 110, 116, 45, 97 }
     paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     bad_signature := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAg.a2lkLTE"
     wrong_purpose := "v4.local.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     wrong_version := "v3.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
-    bad :: [U8].{ 98, 97, 100 }
-    zero_key :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    bad :: [U8]{ 98, 97, 100 }
+    zero_key :: [U8]{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
@@ -1127,7 +1127,7 @@ fn core_auth_jwt_audience_shapes_match_aot_jit_and_interpreter() {
 use core.auth as auth
 
 fn run() {
-    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     if auth.verify_jwt("@SCALAR", key: key, audience: "gateway") == {
         .Ok(claims) -> { print("scalar:{claims.audience}") }
         .Err(_) -> { print("scalar:rejected") }
@@ -1190,9 +1190,9 @@ fn run() {
         }
         .Err(_) -> { print("past-nbf:rejected") }
     }
-    public_key :: [U8].{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
-    footer :: [U8].{ 107, 105, 100, 45, 49 }
-    implicit :: [U8].{ 116, 101, 110, 97, 110, 116, 45, 97 }
+    public_key :: [U8]{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
+    footer :: [U8]{ 107, 105, 100, 45, 49 }
+    implicit :: [U8]{ 116, 101, 110, 97, 110, 116, 45, 97 }
     no_skew :: Duration.milliseconds(0) ?? panic("duration")
     paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
@@ -1276,7 +1276,7 @@ fn core_auth_jwt_iat_option_int_boundaries_match_aot_jit_and_interpreter() {
 use core.auth as auth
 
 fn run() {
-    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     if auth.verify_jwt("@NEGATIVE", key: key, audience: "gateway") == {
         .Ok(claims) -> {
             negative_iat :: claims.issued_at
@@ -1504,7 +1504,7 @@ fn check(token: String, key: [U8], label: String, skew: Duration) {
 }
 
 fn run() {
-    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     skew_token := "@SKEW_TOKEN"
     skew_expiry :: @SKEW_EXPIRY
     base_ns :: @NOW_NS - skew_expiry * 1000000000
@@ -1668,7 +1668,7 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "float_binding_origin";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 
@@ -1739,7 +1739,7 @@ fn run() {
     print(next().origin())
 }
 #Target(JS)
-fn next() => Float {
+fn next() Float {
     print("evaluated")
     return 3.5
 }

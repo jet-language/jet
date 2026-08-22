@@ -78,11 +78,11 @@ struct Tagged<K> {
 }
 
 fn run() {
-    wi :: Wrap<Int>.{ value: 7 }
+    wi :: Wrap<Int>{ value: 7 }
     print(json.to_string(wi))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id :: Tagged<Wrap<Int>>.{ raw: 9, marker: None }
+    id :: Tagged<Wrap<Int>>{ raw: 9, marker: None }
     print(json.to_string(id))
     rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
@@ -185,22 +185,22 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) => DataTree {
-        m :: [String:DataTree].{ "email": DataTree.Text(~self.addr) }
+    fn encode(self) DataTree {
+        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ! [FieldError] {
+    fn decode(tree: DataTree) Email ! [FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
-        return .Ok(Email.{addr: s})
+        return .Ok(Email{addr: s})
     }
 }
 
 fn run() {
-    e := Email.{addr: "a@b.com"}
+    e := Email{addr: "a@b.com"}
     s := json.to_string(e)
     print(s)
     back := json.decode<Email>(s) ?? panic("decode failed")
@@ -240,19 +240,19 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) => DataTree :: DataTree.Object(["address": DataTree.Text(~self.address)])
+    fn encode(self) DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) => HandEmail ! [FieldError] {
+    fn decode(tree: DataTree) HandEmail ! [FieldError] {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
-        return Ok(HandEmail.{ address: address })
+        return Ok(HandEmail{ address: address })
     }
 }
 
 fn run() {
-    derived :: DerivedEmail.{ address: "ada@jet" }
-    hand :: HandEmail.{ address: "ada@jet" }
+    derived :: DerivedEmail{ address: "ada@jet" }
+    hand :: HandEmail{ address: "ada@jet" }
     derived_wire :: json.to_string(derived)
     hand_wire :: json.to_string(hand)
     derived_bytes :: derived_wire.bytes()
@@ -294,11 +294,11 @@ use core.encoding.json as json
 #Codable
 struct Boxed<T> { value: T }
 
-fn generic_encode<T: Encode>(value: T) => String :: json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) => T ! [FieldError] :: json.decode<T>(wire)
+fn generic_encode<T: Encode>(value: T) String -> json.to_string(value)
+fn generic_decode<T: Decode>(wire: String) T ! [FieldError] -> json.decode<T>(wire)
 
 fn run() {
-    value :: Boxed<Int>.{ value: 7 }
+    value :: Boxed<Int>{ value: 7 }
     derived_wire :: json.to_string(value)
     generic_wire :: generic_encode(value)
     derived_bytes :: derived_wire.bytes()
@@ -333,9 +333,9 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) => Email ! [FieldError] {
+    fn decode(tree: DataTree) Email ! [FieldError] {
         value := tree.field("address") ?? DataTree.Text("")
-        return .Ok(Email.{ addr: value.text() ?? "" })
+        return .Ok(Email{ addr: value.text() ?? "" })
     }
 }
 
@@ -380,7 +380,7 @@ enum Event {
 fn run() {
     a := Event.Idle
     b := Event.Count(3)
-    c := Event.Named.{ name: "x", enabled: true }
+    c := Event.Named{ name: "x", enabled: true }
     print(json.to_string(a))
     print(json.to_string(b))
     print(json.to_string(c))
@@ -414,7 +414,7 @@ enum Event {
 fn run() {
     unit := Event.Idle
     tuple := Event.Count(3)
-    named := Event.Named.{ name: "x", enabled: true }
+    named := Event.Named{ name: "x", enabled: true }
     print(json.to_string(unit))
     print(json.to_string(tuple))
     print(json.to_string(named))
@@ -468,11 +468,11 @@ use core.encoding.json as json
 struct Record {
     base: Int
     note: String?
-    doubled: Int => base * 2
+    doubled: Int -> base * 2
 }
 
 fn run() {
-    value := Record.{ base: 4, note: None }
+    value := Record{ base: 4, note: None }
     print(json.to_string(value))
     back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
     print(back.base)
@@ -510,25 +510,25 @@ struct Inner { note: String? }
 struct Envelope {
     inner: Inner
 
-    fn borrowed(self) => String {
+    fn borrowed(self) String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
 
-    fn owned(^self) => String {
+    fn owned(^self) String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
 }
 fn owned_local_nested_field_remains_reusable() {
-    local := Envelope.{ inner: Inner.{ note: Val("local") } }
+    local := Envelope{ inner: Inner{ note: Val("local") } }
     if local.inner.note == Val(value) { print(value) }
     if local.inner.note == Val(value) { print(value) }
 }
 fn run() {
-    borrowed := Envelope.{ inner: Inner.{ note: Val("borrowed") } }
+    borrowed := Envelope{ inner: Inner{ note: Val("borrowed") } }
     print(borrowed.borrowed())
-    owned := Envelope.{ inner: Inner.{ note: Val("owned") } }
+    owned := Envelope{ inner: Inner{ note: Val("owned") } }
     print(owned.owned())
     owned_local_nested_field_remains_reusable()
 }
@@ -564,9 +564,9 @@ struct Wire {
 }
 
 fn run() {
-    absent := Wire.{ first: "a", second: "b", maybe: None, last: 4 }
-    present := Wire.{ first: "a", second: "b", maybe: Val("c"), last: 4 }
-    arbitrary := [String:Int].{ "z": 1, "a": 2 }
+    absent := Wire{ first: "a", second: "b", maybe: None, last: 4 }
+    present := Wire{ first: "a", second: "b", maybe: Val("c"), last: 4 }
+    arbitrary := [String:Int]{ "z": 1, "a": 2 }
     print(json.to_string(absent))
     print(json.to_string(present))
     print(json.to_string(arbitrary))
@@ -602,7 +602,7 @@ struct Outer {
 }
 
 fn run() {
-    value := Outer.{ display_name: "n", inner: Inner.{ x: 1, y: true }, count: 2 }
+    value := Outer{ display_name: "n", inner: Inner{ x: 1, y: true }, count: 2 }
     print(json.to_string(value))
     back := json.decode<Outer>("{{\"displayName\":\"m\",\"x\":3,\"y\":false}}") ?? panic("decode")
     print(back.display_name)
@@ -739,14 +739,14 @@ fn user_derive_orphan_rule_allows_either_local_side() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 derive T.RemoteLabel {
-    fn remote_label(self) => String :: "remote:{T.@name}"
+    fn remote_label(self) String -> "remote:{T.@name}"
 }
 
 #LocalLabel
 pub struct RemoteType { pub value: Int }
 
-pub fn remote_type_label() => String {
-    value := RemoteType.{ value: 2 }
+pub fn remote_type_label() String {
+    value := RemoteType{ value: 2 }
     return value.local_label()
 }
 "#;
@@ -754,14 +754,14 @@ pub fn remote_type_label() => String {
 use labels
 
 derive T.LocalLabel {
-    fn local_label(self) => String :: "local:{T.@name}"
+    fn local_label(self) String -> "local:{T.@name}"
 }
 
 #RemoteLabel
 struct LocalType { value: Int }
 
 fn run() {
-    local := LocalType.{ value: 1 }
+    local := LocalType{ value: 1 }
     print(local.remote_label())
     print(labels.remote_type_label())
 }
@@ -801,7 +801,7 @@ derive T.LayoutFacts {
     selected_offset :: selected.offset
     reflected_offset :: reflected.fields[0].offset
     name :: T.reflect().name
-    fn layout_facts(self) => String :: "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
+    fn layout_facts(self) String -> "{@kind}:{@target}:{@guarantee}:{@source}:{@reflected_kind}:{@field_name}:{@size}:{@reflected_size}:{@selected_offset}:{@reflected_offset}"
 }
 
 #LayoutFacts
@@ -823,9 +823,9 @@ struct ColumnPacket {
 }
 
 fn run() {
-    packet := Packet.{ count: 2, label: "ok" }
-    c_packet := CPacket.{ count: 2, flag: 1 }
-    column_packet := ColumnPacket.{ count: 2, label: "ok" }
+    packet := Packet{ count: 2, label: "ok" }
+    c_packet := CPacket{ count: 2, flag: 1 }
+    column_packet := ColumnPacket{ count: 2, label: "ok" }
     print(packet.layout_facts())
     print(c_packet.layout_facts())
     print(column_packet.layout_facts())
@@ -892,15 +892,15 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) => @param :: ~self.value
-    fn type_name(self) => String :: T.@name
+    fn get_value(self) @param -> ~self.value
+    fn type_name(self) String -> T.@name
 }
 
 #TypeName
 struct Box<T> { value: T }
 
 fn run() {
-    boxed := Box<Int>.{ value: 7 }
+    boxed := Box<Int>{ value: 7 }
     n := boxed.get_value()
     print(n)
     print(boxed.type_name())
@@ -947,11 +947,11 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) => fn(Int) => Int :: ~self.callback
+    fn duplicate(self) fn(Int) Int -> ~self.callback
 }
 
 #CopyCallback
-struct Handler { callback: fn(Int) => Int }
+struct Handler { callback: fn(Int) Int }
 
 fn run() { print(0) }
 "#;
@@ -980,7 +980,7 @@ marker AddFields(@sites: [.Type]) {
     @loop field, target.@fields {
         method :: "field_{field.@name}"
         impl @type_name {
-            fn @method(self) String :> field.@name
+            fn @method(self) String -> field.@name
         }
     }
 }
@@ -994,7 +994,7 @@ struct Person { first: String  last: String }
 
 @loop T, [Person] {
     impl T {
-        fn generated(self) String :> "generated"
+        fn generated(self) String -> "generated"
     }
 }
 
@@ -1092,11 +1092,11 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
-fn pick() => Int {
+fn pick() Int {
     return 0
 }
 
-fn encoded(e: Email, i: Int) => String {
+fn encoded(e: Email, i: Int) String {
     shallow := DataTree.Text(~e.addr)
     nested := DataTree.Text(~e.nested.text)
     indexed := DataTree.Text(~e.items[0].text)
@@ -1107,12 +1107,12 @@ fn encoded(e: Email, i: Int) => String {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) => DataTree {
+fn slice_data(xs: [DataTree]) DataTree {
     return DataTree.Array(xs[0..1])
 }
 
 fn run() {
-    e := Email.{addr: "a@b.com", nested: Address.{text: "inside"}, items: [Address.{text: "zero"}, Address.{text: "item"}]}
+    e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}
     sliced := slice_data([DataTree.Text("slice0"), DataTree.Text("slice1")])
     print("{encoded(e, 0)}|{json.to_string(sliced)}")
 }

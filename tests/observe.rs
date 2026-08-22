@@ -348,9 +348,7 @@ fn panic_context_uses_only_lexically_live_locals() {
 
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(r#"
-fn missing() => (Int?) {{
-    return None
-}}
+fn missing() (Int?) -> None
 fn capture(live: Int) {{
     {scoped_stmt}
     _value :: missing() ?? panic("missing value")
@@ -457,17 +455,17 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) => Int ! ParseError {
+fn parse_age(raw: String) Int ! ParseError -[]> {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) => Int ! ParseError {
+fn load(raw: String) Int ! ParseError -[]> {
     n :: parse_age(raw)? "loading age"
     return Ok((n * 2))
 }
-fn double(raw: String) => Int ! ParseError {
+fn double(raw: String) Int ! ParseError -[]> {
     n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
@@ -516,14 +514,12 @@ fn try_note_interpolation_is_lazy_on_success() {
     }
 
     let src = r#"
-fn present() => String ! {
-    return Ok("ok")
-}
-fn note_value() => String {
+fn present() String ! -> Ok("ok")
+fn note_value() String -[IO]> {
     print("evaluated")
     return "unexpected"
 }
-fn wrapped() => String ! {
+fn wrapped() String ! -[IO]> {
     value :: present()? "never {note_value()}"
     return Ok(value)
 }
@@ -549,14 +545,12 @@ fn uncaught_err_prints_propagation_chain() {
     // D-FAIL-CTX1=A: uncaught Err at `fn run() ?` prints the `?` journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
-fn read_raw() => String ! {
-    return Err("file not found")
-}
-fn parse_config() => String ! {
+fn read_raw() String ! -> Err("file not found")
+fn parse_config() String ! -[]> {
     raw :: read_raw()? "reading raw config"
     return Ok(raw)
 }
-fn load_config() => String ! {
+fn load_config() String ! -[]> {
     cfg :: parse_config()? "loading config"
     return Ok(cfg)
 }
@@ -599,7 +593,7 @@ fn propagation_trace_collapses_repeated_frames() {
     // The journey only reaches stderr when the failure escapes the entry, so
     // `run` propagates instead of recovering.
     let src = r#"
-fn dive(n: Int) => Int ! {
+fn dive(n: Int) Int ! -[]> {
     if n <= 0 {
         return Err("bottom")
     }

@@ -71,7 +71,7 @@ fn run() ! {
 fn origin_facts_clear_through_scrub_gate() {
     let src = r#"
 use core.files as files
-#Scrub(Input) fn clean(raw: #Input String) => String { return ~raw }
+#Scrub(Input) fn clean(raw: #Input String) String { return ~raw }
 fn run() ! {
     raw :: files.read("payload.txt") ?? return Err("test")
     safe :: clean(raw)
@@ -133,7 +133,7 @@ fn run() ! {
             "ffi",
             r#"
 extern rust "std" {
-    fn identity(value: String) => String = "std::convert::identity";
+    fn identity(value: String) String = "std::convert::identity";
 }
 fn run() {
     value :: identity("payload")
@@ -156,7 +156,7 @@ fn declared_tag_sources_and_destinations_drive_dataflow() {
     let src = r#"
 use core.process as process
 tag Untrusted { from: [source], deny: [Exec] }
-fn source() String :> "untrusted"
+fn source() String -> "untrusted"
 fn run() ! {
     value := source()
     process.run(["echo", value]) ?? return Err("test")
@@ -173,7 +173,7 @@ fn tagged_return_types_drive_dataflow() {
     let src = r#"
 use core.process as process
 tag PII { deny: [Exec] }
-fn account_name() #PII String :> "Ada"
+fn account_name() #PII String -> "Ada"
 fn run() ! {
     process.run(["echo", account_name()]) ?? return Err("test")
 }
@@ -210,7 +210,7 @@ use core.process as process
 tag Stored { from: [Store.read], deny: [Exec] }
 struct Store {
     value: String
-    fn read(self) String :> self.value
+    fn read(self) String -> self.value
 }
 fn run() ! {
     store := Store{ value: "Ada" }
@@ -229,7 +229,7 @@ fn scrub_removes_only_its_named_tag() {
 use core.process as process
 tag PII { deny: [Exec] }
 #Scrub(PII)
-fn redact(value: #PII String) String :> value
+fn redact(value: #PII String) String -> value
 fn run() ! {
     value := redact(#PII #Input "secret")
     process.run(["echo", value]) ?? return Err("test")
@@ -264,7 +264,7 @@ fn run() ! {
 fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
-#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
+#Scrub(Input) fn clean(raw: #Input String) String { return raw.split(" ").to_list()[0] }
 fn run() ! {
     name :: #Input "world; rm -rf /"
     safe := clean(name)
@@ -393,7 +393,7 @@ fn run() {
 #[test]
 fn sanitizer_fn_is_a_normal_function() {
     let src = r#"
-#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
+#Scrub(Input) fn clean(raw: #Input String) String { return raw.split(" ").to_list()[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -412,7 +412,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_fn_is_e0059() {
     let src = r#"
-sanitizer fn clean(raw: #Input String) => String { return raw.split(" ")[0] }
+sanitizer fn clean(raw: #Input String) String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -429,7 +429,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_pub_fn_is_e0059() {
     let src = r#"
-sanitizer pub fn clean(raw: #Input String) => String { return raw.split(" ")[0] }
+sanitizer pub fn clean(raw: #Input String) String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -583,7 +583,7 @@ fn run() {
 fn counted_loop_zero_iterations_keeps_pre_loop_taint() {
     let src = r#"
 use core.process as process
-#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
+#Scrub(Input) fn clean(raw: #Input String) String { return raw.split(" ").to_list()[0] }
 fn run(n: Int) ! {
     value := #Input "world; rm -rf /"
     loop i := 0, i < n {

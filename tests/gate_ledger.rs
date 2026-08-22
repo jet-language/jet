@@ -53,8 +53,8 @@ fn write_source_gate_kinds(root: &Path) {
     thirdish(scale: 2/3)
 }
 tag Input { deny: [IO] }
-#Scrub(Input) fn scrub(raw: #Input String) => String { return ~raw }
-#MustUse fn discardable() => Int { return 1 }
+#Scrub(Input) fn scrub(raw: #Input String) String -> { ~raw }
+#MustUse fn discardable() Int -> { 1 }
 
 fn run() {
     #Abilities(caps: IO) {}

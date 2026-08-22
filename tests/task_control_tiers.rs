@@ -12,12 +12,12 @@ use std::{fs, thread};
 const SOURCE: &str = r#"
 use core.time as time
 
-fn slow_three() => Int {
+fn slow_three() Int {
     time.sleep(25ms)
     return 3
 }
 
-fn slow_six() => Int {
+fn slow_six() Int {
     time.sleep(25ms)
     return 6
 }
@@ -51,12 +51,12 @@ const STREAM_EXPECTED: &str = include_str!("../examples/features/expected/stream
 const NESTED_SOURCE: &str = r#"
 use core.time as time
 
-fn slow_one() => Int {
+fn slow_one() Int {
     time.sleep(100ms)
     return 1
 }
 
-fn slow_three() => Int {
+fn slow_three() Int {
     time.sleep(100ms)
     return 3
 }
@@ -77,12 +77,12 @@ use core.time as time
 
 struct Mark { step: Int }
 
-fn win(state: Shared<Mark>) => Int {
+fn win(state: Shared<Mark>) Int {
     state.step = 1
     return 1
 }
 
-fn lose(state: Shared<Mark>) => Int {
+fn lose(state: Shared<Mark>) Int {
     time.sleep(100ms)
     state.step = 2
     return 2
@@ -198,7 +198,7 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
 /// A generator whose `yield` sits inside `#Shield`. The consumer's `break`
 /// cancels the producer child while it is parked at that yield.
 const SHIELDED_STREAM_SOURCE: &str = r#"
-fn shielded_tail() => Stream<Int> {
+fn shielded_tail() Stream<Int> {
     #Shield {
         yield 1
         print("shielded: after")

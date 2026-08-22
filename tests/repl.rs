@@ -488,8 +488,8 @@ impl Marker.Close {
     }
 }
 
-fn values() => Stream<Int> {
-    marker := Marker.{name: "stream"}
+fn values() Stream<Int> -[]> {
+    marker := Marker{name: "stream"}
     defer close(^marker)
     print("before")
     yield 1
@@ -540,7 +540,7 @@ fn repl_reset_clears_bindings() {
 
 #[test]
 fn repl_function_declare_and_call() {
-    let inputs = &["fn double(n: Int) => Int { return n * 2 }", "double(5)"];
+    let inputs = &["fn double(n: Int) Int -[]> { return n * 2 }", "double(5)"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("ok"),
@@ -571,7 +571,7 @@ fn repl_range_fact_proves_fixed_list_index() {
     let out = run_transcript(
         &[
             "Die :: distinct Int(1..6)",
-            "fn pick(faces: [String#6], roll: Die) => String { return faces[roll.raw() - 1] }",
+            "fn pick(faces: [String#6], roll: Die) String -[]> { return faces[roll.raw() - 1] }",
             "pick([\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\"], Die.from_int(3))",
         ],
         None,
@@ -956,7 +956,7 @@ fn repl_probe_exact_outputs() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) => Int { return x + 3; }\n",
+        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
     )
     .ok();
     let project_dir = fixture.to_string_lossy().to_string();
@@ -974,7 +974,7 @@ fn repl_project_loads_items() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) => Int { return x + 3; }\n",
+        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
     )
     .expect("write fixture");
 
@@ -1220,9 +1220,9 @@ fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
     let out = run_transcript(
         &[
             "struct Point { x: Int y: Int }",
-            "p :: Point.{x: 3, y: 4}",
+            "p :: Point{x: 3, y: 4}",
             "p.x + p.y",
-            "inc :: (x: Int) => x + 1",
+            "inc :: (x: Int) -> x + 1",
             "inc(4)",
             "words :: [\"jet\", \"repl\"]",
             "words[1]",
@@ -1240,7 +1240,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
     let out = run_transcript(
         &[
             "enum State { Ready(Int) }",
-            "fn state_value(s: State) => Int { if s == { .Ready(value) -> { return value } } return 0 }",
+        "fn state_value(s: State) Int -[]> { if s == { .Ready(value) -> { return value } } return 0 }",
             "items: [String] :: [\"jet\", \"repl\"]",
             "items[0]",
             "counts: [String:Int] :: [\"jet\": 2]",
@@ -2064,7 +2064,7 @@ fn bare_question_name_is_the_primary_docs_spelling() {
 #[test]
 fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
     let out = run_transcript(
-        &["fn answer() => Int { return 1 }", "answer :: 42", "?answer"],
+        &["fn answer() Int -[]> { return 1 }", "answer :: 42", "?answer"],
         None,
     );
     assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
@@ -2223,7 +2223,7 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
     let root = std::env::temp_dir().join(format!("jet_repl_rerun_project_{}", std::process::id()));
     std::fs::remove_dir_all(&root).ok();
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) => Int { return x + 3; }\n").unwrap();
+        std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) Int -[]> { return x + 3; }\n").unwrap();
     let shell = r#"
 {
   sleep 0.2
@@ -2798,12 +2798,12 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
         "use core.data as data",
         "table :: data.table([3, 1, 2])",
         "lazy :: data.lazy(table)",
-        "deferred :: data.lazy_filter(lazy, (x) => x > 10)",
+        "deferred :: data.lazy_filter(lazy, (x) -> x > 10)",
         "data.plan(deferred)",
-        "planned :: data.lazy_sort_by(data.lazy_filter(lazy, (x) => x > 1), (x) => \"{x}\")",
+        "planned :: data.lazy_sort_by(data.lazy_filter(lazy, (x) -> x > 1), (x) -> \"{x}\")",
         "data.rows(data.collect(planned))",
-        "data.inner_join([1, 2, 1], [1, 1], (x) => \"{x}\", (x) => \"{x}\")",
-        "data.left_join([1, 2], [1], (x) => \"{x}\", (x) => \"{x}\")",
+        "data.inner_join([1, 2, 1], [1, 1], (x) -> \"{x}\", (x) -> \"{x}\")",
+        "data.left_join([1, 2], [1], (x) -> \"{x}\", (x) -> \"{x}\")",
     ];
     let out = run_transcript(inputs, None);
     assert!(out.contains("[table, filter]"), "deferred plan missing: {out}");
@@ -2828,7 +2828,7 @@ fn repl_core_data_schema_empty_table_and_series_law() {
         "empty_table :: data.table(empty_rows)",
         "data.schema(empty_table)",
         "data.schema(data.series([1.0, 2.0]))",
-        "t :: Ticket.{team: \"Core\", minutes: 4.0}",
+        "t :: Ticket{team: \"Core\", minutes: 4.0}",
         "data.schema(data.series([t]))",
         "empty_tickets: [Ticket] := []",
         "data.schema(data.series(empty_tickets))",
@@ -2909,7 +2909,7 @@ fn repl_core_data_json_ingest_and_select() {
         r#"rows :: data.json<Ticket>(raw) ?? panic("bad json")"#,
         "table :: data.table(rows)",
         "data.schema(table)",
-        "selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)",
+        "selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)",
         "data.count(selected)",
         "data.status()[6]",
     ];
@@ -2947,7 +2947,7 @@ fn repl_file_argument_loads_definitions_without_running_entry() {
     let source = fixture.join("defs.jet");
     std::fs::write(
         &source,
-        "fn triple(n: Int) => Int { return n * 3 }\nfn run() { print(\"entry ran\"); }\n",
+        "fn triple(n: Int) Int -[]> { return n * 3 }\nfn run() { print(\"entry ran\"); }\n",
     )
     .unwrap();
 
@@ -3007,7 +3007,7 @@ fn repl_project_flag_value_is_not_read_as_the_preload_file() {
 
     let project = std::env::temp_dir().join(format!("jet_repl_proj_arg_{}", std::process::id()));
     std::fs::create_dir_all(&project).unwrap();
-    std::fs::write(project.join("helper.jet"), "fn helper() => Int { return 7 }\n").unwrap();
+    std::fs::write(project.join("helper.jet"), "fn helper() Int -[]> { return 7 }\n").unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .arg("repl")

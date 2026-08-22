@@ -66,7 +66,7 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) => String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }
@@ -76,7 +76,7 @@ fn receipt_id(receipt: ServiceReceipt) => String {
     return ""
 }
 
-fn receipt_kind(receipt: ServiceReceipt) => String {
+fn receipt_kind(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(_) -> { return "enqueued" }
         .Executed(_) -> { return "executed" }
@@ -180,7 +180,7 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) => String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }
@@ -190,7 +190,7 @@ fn receipt_id(receipt: ServiceReceipt) => String {
     return ""
 }
 
-fn receipt_kind(receipt: ServiceReceipt) => String {
+fn receipt_kind(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(_) -> { return "enqueued" }
         .Executed(_) -> { return "executed" }
@@ -877,11 +877,11 @@ fn workflow_wait_methods_publish_typed_effects() {
     fs::write(
         &entry,
         r#"
-fn time_wait(workflow: ServiceWorkflow, duration: Duration) :[Time]> {
+fn time_wait(workflow: ServiceWorkflow, duration: Duration) -[Time]> {
     workflow.sleep(duration) ?? return
 }
 
-fn activity_wait(workflow: ServiceWorkflow) :[IO]> {
+fn activity_wait(workflow: ServiceWorkflow) -[IO]> {
     workflow.activity("charge", "charge-1") ?? return
     workflow.all(["charge-1"]) ?? return
 }
@@ -1165,7 +1165,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) => String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }
@@ -1227,7 +1227,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) => String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }
@@ -1237,7 +1237,7 @@ fn receipt_id(receipt: ServiceReceipt) => String {
     return ""
 }
 
-fn receipt_kind(receipt: ServiceReceipt) => String {
+fn receipt_kind(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(_) -> { return "enqueued" }
         .Executed(_) -> { return "executed" }
@@ -1314,7 +1314,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) => String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }
@@ -1374,7 +1374,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) -> String {
+fn receipt_id(receipt: ServiceReceipt) String {
     if receipt == {
         .Enqueued(id) -> { return id }
         .Executed(id) -> { return id }

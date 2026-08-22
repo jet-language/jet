@@ -4,12 +4,12 @@ fn range_interval_proves_fixed_array_index() {
 tag Checked { deny: [Net] }
 Die :: distinct Int(1..6)
 
-fn pick(faces: [String#6], roll: Die) => String {
+fn pick(faces: [String#6], roll: Die) String -[]> {
     return faces[roll.raw() - 1]
 }
 
 fn run() {
-    faces :: [String#6].{ "zero", "one", "two", "three", "four", "five" }
+    faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
     print(pick(faces, Die.from_int(3)))
     print(pick(faces, #Checked Die.from_int(1)))
 }
@@ -65,13 +65,13 @@ tag Checked { deny: [Net] }
 Die :: distinct Int(1..6)
 
 #Target(JS)
-fn pick(faces: [String#6], roll: Die) => String {
+fn pick(faces: [String#6], roll: Die) String -[]> {
     return faces[roll.raw() - 1]
 }
 
 #Target(JS)
 fn run() {
-    faces :: [String#6].{ "zero", "one", "two", "three", "four", "five" }
+    faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
     print(pick(faces, Die.from_int(3)))
     print(pick(faces, #Checked Die.from_int(1)))
 }
@@ -117,7 +117,7 @@ fn parenthesized_view_place_return_keeps_parameter_provenance() {
         return;
     }
     let src = r#"
-fn first(values: [Int]) => View<Int> {
+fn first(values: [Int]) View<Int> -[]> {
     return (values[0..1])
 }
 
@@ -185,7 +185,7 @@ fn fnmut_collection_callback_preserves_capture_storage() {
 fn run() {
     values :: [1, 2, 3, 4]
     total := 0
-    values.each((n: Int) => { total = total + n })
+    values.each((n: Int) -> { total = total + n })
     print(total)
 }
 "#;
@@ -415,7 +415,7 @@ fn core_os_facts_and_interrupt_hook_compile() {
 use core.sys as os
 
 fn run() {
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> {
         print("interrupted")
     })
     print(os.name().len() > 0)
@@ -456,7 +456,7 @@ fn run() {
     indirect :: named_callback
     os.on_interrupt(named_callback)
     os.on_interrupt(indirect)
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> {
         print("inline")
         process.exit(0)
     })
@@ -516,10 +516,10 @@ fn stop_callback() {
 fn run() {
     loop indirect := stop_callback, true {
         named_alias :: named_callback
-        local_lambda :: () => {
+        local_lambda :: () -> {
             print("lambda")
         }
-        os.on_interrupt(() => {
+        os.on_interrupt(() -> {
             named_alias()
         })
         os.on_interrupt(local_lambda)
@@ -660,7 +660,7 @@ fn run() {
 use core.sys as os
 
 fn run() {
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> {
         print("interrupted")
     })
 }
@@ -695,8 +695,8 @@ use core.sys as os
 use core.process as process
 
 fn run() {
-    os.on_interrupt(() => { panic("first handler failed") })
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> { panic("first handler failed") })
+    os.on_interrupt(() -> {
         print("second")
         process.exit(0)
     })
@@ -759,12 +759,12 @@ use core.process as process
 use core.time as time
 
 fn run() {
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> {
         #Context(deadline: time.now()) {
             time.sleep(5ms)
         }
     })
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> {
         print("second")
         process.exit(0)
     })
@@ -915,8 +915,8 @@ use core.sys as os
 use core.process as process
 
 fn run() {
-    os.on_interrupt(() => { print("first") })
-    os.on_interrupt(() => {
+    os.on_interrupt(() -> { print("first") })
+    os.on_interrupt(() -> {
         print("second")
         process.exit(0)
     })

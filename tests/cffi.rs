@@ -51,7 +51,7 @@ fn forged_fortran_library_prefix_cannot_admit_list_abi() {
     ));
     fs::create_dir_all(&root).unwrap();
     let main = root.join("main.jet");
-    let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) => Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
+    let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
     fs::write(&main, source).unwrap();
     let diagnostics = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_err();
     assert!(
@@ -296,21 +296,21 @@ fn c_member_lists_resolve_each_library_and_alias_through_cffi() {
     let source = r#"use c.[c as libc, m]
 
 #Extern module c.c {
-    fn clamp(left: Int, middle: Int, right: Int) => Int = "libc_clamp"
+    fn clamp(left: Int, middle: Int, right: Int) Int = "libc_clamp"
 }
 #Extern module c.m {
-    fn version(left: Int, middle: Int, right: Int) => Int = "libm_version"
+    fn version(left: Int, middle: Int, right: Int) Int = "libm_version"
 }
 
 module c_scope {
     use c.[c as lib]
-    pub fn call() => Int {
+    pub fn call() Int {
         return lib.clamp(1, 2, 3)
     }
 }
 module m_scope {
     use c.[m as lib]
-    pub fn call() => Int {
+    pub fn call() Int {
         return lib.version(1, 2, 3)
     }
 }
@@ -372,15 +372,15 @@ fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
     let source = r#"use c.[c, m]
 
 #Extern module c.c {
-    fn first() => Int = "libc_first"
+    fn first() Int = "libc_first"
 }
 #Extern module c.m {
-    fn second() => Int = "libm_second"
+    fn second() Int = "libm_second"
 }
 
 module duplicate {
     use c.[c as lib, m as lib]
-    pub fn call() => Int {
+    pub fn call() Int {
         return lib.first()
     }
 }
@@ -443,12 +443,12 @@ fn foreign_js_import_uses_generated_binding_cache_for_symbols() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() => Int {\n    return 7\n}\n",
+        "pub fn scatter() Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() => Int {\n    return 8\n}\n",
+        "pub fn select() Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -466,16 +466,16 @@ fn foreign_js_inline_member_list_uses_the_same_binding_cache() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() => Int {\n    return 7\n}\n",
+        "pub fn scatter() Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() => Int {\n    return 8\n}\n",
+        "pub fn select() Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
-    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    pub fn inner() => Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
+    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    pub fn inner() Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
     fs::write(&main, src).unwrap();
 
     jet::compile_with_path(src, main.to_str().unwrap())
@@ -489,7 +489,7 @@ fn foreign_js_inline_pub_member_list_reexports_the_namespace() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() => Int {\n    return 7\n}\n",
+        "pub fn scatter() Int {\n    return 7\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -804,10 +804,10 @@ fn jet_bind_native_backend_end_to_end() {
     // The cache uses the real C symbol names verbatim (no aliasing).
     assert!(result
         .source
-        .contains("fn jetc_add_ints(a: Int, b: Int) => Int = \"jetc_add_ints\";"));
+        .contains("fn jetc_add_ints(a: Int, b: Int) Int = \"jetc_add_ints\";"));
     assert!(result
         .source
-        .contains("fn jetc_greeting() => String = \"jetc_greeting\";"));
+        .contains("fn jetc_greeting() String = \"jetc_greeting\";"));
     fs::write(cache.join("jetc.jet"), &result.source).unwrap();
 
     let main = root.join("main.jet");
@@ -884,14 +884,14 @@ fn cffi_end_to_end_links_and_runs() {
         cache.join("jetc.jet"),
         r#"#Bindgen module c.jetc.__bindgen__ {
     fn reset() = "jetc_reset";
-    fn value() => Int = "jetc_value_get";
+    fn value() Int = "jetc_value_get";
     fn store(value: Int) = "jetc_store";
-    fn twice(value: Int) => Int = "jetc_twice";
-    fn add_ints(a: Int, b: Int) => Int = "jetc_add_ints";
-    fn half(value: Float) => Float = "jetc_half";
-    fn sum6(a: Float, b: Float, c: Float, d: Float, e: Float, f: Float) => Float = "jetc_sum6";
-    fn echo(value: String) => String = "jetc_echo";
-    fn greeting() => String = "jetc_greeting";
+    fn twice(value: Int) Int = "jetc_twice";
+    fn add_ints(a: Int, b: Int) Int = "jetc_add_ints";
+    fn half(value: Float) Float = "jetc_half";
+    fn sum6(a: Float, b: Float, c: Float, d: Float, e: Float, f: Float) Float = "jetc_sum6";
+    fn echo(value: String) String = "jetc_echo";
+    fn greeting() String = "jetc_greeting";
 }
 "#,
     )
@@ -1013,7 +1013,7 @@ fn default_int_outside_i64_stops_at_c_boundary_with_e1003() {
     let main = root.join("main.jet");
     let source = r#"use c.jetc as c
 #Extern module c.jetc {
-    fn twice(value: Int) => Int = "jetc_twice"
+    fn twice(value: Int) Int = "jetc_twice"
 }
 fn run() {
     print(c.twice(9223372036854775808))
@@ -1171,12 +1171,12 @@ struct Coord {
 Meters :: distinct Int;
 
 #Extern module c.jetc436 {
-    fn add_u8(a: U8, b: U8) => U8 = "jetc436_add_u8";
-    fn add_i32(a: I32, b: I32) => I32 = "jetc436_add_i32";
-    fn add_f32(a: F32, b: F32) => F32 = "jetc436_add_f32";
-    fn make_point(x: Int, y: Int) => Coord = "jetc436_make_point";
-    fn point_sum(p: Coord) => Int = "jetc436_point_sum";
-    fn scale_meters(m: Meters) => Meters = "jetc436_scale_meters";
+    fn add_u8(a: U8, b: U8) U8 = "jetc436_add_u8";
+    fn add_i32(a: I32, b: I32) I32 = "jetc436_add_i32";
+    fn add_f32(a: F32, b: F32) F32 = "jetc436_add_f32";
+    fn make_point(x: Int, y: Int) Coord = "jetc436_make_point";
+    fn point_sum(p: Coord) Int = "jetc436_point_sum";
+    fn scale_meters(m: Meters) Meters = "jetc436_scale_meters";
 }
 
 fn run() {
@@ -1269,11 +1269,11 @@ enum Status { Ok = 0; Lost = 7 }
 #Layout(c, tag: U8)
 enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
 #Extern module c.reprc2 {
- fn repr_status(s: Status) => I32 = "repr_status"
- fn repr_packet(p: Packet) => I32 = "repr_packet"
- fn repr_packet_size() => I32 = "repr_packet_size"
- fn repr_packet_align() => I32 = "repr_packet_align"
- fn repr_packet_payload_offset() => I32 = "repr_packet_payload_offset"
+ fn repr_status(s: Status) I32 = "repr_status"
+ fn repr_packet(p: Packet) I32 = "repr_packet"
+ fn repr_packet_size() I32 = "repr_packet_size"
+ fn repr_packet_align() I32 = "repr_packet_align"
+ fn repr_packet_payload_offset() I32 = "repr_packet_payload_offset"
 }
 fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41))); print(c.repr_packet_size()); print(c.repr_packet_align()); print(c.repr_packet_payload_offset()) }
 "#).unwrap();
@@ -1303,7 +1303,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
         ),
     )
     .unwrap();
-    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\nfn increment(x: I32) =[]=> I32 { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) =[]=> I32, x: I32) => I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) =[]=> I32) => I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) => x + x, 10)) }\n").unwrap();
+    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\nfn increment(x: I32) I32 -[]> { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) I32 -[]>) I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) -> x + x, 10)) }\n").unwrap();
     let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
     assert!(out.rust.contains("extern \"C\" fn __jet_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
     fs::write(root.join("main.rs"),out.rust).unwrap();
@@ -1334,10 +1334,10 @@ fn cffi_raw_status_out_pointer_reads_only_on_success() {
 use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
-#Extern module c.store { fn store_load(id: U64, out: *Record) => I32 = "store_load"; }
-fn load(id: U64) => Record ! String {
-    slot := Record.{id: 0, flags: 0}
-    status := I32.{ 1 }
+#Extern module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
+fn load(id: U64) Record ! String {
+    slot := Record{id: 0, flags: 0}
+    status := I32{ 1 }
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)
@@ -1369,7 +1369,7 @@ fn cffi_sysv64_abi_executes_native_symbol() {
     fs::write(root.join("abi.c"),"#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
     declare_local_c_dep(&root, "abi");
-    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) => I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
+    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
     fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi"); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
 }
 
@@ -1381,7 +1381,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
     declare_local_c_dep(&root, "strret");
     for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
-        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() => String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
+        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
         let wrapper = out.rust
             .split_once("pub fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
@@ -1431,7 +1431,7 @@ fn cffi_runtime_interior_nul_panics_instead_of_silently_truncating() {
         r#"use c.jetc436 as c436
 
 #Extern module c.jetc436 {
-    fn takes_str(s: String) => Int = "jetc436_strlen";
+    fn takes_str(s: String) Int = "jetc436_strlen";
 }
 
 fn run() {
@@ -1511,7 +1511,7 @@ fn cffi_string_param_emits_cstring_conversion() {
     );
     fs::write(
         cache.join("strlib.jet"),
-        "#Bindgen module c.strlib.__bindgen__ { fn slen(s: String) => Int = \"strlib_slen\"; }\n",
+        "#Bindgen module c.strlib.__bindgen__ { fn slen(s: String) Int = \"strlib_slen\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -1548,7 +1548,7 @@ fn cffi_empty_overlay_is_bindgen_only() {
     build_local_c_provider(&root, "jetc", "long long jetc_ping(void) { return 7; }\n");
     fs::write(
         cache.join("jetc.jet"),
-        "#Bindgen module c.jetc.__bindgen__ { fn ping() => Int = \"jetc_ping\"; }\n",
+        "#Bindgen module c.jetc.__bindgen__ { fn ping() Int = \"jetc_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -1585,14 +1585,14 @@ fn cffi_overlay_overrides_bindgen() {
     );
     fs::write(
         cache.join("jetc.jet"),
-        "#Bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) => Int = \"gen_add\"; }\n",
+        "#Bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) Int = \"gen_add\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-#Extern module c.jetc { fn add(a: Int, b: Int) => Int = "real_add"; }
+#Extern module c.jetc { fn add(a: Int, b: Int) Int = "real_add"; }
 fn run() { print(jc.add(1, 2)); }
 "#,
     )
@@ -2095,7 +2095,7 @@ fn anonymous_union_is_rejected_before_c_ffi_codegen() {
     let src = r#"
 use c.union_boundary as c
 #Extern module c.union_boundary {
-    fn consume(value: Int | String) => Int = "consume"
+    fn consume(value: Int | String) Int = "consume"
 }
 fn run() { print(0) }
 "#;
@@ -2198,7 +2198,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     )
     .unwrap();
     let path = root.join("main.jet");
-    let src = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) => String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")); }\n";
+    let src = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")); }\n";
     fs::write(&path, src).unwrap();
 
     let shown = path.to_string_lossy();
@@ -2235,7 +2235,7 @@ fn concurrent_processes_share_one_bridge_build_per_key() {
     let root = common::unique_tmp("jet_ffi_concurrent");
     let cache = root.join("ffi-cache");
     fs::create_dir_all(&cache).unwrap();
-    let source = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) => String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")) }\n";
+    let source = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) String = \"base64::encode\";\n}\nfn run() { print(b64encode(\"hi\")) }\n";
 
     // Separate working directories: same source, so the same bridge key, but no
     // contention on `build/main` — this test is about the bridge cache, not the

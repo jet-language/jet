@@ -243,7 +243,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() => String :: \"ok\"\n}\n\nstate Report { Draft, Published }\n\n#Debug\nstruct Report {\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() String -> \"ok\"\n}\n\nstate Report { Draft, Published }\n\n#Debug\nstruct Report {\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));

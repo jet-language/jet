@@ -16,7 +16,7 @@ fn package_policy_cannot_authorize_unsafe() {
 #[test]
 fn manifest_memory_denial_uses_the_effects_rights_tree() {
     let package = jet::Package::PackageFacts::parse(
-        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: .{ holds: { deny: [Mem.Alloc(above: 65536)] } }\n",
+        "name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [Mem.Alloc(above: 65536)] } }\n",
         "test",
     )
     .unwrap();
@@ -81,21 +81,21 @@ fn organization_obligations_floor_rejects_package_relaxation() {
 #[test]
 fn organization_policy_document_is_exact_and_fails_closed() {
     let valid = jet::Package::parse_policy_document(
-        "policy: .{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }\n",
+        "policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }\n",
     )
     .unwrap();
     assert_eq!(valid.len(), 3);
     assert_eq!(valid[0].value, jet::Policy::PolicyValue::Obligations);
     assert_eq!(valid[1].key, jet::Policy::PolicyKey::Impure);
     assert_eq!(valid[2].key, jet::Policy::PolicyKey::Nondeterministic);
-    assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations").is_err());
-    assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations }\npackage: .{}").is_err());
+    assert!(jet::Package::parse_policy_document("policy: { unsafe: .Obligations").is_err());
+    assert!(jet::Package::parse_policy_document("policy: { unsafe: .Obligations }\npackage: {}").is_err());
 }
 
 #[test]
 fn package_policy_document_accepts_explicit_units() {
     let declarations = jet::Package::parse_policy_document(
-        "policy: .{ explicit_units: true }\n",
+        "policy: { explicit_units: true }\n",
     )
     .unwrap();
     assert_eq!(declarations.len(), 1);
@@ -106,13 +106,13 @@ fn package_policy_document_accepts_explicit_units() {
 #[test]
 fn copies_policy_is_package_and_source_explicit_only() {
     let declarations = jet::Package::parse_policy_document(
-        "policy: .{ copies: .Explicit }\n",
+        "policy: { copies: .Explicit }\n",
     )
     .unwrap();
     assert_eq!(declarations.len(), 1);
     assert_eq!(declarations[0].key, jet::Policy::PolicyKey::Copies);
     assert_eq!(declarations[0].value, jet::Policy::PolicyValue::Explicit);
-    assert!(jet::Package::parse_policy_document("policy: .{ copies: true }\n").is_err());
+    assert!(jet::Package::parse_policy_document("policy: { copies: true }\n").is_err());
 
     let source = "#Policy(copies: .Explicit)\nfn run() {}\n";
     let (tokens, lex) = jet::Lexer::lex(source);

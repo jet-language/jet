@@ -85,7 +85,7 @@ fn run() {
     loop i, 1..<4 {
         range = (range + i)
     }
-    pair :: Pair.{ left: value, right: range }
+    pair :: Pair{ left: value, right: range }
     xs := [v, pair.right]
     xs[0] = value
     loop item, xs {
@@ -112,49 +112,49 @@ fn binary_pattern_width_classes_match_all_tiers() {
 fn run() {
     subbyte :: [U8]{0xAB}
     if subbyte == {
-        [U8]{"{hi:U4}{lo:U4}"} :> { print("sub={hi}/{lo}") }
-        else :> { print("sub=miss") }
+        [U8]{"{hi:U4}{lo:U4}"} -> { print("sub={hi}/{lo}") }
+        else -> { print("sub=miss") }
     }
     aligned :: [U8]{0x01, 0x02}
     if aligned == {
-        [U8]{"{value:U16be}"} :> { print("aligned={value}") }
-        else :> { print("aligned=miss") }
+        [U8]{"{value:U16be}"} -> { print("aligned={value}") }
+        else -> { print("aligned=miss") }
     }
     non_power24 :: [U8]{0x01, 0x02, 0x03}
     if non_power24 == {
-        [U8]{"{be:U24be}"} :> { print("wide={be}") }
-        else :> { print("wide=miss") }
+        [U8]{"{be:U24be}"} -> { print("wide={be}") }
+        else -> { print("wide=miss") }
     }
     if non_power24 == {
-        [U8]{"{le:U24le}"} :> { print("wide-le={le}") }
-        else :> { print("wide-le=miss") }
+        [U8]{"{le:U24le}"} -> { print("wide-le={le}") }
+        else -> { print("wide-le=miss") }
     }
     non_power40 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05}
     if non_power40 == {
-        [U8]{"{be:U40be}"} :> { print("wide40={be}") }
-        else :> { print("wide40=miss") }
+        [U8]{"{be:U40be}"} -> { print("wide40={be}") }
+        else -> { print("wide40=miss") }
     }
     if non_power40 == {
-        [U8]{"{le:U40le}"} :> { print("wide40-le={le}") }
-        else :> { print("wide40-le=miss") }
+        [U8]{"{le:U40le}"} -> { print("wide40-le={le}") }
+        else -> { print("wide40-le=miss") }
     }
     non_power48 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
     if non_power48 == {
-        [U8]{"{be:U48be}"} :> { print("wide48={be}") }
-        else :> { print("wide48=miss") }
+        [U8]{"{be:U48be}"} -> { print("wide48={be}") }
+        else -> { print("wide48=miss") }
     }
     if non_power48 == {
-        [U8]{"{le:U48le}"} :> { print("wide48-le={le}") }
-        else :> { print("wide48-le=miss") }
+        [U8]{"{le:U48le}"} -> { print("wide48-le={le}") }
+        else -> { print("wide48-le=miss") }
     }
     non_power56 :: [U8]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07}
     if non_power56 == {
-        [U8]{"{be:U56be}"} :> { print("wide56={be}") }
-        else :> { print("wide56=miss") }
+        [U8]{"{be:U56be}"} -> { print("wide56={be}") }
+        else -> { print("wide56=miss") }
     }
     if non_power56 == {
-        [U8]{"{le:U56le}"} :> { print("wide56-le={le}") }
-        else :> { print("wide56-le=miss") }
+        [U8]{"{le:U56le}"} -> { print("wide56-le={le}") }
+        else -> { print("wide56-le=miss") }
     }
 }
 "#;
@@ -179,15 +179,15 @@ fn user_method_shadowing_builtin_name() {
 struct Crate {
     items: [Int]
 
-    fn get(self) => Int {
+    fn get(self) Int {
         return 42
     }
-    fn len(self) => Int {
+    fn len(self) Int {
         return 7
     }
 }
 fn run() {
-    b :: Crate.{ items: [1, 2, 3] }
+    b :: Crate{ items: [1, 2, 3] }
     print(b.get())
     print(b.len())
 }
@@ -218,7 +218,7 @@ struct ScanEntry {
     marks: [Int]
 }
 fn run() {
-    entry :: ScanEntry.{ relative: \"a-b-c\", marks: [1, 2, 1] }
+    entry :: ScanEntry{ relative: \"a-b-c\", marks: [1, 2, 1] }
     print(entry.relative.replace(\"-\", \"/\"))
     print(entry.relative.len())
     print(entry.marks.replace(1, 9))
@@ -256,7 +256,7 @@ fn run() {
     print(m.is_empty())
     s :: \"hi\"
     print(s.is_empty())
-empty :: [Int].{}
+empty :: [Int]{}
     check(empty)
     check([9])
 }
@@ -284,7 +284,7 @@ fn f(xs: [Int]) {
 }
 fn run() {
     f([10, 20])
-empty :: [Int].{}
+empty :: [Int]{}
     f(empty)
     print(99)
 }
@@ -310,7 +310,7 @@ struct Tree {
     value: Int
     child: Tree?
 }
-fn sum(t: Tree) => Int {
+fn sum(t: Tree) Int {
     total := t.value
 kid ::  t.child 
     if kid == {
@@ -322,11 +322,11 @@ kid ::  t.child
     return total
 }
 fn run() {
-    root :: Tree.{
+    root :: Tree{
         value: 3,
-        child: Val(Tree.{
+        child: Val(Tree{
             value: 2,
-            child: Val(Tree.{ value: 1, child: None })
+            child: Val(Tree{ value: 1, child: None })
         })
     }
     print(sum(root))
@@ -338,7 +338,7 @@ fn run() {
 }
 
 /// c109 (borrowed struct-lit value clone): a struct literal whose field value is a
-/// bare borrowed-in-env non-Copy ident (`Person.{ name: n }` where `n: String` is a
+/// bare borrowed-in-env non-Copy ident (`Person{ name: n }` where `n: String` is a
 /// `read` param → `&String`) emitted `__jet_name: (*__jet_n)` → rustc E0507 ("cannot
 /// move out of `*user_n`"). `field_read_to_clone` clones owning field READS but not a
 /// bare borrowed ident used as a struct-lit value; the fix clones it in sema's
@@ -352,8 +352,8 @@ fn borrowed_struct_lit_field_value_cloned() {
 struct Person {
     name: String
 }
-fn make(n: String) => Person {
-    return Person.{ name: n }
+fn make(n: String) Person {
+    return Person{ name: n }
 }
 fn run() {
     p :: make(\"Ada\")
@@ -365,7 +365,7 @@ fn run() {
     assert_eq!(stdout, "Ada\n");
 }
 
-/// c109 (B3): a struct-destructuring binding `Type.{ x, y } :: p` routes through
+/// c109 (B3): a struct-destructuring binding `Type{ x, y } :: p` routes through
 /// the TIR and prints the field sum, matching the old `BindPattern::Struct` baseline.
 #[test]
 fn struct_destructure_binding() {
@@ -375,8 +375,8 @@ fn struct_destructure_binding() {
     let src = "\
 struct Point { x: Int, y: Int }
 fn run() {
-    p :: Point.{ x: 1, y: 2 }
-    Point.{ x, y } :: p
+    p :: Point{ x: 1, y: 2 }
+    Point{ x, y } :: p
     print(x + y)
 }
 ";
@@ -399,17 +399,17 @@ struct Incident {
     title: String
     retries: Int
 }
-fn route(i: Incident) => String {
+fn route(i: Incident) String {
     if i == {
-        .{ kind: \"page\", title, .. } -> { return title }
-        .{ kind: \"ticket\", title, .. } -> { return title }
+        { kind: \"page\", title, .. } -> { return title }
+        { kind: \"ticket\", title, .. } -> { return title }
         else -> { return \"other\" }
     }
 }
 fn run() {
-    page :: Incident.{ kind: \"page\", title: \"database\", retries: 2 }
-    ticket :: Incident.{ kind: \"ticket\", title: \"docs\", retries: 1 }
-    other :: Incident.{ kind: \"note\", title: \"memo\", retries: 0 }
+    page :: Incident{ kind: \"page\", title: \"database\", retries: 2 }
+    ticket :: Incident{ kind: \"ticket\", title: \"docs\", retries: 1 }
+    other :: Incident{ kind: \"note\", title: \"memo\", retries: 0 }
     print(route(page))
     print(route(ticket))
     print(route(other))
@@ -429,7 +429,7 @@ fn user_enum_variant_if_let_condition() {
     }
     let src = "\
 enum Msg { Ping(Int) Pong }
-fn f(m: Msg) => Int {
+fn f(m: Msg) Int {
     if m == .Ping(n) {
         return n
     } else {
@@ -454,16 +454,16 @@ fn fixed_size_list_param_and_field() {
         return;
     }
     let src = "\
-fn double(n: Int) => Int {
+fn double(n: Int) Int {
     return (n * 2)
 }
 struct Grid { row: [Int#3] }
-fn firstof(xs: [Int#3]) => Int {
+fn firstof(xs: [Int#3]) Int {
     return xs[0]
 }
 fn run() {
-    print(firstof([Int#3].{ double(1), double(2), double(3) }))
-    g :: Grid.{ row: [Int#3].{ double(1), double(2), double(3) } }
+    print(firstof([Int#3]{ double(1), double(2), double(3) }))
+    g :: Grid{ row: [Int#3]{ double(1), double(2), double(3) } }
     print(g.row[1])
 }
 ";
@@ -480,11 +480,11 @@ fn inferred_fixed_list_widens_at_call() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) => Int {
+fn total(xs: [Int]) Int {
     return xs[0] + xs[1] + xs[2]
 }
 fn run() {
-    values :: [Int#3].{ 1, 2, 3 }
+    values :: [Int#3]{ 1, 2, 3 }
     print(total(values))
 }
 ";
@@ -504,7 +504,7 @@ fn fixed_size_list_widens_at_core_call() {
 use core.crypto.expert as expert
 
 fn run() {
-    seed :: [U8#32].{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }
+    seed :: [U8#32]{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }
     #Unsafe(\"fixed signature vector\") {
         signature :: expert.ed25519_sign(seed, [])
     }
@@ -527,16 +527,16 @@ fn mixed_switch_non_ident_subject_binds_payload() {
     }
     let src = "\
 struct Holder { val: Int? }
-fn f(h: Holder) => Int {
+fn f(h: Holder) Int {
     if h.val == {
         Val(c) -> { return c }
         else -> { return 0 }
     }
 }
 fn run() {
-    hold :: Holder.{ val: Val(5) }
+    hold :: Holder{ val: Val(5) }
     print(f(hold))
-    empty :: Holder.{ val: None }
+    empty :: Holder{ val: None }
     print(f(empty))
 }
 ";
@@ -556,10 +556,10 @@ fn mixed_switch_non_ident_subject_qualifies_variants() {
     }
     let src = "\
 enum Light { Red Green Yellow }
-fn pick() => Light {
+fn pick() Light {
     return Light.Red
 }
-fn classify() => Int {
+fn classify() Int {
     if pick() == {
         .Red -> { return 1 }
         .Green -> { return 2 }
@@ -586,8 +586,8 @@ fn comptime_local_is_literal_data() {
         return;
     }
     let src = "\
-fn build() => [Int] {
-    xs := [Int].{}
+fn build() [Int] {
+    xs := [Int]{}
     loop i, 1..3 {
         xs.push(i * 10)
     }
@@ -699,7 +699,7 @@ struct P {
 }
 
 fn run() {
-    p :: P.{ name: \"x\" }
+    p :: P{ name: \"x\" }
     s :: p.name
     t :: p.name
     print(s)
@@ -734,7 +734,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     s.scores[\"a\"] = 1
     print(s.scores[\"a\"])
 }
@@ -767,7 +767,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     print(s.scores.len())
 }
 ";
@@ -803,11 +803,11 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair.{left: 7, right: \"seven\"}
+@pair_value :: Pair{left: 7, right: \"seven\"}
 @light_value :: Light.Green
 
 fn run() {
-    p :: Pair.{left: 7, right: \"seven\"}
+    p :: Pair{left: 7, right: \"seven\"}
     l :: Light.Green
     print(\"{@pair_value.left}\")
     print(\"{p.left}\")
@@ -946,7 +946,7 @@ struct Point {
     x: Int
 }
 fn run() {
-    points := [Point.{x: 1}, Point.{x: 2}]
+    points := [Point{x: 1}, Point{x: 2}]
     points[0].x = 11
     points[0].x += 1
     print(points[0].x)
@@ -996,14 +996,14 @@ struct Holder {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) => Vec2 {
-        return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
+    fn add(self, rhs: Vec2) Vec2 {
+        return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 
 fn run() {
-    hs := [Holder.{ value: Vec2.{ x: 1, y: 2 } }]
-    hs[0].value += Vec2.{ x: 3, y: 4 }
+    hs := [Holder{ value: Vec2{ x: 1, y: 2 } }]
+    hs[0].value += Vec2{ x: 3, y: 4 }
     print("{hs[0].value.x},{hs[0].value.y}")
 }
 "#;

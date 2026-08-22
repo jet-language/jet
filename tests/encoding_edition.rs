@@ -130,7 +130,7 @@ fn edition_2027_cbor_encode_emits_l2001() {
 
 #[test]
 fn edition_2027_cbor_decode_emits_l2001_and_2028_removes_it() {
-    let source = "use core.encoding.cbor as cbor\n\nfn run() {\n    decoded := cbor.decode([U8].{ 0x81, 0x01 }) ?? panic(\"decode\")\n    print(decoded)\n}\n";
+    let source = "use core.encoding.cbor as cbor\n\nfn run() {\n    decoded := cbor.decode([U8]{ 0x81, 0x01 }) ?? panic(\"decode\")\n    print(decoded)\n}\n";
     let before = scratch("2027_cbor_decode");
     let before_path = write_project(&before, "2027", source);
     let before_diags = jet::check_with_path(before_path.to_str().unwrap());

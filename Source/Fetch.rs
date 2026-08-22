@@ -127,7 +127,7 @@ fn enforce_provenance_policy(
             "E1207",
             error,
             "authority.trust.require is an explicit provenance floor; Jet will not silently downgrade it".to_string(),
-            "record the required transparency or build evidence, or set `authority: .{ trust: { require: none } }`".to_string(),
+            "record the required transparency or build evidence, or set `authority: { trust: { require: none } }`".to_string(),
             None,
         )
     })

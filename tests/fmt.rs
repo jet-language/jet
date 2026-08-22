@@ -7,9 +7,9 @@ use std::fs;
 #[test]
 fn package_transition_surface_formats_canonically_and_idempotently() {
     let sources = [
-        "name: \"demo\"\noutputs: .{ app: .Executable.{ entry: run } }\n",
-        "pub development :: Config.{ environments: .{ development: .Environment.{ tools: [\"git\"] } } }\n",
-        "pub app :: Config.{ version: \"1\" }\n",
+        "name: \"demo\"\noutputs: .{ app: .Executable{ entry: run } }\n",
+        "pub development :: Config{ environments: .{ development: .Environment{ tools: [\"git\"] } } }\n",
+        "pub app :: Config{ version: \"1\" }\n",
     ];
 
     for source in sources {
@@ -42,7 +42,7 @@ fn type_alias_binding_sigils_are_canonical_and_idempotent() {
 
 #[test]
 fn fmt_preserves_script_and_declaration_source_order() {
-    let source = "message :: \"script entry\"\nprint(message)\n\nfn helper() => Int {\n    return 42\n}\n";
+    let source = "message :: \"script entry\"\nprint(message)\n\nfn helper() Int {\n    return 42\n}\n";
     let once = jet::format_source(source).expect("mixed script source should format");
     let message = once.find("message ::").expect("script binding should remain");
     let helper = once.find("fn helper").expect("declaration should remain");
@@ -54,7 +54,7 @@ fn fmt_preserves_script_and_declaration_source_order() {
 #[test]
 fn fmt_returned_function_calls_use_call_and_are_stable() {
     let source = r#"
-fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
+fn make_adder() fn(Int) Int -> (value: Int) -> value + 1
 
 fn run() {
     result :: make_adder().call(2)
@@ -79,9 +79,9 @@ fn package_formatter_fails_closed_on_comments() {
 #[test]
 fn typed_head_bodies_keep_raw_backslashes() {
     let src = r#"fn run() {
-    digits :: Regex.{"\d+"}
+    digits :: Regex{"\d+"}
     text :: "a\nb"
-    page :: HTML.{"<p>{name}</p>"}
+    page :: HTML{"<p>{name}</p>"}
 }
 "#;
     let once = jet::format_source(src).expect("typed head should format");
@@ -169,10 +169,10 @@ fn fmt_canonicalizes_unit_return_types() {
 fn fmt_parallel_collection_adapters_are_stable() {
     let src = r#"fn run() {
     values := [1, 2, 3, 4]
-    doubled :: values.para_map((n: Int) => n * 2)
-    even :: values.para_filter((n: Int) => n % 2 == 0)
-    split :: values.para_partition((n: Int) => n % 2 == 0)
-    total :: values.para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right)
+    doubled :: values.para_map((n: Int) -> n * 2)
+    even :: values.para_filter((n: Int) -> n % 2 == 0)
+    split :: values.para_partition((n: Int) -> n % 2 == 0)
+    total :: values.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)
 }
 "#;
     let once = jet::format_source(src).expect("parallel collection adapters should format");
@@ -206,7 +206,7 @@ fn computed_declaration_values_format_stably() {
 
 #[test]
 fn multi_head_function_surface_round_trips() {
-    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float :: r * r\nfn area(Rect(w: Float, h: Float)) => Float :: w * h\n";
+    let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) Float -> r * r\nfn area(Rect(w: Float, h: Float)) Float -> w * h\n";
     let once = jet::format_source(src).expect("multi-head functions should format");
     assert!(once.contains("fn area(Circle(r: Float)) Float -> r * r"));
     assert!(once.contains("fn area(Rect(w: Float, h: Float)) Float -> w * h"));
@@ -286,7 +286,7 @@ fn fmt_is_idempotent_on_examples() {
 #[test]
 fn fmt_preserves_binary_pattern_holes() {
     // D-BINPAT1 / D-UNIFYLIT1=A / D-LIT-DOT1=B: `[U8]{"…"}` must survive fmt with every hole intact.
-    let src = "fn run() {\n    packet :: [0x45]\n    if packet == {\n        [U8].{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"} -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
+    let src = "fn run() {\n    packet :: [0x45]\n    if packet == {\n        [U8]{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"} -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
     let once = jet::format_source(src).expect("binary pattern should format");
     assert!(
         once.contains("[U8]{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"}"),
@@ -320,7 +320,7 @@ fn fmt_preserves_typed_performance_budget_role() {
 
 #[test]
 fn fmt_preserves_rate_count_literal_spelling() {
-    let src = "fn run() {\n    rate :: Rate.{ count: 000_100, per: 2s }\n}\n";
+    let src = "fn run() {\n    rate :: Rate{ count: 000_100, per: 2s }\n}\n";
     let once = jet::format_source(src).expect("Rate count spelling should format");
     assert!(once.contains("count: 000_100"), "formatter rewrote Rate count:\n{once}");
     let twice = jet::format_source(&once).expect("formatted Rate count should parse");
@@ -332,7 +332,7 @@ fn fmt_preserves_s61_call_labels() {
     // S61: call-site argument labels (`name:`) must survive fmt — previously
     // `fmt_call_args` dropped them, so `area(width: 3, height: 4)` round-tripped
     // to `area(3, 4)`, silently losing the labels.
-    let src = "fn area(width: Int, height: Int) => Int {\n    return width * height\n}\n\nfn run() {\n    print(area(width: 3, height: 4))\n}\n";
+    let src = "fn area(width: Int, height: Int) Int {\n    return width * height\n}\n\nfn run() {\n    print(area(width: 3, height: 4))\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on labeled calls");
     assert!(
         out.contains("width: 3") && out.contains("height: 4"),
@@ -371,7 +371,7 @@ fn fmt_off_debug_only_statement_attributes_stability() {
 #[test]
 fn fmt_meta_attribute_stability() {
     let src = r#"#Meta(category: "Movement", tunable)
-fn step_speed(speed: Int) => Int {
+fn step_speed(speed: Int) Int {
     #Meta(category: "Movement", tunable)
     next :: speed + 1
     return next
@@ -435,7 +435,7 @@ fn fmt_keeps_transaction_comment_inside_transaction_block() {
 #[test]
 fn fmt_keeps_optional_return_sugar() {
     // D-ERRSIGIL1: bare `T?` is Optional; fallible is `T ! E`.
-    let src = r#"fn parse_count(raw: String) => Int? {
+    let src = r#"fn parse_count(raw: String) Int? {
     return Err("empty");
 }
 "#;
@@ -444,7 +444,7 @@ fn fmt_keeps_optional_return_sugar() {
         out.contains("fn parse_count(raw: String) Int? {"),
         "expected `Int?` optional return to stay `Int?`, got:\n{out}"
     );
-    let fallible = r#"fn parse_count(raw: String) => Int ! {
+    let fallible = r#"fn parse_count(raw: String) Int ! {
     return Err("empty");
 }
 "#;
@@ -455,7 +455,7 @@ fn fmt_keeps_optional_return_sugar() {
         "expected `Int !` fallible return to stay canonical, got:\n{fallible_out}"
     );
 
-    let retired = r#"fn parse_count(raw: String) => Int ? String {
+    let retired = r#"fn parse_count(raw: String) Int ? String {
     return Err("empty");
 }
 "#;
@@ -475,7 +475,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     let src = r#"fn run() {
     @if @build.os == {
         .Linux -> {
-            b :: LinuxBackend.{ name: "gtk" }
+            b :: LinuxBackend{ name: "gtk" }
             print(b.label())
         }
         .MacOS -> print("mac")
@@ -595,7 +595,7 @@ fn fmt_expands_multiline_lambda_dispatch_arms_without_losing_comments() {
     let src = r#"fn run() {
     value :: 1
     if value == {
-        1 -> apply(x => {
+        1 -> apply(x -> {
             // Keep this explanation with the lambda.
             return x + 1
         })
@@ -622,7 +622,7 @@ fn fmt_preserves_multiline_collection_literals() {
         2,
         3
     ]
-    typed :: [Int].{
+    typed :: [Int]{
         4,
         5,
         6
@@ -635,7 +635,7 @@ fn fmt_preserves_multiline_collection_literals() {
         x: 7,
         y: 8
     )
-    record :: Point.{
+    record :: Point{
         x: 9,
         y: 10
     }
@@ -663,24 +663,24 @@ fn fmt_preserves_comments_inside_multiline_collection_literals() {
         "a": /* mapped value */ 1,
         "b": 2
     ]
-    typed :: [Int].{
+    typed :: [Int]{
         // First typed value.
         3,
         4
     }
-    record :: Point.{
+    record :: Point{
         // Named field.
         x: /* field value */ 9,
         y: 10
     }
-    typed_lookup :: [String:Int].{
+    typed_lookup :: [String:Int]{
         "c": /* typed mapped value */ 5,
         "d": 6
     }
     empty :: [
         // Intentionally empty.
     ]
-    typed_empty :: [Int].{
+    typed_empty :: [Int]{
         /* Typed sentinel. */
     }
     print(values.len() + point.x + lookup.len() + typed.len())
@@ -887,7 +887,7 @@ fn run() {
 #[test]
 fn fmt_preserves_named_tuples() {
     // S73 (D-SG7): named tuple literals, types, access, and destructuring round-trip.
-    let src = r#"fn bounds() => (min: Int, max: Int) {
+    let src = r#"fn bounds() (min: Int, max: Int) {
     return (min: 0, max: 10)
 }
 
@@ -933,7 +933,7 @@ fn fmt_preserves_optional_chaining() {
 
 #[test]
 fn fmt_canonicalizes_collection_type_sugar() {
-    let src = r#"fn shell() => [JSON] {
+    let src = r#"fn shell() [JSON] {
     return [
         JSON.Null;
     ];
@@ -963,7 +963,7 @@ fn use_collections(items: [String], counts: [String:Int]) {}
 
 #[test]
 fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
-    let source = "fn answer() => Int {\n    return 42\n}\n";
+    let source = "fn answer() Int {\n    return 42\n}\n";
     let plain = jet::format_source(source).expect("plain fmt should format");
     assert!(plain.contains("fn answer() Int { return 42 }"), "{plain}");
     assert!(!plain.contains(":: 42"), "plain fmt must not simplify:\n{plain}");
@@ -990,12 +990,12 @@ fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
     );
 
     let wide_name = "wide_value".repeat(12);
-    let wide = format!("fn wide() => Int {{ return {wide_name} }}\n");
+    let wide = format!("fn wide() Int {{ return {wide_name} }}\n");
     let wide_out = jet::format_source_with_options(&wide, options)
         .expect("wide simplify input should format");
     assert!(!wide_out.contains(" :: "), "wide bodies must stay braced:\n{wide_out}");
 
-    let commented = "fn noted() => Int {\n    // keep this note\n    return 42\n}\n";
+    let commented = "fn noted() Int {\n    // keep this note\n    return 42\n}\n";
     let commented_out = jet::format_source_with_options(commented, options)
         .expect("commented simplify input should format");
     assert!(
@@ -1003,7 +1003,7 @@ fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
         "commented bodies must stay braced:\n{commented_out}"
     );
 
-    let nested_commented = "fn noted() => Point {\n    return Point.{x: 1, y: 2} // keep this note\n}\n";
+    let nested_commented = "fn noted() Point {\n    return Point{x: 1, y: 2} // keep this note\n}\n";
     let nested_commented_out = jet::format_source_with_options(&nested_commented, options)
         .expect("nested commented simplify input should format");
     assert!(
@@ -1024,7 +1024,7 @@ fn fmt_simplify_leaves_a_recovered_parse_alone() {
     // baseline for the identity check, so the mode degrades to plain fmt.
     let options = jet::Formatter::FormatOptions { simplify: true };
     let broken = include_str!("ui/control_body_needs_braces.jet");
-    let source = format!("fn answer() => Int {{\n    return 42\n}}\n\n{broken}");
+    let source = format!("fn answer() Int {{\n    return 42\n}}\n\n{broken}");
 
     let plain = jet::format_source(&source).expect("a recovered parse still formats");
     let simplified = jet::format_source_with_options(&source, options)
@@ -1048,7 +1048,7 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
     // binding itself must come out byte-identical, since R1 only ever collapses
     // a braced single-`return` function body.
     let options = jet::Formatter::FormatOptions { simplify: true };
-    let source = "fn answer() => Int {\n    return 42\n}\n\nfn search() => Int {\n    values :: [Int].{1, 2, 3, 4}\n    first :: loop value, values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n";
+    let source = "fn answer() Int {\n    return 42\n}\n\nfn search() Int {\n    values :: [Int]{1, 2, 3, 4}\n    first :: loop value, values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n";
 
     let plain = jet::format_source(source).expect("a routed value loop should format");
     let simplified = jet::format_source_with_options(&plain, options)
@@ -1083,7 +1083,7 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
     // struct literal can be read back there. R1 must leave that body braced
     // rather than write source that no longer parses.
     let options = jet::Formatter::FormatOptions { simplify: true };
-    let source = "struct Rect {\n    width: Int,\n    height: Int\n}\n\nfn make(width: Int, height: Int) => Rect {\n    return Rect.{width: width, height: height}\n}\n\nfn run() {}\n";
+    let source = "struct Rect {\n    width: Int,\n    height: Int\n}\n\nfn make(width: Int, height: Int) Rect {\n    return Rect{width: width, height: height}\n}\n\nfn run() {}\n";
 
     let once = jet::format_source_with_options(source, options)
         .expect("a struct-literal return must stay parseable under simplify");
@@ -1141,7 +1141,7 @@ fn fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table() {
     // (L0507 says so in the lint). The rewrite must emit source that parses
     // back, which is what the simplify identity check re-reads.
     let options = jet::Formatter::FormatOptions { simplify: true };
-    let source = "fn grade(score: Int) => String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
+    let source = "fn grade(score: Int) String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
 
     let once = jet::format_source_with_options(source, options)
         .expect("R2 must emit source the parser reads back");
@@ -1162,7 +1162,7 @@ fn fmt_output_for_a_classic_else_if_chain_parses_again() {
     // D-ONELINE-BODY1=B: plain fmt collapses a short chain to one `->` body per
     // arm. Every arm of a chain must read that shape back, or `jet fmt` writes
     // a file the compiler then rejects.
-    let source = "fn grade(score: Int) => String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
+    let source = "fn grade(score: Int) String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n";
     let once = jet::format_source(source).expect("the chain formats");
     let (tokens, lex_diags) = jet::Lexer::lex(&once);
     assert!(lex_diags.is_empty(), "{lex_diags:?}");
@@ -1177,7 +1177,7 @@ fn fmt_output_for_a_classic_else_if_chain_parses_again() {
 
 #[test]
 fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
-    let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
+    let source = "fn read(values: [String: Int]) [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
     assert!(once.contains("values: [String:Int]"), "{once}");
     assert!(once.contains(") [String:Int] {"), "{once}");
@@ -1274,7 +1274,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_optional_result_variants() {
-    let src = r#"fn f(flag: Bool) => Int ! String {
+    let src = r#"fn f(flag: Bool) Int ! String {
     maybe :: .Val(1)
     empty :: .None
     if maybe == {
@@ -1296,10 +1296,10 @@ fn fmt_preserves_optional_result_variants() {
 #[test]
 fn fmt_canonicalizes_anonymous_union_types() {
     // D-UNIONTYPE1=A: order-insensitive identity; formatter prints canonical member order.
-    let src = r#"fn hold(v: String | Int) => Int | String {
+    let src = r#"fn hold(v: String | Int) Int | String {
     return v
 }
-fn parse(raw: String) => Int ! String | Bool {
+fn parse(raw: String) Int ! String | Bool {
     return .Err(false)
 }
 "#;
@@ -1468,7 +1468,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     // already use parser shapes owned by existing generic/type/call/loop
     // grammar. Future task/shared/select forms stay on their implementation
     // cards and do not get parser stubs here.
-    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) => TaskFailure {
+    let src = r#"fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) TaskFailure {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
@@ -1770,7 +1770,7 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
 
 #[test]
 fn fmt_preserves_memo_bound_marker() {
-    let src = "#Memo(bound: none) fn cube(value: Int) =[]=> Int :: value * value * value\n\nfn run() {}\n";
+    let src = "#Memo(bound: none) fn cube(value: Int) Int -[]> value * value * value\n\nfn run() {}\n";
     assert_fmt_stable(src, "#Memo(bound: none) marker");
 }
 
@@ -1867,7 +1867,7 @@ fn fmt_stable_at_marked_fn_and_struct() {
     // idempotence — idempotence alone misses a formatter that drops a token
     // on the FIRST pass) for an `@`-marked fn and an `@`-marked struct.
     let fn_src = "\
-fn double(n: Int) =[]=> Int {
+fn double(n: Int) Int -[]> {
     return (n * 2)
 }
 ";
@@ -1885,16 +1885,16 @@ struct Particle {
 #[test]
 fn fmt_stable_effect_arrows() {
     let src = "\
-fn load(path: String) =[FS.Read, ..E]=> String {
+fn load(path: String) String -[FS.Read, ..E]> {
     return path
 }
 
-fn visit(callback: fn(Int) =[IO]=>) =[via callback]=> {
+fn visit(callback: fn(Int) -[IO]>) -[via callback]> {
     callback(1)
 }
 
-// `=[]=>` replaces the retired `#Pure` marker without moving this comment.
-fn hash(n: Int) =[]=> Int {
+// `-[]>` replaces the retired `#Pure` marker without moving this comment.
+fn hash(n: Int) Int -[]> {
     return n
 }
 ";
@@ -1955,7 +1955,7 @@ enum Shape {
 #[test]
 fn fmt_keeps_replayable_marker() {
     let src = "\
-#Replayable fn replay_turn(seed: Int) => Int {
+#Replayable fn replay_turn(seed: Int) Int {
     return seed + 1
 }
 ";
@@ -1971,11 +1971,11 @@ fn fmt_keeps_typestate_markers() {
 struct Reservation {
     guest: String
 
-    #Transition(_, Pending) fn book(guest: String) => Reservation {
-        return Reservation.{guest: ~guest}
+    #Transition(_, Pending) fn book(guest: String) Reservation {
+        return Reservation{guest: ~guest}
     }
 
-    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) Reservation {
         return self
     }
 
@@ -2046,7 +2046,7 @@ fn fmt_impure_block_no_reason_round_trips() {
 fn fmt_unsafe_reasons_escape_strings() {
     // D-UNSAFE-REASON1=A: unsafe block/function reasons are normal string
     // literals, so fmt must preserve quotes/backslashes as parseable Jet.
-    let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() => Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
+    let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on unsafe reasons");
     assert!(
         out.contains("#Unsafe(\"caller says \\\"ok\\\"\")")
@@ -2141,7 +2141,7 @@ fn fmt_dot_construction_d_dotctor1() {
 
 #[test]
 fn fmt_inferred_new_stability() {
-    let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) => Box<T> {\n        return Box<T>.{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected :: Box<Int>.new(3)\n}\n";
+    let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) Box<T> {\n        return Box<T>{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected :: Box<Int>.new(3)\n}\n";
     let out = jet::format_source(src).expect("fmt should accept `.new(...)`");
     for spelling in ["Box.new(1)", "Box<Int>.new(2)", ".new(3)"] {
         assert!(out.contains(spelling), "formatter lost `{spelling}`:\n{out}");
@@ -2163,7 +2163,7 @@ enum Shape {
     Empty
 }
 
-fn describe(s: Shape) => String {
+fn describe(s: Shape) String {
     if s == {
         .Circle(r) -> { return \"circle:{r}\" }
         .Square(side) -> { return \"square:{side}\" }
@@ -2190,7 +2190,7 @@ enum Shape {
     Square(Float)
 }
 
-fn area(s: Shape) => Float {
+fn area(s: Shape) Float {
     if s == {
         Circle(r) -> { return r * r }
         Square(side) -> { return side * side }
@@ -2224,7 +2224,7 @@ fn fmt_comptime_splice_stability() {
     // (Expr::ComptimeName). The formatter must emit it as `@name` so that
     // the round-trip is stable (previously the mark could be silently dropped
     // if it reached the formatter without an AST node).
-    let src = "derive T.Debug {\n    fn tag(self) => String :: \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
+    let src = "derive T.Debug {\n    fn tag(self) String -> \"ok\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
     let once = jet::format_source(src).expect("fmt should accept a typed derive body");
     let twice = jet::format_source(&once).expect("second fmt should succeed");
     assert_eq!(
@@ -2233,7 +2233,7 @@ fn fmt_comptime_splice_stability() {
     );
 
     // Standalone `@name` expression (outside emit string) round-trips as `@name`.
-    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) => String :: @tname\n}\n\nfn run() {}\n";
+    let splice_src = "derive T.Named {\n    tname :: \"test\"\n    x :: @tname\n    fn @tname(self) String -> @tname\n}\n\nfn run() {}\n";
     let splice_once = jet::format_source(splice_src).expect("fmt should accept @name expression");
     assert!(
         splice_once.contains("@tname"),
@@ -2285,13 +2285,13 @@ fn fmt_impl_dot_trait_stability() {
     // D-IMPLDOT1=A: `impl Type.Trait { … }` round-trips unchanged.
     let src = "\
 trait Greet {
-    fn hello(self) => String;
+    fn hello(self) String;
 }
 
 struct Foo {}
 
 impl Foo.Greet {
-    fn hello(self) => String {
+    fn hello(self) String {
         return \"hi\"
     }
 }
@@ -2442,7 +2442,7 @@ struct Player {
 }
 
 impl Player {
-    fn show(self) => Int { return self.hp }
+    fn show(self) Int { return self.hp }
 
     fn heal(&self, amount: Int) { self.hp = self.hp + amount }
 }
@@ -2451,12 +2451,12 @@ fn damage(p: &Player, amount: Int) {
     p.hp = p.hp - amount
 }
 
-fn archive(p: ^Player) => Int {
+fn archive(p: ^Player) Int {
     return p.hp
 }
 
 fn run() {
-    p := Player.{hp: 100}
+    p := Player{hp: 100}
     damage(&p, 10)
     p.heal(5)
     print(archive(^p))
@@ -2513,14 +2513,14 @@ struct Ticket {
     label: String
 }
 
-fn archive(t: ^Ticket) => String {
+fn archive(t: ^Ticket) String {
     return t.label
 }
 
 fn run() {
     name :: \"vault\"
     saved :: ~name
-    t :: Ticket.{id: 1, label: \"root\"}
+    t :: Ticket{id: 1, label: \"root\"}
     print(archive(~t))
     print(~t.label)
 }
@@ -2564,7 +2564,7 @@ fn run() {
 
 #[test]
 fn fmt_loop_values_and_yielding_loops_are_idempotent() {
-    let src = r#"fn find(xs: [Int]) => Int {
+let src = r#"fn find(xs: [Int]) Int {
     found :: loop {
         loop x, xs {
             if x > 2 { break(found, x) }
@@ -2575,7 +2575,7 @@ fn fmt_loop_values_and_yielding_loops_are_idempotent() {
 }
 
 fn run() {
-    xs :: [Int].{ 1, 2, 3, 4 }
+    xs :: [Int]{ 1, 2, 3, 4 }
     values :: loop x, xs -> {
         if x > 3 { break }
         x * 2
@@ -2629,7 +2629,7 @@ fn run() {
 
 #[test]
 fn fmt_unified_loop_headers_and_next_stability() {
-    let src = "fn next() => Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item, [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
+    let src = "fn next() Int { return 7 }\n\nfn run() {\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item, [1, 2, 3], 2 {\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 { next }\n    }\n}\n";
     assert_fmt_keeps(
         src,
         &[
@@ -2745,7 +2745,7 @@ fn fmt_selective_import_d_selimport1_stability() {
     // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
     let src = "\
 module math {
-    pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
+    pub fn clamp(x: Int, lo: Int, hi: Int) Int {
         if x < lo { return lo }
         if x > hi { return hi }
         return x
@@ -2781,7 +2781,7 @@ fn run() {
 fn fmt_value_tag_type_d_qual4_stability() {
     // D-QUAL4=A: `#TagName T` in type position must survive fmt unchanged.
     let src = "\
-fn process(input: #Input String) => String {
+fn process(input: #Input String) String {
     return \"{input}-clean\"
 }
 
@@ -2826,7 +2826,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_multiline_lambda_call_arg() {
-    // D-TRAILBLOCK2=A: multiline `() => { … }` inside call parentheses is the
+    // D-TRAILBLOCK2=A: multiline `() -> { … }` inside call parentheses is the
     // spelling for code-as-argument; fmt must round-trip it byte-for-byte and
     // must not rewrite it into retired trailing-block sugar.
     let src = "\
@@ -2836,13 +2836,13 @@ fn twice(f: fn()) {
 }
 
 fn run() {
-    twice(() => {
+    twice(() -> {
         print(\"HI\")
         print(\"Hello\")
     })
 }
 ";
-    assert_fmt_stable(src, "multiline () => call arg");
+    assert_fmt_stable(src, "multiline () -> call arg");
 }
 
 #[test]
@@ -2852,9 +2852,9 @@ fn fmt_preserves_bare_lambda_params() {
     let src = "\
 fn run() {
     nums :: [1, 2, 3, 4, 5]
-    big :: nums.filter(x => x > 3)
-    explicit :: nums.filter((x) => x > 3)
-    typed :: nums.filter((n: Int) => n > 3)
+    big :: nums.filter(x -> x > 3)
+    explicit :: nums.filter((x) -> x > 3)
+    typed :: nums.filter((n: Int) -> n > 3)
     print(big)
     print(explicit)
     print(typed)
@@ -2876,7 +2876,7 @@ struct Incident {
 }
 
 fn run() {
-    Incident.{id, severity: sev, ..} :: Incident.{id: 1, severity: 5, title: \"boom\"}
+    Incident{id, severity: sev, ..} :: Incident{id: 1, severity: 5, title: \"boom\"}
     print(\"{id} {sev}\")
 }
 ";
@@ -2894,7 +2894,7 @@ struct Incident {
 }
 
 fn run() {
-    routed :: Incident.{title: \"database down\", kind: \"page\"}
+    routed :: Incident{title: \"database down\", kind: \"page\"}
     if routed == {
         { kind: \"page\", title, .. } -> print(\"page {title}\")
         else -> print(\"other\")
@@ -2990,7 +2990,7 @@ struct Brightness {
     level: Int(0..100)
 }
 
-fn set_brightness(level: Int(0..100)) => Int(0..100) {
+fn set_brightness(level: Int(0..100)) Int(0..100) {
     return level
 }
 
@@ -3048,20 +3048,20 @@ fn render(h: HTML) {
 
 fn run() {
     id :: 42
-    q :: SQL.{\"select * from t where id = {id}\"}
+    q :: SQL{\"select * from t where id = {id}\"}
     run_query(q)
     name :: \"Jet\"
-    page :: HTML.{\"<p>{name}</p>\"}
+    page :: HTML{\"<p>{name}</p>\"}
     render(page)
     trusted :: HTML.raw(\"<b>audited</b>\")
     render(trusted)
     arg :: \"two words;*.jet\"
-    expected :: Sh.{\"printf <%s> {arg}\"}
+    expected :: Sh{\"printf <%s> {arg}\"}
     audited_cmd :: Sh.raw(\"printf raw\")
-    pattern :: Regex.{\"(\\d+)-(\\d+)\"}
-    endpoint :: URL.{\"https://api.example.com/v2/{name}\"}
-    log_path :: Path.{\"/var/log/{name}.log\"}
-    stamp :: DateTime.{\"2026-08-07T12:00:00Z\"}
+    pattern :: Regex{\"(\\d+)-(\\d+)\"}
+    endpoint :: URL{\"https://api.example.com/v2/{name}\"}
+    log_path :: Path{\"/var/log/{name}.log\"}
+    stamp :: DateTime{\"2026-08-07T12:00:00Z\"}
 }
 ";
     assert_fmt_stable(src, "typed text");
@@ -3072,7 +3072,7 @@ fn fmt_preserves_yield() {
     // D-STREAMYIELD1: `yield` must keep its own line, and `Stream<T>` in the
     // return-type position must survive byte-for-byte.
     let src = "\
-fn count(n: Int) => Stream<Int> {
+fn count(n: Int) Stream<Int> {
     i := 0
     loop i < n {
         yield i
@@ -3129,7 +3129,7 @@ fn fmt_preserves_contracts() {
     // marker uses (`#State(…)`, `#Transition(…)`, `#Pure`, `#MustUse`, …;
     // I8: one way to mean it), not one clause per line.
     let src = "\
-#[Pre(cents > 0, \"cents must be positive\"), Post(result > cents, \"result must exceed cents\")] fn add_fee(cents: Int) => Int {
+#[Pre(cents > 0, \"cents must be positive\"), Post(result > cents, \"result must exceed cents\")] fn add_fee(cents: Int) Int {
     return cents + 5
 }
 
@@ -3204,10 +3204,10 @@ fn fmt_preserves_generic_type_param_bound_list() {
     // `<T: A + B>`. Single-trait bounds stay bare.
     let src = "\
 trait Loud {
-    fn shout(self) => String
+    fn shout(self) String
 }
 
-fn describe<T: [Renderable, Loud]>(item: T) => String {
+fn describe<T: [Renderable, Loud]>(item: T) String {
     return item.shout()
 }
 ";
@@ -3217,7 +3217,7 @@ fn describe<T: [Renderable, Loud]>(item: T) => String {
 #[test]
 fn fmt_preserves_quantity_dimension_kind_bound() {
     let src = "\
-fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q {
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q {
     return value
 }
 ";
@@ -3272,13 +3272,13 @@ fn run() {
 #[test]
 fn fmt_preserves_uninit_sentinel() {
     // D-UNINIT-SENTINEL2: formatter special-cases `b.uninit` and prints
-    // `Type.{ uninit }` from the binding type (init AST is a never-evaluated
+    // `Type{ uninit }` from the binding type (init AST is a never-evaluated
     // placeholder). Round-trip must stay byte-identical.
     let src = "\
 use core.mem
 
 fn run() {
-    n := Int.{ uninit }
+    n := Int{ uninit }
     n = 99
     print(n)
 }
@@ -3301,7 +3301,7 @@ struct Stats {
 }
 
 fn run() {
-    s := Stats.{strength: 10, gear_mod: 3}
+    s := Stats{strength: 10, gear_mod: 3}
     print(\"attack: {s.attack}\")
 }
 ";
@@ -3315,24 +3315,24 @@ fn fmt_preserves_inline_contracts() {
     // CLAUDE-memory rule: new syntax needs a formatter round-trip test, not
     // just a parser).
     let src = "\
-#Inline fn square(x: Int) => Int {
+#Inline fn square(x: Int) Int {
     return x * x
 }
 
-#Inline(Always) fn double(x: Int) => Int {
+#Inline(Always) fn double(x: Int) Int {
     return x * 2
 }
 
 struct Meters {
     value: Int
 
-    #Inline(Always) fn plus(self, other: Int) => Int {
+    #Inline(Always) fn plus(self, other: Int) Int {
         return self.value + other
     }
 }
 
 fn run() {
-    m :: Meters.{value: 7}
+    m :: Meters{value: 7}
     print(\"{square(4)} {double(5)} {m.plus(3)}\")
 }
 ";
@@ -3345,7 +3345,7 @@ fn fmt_preserves_unsafe_site_modes_and_postfix_obligations() {
 use core.mem
 
 #Unsafe(\"caller keeps address live\", obligations: .Track)
-fn read(address: Int) => Int {
+fn read(address: Int) Int {
     pointer :: mem.Ptr<Int>.from_addr(address)
     assert valid_ptr, aligned
     value :: mem.volatile_read(pointer)
@@ -3392,7 +3392,7 @@ fn fmt_os_target_marker_stability() {
     // D-OSTARGET1=A: `#Target(OS.Linux)` precedes the `impl` block it gates,
     // on its own line — item-scoped, not file-scoped, so (unlike the two
     // markers above) it keeps the author's own position.
-    let src = "trait Backend {\n    fn label(self) => String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(OS.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) => String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
+    let src = "trait Backend {\n    fn label(self) String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(OS.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Target(OS.Linux) marker");
 }
 
@@ -3418,7 +3418,7 @@ fn fmt_typed_derive_body_comment_not_duplicated() {
     // D-META-CODE1: a derive body is a typed item template. Its comments are
     // walked with the ordinary formatter and must remain attached exactly
     // once across repeated formatting.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) => String :: @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: @tname\n    fn label(self) String -> @lbl\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -3436,7 +3436,7 @@ fn fmt_preserves_call_spread() {
     // that flag, so every spread call argument silently lost its `...` on
     // the first fmt pass (a real behavior change: `join("tags:", ...parts)`
     // reformatted to `join("tags:", parts)`, which then fails to type-check).
-    let src = "fn join(prefix: String, msgs: ...String) => String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn run() {\n    parts := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
+    let src = "fn join(prefix: String, msgs: ...String) String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn run() {\n    parts := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
     assert_fmt_stable(src, "call-argument spread");
 }
 
@@ -3445,7 +3445,7 @@ fn fmt_preserves_trait_associated_type() {
     // D-LIB2: `fmt_trait` only ever walked `t.methods`, never
     // `t.assoc_types` — a trait's `type Elem` associated-type declaration
     // was silently dropped on every fmt pass.
-    let src = "trait Indexed {\n    type Elem\n    fn at(self, i: Int) => Elem\n    fn count(self) => Int\n}\n\nstruct Nums {\n    vals: [Int]\n}\n\nimpl Nums.Indexed {\n    type Elem = Int\n\n    fn at(self, i: Int) => Int {\n        return self.vals[i]\n    }\n\n    fn count(self) => Int {\n        return self.vals.len()\n    }\n}\n\nfn run() {\n    n :: Nums.{vals: [10, 20, 30]}\n    print(n.at(0))\n    print(n.count())\n}\n";
+    let src = "trait Indexed {\n    type Elem\n    fn at(self, i: Int) Elem\n    fn count(self) Int\n}\n\nstruct Nums {\n    vals: [Int]\n}\n\nimpl Nums.Indexed {\n    type Elem = Int\n\n    fn at(self, i: Int) Int {\n        return self.vals[i]\n    }\n\n    fn count(self) Int {\n        return self.vals.len()\n    }\n}\n\nfn run() {\n    n :: Nums{vals: [10, 20, 30]}\n    print(n.at(0))\n    print(n.count())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on trait assoc types");
     assert!(
         out.contains("type Elem\n"),
@@ -3461,7 +3461,7 @@ fn fmt_preserves_pure_callback_bound_sigil() {
     // `#Pure ` (a contract marker, `@`-plane) but the code wrote the literal
     // The effect row belongs inside the callable arrow and must survive the
     // first formatting pass unchanged.
-    let src = "fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] {\n    return items.map((x) => f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
+    let src = "fn transform(items: [Int], f: fn(Int) Int -[]>) [Int] {\n    return items.map((x) -> f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) -> n * 2)\n    print(\"{doubled}\")\n}\n";
     assert_fmt_stable(src, "#Pure callback bound");
 }
 
@@ -3472,14 +3472,14 @@ fn fmt_preserves_dotted_effect_paths() {
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
     // effect list (`#(…)` bounds, prohibitions, and `#Abilities` regions).
-    let src = "fn load(path: String) =[FS.Read]=> String {\n    return path\n}\n\nfn archive(path: String) =[FS.Write]=> {\n    print(path)\n}\n\nfn read_only(path: String) =[FS.Read, !FS.Write]=> {\n    load(path)\n}\n\nfn boot() =[FS]=> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Abilities(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Abilities(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
+    let src = "fn load(path: String) String -[FS.Read]> {\n    return path\n}\n\nfn archive(path: String) -[FS.Write]> {\n    print(path)\n}\n\nfn read_only(path: String) -[FS.Read, !FS.Write]> {\n    load(path)\n}\n\nfn boot() -[FS]> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Abilities(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Abilities(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 
 #[test]
 fn fmt_preserves_effect_leaf_declarations() {
     let src =
-        "effect Log.Audit\n\neffect Metrics.Emit\n\nfn run() =[Log.Audit]=> {}\n";
+        "effect Log.Audit\n\neffect Metrics.Emit\n\nfn run() -[Log.Audit]> {}\n";
     let once = jet::format_source(src).expect("effect declarations should format");
     assert!(once.contains("effect Log.Audit"));
     assert!(once.contains("effect Metrics.Emit"));
@@ -3509,7 +3509,7 @@ fn fmt_preserves_web_partition_markers() {
     // the cross-partition checks: web_showcase_dashboard_roundtrip and
     // web_compute_wasm_bridge_roundtrip in tests/web_build.rs went red after
     // the #177 §5 tree reformat.
-    let src = "#Target(JS)\nfn render_stat(label: String) => String {\n    return \"<div>{label}</div>\"\n}\n\n#Target(Wasm)\nfn crunch(n: Int) => Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) => Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
+    let src = "#Target(JS)\nfn render_stat(label: String) String {\n    return \"<div>{label}</div>\"\n}\n\n#Target(Wasm)\nfn crunch(n: Int) Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on web partition markers");
     for tag in ["#Target(JS)\n", "#Target(Wasm)\n", "#WasmExport\n"] {
         assert!(
@@ -3555,17 +3555,17 @@ fn fmt_preserves_maturity_tags() {
     // must round-trip (fmt STABILITY — not just accept-without-crash).
     let src = "\
 #Meta(maturity: .Experimental)
-fn experimental_label() => String {
+fn experimental_label() String {
     return \"exp\"
 }
 
 #Meta(maturity: .Tested)
-fn tested_label() => String {
+fn tested_label() String {
     return \"tested\"
 }
 
 #Meta(maturity: .Hardened)
-fn hardened_label() => String {
+fn hardened_label() String {
     return \"hard\"
 }
 
@@ -3583,7 +3583,7 @@ fn fmt_preserves_maturity_tags_next_line() {
     // Metadata on the preceding line parses and round-trips canonically.
     let src = "\
 #Meta(maturity: .Experimental)
-fn experimental_label() => String {
+fn experimental_label() String {
     return \"exp\"
 }
 
@@ -3630,7 +3630,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_per_function_c_abi() {
-    let src = "use c.demo as c\n#Extern module c.demo {\n    #ABI(system) fn portable(x: I32) => I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) => I32 = \"native\"\n}\nfn run() {}\n";
+    let src = "use c.demo as c\n#Extern module c.demo {\n    #ABI(system) fn portable(x: I32) I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) I32 = \"native\"\n}\nfn run() {}\n";
     let once = jet::format_source(src).expect("#ABI C module should format");
     assert!(once.contains("#ABI(system)") && once.contains("#ABI(sysv64)"), "fmt dropped #ABI: {once}");
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
@@ -3650,10 +3650,10 @@ fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_c
 #Meta(category: label)
 @size :: capacity
 pub struct Buffer { slots: [T#capacity] }
-module nested<U> { pub fn keep(value: U) => U { return ~value } }
+module nested<U> { pub fn keep(value: U) U { return ~value } }
 module inner :: nested<T>
 #Meta(category: label)
-pub fn adjusted() => Int { return capacity + 1 }
+pub fn adjusted() Int { return capacity + 1 }
 }
 module a :: ring<Int>(2 + 2, "ring")
 module b :: a
@@ -3731,7 +3731,7 @@ fn arrow_in_block_if_comment_does_not_create_inline_guard() {
 }
 #[test]
 fn fmt_output_callable_stability() {
-    let source = "app: Output :: .Executable.{ name: \"demo\", entry: start };\n\nfn start() {}\n";
+    let source = "app: Output :: .Executable{ name: \"demo\", entry: start };\n\nfn start() {}\n";
     let once = jet::format_source(source).expect("typed Output should format");
     for token in [
         "app: Output ::",
@@ -3753,7 +3753,7 @@ fn fmt_preserves_parameter_zones_and_public_labels() {
     // from the local name. All three must round-trip byte-for-byte (fmt
     // STABILITY — idempotence alone would not notice a dropped separator,
     // because a dropped one stays dropped on the second pass).
-    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String :: host\n";
+    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) String -> host\n";
     let once = jet::format_source(src).expect("fmt should accept parameter zones");
     for token in ["host: String", ", /,", ", *,", "timeout seconds: Int = 30", "tls: Bool = true"] {
         assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
@@ -3837,7 +3837,7 @@ fn fmt_keeps_the_division_family_spellings() {
 #[test]
 fn fmt_empty_marker_parentheses_canonicalize_and_are_stable() {
     let src = r#"#Inline()
-fn double(x: Int) => Int {
+fn double(x: Int) Int {
     return x * 2
 }
 
@@ -3872,7 +3872,7 @@ struct Widget {
 @limit :: 32
 
 #Inline
-fn hot(a: Int) => Int {
+fn hot(a: Int) Int {
     return a * @limit
 }
 

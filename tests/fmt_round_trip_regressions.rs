@@ -1,6 +1,6 @@
 #[test]
 fn qualified_variant_heads_round_trip_through_protocol_expansion() {
-    let literal_source = "fn make() :> Payment.Client { return Payment.Client.{_token: 0} }\n";
+    let literal_source = "fn make() Payment.Client -[]> { return Payment.Client{_token: 0} }\n";
     let literal = jet::format_source(literal_source).expect("qualified literal should format");
     assert!(literal.contains("Payment.Client{_token: 0}"), "{literal}");
     assert!(!literal.contains("Payment.Client.{"), "{literal}");
@@ -22,7 +22,7 @@ fn qualified_variant_heads_round_trip_through_protocol_expansion() {
 fn generic_module_template_struct_heads_round_trip() {
     let source = r#"module cache<K>(capacity: Int) {
     struct Entry { key: K }
-    fn entry(k: K) :> Entry { return Entry.{key: k} }
+    fn entry(k: K) Entry -[]> { return Entry{key: k} }
 }
 
 "#;
@@ -46,7 +46,7 @@ fn derive_template_bodies_round_trip_retired_signatures() {
     let source = include_str!("../examples/features/reflection/derive_loop.jet");
     let formatted = jet::format_source(source).expect("derive template should format");
     assert!(
-        formatted.contains("fn @method(self) String :> field.@name"),
+        formatted.contains("fn @method(self) String -> field.@name"),
         "derive callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -60,7 +60,7 @@ fn marker_template_bodies_round_trip_retired_signatures() {
     let source = include_str!("../examples/features/reflection/user_rule_body.jet");
     let formatted = jet::format_source(source).expect("marker template should format");
     assert!(
-        formatted.contains("fn greeting(self) String :> \"hello\""),
+        formatted.contains("fn greeting(self) String -> \"hello\""),
         "marker callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -74,7 +74,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
     let generic = include_str!("../examples/features/modules/generic_modules.jet");
     let formatted = jet::format_source(generic).expect("generic module should format");
     assert!(
-        formatted.contains("pub fn slot(k: K) Slot :> Slot.Value(k)"),
+        formatted.contains("pub fn slot(k: K) Slot -> Slot.Value(k)"),
         "generic module callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -119,7 +119,7 @@ fn generated_source_template_bodies_round_trip_retired_signatures() {
     );
     let formatted = jet::format_source(source).expect("generated source template should format");
     assert!(
-        formatted.contains("fn foundation_marker() String :> \"foundation\""),
+        formatted.contains("fn foundation_marker() String -> \"foundation\""),
         "generated callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(
@@ -133,7 +133,7 @@ fn generated_source_template_bodies_round_trip_retired_signatures() {
 fn inline_module_struct_heads_round_trip() {
     let source = r#"module arith {
     struct Tally { total: Int }
-    fn tally(value: Int) :> Tally { return Tally.{total: value} }
+    fn tally(value: Int) Tally -[]> { return Tally{total: value} }
 }
 "#;
     let formatted = jet::format_source(source).expect("inline module source should format");
@@ -154,10 +154,10 @@ fn inline_module_struct_heads_round_trip() {
 #[test]
 fn effect_arrows_round_trip_beside_foreign_bodies() {
     let source = r#"#Extern module c.demo {
-    fn probe(value: Int) => Int = "probe";
+    fn probe(value: Int) Int = "probe";
 }
 
-fn run() =[IO]=> Int {
+fn run() Int -[IO]> {
     return 1
 }
 "#;
@@ -167,7 +167,7 @@ fn run() =[IO]=> Int {
         "foreign declaration arrow was not canonicalized:\n{formatted}"
     );
     assert!(
-        formatted.contains("fn run() Int :[IO]>"),
+        formatted.contains("fn run() Int -[IO]>"),
         "effect arrow was not canonicalized:\n{formatted}"
     );
     assert!(
@@ -183,8 +183,8 @@ fn run() =[IO]=> Int {
 #[test]
 fn interpolated_struct_literals_survive_retired_dot_migration() {
     let source = r#"fn run() {
-    print("{NoDebug.{value: 2}:Debug}")
-    print("{Probe.{value: 2} == Probe.{value: 1}:Debug}")
+    print("{NoDebug{value: 2}:Debug}")
+    print("{Probe{value: 2} == Probe{value: 1}:Debug}")
 }
 "#;
     let formatted = jet::format_source(source).expect("interpolated literals should format");

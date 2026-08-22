@@ -111,19 +111,19 @@ fn program_at(marker: &str, row: &AppliedRule, site: RuleSite) -> Option<String>
             format!("{marker} module c.lib {{\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n")
         }
         RuleSite::Function if marker.starts_with("#Scrub") => format!(
-            "tag X {{ deny: [IO] }}\n{marker} fn helper(raw: #X String) => String {{ return ~raw }}\n\nfn run() {{\n}}\n"
+            "tag X {{ deny: [IO] }}\n{marker} fn helper(raw: #X String) String -[]> {{ return ~raw }}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if marker.starts_with("#Undo") => format!(
             "fn inverse() {{}}\n#[Unsafe(\"coverage\"), FFI(c), Undo(inverse)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if marker.starts_with("#ABI") => format!(
-            "#Extern module c.demo {{\n    {marker} fn helper(value: I32) => I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n"
+            "#Extern module c.demo {{\n    {marker} fn helper(value: I32) I32 = \"helper\"\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if marker.starts_with("#FFI") => format!(
             "#[Unsafe(\"coverage\"), FFI(c)]\nfn helper() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function if row.name == jet::Syntax::MARKER_MEMO => format!(
-            "{marker}\nfn helper() =[]=> {{\n}}\n\nfn run() {{\n}}\n"
+            "{marker}\nfn helper() -[]> {{\n}}\n\nfn run() {{\n}}\n"
         ),
         RuleSite::Function => format!("{marker}\nfn helper() {{\n}}\n\nfn run() {{\n}}\n"),
         RuleSite::Method => format!(

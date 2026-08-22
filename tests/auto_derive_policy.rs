@@ -145,7 +145,7 @@ fn signed_markers_gate_generated_traits_and_jit_behavior() {
 struct Mixed { value: Int }
 
 fn run() {
-    print(Mixed.{ value: 7 })
+    print(Mixed{ value: 7 })
 }
 "#,
     );
@@ -212,7 +212,7 @@ use core.encoding.json as json
 struct Record { id: Int; name: String }
 
 fn run() {
-    print(json.to_string(Record.{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }))
 }
 "#,
     );
@@ -252,7 +252,7 @@ use core.encoding.json as json
 struct Record { id: Int; name: String }
 
 fn run() {
-    print(json.to_string(Record.{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }))
 }
 "#,
     );
@@ -265,7 +265,7 @@ use core.encoding.json as json
 struct Record { id: Int; name: String }
 
 fn run() {
-    print(json.to_string(Record.{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }))
 }
 "#,
     );
@@ -448,15 +448,15 @@ struct Missing { value: Int }
 struct Manual { value: Int }
 
 impl Manual.Debug {
-    fn debug(self) => String { return "manual" }
+    fn debug(self) String { return "manual" }
 }
 
 fn run() {
-    a := Enabled.{ value: 3 }
+    a := Enabled{ value: 3 }
     print(a)
     print("{a:Debug}")
-    print(a == Enabled.{ value: 3 })
-    print("{Manual.{ value: 9 }:Debug}")
+    print(a == Enabled{ value: 3 })
+    print("{Manual{ value: 9 }:Debug}")
 }
 "#,
     );
@@ -566,10 +566,10 @@ fn reject_outer_reader(value: OuterReader) {
 }
 
 fn run() {
-    print(OuterNoPrint.{ inner: NoPrint.{ value: 1 } })
-    print("{OuterNoDebug.{ inner: NoDebug.{ value: 2 } }:Debug}")
-    print(OuterNoEquality.{ inner: NoEquality.{ value: 3 } } == OuterNoEquality.{ inner: NoEquality.{ value: 3 } })
-    print(OuterHidden.{ value: Hidden.{ value: 4 } })
+    print(OuterNoPrint{ inner: NoPrint{ value: 1 } })
+    print("{OuterNoDebug{ inner: NoDebug{ value: 2 } }:Debug}")
+    print(OuterNoEquality{ inner: NoEquality{ value: 3 } } == OuterNoEquality{ inner: NoEquality{ value: 3 } })
+    print(OuterHidden{ value: Hidden{ value: 4 } })
 }
 "#,
     );
@@ -736,7 +736,7 @@ fn reject(value: vendor.Token) {
 }
 
 fn run() {
-    print(LocalEnvelope.{ token: Token.{ value: 7 } })
+    print(LocalEnvelope{ token: Token{ value: 7 } })
 }
 "#,
     )
@@ -801,34 +801,34 @@ struct MapEnvelope { values: [String:Int] }
 struct UnionEnvelope { value: Int | String }
 
 fn run() {
-    token :: Token.{ value: 7 }
+    token :: Token{ value: 7 }
     print(token)
     print("{token:Debug}")
-    print(token == Token.{ value: 7 })
+    print(token == Token{ value: 7 })
 
-    badge :: library.Badge.{ value: 9 }
+    badge :: library.Badge{ value: 9 }
     print(badge)
     print("{badge:Debug}")
-    print(badge == library.Badge.{ value: 9 })
+    print(badge == library.Badge{ value: 9 })
 
-    envelope :: ImportedEnvelope.{ badge: library.Badge.{ value: 9 } }
+    envelope :: ImportedEnvelope{ badge: library.Badge{ value: 9 } }
     print(envelope)
     print("{envelope:Debug}")
-    print(envelope == ImportedEnvelope.{ badge: library.Badge.{ value: 9 } })
-    print(envelope < ImportedEnvelope.{ badge: library.Badge.{ value: 10 } })
+    print(envelope == ImportedEnvelope{ badge: library.Badge{ value: 9 } })
+    print(envelope < ImportedEnvelope{ badge: library.Badge{ value: 10 } })
     wire :: json.to_string(envelope)
     print(wire)
     decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
     print(decoded == envelope)
 
-    map :: MapEnvelope.{ values: [String:Int].{ "one": 1 } }
+    map :: MapEnvelope{ values: [String:Int]{ "one": 1 } }
     print(map)
     print("{map:Debug}")
 
-    union :: UnionEnvelope.{ value: 3 }
+    union :: UnionEnvelope{ value: 3 }
     print(union)
     print("{union:Debug}")
-    print(union == UnionEnvelope.{ value: 3 })
+    print(union == UnionEnvelope{ value: 3 })
 }
 "#,
     )

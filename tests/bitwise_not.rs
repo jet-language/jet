@@ -9,7 +9,7 @@ mod tir_support;
 
 use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
 
-const SEED: &str = "fn bits(n: Int) => Int {\n    return n\n}\n";
+const SEED: &str = "fn bits(n: Int) Int {\n    return n\n}\n";
 
 /// D-BITNOT1=A: on the width-free default `Int`, turning over every bit is the
 /// same as `-x - 1`. Proving the identity rather than a table of constants is
@@ -50,17 +50,17 @@ fn bit_not_keeps_each_integer_width() {
     }
     let src = "
 fn run() {
-    a :: U8.{5}
+    a :: U8{5}
     print(!a)
-    b :: U16.{5}
+    b :: U16{5}
     print(!b)
-    c :: U32.{5}
+    c :: U32{5}
     print(!c)
-    d :: I8.{5}
+    d :: I8{5}
     print(!d)
-    e :: I16.{5}
+    e :: I16{5}
     print(!e)
-    f :: I32.{5}
+    f :: I32{5}
     print(!f)
 }
 ";
@@ -100,7 +100,7 @@ fn bit_not_on_bool_is_unchanged() {
         return;
     }
     let src = "
-fn yes() => Bool {
+fn yes() Bool {
     return true
 }
 
@@ -131,11 +131,11 @@ fn run() {{
     print(!bits(4294967296))
     print(bits(15) & !bits(4))
     print(!true)
-    a :: U8.{{5}}
+    a :: U8{{5}}
     print(!a)
-    b :: I16.{{5}}
+    b :: I16{{5}}
     print(!b)
-    c :: U32.{{5}}
+    c :: U32{{5}}
     print(!c)
 }}
 "

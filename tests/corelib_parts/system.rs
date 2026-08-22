@@ -65,7 +65,7 @@ fn run() {
     ]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
-    insert :: SQL.{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
+    insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
     _inserted :: scoped.execute(insert.template(), db.params(insert)) ?? panic("insert")
     failed :: db.transaction(scoped, "bad batch", [
         "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
@@ -104,7 +104,7 @@ fn core_db_implements_driver_trait() {
     let src = r#"
 use core.db as db
 
-fn count_people<T: Driver>(&conn: T) => Int ! DBError {
+fn count_people<T: Driver>(&conn: T) Int ! DBError {
     row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])?
     found :: row ?? panic("missing")
     missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])?
@@ -336,7 +336,7 @@ fn core_testing_helpers_run_against_files() {
 use core.testing as testing
 
 module perf.testing {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "parse",
         scope: .Test("parse"),
         metric: .BenchTime(.P50),
@@ -896,11 +896,11 @@ fn race_cancels_losing_task() {
 use core.tasks as tasks
 use core.time as time
 
-fn fast_nine() => Int {
+fn fast_nine() Int {
     return 9
 }
 
-fn slow_one() => Int {
+fn slow_one() Int {
     time.sleep(300ms)
     return 1
 }

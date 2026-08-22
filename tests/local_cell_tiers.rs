@@ -22,39 +22,39 @@ struct LineCache {
 }
 
 fn mapped_read(cell: Cell<Pair>) {
-    left :: cell.guard_read().map(pair => pair.left)
+    left :: cell.guard_read().map(pair -> pair.left)
     print(left.get())
 }
 
 fn split_read(cell: Cell<Pair>) {
     (left, right) :: cell.guard_read().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
     print(left.get() + right.get())
 }
 
 fn mapped_edit(cell: Cell<Pair>) {
-    left :: cell.guard_edit().map(pair => pair.left)
+    left :: cell.guard_edit().map(pair -> pair.left)
     left.set(9)
 }
 
 fn split_edit(cell: Cell<Pair>) {
     (left, right) :: cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
     left.set(10)
     right.set(11)
 }
 
-fn make_edit_guards(cell: Cell<Pair>) => (
+fn make_edit_guards(cell: Cell<Pair>) (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
 ) {
     return cell.guard_edit().split(
-        pair => pair.left,
-        pair => pair.right
+        pair -> pair.left,
+        pair -> pair.right
     )
 }
 
@@ -71,13 +71,13 @@ fn edit_then_return(cell: Cell<Int>) {
 }
 
 fn run() {
-    cell :: Cell.new(Pair.{ left: 1, right: 2 })
-    print(cell.read(pair => pair.left + pair.right))
-    cell.edit(pair => pair.left += 3)
+    cell :: Cell.new(Pair{ left: 1, right: 2 })
+    print(cell.read(pair -> pair.left + pair.right))
+    cell.edit(pair -> pair.left += 3)
     print(cell.get().left)
-    old :: cell.replace(Pair.{ left: 5, right: 6 })
+    old :: cell.replace(Pair{ left: 5, right: 6 })
     print(old.left)
-    cell.set(Pair.{ left: 7, right: 8 })
+    cell.set(Pair{ left: 7, right: 8 })
     mapped_read(cell)
     split_read(cell)
     mapped_edit(cell)
@@ -87,26 +87,26 @@ fn run() {
     edit_returned_split(cell)
     print(cell.get().left + cell.get().right)
 
-    cache :: Cache.{ value: Cell.new(None) }
-    print(cache.value.get_or_set(() => "built"))
-    print(cache.value.get_or_set(() => "unused"))
+    cache :: Cache{ value: Cell.new(None) }
+    print(cache.value.get_or_set(() -> "built"))
+    print(cache.value.get_or_set(() -> "unused"))
 
-    lines :: LineCache.{ value: Cell.new(None) }
-    print(lines.value.get_or_set(() => [0, 8, 15]).len())
-    print(lines.value.get_or_set(() => [99]).len())
+    lines :: LineCache{ value: Cell.new(None) }
+    print(lines.value.get_or_set(() -> [0, 8, 15]).len())
+    print(lines.value.get_or_set(() -> [99]).len())
 
     early :: Cell.new(1)
     edit_then_return(early)
     print(early.get())
-    early.edit(value => value += 1)
+    early.edit(value -> value += 1)
     print(early.get())
 
-    wide :: Cell.new(U16.{0})
-    wide.set(U8.{7})
-    print(wide.get() == U16.{7})
+    wide :: Cell.new(U16{0})
+    wide.set(U8{7})
+    print(wide.get() == U16{7})
 
-    decimal :: Cell.new(Float.{0.0})
-    decimal.set(Int.{42})
+    decimal :: Cell.new(Float{0.0})
+    decimal.set(Int{42})
     print(decimal.get() == 42.0)
 }
 "#;
@@ -129,39 +129,39 @@ struct Reverse<Value, Alpha> {
 }
 
 impl Box {
-    fn new(value: ^T) => Box<T> {
-        return Box<T>.{ value: value }
+    fn new(value: ^T) Box<T> {
+        return Box<T>{ value: value }
     }
 }
 
 fn keep_result(value: ^(Int ! String)) {
     cell :: Cell.new(value)
-    print(cell.read(result => result ?? 0))
+    print(cell.read(result -> result ?? 0))
 }
 
-fn ok_result() => Int ! String {
+fn ok_result() Int ! String {
     return Ok(7)
 }
 
 fn run() {
-    counts := [String:Int].{}
+    counts := [String:Int]{}
     counts["jet"] = 3
     map_cell :: Cell.new(^counts)
-    print(map_cell.read(values => values.get("jet") ?? 0))
+    print(map_cell.read(values -> values.get("jet") ?? 0))
 
     keep_result(ok_result())
 
     handle :: shared 9
     shared_cell :: Cell.new(handle)
-    print(shared_cell.read(inner => inner.guard_read().value))
+    print(shared_cell.read(inner -> inner.guard_read().value))
 
     nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
-    projected :: nested.guard_read().map(value => value.value.value)
+    projected :: nested.guard_read().map(value -> value.value.value)
     print(projected.get())
 
-    reverse :: Cell.new(Reverse<Float, Number>.{
+    reverse :: Cell.new(Reverse<Float, Number>{
         first: 1.5,
-        second: Number.{ value: 13 },
+        second: Number{ value: 13 },
     })
     print(reverse.get().first)
     print(reverse.get().second.value)
@@ -173,10 +173,10 @@ const GENERIC_EXPECTED: &str = "3\n7\n9\n11\n1.5\n13\n";
 
 const INT_MAP_SOURCE: &str = r#"
 fn run() {
-    values := [Int:Int].{}
+    values := [Int:Int]{}
     values[1] = 2
     cell :: Cell.new(^values)
-    print(cell.read(items => items.get(1) ?? 0))
+    print(cell.read(items -> items.get(1) ?? 0))
 }
 "#;
 
@@ -424,9 +424,9 @@ fn run() {
         (
             "lambda capture",
             r#"
-fn hold(cell: Cell<Int>) => fn() => Int {
+fn hold(cell: Cell<Int>) fn() Int {
     guard :: cell.guard_read()
-    return () => guard.get()
+    return () -> guard.get()
 }
 
 fn run() {}
@@ -438,7 +438,7 @@ fn run() {}
 fn run() {
     cell :: Cell.new(1)
     guard :: cell.guard_read()
-    read :: (() => guard.get()).call()
+    read :: (() -> guard.get()).call()
 }
 "#,
         ),
@@ -453,7 +453,7 @@ fn consume<T>(held: Held<T>) {}
 
 fn run() {
     cell :: Cell.new(1)
-    consume(Held<CellReadGuard<Int>>.{ value: cell.guard_read() })
+    consume(Held<CellReadGuard<Int>>{ value: cell.guard_read() })
 }
 "#,
         ),

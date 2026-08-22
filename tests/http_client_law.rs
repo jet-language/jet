@@ -468,7 +468,7 @@ use core.http.client as http
 fn run() {{
     client :: http.Client.new()
         .cookies(.Memory)
-        .redirects(.Follow.{{ max: 2, same_origin_credentials: true }})
+        .redirects(.Follow{{ max: 2, same_origin_credentials: true }})
         .protocols(false, true, false)
         .timeouts(1000, 1000, 1000, 1000, 1000, 1000, 5000)
         .raw_encoding()
@@ -1865,7 +1865,7 @@ fn public_client_tls_custom_only_trust() {
     let empty_src = r#"
 use core.net.tls as tls
 fn run() {
-    empty :: [U8].{}
+    empty :: [U8]{}
     if tls.RootCertificates.from_pem(empty) == {
         .Ok(_) -> print("empty-ok")
         .Err(_) -> print("empty-fail")
@@ -2756,7 +2756,7 @@ fn follow_same_origin_credentials_strips_authorization_on_redirect() {
 use core.http.client as http
 fn run() {{
     client :: http.Client.new()
-        .redirects(.Follow.{{ max: 2, same_origin_credentials: {keep} }})
+        .redirects(.Follow{{ max: 2, same_origin_credentials: {keep} }})
         .protocols(false, true, false)
     req :: http.request("GET", "http://{addr}/start")
         .header("Authorization", "Bearer secret")

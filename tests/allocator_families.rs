@@ -175,7 +175,7 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
         .filter(|line| {
             line.contains("unsafe")
                 && !(
-                    (src.contains(":= uninit") || src.contains(".{ uninit }") || src.contains(".{uninit}"))
+                    (src.contains(":= uninit") || src.contains("{ uninit }") || src.contains("{uninit}"))
                         && line.contains("MaybeUninit")
                 )
         })
@@ -366,7 +366,7 @@ fn run() {
     let over_src = r#"
 use core.mem
 fn run() {
-    bytes := [U8#128].{ uninit }
+    bytes := [U8#128]{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     value :: fixed.alloc(9)
     print(value)
@@ -451,7 +451,7 @@ fn fixed_over_exclusively_borrows_one_inline_byte_array() {
         r#"
 use core.mem
 fn run() {
-    bytes := [U8#8].{ uninit }
+    bytes := [U8#8]{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     bytes[0] = 1
     close(^fixed)
@@ -489,10 +489,10 @@ struct Item { value: Int }
 
 fn run() {
     pool := Pool<Item>.new()
-    first :: pool.add(Item.{ value: 10 })
+    first :: pool.add(Item{ value: 10 })
     stale :: first
     removed :: pool.remove(first)
-    second :: pool.add(Item.{ value: 20 })
+    second :: pool.add(Item{ value: 20 })
     if removed == Val(item) {
         print(item.value)
     } else {
@@ -517,10 +517,10 @@ struct Item { value: Int }
 
 fn run() {
     pool := Pool<Item>.new()
-    first :: pool.add(Item.{ value: 10 })
+    first :: pool.add(Item{ value: 10 })
     stale :: first
     _removed :: pool.remove(first)
-    _second :: pool.add(Item.{ value: 20 })
+    _second :: pool.add(Item{ value: 20 })
     print(pool[stale].value)
 }
 "#;

@@ -70,7 +70,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         "b1_json_text_view",
         r#"
 use core.encoding.json as json
-fn wrap(x: String) => String {
+fn wrap(x: String) String -[]> {
     j :: JSON.Text(~x)
     return json.to_string(j)
 }
@@ -123,7 +123,7 @@ struct Holder {
     items: [String:Int]
 }
 fn run() {
-    h := Holder.{ items: [] }
+    h := Holder{ items: [] }
     h.items["x"] = 1
     loop (k, v), h.items {
         print(k)
@@ -140,7 +140,7 @@ fn b5_fixed_array_index_assign() {
         "b5_fixed_array_index_assign",
         r#"
 fn run() {
-    buf := [Int#3].{ 1, 2, 3 }
+    buf := [Int#3]{ 1, 2, 3 }
     i := 1
     buf[i] = 99
     print(buf[0])
@@ -190,7 +190,7 @@ struct Holder {
 }
 fn run() {
     s := "hi"
-    h := Holder.{ payload: s }
+    h := Holder{ payload: s }
     print("{s}")
     print(h.payload)
 }

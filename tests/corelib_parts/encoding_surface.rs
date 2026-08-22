@@ -307,7 +307,7 @@ use core.time as date
 use core.time as datetime
 use core.crypto.random as crypto_rand
 
-fn shuffle_unit() => Unit {
+fn shuffle_unit() {
     values := [1, 2, 3]
     return random.shuffle(&values)
 }
@@ -469,7 +469,7 @@ fn run() {
     print(encoded.len() > 0)
     decoded := cbor.parse(encoded) ?? panic("cbor parse")
     print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
-    bytes :: [U8].{ 104, 105 }
+    bytes :: [U8]{ 104, 105 }
     u := base64.encode_url(bytes)
     print(u)
     print((base64.decode_url(u) ?? panic("base64url")).len())
@@ -673,7 +673,7 @@ fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn same_bytes(left: [U8], right: [U8]) => Bool {
+fn same_bytes(left: [U8], right: [U8]) Bool {
     if left.len() != right.len() { return false }
     loop index, 0..<left.len() {
         if left[index] != right[index] { return false }
@@ -681,18 +681,18 @@ fn same_bytes(left: [U8], right: [U8]) => Bool {
     return true
 }
 
-fn summarize() => String {
-    plain :: [U8].{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
-    utf8_bom :: [U8].{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
-    utf16 :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
-    conflict :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0 }
+fn summarize() String {
+    plain :: [U8]{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
+    utf8_bom :: [U8]{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
+    utf16 :: [U8]{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
+    conflict :: [U8]{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0 }
 
     plain_doc :: xml.parse_bytes(plain) ?? panic("plain parse")
     plain_out :: xml.to_bytes(plain_doc) ?? panic("plain render")
     utf8_doc :: xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
-    utf8_out :: xml.to_bytes(utf8_doc, xml.XMLRenderOptions.{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
+    utf8_out :: xml.to_bytes(utf8_doc, xml.XMLRenderOptions{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
     utf16_doc :: xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
-    utf16_out :: xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
+    utf16_out :: xml.to_bytes(utf16_doc, xml.XMLRenderOptions{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
 
     conflict_result :: xml.parse_bytes(conflict)
     if conflict_result == {
@@ -745,7 +745,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree ! XMLError) => String {
+fn show(result: DataTree ! XMLError) String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -805,7 +805,7 @@ fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn summarize(source: String) => String {
+fn summarize(source: String) String {
     doc := xml.parse(source) ?? panic("xml")
     root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
@@ -874,7 +874,7 @@ fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-fn show64(text: String) => String {
+fn show64(text: String) String {
     if base64.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -882,7 +882,7 @@ fn show64(text: String) => String {
     return "unreachable"
 }
 
-fn show64url(text: String) => String {
+fn show64url(text: String) String {
     if base64.decode_url(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -890,7 +890,7 @@ fn show64url(text: String) => String {
     return "unreachable"
 }
 
-fn show32(text: String) => String {
+fn show32(text: String) String {
     if base32.decode(text) == {
         .Ok(bytes) -> { return "OK:{bytes}" }
         .Err(reason) -> { return "ERR:{reason}" }
@@ -1044,7 +1044,7 @@ use core.encoding.xml as xml
 use core.files as files
 
 fn run() {{
-    paths :: [String].{{ {boundary_paths} }}
+    paths :: [String]{{ {boundary_paths} }}
     passed := 0
     loop path, paths {{
         input :: files.open(path) ?? panic("open boundary")
@@ -1217,7 +1217,7 @@ fn run() {{
     input16 :: files.open("{}") ?? panic("open utf16 source")
     output16 :: files.create("{}") ?? panic("create utf16")
     reader16 :: xml.reader(^input16) ?? panic("reader utf16")
-    render16 := xml.XMLRenderOptions.{{ encoding: .UTF16LE, lexical: .Deterministic }}
+    render16 := xml.XMLRenderOptions{{ encoding: .UTF16LE, lexical: .Deterministic }}
     writer16 :: xml.writer(^output16, encoding.EncodingLimits.safe(), render16) ?? panic("writer utf16")
     loop true {{
         maybe :: reader16.next() ?? panic("next utf16")
@@ -1228,7 +1228,7 @@ fn run() {{
     }}
     writer16.finish() ?? panic("finish utf16")
     tree :: xml.parse("<r xmlns:q='urn:q' q:z='2' a='1'><e/></r>") ?? panic("parse")
-    options := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }}
+    options := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }}
     print(xml.canonical(tree, options) ?? panic("canonical"))
 }}
 "#, input.to_string_lossy().replace('\\', "\\\\"), output.to_string_lossy().replace('\\', "\\\\"), input.to_string_lossy().replace('\\', "\\\\"), utf16.to_string_lossy().replace('\\', "\\\\"));
@@ -1298,11 +1298,11 @@ fn run() {{
 
     // Exclusive C14N omits unused xmlns on ancestors; utilized prefixes move down.
     tree :: xml.parse("<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>") ?? panic("parse")
-    options := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }}
+    options := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }}
     print(xml.canonical(tree, options) ?? panic("canonical"))
 
     // InclusiveNamespaces PrefixList forces unused b onto the apex.
-    forced := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }}
+    forced := xml.XMLCanonical{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }}
     print(xml.canonical(tree, forced) ?? panic("forced"))
 }}
 "#

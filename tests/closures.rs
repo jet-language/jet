@@ -5,20 +5,20 @@ mod common;
 #[test]
 fn lambdas_compile_to_rust() {
     let src = r#"
-fn apply(f: fn(Int) => Int, x: Int) => Int {
+fn apply(f: fn(Int) Int, x: Int) Int {
     return f(f(x))
 }
 
 fn run() {
     nums :: [1, 2, 3]
-    print(nums.map((n: Int) => n * n).to_list().len())
+    print(nums.map((n: Int) -> n * n).to_list().len())
     total := 0
-    nums.each((n: Int) => { total += n })
+    nums.each((n: Int) -> { total += n })
     print(total)
-    print(apply((x: Int) => x + 1, 5))
-    print(nums.filter((n: Int) => n > 1).to_list().len())
-    print(nums.any((n: Int) => n == 2))
-    print(nums.reduce(0, (acc: Int, n: Int) => acc + n))
+    print(apply((x: Int) -> x + 1, 5))
+    print(nums.filter((n: Int) -> n > 1).to_list().len())
+    print(nums.any((n: Int) -> n == 2))
+    print(nums.reduce(0, (acc: Int, n: Int) -> acc + n))
 }
 "#;
     let out = jet::compile(src).expect("closures should compile");
@@ -33,14 +33,14 @@ fn run() {
 #[test]
 fn single_line_lambda_bodies_need_no_braces() {
     // S46: braces only for multi-statement bodies. One assignment or one void
-    // call after `=>` is the brace-free form of the same block.
+    // call after `->` is the brace-free form of the same block.
     let src = r#"
 struct Box {
     n: Int
 }
 
 fn bump(box: Shared<Box>) {
-    slot :: box.guard_edit().map(b => b.n)
+    slot :: box.guard_edit().map(b -> b.n)
     slot.value += 1
 }
 
@@ -62,8 +62,8 @@ fn run() {
 fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
     let mutable_capture = r#"
 fn run() {
-    seen := [Int].{}
-    ignored :: [1, 2, 3].para_map((n: Int) => { seen.push(n) })
+    seen := [Int]{}
+    ignored :: [1, 2, 3].para_map((n: Int) -> { seen.push(n) })
 }
 "#;
     let diags = jet::compile(mutable_capture).expect_err("mutable parallel capture must fail");
@@ -77,7 +77,7 @@ fn run() {
 fn run() {
     values := [1, 2, 3]
     window :: values[0..1]
-    ignored :: [1, 2, 3].para_filter((n: Int) => window.contains(n))
+    ignored :: [1, 2, 3].para_filter((n: Int) -> window.contains(n))
 }
 "#;
     let diags = jet::compile(borrowed_capture).expect_err("borrowed parallel capture must fail");
@@ -86,7 +86,7 @@ fn run() {
     let hidden_capture = r#"
 fn run() {
     offset :: 1
-    callback :: (n: Int) => n + offset
+    callback :: (n: Int) -> n + offset
     ignored :: [1, 2, 3].para_map(callback)
 }
 "#;
@@ -96,17 +96,17 @@ fn run() {
     for (role, source) in [
         (
             "item",
-            r#"fn bump(n: Int) => Int { return n + 1 }
+            r#"fn bump(n: Int) Int { return n + 1 }
 fn run() {
-    callbacks :: [fn(Int) => Int].{ bump }
-    ignored :: callbacks.para_filter((callback: fn(Int) => Int) => true)
+    callbacks :: [fn(Int) Int]{ bump }
+    ignored :: callbacks.para_filter((callback: fn(Int) Int) -> true)
 }
 "#,
         ),
         (
             "result",
             r#"fn run() {
-    ignored :: [1].para_map((n: Int) => (x: Int) => x + n)
+    ignored :: [1].para_map((n: Int) -> (x: Int) -> x + n)
 }
 "#,
         ),
@@ -114,9 +114,9 @@ fn run() {
             "accumulator",
             r#"fn run() {
     ignored :: [1].para_fold(
-        () => (x: Int) => x,
-        (callback: fn(Int) => Int, n: Int) => callback,
-        (left: fn(Int) => Int, right: fn(Int) => Int) => left
+        () -> (x: Int) -> x,
+        (callback: fn(Int) Int, n: Int) -> callback,
+        (left: fn(Int) Int, right: fn(Int) Int) -> left
     )
 }
 "#,
@@ -124,19 +124,19 @@ fn run() {
         (
             "enum payload",
             r#"alias Boxed<T> :: T
-enum CallbackPayload { Callback(Boxed<fn(Int) => Int>) }
-fn bump(n: Int) => Int { return n + 1 }
+enum CallbackPayload { Callback(Boxed<fn(Int) Int>) }
+fn bump(n: Int) Int { return n + 1 }
 fn run() {
-    payloads :: [CallbackPayload].{ CallbackPayload.Callback(bump) }
-    ignored :: payloads.para_map((payload: CallbackPayload) => 1)
+    payloads :: [CallbackPayload]{ CallbackPayload.Callback(bump) }
+    ignored :: payloads.para_map((payload: CallbackPayload) -> 1)
 }
 "#,
         ),
         (
             "stored-function capture",
             r#"fn run() {
-    stored :: (n: Int) => n + 1
-    ignored :: [1].para_map((n: Int) => stored(n))
+    stored :: (n: Int) -> n + 1
+    ignored :: [1].para_map((n: Int) -> stored(n))
 }
 "#,
         ),
@@ -153,7 +153,7 @@ fn run() {
 #[test]
 fn legacy_parallel_adapter_spellings_are_removed() {
     for method in ["par_map", "par_filter", "par_partition", "par_fold"] {
-        let source = format!("fn run() {{ ignored :: [1, 2, 3].{method}((n: Int) => n) }}\n");
+        let source = format!("fn run() {{ ignored :: [1, 2, 3].{method}((n: Int) -> n) }}\n");
         let diags = jet::compile(&source).expect_err("legacy parallel spelling must fail");
         assert!(
             diags.iter().any(|diag| diag.code == "E0311"),
@@ -176,7 +176,7 @@ fn run_each(xs: [Int], f: fn(Int)) {
 }
 
 fn run() {
-    run_each([1, 2, 3], (x) => {
+    run_each([1, 2, 3], (x) -> {
         print(x)
     })
 }
@@ -193,12 +193,12 @@ fn run() {
 #[test]
 fn stored_callback_boxes() {
     let src = r#"
-fn twice(f: fn(Int) => Int, x: Int) => Int {
+fn twice(f: fn(Int) Int, x: Int) Int {
     return f(f(x))
 }
 
 fn run() {
-    bump :: (x: Int) => x + 1
+    bump :: (x: Int) -> x + 1
     print(twice(bump, 10))
 }
 "#;
@@ -209,7 +209,7 @@ fn run() {
 #[test]
 fn multiline_callable_tail_returns_the_declared_result() {
     let src = r#"
-fn double(value: Int) => Int {
+fn double(value: Int) Int {
     adjusted :: value + 1
     adjusted * 2
 }
@@ -231,10 +231,10 @@ fn implicit_capture_copies_cloneable_and_moves_non_cloneable_values() {
     let src = r#"
 struct NoClone { label: Int }
 fn run() {
-    item :: NoClone.{ label: 7 }
-    f :: (n: Int) => n + item.label
+    item :: NoClone{ label: 7 }
+    f :: (n: Int) -> n + item.label
     values :: [1, 2, 3]
-    g :: () => values.len()
+    g :: () -> values.len()
     print(values.len())
     print(f(1))
     print(g())
@@ -247,9 +247,9 @@ fn run() {
 #[test]
 fn fn_field_callback() {
     let src = r#"
-struct Worker { step: fn(Int) => Int }
+struct Worker { step: fn(Int) Int }
 fn run() {
-    w :: Worker.{ step: (n: Int) => n + 1 }
+    w :: Worker{ step: (n: Int) -> n + 1 }
     print(w.step(4))
 }
 "#;
@@ -262,7 +262,7 @@ fn sort_by_with_lambda() {
     let src = r#"
 fn run() {
     nums := [3, 1, 2]
-    nums.sort_by((n: Int) => n)
+    nums.sort_by((n: Int) -> n)
     print(nums[0])
 }
 "#;
@@ -279,20 +279,20 @@ fn run() {
     print(nums.skip(2).to_list())
     print(nums.step_by(2).to_list())
     print(nums.dedup().to_list())
-    print(nums.take_while((n: Int) => (n < 4)).to_list())
-    print(nums.skip_while((n: Int) => (n < 4)).to_list())
-    sum := nums.fold(0, (acc: Int, n: Int) => (acc + n))
+    print(nums.take_while((n: Int) -> (n < 4)).to_list())
+    print(nums.skip_while((n: Int) -> (n < 4)).to_list())
+    sum := nums.fold(0, (acc: Int, n: Int) -> (acc + n))
     print(sum)
-    pos := nums.position((n: Int) => (n == 3))
+    pos := nums.position((n: Int) -> (n == 3))
     print(pos)
     words := ["b", "a", "c"]
-    print(words.min_by((w: String) => w.len()))
-    print(words.max_by((w: String) => w.len()))
+    print(words.min_by((w: String) -> w.len()))
+    print(words.max_by((w: String) -> w.len()))
     nested := [[1, 2], [3, 4]]
     print(nested.flatten())
     print(nested.lazy().flatten().to_list())
-    print(nested.flat_map((xs: [Int]) => xs))
-    print(nested.lazy().flat_map((xs: [Int]) => xs).to_list())
+    print(nested.flat_map((xs: [Int]) -> xs))
+    print(nested.lazy().flat_map((xs: [Int]) -> xs).to_list())
 }
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");

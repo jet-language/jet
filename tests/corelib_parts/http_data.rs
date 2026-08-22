@@ -6,7 +6,7 @@ fn core_email_policy_envelope_and_reports_are_real_jet_values() {
     let src = r#"
 use core.email as email
 
-fn error_text(problem: email.EmailError) => String {
+fn error_text(problem: email.EmailError) String {
     if problem == {
         .Configuration(_, _, _, _) -> { return "matched" }
         .TLS(_, _, _, _) -> { return "tls-error" }
@@ -27,13 +27,13 @@ fn run() {
     start_tls :: email.SMTPSecurity.StartTls
     transport_tls :: email.SMTPSecurity.TLS
     require_all :: email.RecipientPolicy.RequireAll
-    recipient :: email.RecipientReport.{
+    recipient :: email.RecipientReport{
         address: hidden,
         accepted: true,
         code: 250,
         message: "accepted",
     }
-    report :: email.SendReport.{
+    report :: email.SendReport{
         server: "smtp.example.com",
         accepted: [recipient],
         rejected: [],
@@ -41,13 +41,13 @@ fn run() {
         response: "queued",
         accepted_at: "2026-07-13T17:00:00Z",
     }
-    problem :: EmailError.{ .Configuration.{
+    problem :: EmailError{ .Configuration{
         operation: "send",
         server: Val("smtp.example.com"),
         code: Val(451),
         reason: "stopped",
     } }
-    tls_problem :: EmailError.{ .TLS.{
+    tls_problem :: EmailError{ .TLS{
         operation: "handshake",
         server: Val("smtp.example.com"),
         code: Val(525),
@@ -953,7 +953,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
-    mux.get("/", (req: HTTPRequest) =>
+    mux.get("/", (req: HTTPRequest) ->
         .Ok(server.response(200, "ok")
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2"))
@@ -1001,12 +1001,12 @@ struct Budget {
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) => Bool {
+fn must_stay_deferred(ticket: Ticket) Bool {
     panic("lazy filter ran before collect")
     return false
 }
 
-fn missing_minutes() => Float? :: None
+fn missing_minutes() Float? -> None
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
@@ -1016,9 +1016,9 @@ fn run() {
     print(data.count(rows))
     table :: data.table(rows)
     lazy :: data.lazy(table)
-    deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
+    deferred :: data.lazy_filter(lazy, (t) -> must_stay_deferred(t))
     print(data.plan(deferred)[1])
-    planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 6.0), (t) => t.team)
+    planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) -> t.minutes >= 6.0), (t) -> t.team)
     collected :: data.collect(planned) ?? panic("collect")
     print(data.count(table))
     print(data.count(planned))
@@ -1031,31 +1031,31 @@ fn run() {
     series :: data.series(maybe_minutes)
     print(data.count(series))
     print(data.missing_count(series))
-    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes) ?? panic("group")
+    groups :: data.group_mean(rows, (t) -> t.team, (t) -> t.minutes) ?? panic("group")
     loop g, groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values) ?? panic("sum"))
     print(data.mean(values) ?? panic("mean"))
-    joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team) ?? panic("join")
+    joined :: data.inner_join(rows, budgets, (t) -> t.team, (b) -> b.team) ?? panic("join")
     loop pair, joined {
         print("{pair.left.team}:{pair.right.owner}")
     }
-    left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team) ?? panic("left")
+    left :: data.left_join(rows, [budgets[0]], (t) -> t.team, (b) -> b.team) ?? panic("left")
     loop pair, left {
         if pair.right == {
             Val(budget) -> print("{pair.left.team}:{budget.owner}")
             None -> print("{pair.left.team}:none")
         }
     }
-    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 -> "long" else -> "short", (t) => t.minutes) ?? panic("pivot")
+    pivot :: data.pivot_sum(rows, (t) -> t.team, (t) -> if t.minutes >= 6.0 -> "long" else -> "short", (t) -> t.minutes) ?? panic("pivot")
     loop cell, pivot {
         print("{cell.row_key}|{cell.column_key}:{cell.count}")
     }
     rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
     print(rolling[2])
-    counts :: data.group_count(rows, (t) => t.team) ?? panic("count")
+    counts :: data.group_count(rows, (t) -> t.team) ?? panic("count")
     print(data.bar_text(counts) ?? panic("bar"))
     print((data.bar_svg(counts) ?? panic("svg")).len())
     status :: data.status()
@@ -1110,12 +1110,12 @@ fn run() {{
         Val(row) -> print("first:{{row.service}}")
         None -> panic("eof")
     }}
-    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
     if groups == {{
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
     }}
-    empty := data.mean([Float].{{}})
+    empty := data.mean([Float]{{}})
     if empty == {{
         .Ok(_) -> print("unexpected mean")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
@@ -1169,7 +1169,7 @@ fn run() {
     loop c, cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
+    selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
     loop t, selected {
         print("{t.team}:{t.minutes}")
@@ -1218,7 +1218,7 @@ fn run() {
     loop c, cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
+    selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
     loop t, selected {
         print("{t.team}:{t.minutes}")
@@ -1269,7 +1269,7 @@ struct Box<T> {
 }
 
 fn run() {
-    empty_rows := [Ticket].{}
+    empty_rows := [Ticket]{}
     empty_table :: data.table(empty_rows)
     loop c, data.schema(empty_table) {
         print("empty:{c.name}:{c.type_name}")
@@ -1280,21 +1280,21 @@ fn run() {
         print("float:{c.name}:{c.type_name}")
     }
 
-    tickets :: data.series([Ticket.{team: "Core", minutes: 4.0}])
+    tickets :: data.series([Ticket{team: "Core", minutes: 4.0}])
     loop c, data.schema(tickets) {
         print("struct:{c.name}:{c.type_name}")
     }
 
-    empty_tickets := [Ticket].{}
+    empty_tickets := [Ticket]{}
     empty_series :: data.series(empty_tickets)
     loop c, data.schema(empty_series) {
         print("empty_series:{c.name}:{c.type_name}")
     }
 
-    empty_units := [Empty].{}
+    empty_units := [Empty]{}
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
 
-    boxed := [Box<Int>].{}
+    boxed := [Box<Int>]{}
     loop c, data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }

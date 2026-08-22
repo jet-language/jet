@@ -98,27 +98,27 @@ const CASES: &[&str] = &[
 ];
 
 const F32_VALUE_FLOW: &str = r#"
-fn pass_f32(value: F32) => F32 {
+fn pass_f32(value: F32) F32 {
     return value
 }
 
-fn apply_f32(transform: fn(F32) => F32, value: F32) => F32 {
+fn apply_f32(transform: fn(F32) F32, value: F32) F32 {
     return transform(value)
 }
 
-fn f32_value_flow() => String {
-    literal :: F32.{ 16777217.0 }
-    one :: F32.{ 1.0 }
-    two :: F32.{ 2.0 }
-    three :: F32.{ 3.0 }
-    threshold :: F32.{ 16777215.0 }
-    immutable :: F32.{ literal + one }
-    mutable := F32.{ literal }
+fn f32_value_flow() String {
+    literal :: F32{ 16777217.0 }
+    one :: F32{ 1.0 }
+    two :: F32{ 2.0 }
+    three :: F32{ 3.0 }
+    threshold :: F32{ 16777215.0 }
+    immutable :: F32{ literal + one }
+    mutable := F32{ literal }
     mutable += one
     mutable -= two
     mutable *= three
     mutable /= two
-    transform :: (value: F32) => value + one
+    transform :: (value: F32) -> value + one
     same :: pass_f32(literal)
     wide :: Float.from_f32(literal)
     narrowed :: F32.from_float(wide) ?? one
@@ -127,10 +127,10 @@ fn f32_value_flow() => String {
     option_right :: [[[same].get(0)]]
     result_left :: [[F32.from_float(wide)]]
     result_right :: [[F32.from_float(Float.from_f32(same))]]
-    negative :: F32.{ -literal }
-    difference :: F32.{ literal - one }
-    product :: F32.{ literal * two }
-    quotient :: F32.{ literal / two }
+    negative :: F32{ -literal }
+    difference :: F32{ literal - one }
+    product :: F32{ literal * two }
+    quotient :: F32{ literal / two }
     return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
 }
 
@@ -334,13 +334,13 @@ fn stream_generator_break_matches_comptime_and_runtime() {
         35_000,
         "Stream generator early break",
         r#"
-fn stop_after_two() => Stream<Int> {
+fn stop_after_two() Stream<Int> {
     yield 1
     yield 2
     yield 3
 }
 
-fn first() => [Int] {
+fn first() [Int] {
     return loop value, stop_after_two() -> {
         if value == 2 { break }
         value
@@ -375,15 +375,15 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
     }
     let src = r#"use core.archive.gzip as gzip
 
-fn codec_probe() => String {
-    bytes :: [U8].{ 72, 101, 108, 108, 111 }
-    gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8].{}
-    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8].{}
-    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8].{ 255 }
-    h :: U8.{ 72 }
-    lower_h :: U8.{ 104 }
-    o :: U8.{ 111 }
-    max :: U8.{ 255 }
+fn codec_probe() String {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
+    gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8]{}
+    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+    h :: U8{ 72 }
+    lower_h :: U8{ 104 }
+    o :: U8{ 111 }
+    max :: U8{ 255 }
     return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
 }
 
@@ -406,12 +406,12 @@ fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     }
     let src = r#"use core.archive.zstd as zstd
 
-@bytes :: [U8].{ 72, 101, 108, 108, 111 }
+@bytes :: [U8]{ 72, 101, 108, 108, 111 }
 @encoded :: zstd.compress(@bytes)
-@expected :: zstd.decompress(@encoded) ?? [U8].{}
+@expected :: zstd.decompress(@encoded) ?? [U8]{}
 
 fn run() {
-    restored :: zstd.decompress(@encoded) ?? [U8].{}
+    restored :: zstd.decompress(@encoded) ?? [U8]{}
     print("{@expected}")
     print("{restored}")
 }
@@ -427,10 +427,10 @@ fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
     }
     let src = r#"use core.archive.zstd as zstd
 
-@expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
+@expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
 
 fn run() {
-    actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
+    actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
     print("{@expected}")
     print("{actual}")
 }
@@ -484,7 +484,7 @@ fn comptime_generic_alias_matches_runtime() {
     }
     let src = r#"alias Answer<T> :: T
 
-fn answer() => Answer<Int> {
+fn answer() Answer<Int> {
     return 42
 }
 
@@ -513,14 +513,14 @@ fn reusable_regex_matches_across_comptime_tir_and_runtime() {
         34_000,
         "typed Regex methods and canonical grammar",
         r#"
-@ct_regex :: Regex.{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
+@ct_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
 @ct_match :: @ct_regex.match("xx Jet_2026 yy") ?? panic("missing comptime match")
-@comptime_value :: "{@ct_match.group(2) ?? "none"}|{@ct_match.name("word") ?? "none"}|{@ct_match.start()}|{@ct_match.end()}|{@ct_match.group_start(1) ?? -1}|{@ct_match.group_end(1) ?? -1}|{@ct_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{@ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
+@comptime_value :: "{@ct_match.group(2) ?? "none"}|{@ct_match.name("word") ?? "none"}|{@ct_match.start()}|{@ct_match.end()}|{@ct_match.group_start(1) ?? -1}|{@ct_match.group_end(1) ?? -1}|{@ct_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{@ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
 
 fn run() {
-    rt_regex :: Regex.{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
+    rt_regex :: Regex{"(?<word>\p{{Alphabetic}}+)_(\d{{2,4}})"}
     rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
-    runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
+    runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) -> m.name("word") ?? "none")}"
     print("{@comptime_value}")
     print("{runtime_value}")
 }
@@ -536,11 +536,11 @@ fn typed_datetime_head_matches_comptime_and_runtime() {
         34_002,
         "typed DateTime head",
         r#"
-@stamp :: DateTime.{"2026-08-07T12:00:00Z"}
+@stamp :: DateTime{"2026-08-07T12:00:00Z"}
 @expected :: @stamp.to_string()
 
 fn run() {
-    runtime :: DateTime.{"2026-08-07T12:00:00Z"}
+    runtime :: DateTime{"2026-08-07T12:00:00Z"}
     print("{@expected}")
     print("{runtime.to_string()}")
 }
@@ -559,12 +559,12 @@ fn sequential_comptime_reads_advance_the_shared_reader() {
         "sequential compile-time reader reads",
         r#"
 fn run() {
-    @ct :: Reader.over([U8].{7, 9, 11})
+    @ct :: Reader.over([U8]{7, 9, 11})
     @ct_a :: @ct.read_u8() ?? panic("ct a")
     @ct_b :: @ct.read_u8() ?? panic("ct b")
     @comptime_value :: "{@ct_a}|{@ct_b}|{@ct.remaining()}"
 
-    rt :: Reader.over([U8].{7, 9, 11})
+    rt :: Reader.over([U8]{7, 9, 11})
     rt_a :: rt.read_u8() ?? panic("rt a")
     rt_b :: rt.read_u8() ?? panic("rt b")
     runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
@@ -833,7 +833,7 @@ fn data_empty_input_error_matches_comptime_and_runtime() {
         let src = format!(
             r#"use core.data as data
 
-fn show(result: Float ! DataError) => String {{
+fn show(result: Float ! DataError) String {{
     if result == {{
         .Ok(value) -> return "ok {{value}}"
         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
@@ -841,7 +841,7 @@ fn show(result: Float ! DataError) => String {{
     return "unreachable"
 }}
 
-fn empty() => [Float] {{
+fn empty() [Float] {{
     return []
 }}
 
@@ -866,7 +866,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree ! XMLError) => String {
+fn show(result: DataTree ! XMLError) String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -927,13 +927,13 @@ struct Packet { id: Int, payload: [U8] }
 @expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
 @expected_floats :: hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
 @expected_nan :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
-@expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+@expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
 
 fn run() {
     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
     actual_floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
     actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
-    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
     if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
     if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
     if actual_nan != "f97e00" { panic("canonical NaN drift") }
@@ -953,11 +953,11 @@ fn cbor_options_and_hostile_errors_match_comptime_and_aot() {
     }
     let src = r#"use core.encoding.cbor as cbor
 
-fn safe() => cbor.CBOROptions {
-    return cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+fn safe() cbor.CBOROptions {
+    return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
 }
 
-fn show(bytes: [U8]) => String {
+fn show(bytes: [U8]) String {
     if cbor.parse(bytes, safe()) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -965,43 +965,43 @@ fn show(bytes: [U8]) => String {
     return "unreachable"
 }
 
-fn show_strict(bytes: [U8]) => String {
-    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+fn show_strict(bytes: [U8]) String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_depth(bytes: [U8]) => String {
-    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+fn show_depth(bytes: [U8]) String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_items(bytes: [U8]) => String {
-    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+fn show_items(bytes: [U8]) String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_bytes(bytes: [U8]) => String {
-    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+fn show_bytes(bytes: [U8]) String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_alloc(bytes: [U8]) => String {
-    if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+fn show_alloc(bytes: [U8]) String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 
-fn show_ints(bytes: [U8]) => String {
+fn show_ints(bytes: [U8]) String {
     if cbor.decode<[Int]>(bytes, safe()) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e[0].path}|{e[0].reason}"
@@ -1020,13 +1020,13 @@ fn show_ints(bytes: [U8]) => String {
 @expected_alloc :: show_alloc([130, 1, 2])
 
 fn run() {
-    malformed_wire := [U8].{ 255 }
-    truncated_wire := [U8].{ 129 }
-    noncanonical_wire := [U8].{ 24, 1 }
-    unsupported_wire := [U8].{ 192, 1 }
-    mismatch_wire := [U8].{ 129, 97, 120 }
-    depth_wire := [U8].{ 129, 129, 1 }
-    items_wire := [U8].{ 130, 1, 2 }
+    malformed_wire := [U8]{ 255 }
+    truncated_wire := [U8]{ 129 }
+    noncanonical_wire := [U8]{ 24, 1 }
+    unsupported_wire := [U8]{ 192, 1 }
+    mismatch_wire := [U8]{ 129, 97, 120 }
+    depth_wire := [U8]{ 129, 129, 1 }
+    items_wire := [U8]{ 130, 1, 2 }
     actual_malformed := show(malformed_wire)
     actual_truncated := show(truncated_wire)
     actual_noncanonical := show_strict(noncanonical_wire)
@@ -1046,8 +1046,8 @@ fn run() {
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
-fn build() => [Int] {
-    xs := [Int].{}
+fn build() [Int] {
+    xs := [Int]{}
     loop i, 1..5, 2 {
         if i == 3 { next }
         xs.push(i * 10)
@@ -1087,11 +1087,11 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair.{left: 7, right: "seven"}
+@pair_value :: Pair{left: 7, right: "seven"}
 @light_value :: Light.Green
 
 fn run() {
-    p :: Pair.{left: 7, right: "seven"}
+    p :: Pair{left: 7, right: "seven"}
     l :: Light.Green
     print("{@pair_value.left}")
     print("{p.left}")

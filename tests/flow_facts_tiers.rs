@@ -17,14 +17,14 @@ use std::process::Command;
 /// One program, every plane. `label` narrows an optional across a branch;
 /// `total` is written in both arms and read after they meet.
 const SOURCE: &str = r#"
-fn label(text: String?) => String {
+fn label(text: String?) String {
     if text != None {
         return text
     }
     return "none"
 }
 
-fn score(flag: Bool) => Int {
+fn score(flag: Bool) Int {
     total := 0
     if {
         flag -> total = 2
@@ -101,7 +101,7 @@ fn comptime_folds_the_same_answer() {
 fn repl_answers_the_same() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "fn label(text: String?) => String { if text != None { return text } return \"none\" }",
+            "fn label(text: String?) String { if text != None { return text } return \"none\" }",
             "print(label(Val(\"keep\")))",
             "print(label(None))",
         ],

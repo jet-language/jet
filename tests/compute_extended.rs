@@ -53,7 +53,7 @@ fn curried_autodiff_shapes_share_the_prelude_handle() {
         r#"
 use core.compute as compute
 
-fn loss(w: Tensor, x: Tensor) Tensor :> compute.mul(w, x) ?? panic("loss")
+fn loss(w: Tensor, x: Tensor) Tensor -> compute.mul(w, x) ?? panic("loss")
 
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
@@ -261,7 +261,7 @@ fn run() {
 #[test]
 fn safe_kernel_rejects_effectful_bodies_before_codegen() {
     let diagnostics = jet::compile(
-        "#Kernel(.parallel) fn noisy(value: Int) => Int { print(value); return value }\n",
+        "#Kernel(.parallel) fn noisy(value: Int) Int -[IO]> { print(value); return value }\n",
     )
     .expect_err("a safe kernel must not lower an effectful body");
     assert!(
@@ -288,7 +288,7 @@ fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
 #[test]
 fn safe_kernel_proof_reaches_tir_without_rederivation() {
     let compiled = jet::compile(
-        "#Kernel(.parallel) fn add(left: Int, right: Int) Int :> left + right;\nfn run() { print(add(1, 2)) }\n",
+        "#Kernel(.parallel) fn add(left: Int, right: Int) Int -> left + right;\nfn run() { print(add(1, 2)) }\n",
     )
     .expect("the checked kernel should compile");
     assert!(

@@ -122,7 +122,7 @@ fn profile_custom_name_from_package_jet() {
         dir.join("package.jet"),
         r#"name: "p"
 version: "0.1.0"
-build: { staging: Build.{ optimize: basic } }
+build: { staging: Build{ optimize: basic } }
 "#,
     )
     .unwrap();
@@ -347,7 +347,7 @@ fn expand_effects_and_layout_report_checked_facts() {
     assert_eq!(effects.status.code(), Some(0));
     let effects_human = scrub_fixture(&String::from_utf8_lossy(&effects.stdout), &fixture);
     assert!(effects_human.contains("audit"), "{effects_human}");
-    // `=[Log.Audit]=>` is an upper bound. The pure fixture body resolves to
+    // `-[Log.Audit]>` is an upper bound. The pure fixture body resolves to
     // an empty inferred row; a declaration is not an executed effect.
     assert!(effects_human.contains("resolved=[]"), "{effects_human}");
 
@@ -679,7 +679,7 @@ fn plugin_using_an_effect_is_e1258() {
     let dir = isolated_cwd("plugin_effect_denied");
     fs::write(
         dir.join("main.jet"),
-        "use core.sys as env\n\npub fn get_secret() => Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
+        "use core.sys as env\n\npub fn get_secret() Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -724,7 +724,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let dir = isolated_cwd("plugin_no_wasmtools");
     fs::write(
         dir.join("main.jet"),
-        "pub fn scale(a: Float, b: Float) => Float {\n    return a * b\n}\n",
+        "pub fn scale(a: Float, b: Float) Float {\n    return a * b\n}\n",
     )
     .unwrap();
 
@@ -926,7 +926,7 @@ fn service_probe_unavailable_without_dev_reports_diagnostic() {
 }
 
 module perf.package {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "readiness",
         scope: .Service("mydb"),
         metric: .ServiceReadiness,
@@ -982,7 +982,7 @@ fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
         r#"use project.env.dev
 
 module perf.package {
-    budgets: [Budget.{
+    budgets: [Budget{
         name: "readiness",
         scope: .Service("mydb"),
         metric: .ServiceReadiness,

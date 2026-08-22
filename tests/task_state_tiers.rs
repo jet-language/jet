@@ -9,7 +9,7 @@ use std::fs;
 use std::process::Command;
 
 const SOURCE: &str = r#"
-fn add(left: Int, right: Int) => Int {
+fn add(left: Int, right: Int) Int {
     return left + right
 }
 
