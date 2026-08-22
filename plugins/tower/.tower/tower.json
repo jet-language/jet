@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 41530,
+    "rev": 41591,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2003,7 +2003,7 @@
       "title": "M19 · One callable, one arrow",
       "goal": "Land the reading-first callable and arrow slate ratified 2026-08-21: the arrow respells to -> with the effect row outside it, a function is a named lambda whose arrow appears iff a non-unit success value is declared, lambdas may state their whole interface, arm heads take parens when atoms mix with guards, subject shorthand gets one rule and a nesting fence, defaults ride the type, and the failure surface reads as suffixes.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-21T23:50:13.725Z"
     }
   ],
@@ -12648,7 +12648,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-profiles-providers",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Provider conformance: shared lossless provider contract** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-PROVIDERS2=D.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/Provider.rs, crates/jetpack/src/ProviderGraph.rs, crates/jetpack/src/Provider/, crates/jet-pkg-model/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower profiles and providers into the shared typed fact model. Preserve lossless import, export, lock, and explain behavior.\n6. Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -12742,52 +12742,52 @@
         }
       ],
       "created": "2026-07-09T20:38:07.993Z",
-      "updated": "2026-08-22T19:48:58.330Z",
+      "updated": "2026-08-22T20:40:01.635Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.964Z"
+          "evidence": "evidence: Provider.rs:126 validates and embeds the shared carrier; production conformance tests passed. [lane y428]",
+          "at": "2026-08-22T20:39:55.913Z"
         },
         {
           "n": 2,
           "text": "Provider and profile changes retain identity, provenance, and meaning across source, lock, explain, and generated outputs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.964Z"
+          "evidence": "evidence: ProviderGraph.rs:163 preserves native bytes and typed facts; lock/export/explain tests passed. [lane y428]",
+          "at": "2026-08-22T20:39:57.481Z"
         },
         {
           "n": 3,
           "text": "Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.964Z"
+          "evidence": "evidence: ProviderFacts.rs:642 rejects loss/conflict; ProviderGraph.rs:418 reports conflicting dependency projections. [lane y428]",
+          "at": "2026-08-22T20:39:58.422Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.964Z"
+          "evidence": "evidence: 7 conformance, 1 real import, 2 plan-failure, and 1 Store-carrier checks passed. [lane y428]",
+          "at": "2026-08-22T20:39:58.778Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:11.964Z"
+          "evidence": "evidence: world-class-package-manager.md:679 documents shipped behavior; explain and golden-path tests passed. [lane y428]",
+          "at": "2026-08-22T20:40:00.061Z"
         }
       ],
       "needsAcceptance": false,
@@ -12801,7 +12801,8 @@
       ],
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:01.635Z"
     },
     {
       "id": "c0pn8z35",
@@ -37688,11 +37689,11 @@
         {
           "n": 3,
           "text": "Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:24.021Z"
+          "evidence": "evidence: atomic staging/race handling (Source/Publish/Registry.rs:834, :1149); concurrent, duplicate, stale-cache, credential, corrupt-artifact, and interrupted-stage tests passed. [lane y928]",
+          "at": "2026-08-22T20:40:04.298Z"
         },
         {
           "n": 4,
@@ -37722,7 +37723,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:56.393Z",
-      "updated": "2026-08-22T19:49:09.366Z",
+      "updated": "2026-08-22T20:40:04.298Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -38454,7 +38455,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-profiles-providers",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Provider conformance: Jet registry, npm, and Cargo** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/Provider.rs, crates/jetpack/src/ProviderGraph.rs, crates/jetpack/src/Provider/, crates/jet-pkg-model/src, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Lower profiles and providers into the shared typed fact model. Preserve lossless import, export, lock, and explain behavior.\n6. Unsupported, lossy, ambiguous, or conflicting provider facts produce explicit loss or conflict reports. Silent defaults do not count.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -38510,11 +38511,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:26.057Z"
+          "evidence": "evidence: tests/jetpack_engine.rs:8112, :8180; production success/failure checks pass. [lane y936]",
+          "at": "2026-08-22T20:40:05.191Z"
         },
         {
           "n": 5,
@@ -38536,10 +38537,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:59.918Z",
-      "updated": "2026-08-22T19:49:23.701Z",
+      "updated": "2026-08-22T20:40:06.729Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:06.729Z"
     },
     {
       "id": "c07elzj4",
@@ -39697,7 +39699,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-platform-acceptance",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Epoch 4 gate: store, action-graph, resolver, and evaluator scale budgets** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, docs/spec/roadmap.md, tests/jetpack_engine.rs, tests/jetpack_dispatch.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Prove the integrated Jetpack workflow on clean machines and the declared platform matrix. Do not implement duplicate feature paths here.\n6. Missing tools, offline mode, clean stores, unsupported platforms, and injected component failure expose no hidden dependency or false-green skip.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -39731,47 +39733,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.452Z"
+          "evidence": "evidence: bounded Store/closure limits, 100k indexed action graph, iterative 100k resolver, evaluator budgets; focused tests passed. [lane y954]",
+          "at": "2026-08-22T20:40:07.302Z"
         },
         {
           "n": 2,
           "text": "The named acceptance workflow completes through integrated production components and records durable, reproducible evidence.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.452Z"
+          "evidence": "evidence: world-class-package-manager.md:874, roadmap.md:177; production integration tests passed. [lane y954]",
+          "at": "2026-08-22T20:40:08.145Z"
         },
         {
           "n": 3,
           "text": "Missing tools, offline mode, clean stores, unsupported platforms, and injected component failure expose no hidden dependency or false-green skip.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.452Z"
+          "evidence": "evidence: platform lane 4/4, offline/missing-output checks passed; empty PATH evaluator checks passed. [lane y954]",
+          "at": "2026-08-22T20:40:09.268Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.452Z"
+          "evidence": "evidence: action, resolver, Hangar, evaluator, platform, offline tests passed. [lane y954]",
+          "at": "2026-08-22T20:40:09.622Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.452Z"
+          "evidence": "evidence: docs and named proof tests match shipped behavior. [lane y954]",
+          "at": "2026-08-22T20:40:09.997Z"
         }
       ],
       "refs": [
@@ -39782,10 +39784,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:07.662Z",
-      "updated": "2026-08-19T13:28:29.227Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-22T20:40:11.540Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:11.540Z"
     },
     {
       "id": "c0tqgl1r",
@@ -39796,7 +39799,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-platform-acceptance",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Epoch 4 gate: package-manager dogfood portfolio** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, docs/spec/roadmap.md, tests/jetpack_engine.rs, tests/jetpack_dispatch.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Prove the integrated Jetpack workflow on clean machines and the declared platform matrix. Do not implement duplicate feature paths here.\n6. Missing tools, offline mode, clean stores, unsupported platforms, and injected component failure expose no hidden dependency or false-green skip.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -39820,20 +39823,20 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.718Z"
+          "evidence": "evidence: tests/jetpack_engine.rs:6818, tests/jetpack_engine.rs:6893, epoch4 dogfood harness: PASS [lane y955]",
+          "at": "2026-08-22T20:40:13.057Z"
         },
         {
           "n": 2,
           "text": "The named acceptance workflow completes through integrated production components and records durable, reproducible evidence.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.719Z"
+          "evidence": "evidence: documented matrix at world-class-package-manager.md:897; all named CLI, service, plugin, cross-build, monorepo, registry, flake, remote, and offline tests passed. [lane y955]",
+          "at": "2026-08-22T20:40:13.544Z"
         },
         {
           "n": 3,
@@ -39847,20 +39850,20 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.719Z"
+          "evidence": "evidence: dispatch success/failure tests passed; card test asserts injected component failure at tests/jetpack_engine.rs:6897. [lane y955]",
+          "at": "2026-08-22T20:40:13.859Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:30.719Z"
+          "evidence": "evidence: world-class-package-manager.md:902, world-class-package-manager.md:915, roadmap.md:188; git diff --check passed. [lane y955]",
+          "at": "2026-08-22T20:40:14.206Z"
         }
       ],
       "refs": [
@@ -39871,8 +39874,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:08.131Z",
-      "updated": "2026-08-19T13:28:29.833Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-22T20:40:14.912Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -39984,7 +39987,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-trust-policy",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Package trust: remote execution, locks, and offline bundles** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/TrustRoot.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Apply trust and policy before any package, cache, or remote result becomes usable. Keep decisions visible in receipts and explain output.\n6. Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -40013,29 +40016,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.230Z"
+          "evidence": "evidence: production gates at Store.rs:2023-2057 and cache verification at Store/Cache.rs:619-645; remote, offline, and advisory production tests passed. [lane y957]",
+          "at": "2026-08-22T20:40:16.585Z"
         },
         {
           "n": 2,
           "text": "Identity, signatures, provenance, locks, advisory policy, and offline state produce one deterministic allow or deny result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.230Z"
+          "evidence": "evidence: trust-root monotonic/signature checks at TrustRoot.rs:1222-1284, lock/cache boundary at Store.rs:2023-2063, explain admissions at Store/Cache.rs:1091-1175. [lane y957]",
+          "at": "2026-08-22T20:40:17.759Z"
         },
         {
           "n": 3,
           "text": "Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.230Z"
+          "evidence": "evidence: rollback, expiry, provenance, and same-version rejection at Store/Cache.rs:1624-1687; binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match passed. [lane y957]",
+          "at": "2026-08-22T20:40:18.139Z"
         },
         {
           "n": 4,
@@ -40049,11 +40052,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.230Z"
+          "evidence": "evidence: trust behavior documented at docs/plans/epoch-4/world-class-package-manager.md:347-356; explain/audit output covered by Store/Explain.rs:1091-1175,1837-1853; signed advisory tests passed. [lane y957]",
+          "at": "2026-08-22T20:40:18.603Z"
         }
       ],
       "refs": [
@@ -40064,8 +40067,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:09.181Z",
-      "updated": "2026-08-01T17:56:31.230Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T20:40:19.375Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -40078,7 +40081,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-trust-policy",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Package trust: SLSA action and output provenance** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/TrustRoot.rs, crates/jetpack/src/Store.rs, tests/jetpack_engine.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Apply trust and policy before any package, cache, or remote result becomes usable. Keep decisions visible in receipts and explain output.\n6. Tamper, rollback, freeze, mix-and-match, stale metadata, and compromised-key cases fail closed with a useful recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -40124,11 +40127,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.463Z"
+          "evidence": "evidence: production-path trust tests passed: binary_cache_local_publish_verify_and_reject_corruption, binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match, jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed [lane y958]",
+          "at": "2026-08-22T20:40:19.978Z"
         },
         {
           "n": 5,
@@ -40148,10 +40151,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:09.498Z",
-      "updated": "2026-08-22T19:49:53.512Z",
+      "updated": "2026-08-22T20:40:21.191Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:21.191Z"
     },
     {
       "id": "c0lqvdtv",
@@ -42974,7 +42978,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-store-repair",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n\nShip **jet hangar copy command** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, Source/CmdPkg.rs, crates/jet-cli/src/CLI.rs, crates/jetpack/src/Store.rs, crates/jet-pkg-model/src/Envelope.rs, tests/diagnostic_snapshots.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical Hangar and closure model. Make every mutation atomic, recoverable, and explainable.\n6. Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -43003,47 +43007,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.935Z"
+          "evidence": "evidence: Source/main.rs:2353, crates/jetpack/src/CLI/package_hangar_vendor.rs:816, Store::copy_archive; copy test passed. [lane y991]",
+          "at": "2026-08-22T20:40:22.631Z"
         },
         {
           "n": 2,
           "text": "Store identity, reachability, receipts, and projections agree. Repeated operations are safe and deterministic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.935Z"
+          "evidence": "evidence: Store/Archive.rs:399-418,691-813; receipt, closure, repeat, and conflict checks pass. [lane y991]",
+          "at": "2026-08-22T20:40:23.001Z"
         },
         {
           "n": 3,
           "text": "Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.935Z"
+          "evidence": "evidence: export-corruption, repair-crash, and recovery/stale-lease/path-escape tests pass. [lane y991]",
+          "at": "2026-08-22T20:40:23.362Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.935Z"
+          "evidence": "evidence: four real production-path targeted tests passed. [lane y991]",
+          "at": "2026-08-22T20:40:23.754Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:31.935Z"
+          "evidence": "evidence: truth-matrix.md:72, package-manager plan :787-794, CLI help, E1340 diagnostics. [lane y991]",
+          "at": "2026-08-22T20:40:24.084Z"
         }
       ],
       "refs": [
@@ -43057,10 +43061,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:24.357Z",
-      "updated": "2026-08-01T17:56:31.935Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T20:40:24.835Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:24.834Z"
     },
     {
       "id": "c0g4ojoy",
@@ -45836,7 +45841,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-store-repair",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Hangar broker: native lifecycle, recovery, and hostile proof** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/proposals/ecosystem-shape.md, docs/spec/syntax-decisions.md, docs/plans/epoch-4/world-class-package-manager.md, crates/jetpack/src/Store.rs, crates/jetpack/src/CLI/parse.rs, Source/Doctor.rs, tests/jetpack_engine.rs, tests/diagnostic_snapshots.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the canonical Hangar and closure model. Make every mutation atomic, recoverable, and explainable.\n6. Crash, corruption, stale lease, path escape, and concurrent-update cases preserve live data and give a safe repair or rollback path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -45882,11 +45887,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:38.207Z"
+          "evidence": "evidence: real production harness passed 18/18 targeted tests. [lane y1022]",
+          "at": "2026-08-22T20:40:26.016Z"
         },
         {
           "n": 5,
@@ -45910,10 +45915,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:38.511Z",
-      "updated": "2026-08-21T18:49:40.943Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-22T20:40:26.747Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:26.747Z"
     },
     {
       "id": "c02iiv45",
@@ -51361,7 +51367,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Service presets: PostgreSQL and Redis** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, crates/jetpack/src, examples/features. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -51390,20 +51396,20 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.190Z"
+          "evidence": "evidence: Services.rs:262, Services.rs:283, realize.rs:714, passing production catalog test. [lane y1080]",
+          "at": "2026-08-22T20:40:27.395Z"
         },
         {
           "n": 2,
           "text": "Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.190Z"
+          "evidence": "evidence: Services.rs:1117, Services.rs:4275, tests/jetpack_services.rs:893. [lane y1080]",
+          "at": "2026-08-22T20:40:27.740Z"
         },
         {
           "n": 3,
@@ -51426,11 +51432,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.190Z"
+          "evidence": "evidence: docs/reference/jetpack-epoch5.md:473, tests/fixtures/jetpack-typed/services.jet:21, fixture test passed. [lane y1080]",
+          "at": "2026-08-22T20:40:28.164Z"
         }
       ],
       "refs": [
@@ -51441,8 +51447,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:06:04.383Z",
-      "updated": "2026-08-01T17:56:41.190Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T20:40:28.900Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -51455,7 +51461,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Service presets: MySQL or MariaDB and Nginx** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, crates/jetpack/src, examples/features. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -51474,47 +51480,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.415Z"
+          "evidence": "evidence: Services.rs:294, :313, :332; production catalog test passed. [lane y1081]",
+          "at": "2026-08-22T20:40:29.494Z"
         },
         {
           "n": 2,
           "text": "Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.415Z"
+          "evidence": "evidence: realize.rs:714, services_secrets_config.rs:513, Services.rs:1022; lifecycle/dependency tests passed. [lane y1081]",
+          "at": "2026-08-22T20:40:29.855Z"
         },
         {
           "n": 3,
           "text": "Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.415Z"
+          "evidence": "evidence: startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and descendant cleanup tests passed. [lane y1081]",
+          "at": "2026-08-22T20:40:30.200Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.415Z"
+          "evidence": "evidence: production_catalog_services_prepare_state_and_pass_readiness plus focused failure tests passed. [lane y1081]",
+          "at": "2026-08-22T20:40:30.567Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.415Z"
+          "evidence": "evidence: research doc :141, :227; executable fixture services.jet:11; model fixture test passed. [lane y1081]",
+          "at": "2026-08-22T20:40:30.964Z"
         }
       ],
       "refs": [
@@ -51525,10 +51531,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:06:04.713Z",
-      "updated": "2026-08-01T17:56:41.415Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T20:40:31.717Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-22T20:40:31.716Z"
     },
     {
       "id": "c0z655d9",
@@ -51539,7 +51546,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-env-services",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Service presets: MinIO, mail, and administration tools** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/research/2026-07-24-devenv-parity.md, docs/spec/syntax-decisions.md, crates/jetpack/src, examples/features. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse typed tasks, services, files, process control, watchers, and grants. Do not add string shell fields or a second supervisor.\n6. Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 5 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -51567,20 +51574,20 @@
         {
           "n": 2,
           "text": "Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.682Z"
+          "evidence": "evidence: shared catalog and lifecycle path (Services.rs:48-61, Services.rs:979-1032, Services.rs:2715-2956, CLI/realize.rs:714-723). [lane y1082]",
+          "at": "2026-08-22T20:40:33.166Z"
         },
         {
           "n": 3,
           "text": "Startup failure, readiness timeout, restart exhaustion, dependency failure, cancellation, and cleanup leave no orphan process or misleading health state.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:56:41.682Z"
+          "evidence": "evidence: bounded readiness, restart, dependency, cancellation, and cleanup paths (Services.rs:2958-3045, Services.rs:4123-4165, Services.rs:4266-4367); targeted failure tests passed. [lane y1082]",
+          "at": "2026-08-22T20:40:34.387Z"
         },
         {
           "n": 4,
@@ -51609,8 +51616,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:06:05.056Z",
-      "updated": "2026-08-01T17:56:41.682Z",
-      "updatedBy": "codex-plan-audit",
+      "updated": "2026-08-22T20:40:35.172Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -141776,7 +141783,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m19-arrow-slate",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -141791,7 +141798,62 @@
           "text": "Blocker found while closing #2146. Six build entry points spell their signature `fn build(b: BuildContext) BuildPlan! ->` (examples/features/tooling/compiler_api.jet:6, tooling/programmable_build/main.jet:1, tooling/build_entry_discovery/packages/foundation/tools/build.jet:1, tooling/build_entry_discovery/tools/build_entry.jet:1, comptime/distinct_reflect.jet:5, packages/build_contribution/run.jet:2). Under D-ERRSUFFIX1=B a bare E! is unit-fallible, so BuildPlan! reads as unit success failing with BuildPlan. But these functions return a BuildPlan value (distinct_reflect.jet:20 returns b.plan(app)) and propagate with ?, so the corpus convention means the opposite of the ratified rule. The formatter already follows the ratified rule and strips the arrow, which is why fmt_lossless fails on distinct_reflect.jet. Respelling these to name both the success and the error type is this card work; do not guess the error type without checking the BuildContext surface."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Parser accepts typed suffixes in all listed type positions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: fallible_type_sigil_is_valid_in_all_type_positions; failure_suffixes_compose_optional_success_and_error_union passed. [lane y2149]",
+          "at": "2026-08-22T20:39:47.539Z"
+        },
+        {
+          "n": 2,
+          "text": "Bare ! keeps default-error meaning.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: suffix_zone_supports_bare_default_error_in_general_types; unit_fallible_signatures_use_the_error_suffix passed. [lane y2149]",
+          "at": "2026-08-22T20:39:48.618Z"
+        },
+        {
+          "n": 3,
+          "text": "Retired infix forms emit E-ERR-SIGIL with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/ui/retired_fallible_type_sigil.stderr:1, crates/jet-codegen/src/Prelude/Diagnostics.jet:281; snapshot passed. [lane y2149]",
+          "at": "2026-08-22T20:39:48.955Z"
+        },
+        {
+          "n": 4,
+          "text": "Optional-plus-fallible signatures compile end-to-end.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/tir_control_and_data.rs:205; fallible_type_spelling_example_matches_all_execution_tiers passed. [lane y2149]",
+          "at": "2026-08-22T20:39:50.012Z"
+        },
+        {
+          "n": 5,
+          "text": "Active docs and examples use suffix spelling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: docs/spec/stdlib-api-laws.md:92, examples/features/parsing/binary-reader.jet:4, examples/canon.jet:125. [lane y2149]",
+          "at": "2026-08-22T20:39:51.242Z"
+        },
+        {
+          "n": 6,
+          "text": "AOT, JIT, and interpreter outputs match.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "evidence: tests/tir_control_and_data.rs:202; all execution tiers passed. [lane y2149]",
+          "at": "2026-08-22T20:39:52.537Z"
+        }
+      ],
       "refs": [
         "#2144"
       ],
@@ -141799,8 +141861,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-21T22:17:04.116Z",
-      "updated": "2026-08-22T19:08:16.363Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-22T20:39:54.361Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-22T20:39:54.361Z"
     },
     {
       "id": "c0mns63v",
@@ -189858,6 +189921,433 @@
   ],
   "events": [
     {
+      "at": "2026-08-22T20:40:35.173Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z655d9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:34.388Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z655d9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:33.166Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z655d9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:31.717Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0thpu5d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:30.964Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0thpu5d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:30.567Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0thpu5d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:30.201Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0thpu5d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:29.855Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0thpu5d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:29.494Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0thpu5d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:28.901Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o1h1be",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:28.164Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o1h1be",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:27.740Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o1h1be",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:27.396Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o1h1be",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:26.748Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s602tp",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:26.016Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s602tp",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:24.835Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a2zqpr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:24.085Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2zqpr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:23.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2zqpr",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:23.363Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2zqpr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:23.002Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2zqpr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:22.631Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a2zqpr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:21.192Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gcdx0k",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:19.979Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gcdx0k",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:19.375Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0b35mgo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:18.603Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b35mgo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:18.140Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b35mgo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:17.759Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b35mgo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:16.585Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b35mgo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:14.912Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tqgl1r",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:14.206Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tqgl1r",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:13.860Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tqgl1r",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:13.545Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tqgl1r",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:13.058Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tqgl1r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:11.540Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lz10ao",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:09.998Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lz10ao",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:40:09.623Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lz10ao",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:09.269Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lz10ao",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:08.145Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lz10ao",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:40:07.303Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lz10ao",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:40:06.730Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01wj9pi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:05.192Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01wj9pi",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:40:04.298Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0flp0gw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:40:01.635Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:40:00.061Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mwowfx",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:39:58.779Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mwowfx",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:39:58.423Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mwowfx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:39:57.481Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mwowfx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:39:55.913Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mwowfx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:39:54.362Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05mwfmo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-22T20:39:52.537Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-22T20:39:51.242Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-22T20:39:50.012Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-22T20:39:48.955Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-22T20:39:48.619Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-22T20:39:47.539Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05mwfmo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-22T20:39:46.418Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#6 AOT, JIT, and interpreter outputs match."
+    },
+    {
+      "at": "2026-08-22T20:39:46.067Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#5 Active docs and examples use suffix spelling."
+    },
+    {
+      "at": "2026-08-22T20:39:45.723Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#4 Optional-plus-fallible signatures compile end-to-end."
+    },
+    {
+      "at": "2026-08-22T20:39:45.384Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#3 Retired infix forms emit E-ERR-SIGIL with a UI snapshot."
+    },
+    {
+      "at": "2026-08-22T20:39:45.063Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#2 Bare ! keeps default-error meaning."
+    },
+    {
+      "at": "2026-08-22T20:39:44.743Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05mwfmo",
+      "note": "#1 Parser accepts typed suffixes in all listed type positions."
+    },
+    {
       "at": "2026-08-22T19:49:53.512Z",
       "by": "Main",
       "action": "card.update",
@@ -192929,433 +193419,6 @@
       "action": "card.criteria-meet",
       "ref": "c0mns63v",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-22T13:54:59.202Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mns63v",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T13:54:58.848Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mns63v",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T13:54:58.523Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mns63v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T13:54:57.738Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mns63v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T13:54:56.638Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mns63v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T13:54:55.420Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#8 Default run and AOT output match."
-    },
-    {
-      "at": "2026-08-22T13:54:54.638Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#7 Corpus has no affected unparenthesized hits beyond the dedic"
-    },
-    {
-      "at": "2026-08-22T13:54:53.767Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#6 Pure predicate arms remain accepted."
-    },
-    {
-      "at": "2026-08-22T13:54:52.674Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#5 Pure atom arms remain accepted."
-    },
-    {
-      "at": "2026-08-22T13:54:52.169Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#4 Pattern guard remains accepted."
-    },
-    {
-      "at": "2026-08-22T13:54:51.197Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#3 &&, ||, and right-hand groups reject bare distributed atoms;"
-    },
-    {
-      "at": "2026-08-22T13:54:50.155Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#2 Fixit inserts (48 | 45) with safe formatting applicability."
-    },
-    {
-      "at": "2026-08-22T13:54:49.835Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mns63v",
-      "note": "#1 E0386 registered with What/Why/Fix; invalid fixture emits it"
-    },
-    {
-      "at": "2026-08-22T13:54:49.260Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jalyt0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T13:54:48.545Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-22T13:54:48.213Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-22T13:54:47.867Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T13:54:47.533Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T13:54:47.193Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T13:54:46.829Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T13:54:46.477Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jalyt0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T13:54:45.910Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#7 Targeted tests pass without forbidden-path writes."
-    },
-    {
-      "at": "2026-08-22T13:54:45.560Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#6 AOT, JIT, and interpreter outputs match."
-    },
-    {
-      "at": "2026-08-22T13:54:45.197Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#5 Diagnostics have registered codes and snapshots."
-    },
-    {
-      "at": "2026-08-22T13:54:44.864Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#4 D-LAMBDA-INFER1 behavior remains valid."
-    },
-    {
-      "at": "2026-08-22T13:54:44.548Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#3 Sema rejects result, error, and effect mismatches."
-    },
-    {
-      "at": "2026-08-22T13:54:44.223Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#2 Parser accepts full lambda callable suffixes."
-    },
-    {
-      "at": "2026-08-22T13:54:43.887Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jalyt0",
-      "note": "#1 Lambda AST stores result, error, and effect slots."
-    },
-    {
-      "at": "2026-08-22T13:54:43.093Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qvv1mi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T13:54:42.372Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-22T13:54:41.457Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T13:54:40.273Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T13:54:39.266Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T13:54:38.481Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T13:54:37.663Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qvv1mi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T13:54:37.126Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#6 Explain output matches its snapshot; scoped scans find no un"
-    },
-    {
-      "at": "2026-08-22T13:54:36.779Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#5 Targeted formatter and lint tests pass."
-    },
-    {
-      "at": "2026-08-22T13:54:36.440Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#4 Current examples and fixture expectations use canonical synt"
-    },
-    {
-      "at": "2026-08-22T13:54:36.118Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#3 AST comments contain no retired callable/effect arrows."
-    },
-    {
-      "at": "2026-08-22T13:54:35.781Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#2 M8 and L0507 diagnostics teach current spellings."
-    },
-    {
-      "at": "2026-08-22T13:54:35.416Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qvv1mi",
-      "note": "#1 Active syntax-decision prose uses ->, -[E]>, or -[]>."
-    },
-    {
-      "at": "2026-08-22T12:56:55.832Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05rc0xv",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T12:56:55.110Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c05rc0xv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T11:37:23.438Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-22T11:37:23.438Z"
-    },
-    {
-      "at": "2026-08-22T11:35:17.839Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mbyz4d",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T11:35:16.461Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mbyz4d",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-22T11:35:15.476Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mbyz4d",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T11:35:14.582Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mbyz4d",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T11:35:13.577Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mbyz4d",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T11:35:12.666Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09w33e1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T11:35:11.593Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-22T11:35:11.013Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-22T11:35:10.401Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-22T11:35:09.804Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-22T11:35:09.198Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-22T11:35:08.569Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-22T11:35:08.005Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-22T11:35:07.011Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09w33e1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-22T11:35:05.679Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02582xi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-22T11:35:04.167Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02582xi",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-22T11:35:03.563Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02582xi",
-      "note": "#7"
     }
   ],
   "nextNum": 368,
