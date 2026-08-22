@@ -8,7 +8,7 @@
 //! authenticated, and re-hashed in quarantine.
 
 use super::Closure;
-use super::{list_checked, parse_meta, Roots, StoreEntry};
+use super::{parse_meta, Roots, StoreEntry};
 use crate::RuntimePolicy;
 use crate::TrustRoot::{os_random_bytes, Signature as TrustSignature, TrustKey};
 use crate::{Envelope, JSON};
@@ -82,7 +82,7 @@ pub fn export_archive(
     key: Option<&str>,
 ) -> io::Result<(Vec<u8>, ArchiveReport)> {
     RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let archive = build_archive(roots, target, include_closure)?;
+        let archive = build_archive_unlocked(roots, target, include_closure)?;
         let key = signing_key(roots, key, true)?;
         let payload = archive.encode_unsigned()?;
         let signed = Archive {
@@ -107,7 +107,7 @@ pub fn export_unsigned_archive(
         // Keep the unsigned archive structurally complete.  `encode_unsigned`
         // is the signature payload and intentionally omits the trailer; callers
         // that hand bytes to the archive decoder need the explicit `None` trailer.
-        build_archive(roots, target, include_closure)?.encode()
+        build_archive_unlocked(roots, target, include_closure)?.encode()
     })
 }
 
@@ -234,10 +234,8 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
                 // A repair can crash after moving an already-corrupt object.
                 // Preserve that evidence, but do not let it block the next
                 // signed repair or pretend it is safe to restore.
-                let rejected = quarantine.join(format!(
-                    "rejected-repair-{digest}-{}",
-                    unique_suffix()
-                ));
+                let rejected =
+                    quarantine.join(format!("rejected-repair-{digest}-{}", unique_suffix()));
                 if fs::symlink_metadata(&rejected).is_ok() {
                     return Err(invalid("rejected repair quarantine name already exists"));
                 }
@@ -331,33 +329,35 @@ pub fn write_archive_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Verify an archive or one live Hangar entry without changing state.
 pub fn verify_archive(roots: &Roots, target: &str, key: Option<&str>) -> io::Result<ArchiveReport> {
-    if Path::new(target).is_file() {
-        let bytes = read_bounded(Path::new(target))?;
-        let archive = Archive::decode(&bytes)?;
-        archive.verify_signature(roots, key, false)?;
-        verify_archive_contents(roots, &archive)?;
-        return Ok(archive.report());
-    }
-    let entry = select_entry(roots, target)?;
-    verify_live_entry(roots, &entry)?;
-    let sidecar = signature_path(roots, &entry);
-    if sidecar.is_file() {
-        let bytes = read_bounded(&sidecar)?;
-        let archive = Archive::decode(&bytes)?;
-        archive.verify_signature(roots, key, false)?;
-        verify_archive_contents(roots, &archive)?;
-        if !archive.objects.iter().any(|object| object.id == entry.id) {
-            return Err(invalid(
-                "the signed archive does not name the requested entry",
-            ));
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        if Path::new(target).is_file() {
+            let bytes = read_bounded(Path::new(target))?;
+            let archive = Archive::decode(&bytes)?;
+            archive.verify_signature(roots, key, false)?;
+            verify_archive_contents(roots, &archive)?;
+            return Ok(archive.report());
         }
-        return Ok(archive.report());
-    }
-    Ok(ArchiveReport {
-        objects: 1,
-        bytes: 0,
-        signed: false,
-        root: entry.id,
+        let entry = select_entry_unlocked(roots, target)?;
+        verify_live_entry_unlocked(roots, &entry)?;
+        let sidecar = signature_path(roots, &entry);
+        if sidecar.is_file() {
+            let bytes = read_bounded(&sidecar)?;
+            let archive = Archive::decode(&bytes)?;
+            archive.verify_signature(roots, key, false)?;
+            verify_archive_contents(roots, &archive)?;
+            if !archive.objects.iter().any(|object| object.id == entry.id) {
+                return Err(invalid(
+                    "the signed archive does not name the requested entry",
+                ));
+            }
+            return Ok(archive.report());
+        }
+        Ok(ArchiveReport {
+            objects: 1,
+            bytes: 0,
+            signed: false,
+            root: entry.id,
+        })
     })
 }
 
@@ -370,23 +370,25 @@ pub fn sign_archive(
     destination: Option<&Path>,
     key: Option<&str>,
 ) -> io::Result<ArchiveReport> {
-    let key = signing_key(roots, key, true)?;
-    if Path::new(target).is_file() {
-        let bytes = read_bounded(Path::new(target))?;
-        let archive = Archive::decode(&bytes)?;
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let key = signing_key(roots, key, true)?;
+        if Path::new(target).is_file() {
+            let bytes = read_bounded(Path::new(target))?;
+            let archive = Archive::decode(&bytes)?;
+            let signed = sign_decoded(archive, &key)?;
+            let out = destination.unwrap_or_else(|| Path::new(target));
+            write_atomic(out, &signed.encode()?)?;
+            return Ok(signed.report());
+        }
+        let entry = select_entry_unlocked(roots, target)?;
+        let archive = build_archive_unlocked(roots, &entry.id, false)?;
         let signed = sign_decoded(archive, &key)?;
-        let out = destination.unwrap_or_else(|| Path::new(target));
-        write_atomic(out, &signed.encode()?)?;
-        return Ok(signed.report());
-    }
-    let entry = select_entry(roots, target)?;
-    let archive = build_archive(roots, &entry.id, false)?;
-    let signed = sign_decoded(archive, &key)?;
-    let sidecar = destination
-        .map(PathBuf::from)
-        .unwrap_or_else(|| signature_path(roots, &entry));
-    write_atomic(&sidecar, &signed.encode()?)?;
-    Ok(signed.report())
+        let sidecar = destination
+            .map(PathBuf::from)
+            .unwrap_or_else(|| signature_path(roots, &entry));
+        write_atomic(&sidecar, &signed.encode()?)?;
+        Ok(signed.report())
+    })
 }
 
 /// Copy a closure to another local Jetpack root through the same archive path
@@ -406,9 +408,7 @@ pub fn copy_archive(
             "Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive",
         ));
     }
-    let (bytes, _) = RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        export_archive(roots, target, true, key)
-    })?;
+    let (bytes, _) = export_archive(roots, target, true, key)?;
     let archive = Archive::decode(&bytes)?;
     archive.verify_signature(roots, key, false)?;
     import_verified_archive(&Roots::at(destination.to_path_buf()), archive)
@@ -591,15 +591,19 @@ fn repair_output_path(roots: &Roots, entry: &StoreEntry) -> io::Result<PathBuf> 
     Ok(expected)
 }
 
-fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Result<Archive> {
+fn build_archive_unlocked(
+    roots: &Roots,
+    target: &str,
+    include_closure: bool,
+) -> io::Result<Archive> {
     super::Ingest::require_real_directory(&roots.hangar_dir(), "Hangar root")?;
-    let entry = select_entry(roots, target)?;
-    verify_live_entry(roots, &entry)?;
+    let entry = select_entry_unlocked(roots, target)?;
+    verify_live_entry_unlocked(roots, &entry)?;
     super::Ingest::require_real_directory(
         &roots.hangar_dir().join("objects"),
         "Hangar object pool",
     )?;
-    let graph = Closure::closure_graph_structure(roots)?;
+    let graph = Closure::closure_graph_structure_unlocked(roots)?;
     let root_digest = entry.envelope.output_hash.clone();
     let mut digests = if include_closure {
         graph.closure(&root_digest)
@@ -612,7 +616,7 @@ fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Resu
     digests.sort();
     digests.dedup();
 
-    let entries = list_checked(roots)?;
+    let entries = super::list_unlocked(roots)?;
     let mut selected_entries = BTreeMap::new();
     selected_entries.insert(entry.id.clone(), entry.clone());
     for candidate in entries {
@@ -894,10 +898,6 @@ fn map_member_path(source_out: &Path, member: &str, destination: &Path) -> io::R
     Ok(destination.join(suffix).to_string_lossy().into_owned())
 }
 
-fn verify_live_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
-    super::verify_hangar_object(roots, entry).map_err(|error| io::Error::other(error.what()))
-}
-
 fn verify_live_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> io::Result<()> {
     super::verify_hangar_object_unlocked(roots, entry)
         .map_err(|error| io::Error::other(error.what()))
@@ -980,11 +980,6 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
     })();
     let _ = remove_tree(&stage);
     result
-}
-
-fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
-    let entries = list_checked(roots)?;
-    select_entry_from(&entries, target)
 }
 
 fn select_entry_unlocked(roots: &Roots, target: &str) -> io::Result<StoreEntry> {
@@ -1985,11 +1980,12 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 
-/// Stable machine output used by the Hangar CLI.  It intentionally does not
-/// include host paths or timestamps.
+/// Stable status output used by the Hangar CLI. It uses the shared report
+/// schema and intentionally does not include host paths or timestamps.
 pub fn report_json(action: &str, report: &ArchiveReport) -> String {
     format!(
-        "{{\"action\":{},\"bytes\":{},\"objects\":{},\"root\":{},\"signed\":{}}}",
+        "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":{},\"bytes\":{},\"objects\":{},\"root\":{},\"signed\":{}}}",
+        JSON::quote(jet_foundation::Report::REPORT_SCHEMA),
         JSON::quote(action),
         report.bytes,
         report.objects,

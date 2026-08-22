@@ -69,8 +69,7 @@ use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
 use CmdStructure::run_structure;
 use CmdImpact::run_impact;
 use CmdPkg::{
-    run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_hangar_verify,
-    run_remove, run_update,
+    run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_remove, run_update,
 };
 use CmdProve::run_prove;
 use CmdReport::run_report;
@@ -2329,20 +2328,27 @@ fn main() {
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
         }
         // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
-        // store verb. `path`/`verify`/`rollback`/`generations` reuse the existing
-        // real generation-tracking logic (renamed from `store`); `du` is
-        // Jetpack's real per-object disk accounting. Archive operations cross
-        // the version-checked Jetpack boundary so every transfer verb shares
-        // one signed archive and closure implementation.
+        // store verb. `path`/`rollback`/`generations` reuse the existing real
+        // generation-tracking logic (renamed from `store`); `du` and `verify`
+        // use Jetpack's real store accounting and archive verification.
+        // Archive operations cross the version-checked Jetpack boundary so
+        // every transfer verb shares one signed archive and closure
+        // implementation.
         "hangar" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
             match sub {
-                "verify" => run_hangar_verify(),
+                "verify" => {
+                    exit(EngineDispatch::dispatch(
+                        jet::Syntax::JETPACK_BINARY_NAME,
+                        "hangar",
+                        &raw,
+                    ));
+                }
                 "rollback" => {
                     let gen_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
-                    run_hangar_rollback(gen_str);
+                    run_hangar_rollback(gen_str, mode.json);
                 }
-                "generations" => run_hangar_generations(),
+                "generations" => run_hangar_generations(mode.json),
                 "path" | "du" => {
                     exit(EngineDispatch::dispatch(
                         jet::Syntax::JETPACK_BINARY_NAME,

@@ -600,6 +600,8 @@ pub const ENV_FIELD_UNSET: &str = "unset";
 pub const ENV_FIELD_ON_ENTER: &str = "on_enter";
 pub const ENV_FIELD_CHECKS: &str = "checks";
 pub const ENV_FIELD_RELOAD: &str = "reload";
+/// D-ECO6=A: map the typed environment to the project's Git hook directory.
+pub const ENV_FIELD_GIT_HOOKS_PATH: &str = "git_hooks_path";
 /// D-ENV-PROFILE1/D-ENV-LANGPACK1, renamed by D-CONF-WORD1=A: typed
 /// environment composition fields. A preset is one named composition.
 pub const ENV_FIELD_PRESETS: &str = "presets";

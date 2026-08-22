@@ -37,6 +37,25 @@ fn make_writable(path: &str) {
     walk(Path::new(path));
 }
 
+fn make_directories_writable(path: &Path) {
+    let metadata = fs::symlink_metadata(path).unwrap();
+    if !metadata.is_dir() {
+        return;
+    }
+    let mut permissions = metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).unwrap();
+    for entry in fs::read_dir(path).unwrap() {
+        make_directories_writable(&entry.unwrap().path());
+    }
+}
+
 mod common;
 
 #[path = "support/jetpack_fixtures.rs"]
@@ -647,6 +666,16 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     jetpack::Store::publish_cache_entry(&roots, &entry.id, "public").unwrap();
     jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
 
+    let nar = mirror
+        .join("nar")
+        .join(format!("{}.nar", entry.envelope.output_hash));
+    let info = mirror.join(&format!(
+        "{}-{}.narinfo",
+        entry.envelope.output_hash, entry.id
+    ));
+    let nar_bytes = fs::read(&nar).unwrap();
+    let info_bytes = fs::read(&info).unwrap();
+
     let key = jetpack::TrustRoot::TrustKey::from_secret(
         fs::read(root.join("trust/cache-public.key")).unwrap(),
     )
@@ -745,6 +774,41 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
         &key,
     )
     .unwrap();
+    fs::write(&receipt_path, receipt_text(&v2)).unwrap();
+    jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+
+    // A validly signed newer receipt must not be admitted before its payload
+    // proves the requested output identity. Otherwise a bad mirror can
+    // advance the host pin and freeze the still-valid receipt behind it.
+    let v3 = jetpack::TrustRoot::CacheReceipt::issue(
+        "public",
+        provenance.clone(),
+        3,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&v3)).unwrap();
+    let wrong_source = Scratch::new("cache-trust-wrong-payload");
+    fs::write(wrong_source.join("payload"), "wrong trusted bytes\n").unwrap();
+    let (wrong_nar, wrong_stats) = jetpack::Store::write_nar(&wrong_source.path).unwrap();
+    let mut wrong_info =
+        jetpack::Store::NarInfo::parse(std::str::from_utf8(&info_bytes).unwrap()).unwrap();
+    wrong_info.file_size = wrong_stats.bytes;
+    wrong_info.nar_size = wrong_stats.bytes;
+    wrong_info.nar_hash = wrong_stats.digest;
+    fs::write(&nar, wrong_nar).unwrap();
+    fs::write(&info, wrong_info.signed(&key).unwrap().to_text().unwrap()).unwrap();
+    let wrong_payload = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(wrong_payload.contains("output identity"), "{wrong_payload}");
+
+    // Restore the valid artifact with the already-admitted v2 receipt. This
+    // succeeds only if the failed payload did not consume a newer pin.
+    fs::write(&nar, &nar_bytes).unwrap();
+    fs::write(&info, &info_bytes).unwrap();
     fs::write(&receipt_path, receipt_text(&v2)).unwrap();
     jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
 
@@ -1118,7 +1182,8 @@ fn package_generation_lifecycle_preserves_source_facts_and_history() {
         String::from_utf8_lossy(&explained.stderr)
     );
     let explained_stdout = String::from_utf8_lossy(&explained.stdout);
-    assert!(explained_stdout.contains("\"schema\":\"jet-package-explain-v1\""));
+    assert!(explained_stdout.contains("\"schema\":\"jet.report/v1\""));
+    assert!(explained_stdout.contains("\"moment\":\"tool\""));
     assert!(explained_stdout.contains("\"profile_facts\":["));
     assert!(explained_stdout.contains("\"profile\":\"dev\""));
     assert!(explained_stdout.contains("\"generation\":1"));
@@ -2474,7 +2539,8 @@ fn build_resolves_fixture_ref() {
         String::from_utf8_lossy(&explained.stderr)
     );
     let stdout = String::from_utf8_lossy(&explained.stdout);
-    assert!(stdout.contains("\"schema\":\"jet-package-explain-v1\""));
+    assert!(stdout.contains("\"schema\":\"jet.report/v1\""));
+    assert!(stdout.contains("\"moment\":\"tool\""));
     assert!(stdout.contains("\"provider_facts\":"));
     assert!(stdout.contains("\"direct_dependencies\":"));
     assert!(stdout.contains("\"roots\":"));
@@ -2773,7 +2839,13 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
         String::from_utf8_lossy(&recovered.stderr)
     );
     assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
-    assert!(build().status.success());
+    let rebuilt = build();
+    assert!(
+        rebuilt.status.success(),
+        "recovered receipt was not reusable: stdout={} stderr={}",
+        String::from_utf8_lossy(&rebuilt.stdout),
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
 }
 
 #[test]
@@ -6828,7 +6900,7 @@ fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
             (entry.reference == "hello@mine").then_some(entry)
         })
         .expect("portfolio build must register its Hangar entry");
-    make_writable(&entry.out);
+    make_directories_writable(Path::new(&entry.out));
     fs::remove_dir_all(&entry.out).unwrap();
     fs::remove_file(&source_executable).unwrap();
 
@@ -7890,6 +7962,62 @@ outputs: .{
 }
 
 #[test]
+fn package_host_split_preserves_system_projection_and_reaches_jetos() {
+    let project = Scratch::new("package-host-split-parity");
+    fs::write(
+        project.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"halcyon\", target: linux.x64, packages: [ripgrep] } }\n",
+    )
+    .unwrap();
+
+    let before_facts = jetpack::Package::PackageFacts::load(&project.path)
+        .unwrap()
+        .unwrap();
+    let before = jet_env_model::ModuleEval::project_package_outputs(&before_facts).unwrap();
+    let split = jet()
+        .args(["split", "hosts", "server", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        split.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&split.stderr)
+    );
+
+    let fleet_source = fs::read_to_string(project.join("package/fleet.jet")).unwrap();
+    assert!(fleet_source.contains("system.halcyon"), "{fleet_source}");
+    let after_facts = jetpack::Package::PackageFacts::load(&project.path)
+        .unwrap()
+        .unwrap();
+    let after = jet_env_model::ModuleEval::project_package_outputs(&after_facts).unwrap();
+    assert_eq!(before.systems, after.systems);
+    assert_eq!(after.fleets[0].hosts[0].system, "halcyon");
+
+    let plan = jet()
+        .args([
+            "os",
+            "plan",
+            "halcyon",
+            "--json",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", project.join("jet-root"))
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan_json = String::from_utf8_lossy(&plan.stdout);
+    assert!(plan_json.contains("\"host\":\"halcyon\""), "{plan_json}");
+    assert!(plan_json.contains("\"graph_identity\":\""), "{plan_json}");
+}
+
+#[test]
 fn jetos_plan_rejects_invalid_package_system_without_mutating_store() {
     let project = Scratch::new("jetos-package-system-invalid");
     fs::write(
@@ -8081,4 +8209,127 @@ fn remote_execution_identity_binds_the_complete_action_request() {
     let mut changed_output = request;
     changed_output.outputs[0] = BuildPath::new("build/other").unwrap();
     assert_ne!(identity, remote_execution_identity(&changed_output));
+}
+
+#[test]
+fn provider_conformance_real_path_preserves_registry_npm_and_cargo_facts() {
+    use jetpack::MigrationImport::{import_cargo, import_npm};
+    use jetpack::ProviderFacts;
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let npm_document = r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5.4.0"},"scripts":{"build":"vite build"},"repository":{"type":"git","url":"https://example.invalid/web.git"}}"#;
+    let npm = import_npm(npm_document);
+    let npm_facts = npm
+        .provider_facts
+        .get("vite#version=5.4.0@npm")
+        .expect("npm production importer emits exact dependency facts");
+    npm_facts.validate().expect("npm facts are lossless");
+    assert!(npm.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"));
+    assert_eq!(npm_facts.native_document, npm_document);
+    assert!(npm_facts
+        .explain_lines()
+        .iter()
+        .any(|line| line == "native package.json: retained"));
+    assert_eq!(
+        ProviderFacts::from_json(&npm_facts.to_json()).unwrap(),
+        *npm_facts
+    );
+
+    let cargo_manifest = "[package]\nname = \"app\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\nrepository = \"https://example.invalid/app.git\"\n[dependencies]\nserde = \"1\"\n[dev-dependencies]\ninsta = \"1\"\n";
+    let cargo_lock = "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+https://example.invalid\"\nchecksum = \"serde-checksum\"\n";
+    let cargo = import_cargo(cargo_manifest, cargo_lock);
+    let cargo_facts = cargo
+        .provider_facts
+        .get("serde#version=1.0.200@cargo")
+        .expect("Cargo production importer emits exact dependency facts");
+    cargo_facts.validate().expect("Cargo facts are lossless");
+    assert!(cargo
+        .emit_pkg_jet()
+        .contains("serde: serde#version=1.0.200@cargo"));
+    assert!(cargo_facts.native_document.contains("Cargo.lock:"));
+    assert!(cargo_facts
+        .facts
+        .contains_key("provider.cargo.lock.serde.checksum"));
+    assert!(cargo
+        .provider_facts
+        .values()
+        .any(|facts| facts.facts.contains_key("package.dependency_kind")));
+    let registry_document = r#"{"name":"web","version":"1.0.0","content_hash":"sha256-web","license":"MIT","yanked":false,"signature":"sig","owner":"team-web","source":{"kind":"git","url":"https://example.invalid/web.git"},"hooks":{"build":{"digest":"hook-digest"}}}"#;
+    let registry = normalize_provider_document(ProviderFamily::JetRegistry, registry_document);
+    registry
+        .validate()
+        .expect("Jet registry facts are lossless");
+    let shared = registry.shared_facts();
+    assert!(shared.facts.contains_key("provider.registry.signature"));
+    assert!(shared.facts.contains_key("provider.registry.yanked"));
+    assert_eq!(shared.native_document, registry_document);
+    assert!(shared
+        .explain_lines()
+        .iter()
+        .any(|line| line == "native json: retained"));
+    let lock = registry
+        .lock_record("app", &shared.reference, "x86_64-linux")
+        .expect("Jet registry provider lock");
+    let locked = ProviderFacts::from_json(
+        lock.future_fields
+            .get("provider-facts")
+            .expect("provider facts in Jet registry lock"),
+    )
+    .expect("Jet registry lock facts JSON");
+    assert_eq!(locked, shared);
+}
+
+#[test]
+fn provider_conformance_real_path_refuses_mutable_missing_and_conflicting_facts() {
+    use jetpack::MigrationImport::{import_cargo, import_npm};
+    use jetpack::ProviderGraph::{normalize_provider_document, ProviderFamily};
+
+    let npm = import_npm(r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"^5"}}"#);
+    let npm_facts = npm
+        .provider_facts
+        .get("vite@npm")
+        .expect("mutable npm dependency remains in the fact carrier");
+    assert!(!npm.emit_pkg_jet().contains("vite: vite@npm"));
+    assert!(npm_facts
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("not an exact lock identity")));
+    assert!(npm
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "package.json" && todo.message.contains("unresolved") }));
+
+    let cargo = import_cargo(
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+        "",
+    );
+    let cargo_facts = cargo
+        .provider_facts
+        .get("serde@cargo")
+        .expect("missing Cargo lock remains in the fact carrier");
+    assert!(!cargo.emit_pkg_jet().contains("serde: serde@cargo"));
+    assert!(cargo_facts
+        .losses
+        .iter()
+        .any(|loss| loss.reason.contains("no exact version")));
+    assert!(cargo
+        .todos
+        .iter()
+        .any(|todo| todo.source_path == "Cargo.lock" && todo.message.contains("missing")));
+
+    let conflicting_registry = concat!(
+        r#"{"name":"web","version":"1.0.0","content_hash":"sha256-a"}"#,
+        "\n",
+        r#"{"name":"web","version":"1.0.0","content_hash":"sha256-b"}"#
+    );
+    let registry = normalize_provider_document(ProviderFamily::JetRegistry, conflicting_registry);
+    assert!(!registry.is_lossless());
+    assert!(registry
+        .conflicts
+        .iter()
+        .any(|conflict| conflict.contains("conflicting native facts")));
+    assert!(registry
+        .lock_record("app", "web#version=1.0.0@jet-registry", "any")
+        .expect_err("conflicting registry facts must not enter the lock")
+        .contains("conflict"));
 }

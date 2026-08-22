@@ -239,9 +239,12 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         Some("path") => {
             let path = Store::resolve().hangar_dir();
             if parsed.flags.json {
-                println!(
-                    "{{\"path\":{}}}",
-                    crate::JSON::quote(&path.display().to_string())
+                hangar_status_json(
+                    "path",
+                    &format!(
+                        ",\"path\":{}",
+                        crate::JSON::quote(&path.display().to_string())
+                    ),
                 );
             } else {
                 println!("{}", path.display());
@@ -252,23 +255,52 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             let roots = Store::resolve();
             let entries = Store::du(&roots);
             if entries.is_empty() {
-                theme.status("hangar is empty.");
+                if parsed.flags.json {
+                    hangar_status_json(
+                        "du",
+                        ",\"objects\":0,\"built\":0,\"bytes\":0,\"entries\":[]",
+                    );
+                } else {
+                    theme.status("hangar is empty.");
+                }
                 return 0;
             }
             let mut total = 0u64;
             let mut built = 0usize;
+            let mut machine_entries = Vec::with_capacity(entries.len());
             for e in &entries {
                 total += e.bytes;
                 if e.source_built {
                     built += 1;
                 }
-                let tag = if e.source_built { " (built)" } else { "" };
-                theme.detail(&format!(
-                    "{:>10}  {}{}",
-                    human_bytes(e.bytes),
-                    theme.bold(&e.id),
-                    theme.gray(tag)
+                machine_entries.push(format!(
+                    "{{\"id\":{},\"bytes\":{},\"source_built\":{}}}",
+                    crate::JSON::quote(&e.id),
+                    e.bytes,
+                    e.source_built,
                 ));
+                let tag = if e.source_built { " (built)" } else { "" };
+                if !parsed.flags.json {
+                    theme.detail(&format!(
+                        "{:>10}  {}{}",
+                        human_bytes(e.bytes),
+                        theme.bold(&e.id),
+                        theme.gray(tag)
+                    ));
+                }
+            }
+            if parsed.flags.json {
+                hangar_status_json(
+                    "du",
+                    &format!(
+                        ",\"objects\":{},\"built\":{},\"bytes\":{},\"entries\":[{}]",
+                        entries.len(),
+                        built,
+                        total,
+                        machine_entries.join(",")
+                    ),
+                );
+                return 0;
             }
             theme.status(&format!(
                 "{} object(s), {} built from source, {} total",
@@ -289,34 +321,42 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         Some("repair") => cmd_hangar_archive(theme, parsed, "repair"),
         Some("referrers") => cmd_hangar_referrers(theme, parsed),
         Some("register-external-root") => cmd_hangar_register_external_root(theme, parsed),
-        Some("list-external-roots") => cmd_hangar_list_external_roots(theme),
+        Some("list-external-roots") => cmd_hangar_list_external_roots(theme, parsed),
         Some("unregister-external-root") => cmd_hangar_unregister_external_root(theme, parsed),
         Some("recover") => {
             let roots = Store::resolve();
             match Store::recover_hangar(&roots) {
                 Ok(n) => {
-                    theme.status(&format!(
-                        "recovered {n} abandoned or committed hangar item(s)"
-                    ));
+                    if parsed.flags.json {
+                        hangar_status_json("recover", &format!(",\"recovered\":{n}"));
+                    } else {
+                        theme.status(&format!(
+                            "recovered {n} abandoned or committed hangar item(s)"
+                        ));
+                    }
                     0
                 }
                 Err(e) => {
-                    theme.error(
+                    hangar_report_error(
+                        theme,
+                        parsed,
+                        "E1340",
                         "could not recover hangar staging",
                         &e.to_string(),
                         "check permissions on the hangar root.",
-                    );
-                    2
+                    )
                 }
             }
         }
         Some(other) => {
-            theme.error(
+            hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
                 &format!("`hangar {other}` is not a hangar command"),
                 "hangar subcommands: `path`, `du`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
                 "run `jetpack hangar path`.",
-            );
-            2
+            )
         }
     }
 }
@@ -324,23 +364,27 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
 fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
     let args = positional_values_after(parsed, "register-external-root");
     let (Some(label), Some(reference)) = (args.first(), args.get(1)) else {
-        theme.error(
+        return hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             "`hangar register-external-root` needs a label and reference",
             "a manual root names one existing Hangar closure to retain.",
             "run `jetpack hangar register-external-root <label> <reference> [--expires-in <duration>] --yes`.",
         );
-        return 2;
     };
     let expires_in = match flag_value(parsed, "--expires-in") {
         Some(value) => match parse_duration(&value) {
             Ok(seconds) => Some(seconds),
             Err(error) => {
-                theme.error(
+                return hangar_report_error(
+                    theme,
+                    parsed,
+                    "E1340",
                     "invalid external-root expiry",
                     &error,
                     "use a positive duration such as `1h`, `7d`, or `1w`.",
                 );
-                return 2;
             }
         },
         None => None,
@@ -350,12 +394,14 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         Some(seconds) => match now.checked_add(seconds) {
             Some(value) => Some(value),
             None => {
-                theme.error(
+                return hangar_report_error(
+                    theme,
+                    parsed,
+                    "E1340",
                     "external-root expiry is too far in the future",
                     "the requested duration overflows the lifecycle timestamp.",
                     "use a shorter duration.",
                 );
-                return 2;
             }
         },
         None => None,
@@ -363,7 +409,7 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let closure_size = match Store::external_root_closure_size(&roots, reference) {
         Ok(size) => size,
-        Err(error) => return report_external_root_error(theme, error),
+        Err(error) => return report_external_root_error(theme, parsed, error),
     };
     let principal = external_root_principal();
     theme.status("Plan external root");
@@ -390,58 +436,97 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         now,
     ) {
         Ok(view) => {
-            theme.status(&format!(
-                "Created external root `{}` at etag {}.",
-                view.label, view.etag
-            ));
-            0
-        }
-        Err(error) => report_external_root_error(theme, error),
-    }
-}
-
-fn cmd_hangar_list_external_roots(theme: &Theme) -> i32 {
-    let roots = Store::resolve();
-    match Store::list_external_roots(&roots, &external_root_principal()) {
-        Ok(roots) if roots.is_empty() => {
-            theme.status("no external roots.");
-            0
-        }
-        Ok(roots) => {
-            let now = unix_now();
-            for root in roots {
-                let expiry = root
-                    .expires_at
-                    .map(|at| format!("{}", render_expiry(at, now)))
-                    .unwrap_or_else(|| "expires never".to_string());
-                theme.detail(&format!(
-                    "{}  {}  {}  etag {}",
-                    root.label, root.reference, expiry, root.etag
+            if parsed.flags.json {
+                hangar_status_json(
+                    "register-external-root",
+                    &format!(
+                        ",\"label\":{},\"reference\":{},\"etag\":{},\"expires_at\":{}",
+                        crate::JSON::quote(&view.label),
+                        crate::JSON::quote(&view.reference),
+                        crate::JSON::quote(&view.etag),
+                        view.expires_at
+                            .map_or_else(|| "null".to_string(), |value| value.to_string())
+                    ),
+                );
+            } else {
+                theme.status(&format!(
+                    "Created external root `{}` at etag {}.",
+                    view.label, view.etag
                 ));
             }
             0
         }
-        Err(error) => report_external_root_error(theme, error),
+        Err(error) => report_external_root_error(theme, parsed, error),
+    }
+}
+
+fn cmd_hangar_list_external_roots(theme: &Theme, parsed: &Parsed) -> i32 {
+    let roots = Store::resolve();
+    match Store::list_external_roots(&roots, &external_root_principal()) {
+        Ok(roots) if roots.is_empty() => {
+            if parsed.flags.json {
+                hangar_status_json("list-external-roots", ",\"roots\":[]");
+            } else {
+                theme.status("no external roots.");
+            }
+            0
+        }
+        Ok(roots) => {
+            let now = unix_now();
+            let mut machine_roots = Vec::with_capacity(roots.len());
+            for root in roots {
+                machine_roots.push(format!(
+                    "{{\"label\":{},\"reference\":{},\"etag\":{},\"expires_at\":{}}}",
+                    crate::JSON::quote(&root.label),
+                    crate::JSON::quote(&root.reference),
+                    crate::JSON::quote(&root.etag),
+                    root.expires_at
+                        .map_or_else(|| "null".to_string(), |value| value.to_string())
+                ));
+                let expiry = root
+                    .expires_at
+                    .map(|at| format!("{}", render_expiry(at, now)))
+                    .unwrap_or_else(|| "expires never".to_string());
+                if !parsed.flags.json {
+                    theme.detail(&format!(
+                        "{}  {}  {}  etag {}",
+                        root.label, root.reference, expiry, root.etag
+                    ));
+                }
+            }
+            if parsed.flags.json {
+                hangar_status_json(
+                    "list-external-roots",
+                    &format!(",\"roots\":[{}]", machine_roots.join(",")),
+                );
+            }
+            0
+        }
+        Err(error) => report_external_root_error(theme, parsed, error),
     }
 }
 
 fn cmd_hangar_unregister_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
     let args = positional_values_after(parsed, "unregister-external-root");
     let Some(label) = args.first() else {
-        theme.error(
+        return hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             "`hangar unregister-external-root` needs a label",
             "removing a manual root needs its stable label and current etag.",
             "run `jetpack hangar unregister-external-root <label> --etag <etag> --yes`.",
         );
-        return 2;
     };
     let Some(etag) = flag_value(parsed, "--etag") else {
-        theme.error(
+        return hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             "`hangar unregister-external-root` needs `--etag`",
             "root removal is compare-and-swap protected.",
             "read `jetpack hangar list-external-roots`, then pass its etag.",
         );
-        return 2;
     };
     if !theme.confirm_apply(parsed.flags.assume_yes) {
         return 0;
@@ -455,14 +540,25 @@ fn cmd_hangar_unregister_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         unix_now(),
     ) {
         Ok(()) => {
-            theme.status(&format!("Removed external root `{label}`."));
+            if parsed.flags.json {
+                hangar_status_json(
+                    "unregister-external-root",
+                    &format!(",\"label\":{}", crate::JSON::quote(label)),
+                );
+            } else {
+                theme.status(&format!("Removed external root `{label}`."));
+            }
             0
         }
-        Err(error) => report_external_root_error(theme, error),
+        Err(error) => report_external_root_error(theme, parsed, error),
     }
 }
 
-fn report_external_root_error(theme: &Theme, error: Store::ExternalRootError) -> i32 {
+fn report_external_root_error(
+    theme: &Theme,
+    parsed: &Parsed,
+    error: Store::ExternalRootError,
+) -> i32 {
     match error {
         Store::ExternalRootError::Conflict {
             label,
@@ -475,25 +571,32 @@ fn report_external_root_error(theme: &Theme, error: Store::ExternalRootError) ->
                 ),
                 None => "Read the current roots, then retry the mutation.".to_string(),
             };
-            theme.error_coded(
+            hangar_report_error(
+                theme,
+                parsed,
                 "E1320",
                 &format!("external root `{label}` changed before this request"),
                 "No requested root mutation was applied.",
                 &fix,
-            );
+            )
         }
-        Store::ExternalRootError::ReferenceNotFound(reference) => theme.error(
+        Store::ExternalRootError::ReferenceNotFound(reference) => hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             "could not retain that external root",
             &format!("no Hangar entry matches `{reference}`."),
             "run `jetpack list` and use the exact package reference.",
         ),
-        Store::ExternalRootError::Store(error) => theme.error(
+        Store::ExternalRootError::Store(error) => hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             "could not update the external root",
             &error.to_string(),
             "repair the Hangar state or check its permissions, then retry.",
         ),
     }
-    2
 }
 
 fn external_root_principal() -> String {
@@ -584,6 +687,56 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+fn hangar_status_json(action: &str, fields: &str) {
+    println!(
+        "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":{}{}}}",
+        crate::JSON::quote(jet_foundation::Report::REPORT_SCHEMA),
+        crate::JSON::quote(action),
+        fields,
+    );
+}
+
+fn hangar_report_error(
+    theme: &Theme,
+    parsed: &Parsed,
+    code: &str,
+    what: &str,
+    why: &str,
+    fix: &str,
+) -> i32 {
+    if parsed.flags.json {
+        let diagnostic = jet_foundation::Diagnostics::Diagnostic::error(
+            code,
+            what.to_string(),
+            why.to_string(),
+            fix.to_string(),
+            None,
+        );
+        print!(
+            "{}",
+            jet_foundation::Diagnostics::render_all_json(
+                &jet_foundation::Diagnostics::ReportPath::from_process(""),
+                "",
+                &[diagnostic],
+            )
+        );
+    } else {
+        theme.error_coded(code, what, why, fix);
+    }
+    2
+}
+
+fn hangar_ingest_error(theme: &Theme, parsed: &Parsed, error: &Store::IngestError) -> i32 {
+    hangar_report_error(
+        theme,
+        parsed,
+        error.code(),
+        &error.what(),
+        &error.why(),
+        error.fix(),
+    )
+}
+
 fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
     let name = match parsed
         .flags
@@ -593,12 +746,14 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
     {
         Some(n) if !n.is_empty() => n,
         _ => {
-            theme.error(
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
                 "`hangar ingest` needs `--name`",
                 "every hangar object has a package name in its record.",
                 "pass `--name <pkg>`.",
             );
-            return 2;
         }
     };
     let version = flag_value(parsed, "--version").unwrap_or_default();
@@ -607,12 +762,14 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = match positional_path_after(parsed, "ingest") {
         Some(p) => p,
         None => {
-            theme.error(
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
                 "`hangar ingest` needs a source directory",
                 "atomic staged ingest copies a local tree into the hangar.",
                 "run `jetpack hangar ingest <dir> --name <pkg>`.",
             );
-            return 2;
         }
     };
     let reference =
@@ -636,23 +793,32 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     match Store::ingest_tree(&roots, &req) {
         Ok(ingested) => {
-            let tag = if ingested.deduplicated {
-                " (deduplicated)"
+            if parsed.flags.json {
+                hangar_status_json(
+                    "ingest",
+                    &format!(
+                        ",\"id\":{},\"output_hash\":{},\"deduplicated\":{}",
+                        crate::JSON::quote(&ingested.entry.id),
+                        crate::JSON::quote(&ingested.entry.envelope.output_hash),
+                        ingested.deduplicated
+                    ),
+                );
             } else {
-                ""
-            };
-            theme.status(&format!(
-                "ingested {} → {}{}",
-                theme.bold(&ingested.entry.id),
-                ingested.entry.envelope.output_hash,
-                tag
-            ));
+                let tag = if ingested.deduplicated {
+                    " (deduplicated)"
+                } else {
+                    ""
+                };
+                theme.status(&format!(
+                    "ingested {} → {}{}",
+                    theme.bold(&ingested.entry.id),
+                    ingested.entry.envelope.output_hash,
+                    tag
+                ));
+            }
             0
         }
-        Err(err) => {
-            err.report(theme);
-            2
-        }
+        Err(err) => hangar_ingest_error(theme, parsed, &err),
     }
 }
 
@@ -662,27 +828,29 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
         let entries = match Store::list_checked(&roots) {
             Ok(entries) => entries,
             Err(error) => {
-                theme.error(
+                return hangar_report_error(
+                    theme,
+                    parsed,
+                    "E1340",
                     "could not read the Hangar",
                     &error.to_string(),
                     "repair the Hangar journal, then retry verification.",
                 );
-                return 2;
             }
         };
         let mut verified = 0usize;
         for entry in &entries {
-            if let Err(error) = Store::verify_hangar_object(&roots, entry) {
-                error.report(theme);
-                return 2;
+            if let Err(error) = Store::verify_archive(
+                &roots,
+                &entry.id,
+                parsed.flags.archive_key.as_deref(),
+            ) {
+                return report_archive_error(theme, parsed, "verify", error);
             }
             verified += 1;
         }
         if parsed.flags.json {
-            println!(
-                "{{\"action\":\"verify\",\"objects\":{},\"status\":\"ok\"}}",
-                verified
-            );
+            hangar_status_json("verify", &format!(",\"objects\":{verified}"));
         } else {
             theme.status(&format!("verified {verified} Hangar object(s)"));
         }
@@ -708,12 +876,14 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
             || e.reference == target
             || format!("{}@{}", e.name, e.version) == target
     }) else {
-        theme.error(
+        return hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
             &format!("no hangar object `{target}`"),
             "verify only checks realized hangar records.",
             "run `jetpack list` to see ids.",
         );
-        return 2;
     };
     match Store::verify_archive(&roots, &entry.id, parsed.flags.archive_key.as_deref()) {
         Ok(report) => {
@@ -724,7 +894,7 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             0
         }
-        Err(error) => report_archive_error(theme, "verify", error),
+        Err(error) => report_archive_error(theme, parsed, "verify", error),
     }
 }
 
@@ -735,16 +905,16 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
     match action {
         "export" => {
             let Some(target) = target else {
-                return archive_usage(theme, "`hangar export` needs an entry id, reference, or output digest", "jetpack hangar export <entry> --to <archive.hangar> --yes");
+                return archive_usage(theme, parsed, "`hangar export` needs an entry id, reference, or output digest", "jetpack hangar export <entry> --to <archive.hangar> --yes");
             };
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
-                return archive_usage(theme, "`hangar export` needs `--to <archive.hangar>`", "write one signed archive, then import it on the target Hangar");
+                return archive_usage(theme, parsed, "`hangar export` needs `--to <archive.hangar>`", "write one signed archive, then import it on the target Hangar");
             };
+            if !theme.confirm_apply(parsed.flags.assume_yes) {
+                return 0;
+            }
             let result = Store::export_archive(&roots, &target, !parsed.flags.archive_no_deps, key)
                 .and_then(|(bytes, report)| {
-                    if !theme.confirm_apply(parsed.flags.assume_yes) {
-                        return Ok(report);
-                    }
                     Store::write_archive_file(destination, &bytes)?;
                     Ok(report)
                 });
@@ -752,7 +922,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "import" => {
             let Some(source) = target else {
-                return archive_usage(theme, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes");
+                return archive_usage(theme, parsed, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes");
             };
             let result = Store::read_archive_file(std::path::Path::new(&source)).and_then(|bytes| {
                 if !theme.confirm_apply(parsed.flags.assume_yes) {
@@ -769,16 +939,16 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "dump" => {
             let Some(target) = target else {
-                return archive_usage(theme, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar");
+                return archive_usage(theme, parsed, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar");
             };
             match Store::export_archive(&roots, &target, !parsed.flags.archive_no_deps, key) {
                 Ok((bytes, _)) => {
                     if let Err(error) = std::io::stdout().write_all(&bytes) {
-                        return report_archive_error(theme, action, error);
+                        return report_archive_error(theme, parsed, action, error);
                     }
                     0
                 }
-                Err(error) => report_archive_error(theme, action, error),
+                Err(error) => report_archive_error(theme, parsed, action, error),
             }
         }
         "restore" => {
@@ -812,10 +982,10 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "copy" => {
             let Some(target) = target else {
-                return archive_usage(theme, "`hangar copy` needs an entry id or reference", "jetpack hangar copy <entry> --to <hangar-root> --yes");
+                return archive_usage(theme, parsed, "`hangar copy` needs an entry id or reference", "jetpack hangar copy <entry> --to <hangar-root> --yes");
             };
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
-                return archive_usage(theme, "`hangar copy` needs `--to <hangar-root>`", "copy uses the signed export/import backbone");
+                return archive_usage(theme, parsed, "`hangar copy` needs `--to <hangar-root>`", "copy uses the signed export/import backbone");
             };
             if !theme.confirm_apply(parsed.flags.assume_yes) {
                 return 0;
@@ -829,7 +999,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "sign" => {
             let Some(target) = target else {
-                return archive_usage(theme, "`hangar sign` needs an entry id or archive path", "jetpack hangar sign <entry-or-archive> [--to <path>] --yes");
+                return archive_usage(theme, parsed, "`hangar sign` needs an entry id or archive path", "jetpack hangar sign <entry-or-archive> [--to <path>] --yes");
             };
             if !theme.confirm_apply(parsed.flags.assume_yes) {
                 return 0;
@@ -848,7 +1018,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "repair" => {
             let Some(target) = target else {
-                return archive_usage(theme, "`hangar repair` needs an entry id or reference", "jetpack hangar repair <entry> --from <signed.hangar> --yes");
+                return archive_usage(theme, parsed, "`hangar repair` needs an entry id or reference", "jetpack hangar repair <entry> --from <signed.hangar> --yes");
             };
             if !theme.confirm_apply(parsed.flags.assume_yes) {
                 return 0;
@@ -889,14 +1059,21 @@ fn report_archive_result(
             }
             0
         }
-        Err(error) => report_archive_error(theme, action, error),
+        Err(error) => report_archive_error(theme, parsed, action, error),
     }
 }
 
-fn report_archive_error(theme: &Theme, action: &str, error: std::io::Error) -> i32 {
+fn report_archive_error(
+    theme: &Theme,
+    parsed: &Parsed,
+    action: &str,
+    error: std::io::Error,
+) -> i32 {
     if action == "verify" && error.to_string().starts_with("hangar ingest ") {
         let message = error.to_string();
-        theme.error_coded(
+        hangar_report_error(
+            theme,
+            parsed,
             "E1315",
             &message,
             &message,
@@ -904,49 +1081,86 @@ fn report_archive_error(theme: &Theme, action: &str, error: std::io::Error) -> i
         );
         return 2;
     }
-    theme.error(
+    hangar_report_error(
+        theme,
+        parsed,
+        "E1340",
         &format!("Hangar {action} failed"),
         &error.to_string(),
         "check the archive signature and paths, or retry from a verified source archive.",
-    );
-    2
+    )
 }
 
-fn archive_usage(theme: &Theme, what: &str, fix: &str) -> i32 {
-    theme.error(what, "Hangar archive operations are plan-before-apply and content verified.", fix);
-    2
+fn archive_usage(theme: &Theme, parsed: &Parsed, what: &str, fix: &str) -> i32 {
+    hangar_report_error(
+        theme,
+        parsed,
+        "E1340",
+        what,
+        "Hangar archive operations are plan-before-apply and content verified.",
+        fix,
+    )
 }
 
 fn cmd_hangar_referrers(theme: &Theme, parsed: &Parsed) -> i32 {
     let digest = match positional_path_after(parsed, "referrers") {
         Some(d) => d.to_string_lossy().into_owned(),
         None => {
-            theme.error(
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
                 "`hangar referrers` needs an output digest",
                 "referrers lists objects that declare a dependency on this digest.",
                 "run `jetpack hangar referrers sha256-…`.",
             );
-            return 2;
         }
     };
     let roots = Store::resolve();
     let refs = match Store::referrers_of(&roots, &digest) {
         Ok(refs) => refs,
         Err(error) => {
-            theme.error(
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
                 "could not read the hangar closure graph",
                 &error.to_string(),
                 "run `jetpack hangar verify` before querying referrers.",
             );
-            return 2;
         }
     };
     if refs.is_empty() {
-        theme.status("no referrers.");
+        if parsed.flags.json {
+            hangar_status_json(
+                "referrers",
+                &format!(
+                    ",\"digest\":{},\"referrers\":[]",
+                    crate::JSON::quote(&digest)
+                ),
+            );
+        } else {
+            theme.status("no referrers.");
+        }
         return 0;
     }
-    for r in refs {
-        theme.detail(&r);
+    if parsed.flags.json {
+        let values = refs
+            .iter()
+            .map(|reference| crate::JSON::quote(reference))
+            .collect::<Vec<_>>();
+        hangar_status_json(
+            "referrers",
+            &format!(
+                ",\"digest\":{},\"referrers\":[{}]",
+                crate::JSON::quote(&digest),
+                values.join(",")
+            ),
+        );
+    } else {
+        for r in refs {
+            theme.detail(&r);
+        }
     }
     0
 }

@@ -1921,6 +1921,13 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
                 )
             })
             .collect::<Vec<_>>();
+        let git_hooks_path = plan
+            .environment
+            .lifecycle
+            .git_hooks_path
+            .as_deref()
+            .map(crate::JSON::quote)
+            .unwrap_or_else(|| "null".to_string());
         let languages = plan
             .environment
             .languages
@@ -2222,7 +2229,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"{}\":[{}],\"{}\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"git_hooks_path\":{},\"integrations\":[{}]}}",
             crate::JSON::quote(preset),
             quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2260,6 +2267,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             variables,
             quote_list(&files),
             dotenv.join(","),
+            git_hooks_path,
             integrations.join(","),
         );
         return 0;
@@ -2376,6 +2384,14 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         if variables.is_empty() { "<none>".to_string() } else { variables.join(", ") }
     ));
     theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
+    theme.detail(&format!(
+        "git hooks path: {}",
+        plan.environment
+            .lifecycle
+            .git_hooks_path
+            .as_deref()
+            .unwrap_or("<none>")
+    ));
     let integrations = plan
         .environment
         .integrations
@@ -2540,7 +2556,8 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         let sensitive = Trust::is_trust_sensitive_ext(&plan.refs, !plan.secrets.is_empty())
             || !plan.environment.lifecycle.on_enter.is_empty()
-            || !plan.environment.lifecycle.checks.is_empty();
+            || !plan.environment.lifecycle.checks.is_empty()
+            || plan.environment.lifecycle.git_hooks_path.is_some();
         let trusted = !sensitive
             || Trust::is_environment_trusted(
                 &store,
@@ -2687,6 +2704,7 @@ pub(super) fn project_declares_env(dir: &Path) -> bool {
                     || !p.lifecycle.unset.is_empty()
                     || !p.lifecycle.on_enter.is_empty()
                     || !p.lifecycle.checks.is_empty()
+                    || p.lifecycle.git_hooks_path.is_some()
                     || p.lifecycle.reload_explicit
                     || !p.presets.is_empty()
                     || !p.languages.is_empty()

@@ -206,7 +206,7 @@ pub fn explain_package(
             message: rebuild.reason.clone(),
         });
         return Ok(Some(PackageExplain {
-            schema: "jet-package-explain-v1".to_string(),
+            schema: jet_foundation::Report::REPORT_SCHEMA.to_string(),
             query: query.to_string(),
             lens: lens.label().to_string(),
             entry: None,
@@ -247,7 +247,7 @@ pub fn explain_package(
     );
 
     Ok(Some(PackageExplain {
-        schema: "jet-package-explain-v1".to_string(),
+        schema: jet_foundation::Report::REPORT_SCHEMA.to_string(),
         query: query.to_string(),
         lens: lens.label().to_string(),
         entry: Some(entry_projection(&entry)),
@@ -508,7 +508,17 @@ fn locked_provider_facts(
     reports: &mut Vec<ExplainReport>,
 ) -> Option<ProviderFacts> {
     let cwd = std::env::current_dir().ok()?;
-    let lock_path = super::nearest_lock_path(&cwd)?;
+    let lock_path = match super::nearest_lock_path(&cwd) {
+        Ok(Some(path)) => path,
+        Ok(None) => return None,
+        Err(error) => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("project lock path could not be inspected: {error}"),
+            });
+            return None;
+        }
+    };
     let project = lock_path.parent()?;
     let lock = match SemanticLock::load(project) {
         Some(lock) => lock,
@@ -1122,7 +1132,7 @@ fn liveness_projection(
     if lock_match {
         let lock = std::env::current_dir()
             .ok()
-            .and_then(|cwd| super::nearest_lock_path(&cwd));
+            .and_then(|cwd| super::nearest_lock_path(&cwd).ok().flatten());
         let id = lock
             .as_ref()
             .map(|path| path.display().to_string())
@@ -1205,8 +1215,16 @@ fn project_lock_matches(entry: &StoreEntry, reports: &mut Vec<ExplainReport>) ->
         });
         return false;
     };
-    let Some(lock_path) = super::nearest_lock_path(&cwd) else {
-        return false;
+    let lock_path = match super::nearest_lock_path(&cwd) {
+        Ok(Some(path)) => path,
+        Ok(None) => return false,
+        Err(error) => {
+            reports.push(ExplainReport {
+                kind: "loss".to_string(),
+                message: format!("project lock path could not be inspected: {error}"),
+            });
+            return false;
+        }
     };
     let Ok(raw) = fs::read_to_string(&lock_path) else {
         reports.push(ExplainReport {
@@ -1492,9 +1510,12 @@ fn attempt_projection(attempt: &BuildDebug::Attempt) -> ExplainAttempt {
 
 impl PackageExplain {
     pub fn to_json(&self) -> String {
+        let conflicted = self.reports.iter().any(|report| report.kind == "conflict");
         format!(
-            "{{\"schema\":{},\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}}}",
+            "{{\"schema\":{},\"moment\":\"tool\",\"status\":{},\"ok\":{},\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}}}",
             JSON::quote(&self.schema),
+            JSON::quote(if conflicted { "conflict" } else { "ok" }),
+            !conflicted,
             JSON::quote(&self.query),
             JSON::quote(&self.lens),
             option_json(self.entry.as_ref(), ExplainEntry::to_json),

@@ -1912,6 +1912,8 @@ pub struct EnvironmentLifecycle {
     pub unset: Vec<String>,
     pub on_enter: Vec<HookSpec>,
     pub checks: Vec<HookSpec>,
+    /// D-ECO6=A: project-relative Git hook directory used by native Git.
+    pub git_hooks_path: Option<String>,
     pub reload: ReloadPolicy,
     /// Distinguish the default policy from an author-provided policy when
     /// several imported modules are merged.
@@ -1949,6 +1951,11 @@ impl EnvironmentLifecycle {
             text.push_str(hook.cwd.as_deref().unwrap_or(""));
             text.push('\t');
             text.push_str(if hook.trusted { "trusted" } else { "untrusted" });
+            text.push('\n');
+        }
+        if let Some(path) = &self.git_hooks_path {
+            text.push_str("git-hooks-path\t");
+            text.push_str(path);
             text.push('\n');
         }
         match &self.reload {
@@ -2158,6 +2165,10 @@ pub fn lifecycle_from_field(
             lifecycle.checks = hooks_from_value("check", value)?;
             Ok(true)
         }
+        crate::Syntax::ENV_FIELD_GIT_HOOKS_PATH => {
+            lifecycle.git_hooks_path = Some(git_hooks_path_from_value(value)?);
+            Ok(true)
+        }
         "reload" => {
             lifecycle.reload = reload_from_value(value)?;
             lifecycle.reload_explicit = true;
@@ -2165,6 +2176,17 @@ pub fn lifecycle_from_field(
         }
         _ => Ok(false),
     }
+}
+
+fn git_hooks_path_from_value(value: &CtValue) -> Result<String, String> {
+    let path = string_value(value)
+        .ok_or_else(|| "git_hooks_path must be a string".to_string())?;
+    if validate_relative_path(&path, true).is_err() {
+        return Err(
+            "git_hooks_path must be a non-empty project-relative path without `..`".to_string(),
+        );
+    }
+    Ok(path)
 }
 
 /// Parse both `dotenv: [".env"]` and the expert record form
@@ -3290,5 +3312,24 @@ mod tests {
         assert!(languages_from_value(&malformed)
             .unwrap_err()
             .contains("Lang.enable must be Bool"));
+    }
+
+    #[test]
+    fn git_hooks_path_is_typed_project_relative_and_fingerprinted() {
+        let mut lifecycle = EnvironmentLifecycle::default();
+        assert!(lifecycle_from_field(
+            &mut lifecycle,
+            crate::Syntax::ENV_FIELD_GIT_HOOKS_PATH,
+            &CtValue::Str("scripts/githooks".to_string()),
+        )
+        .unwrap());
+        assert_eq!(lifecycle.git_hooks_path.as_deref(), Some("scripts/githooks"));
+        assert!(lifecycle.fingerprint().contains("git-hooks-path\tscripts/githooks\n"));
+        assert!(lifecycle_from_field(
+            &mut EnvironmentLifecycle::default(),
+            crate::Syntax::ENV_FIELD_GIT_HOOKS_PATH,
+            &CtValue::Str("../outside".to_string()),
+        )
+        .is_err());
     }
 }

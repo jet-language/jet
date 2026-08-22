@@ -247,15 +247,17 @@ pub(super) fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
 
 pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
-        theme.error(
+        return explain_error(
+            theme,
+            parsed,
+            "E1274",
             "explain needs a package ref",
             "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.",
             "write `jet explain weirdctl` after a failed build.",
         );
-        return 2;
     };
     if query.starts_with("package-overlay:") {
-        return cmd_explain_overlay(theme, query);
+        return cmd_explain_overlay(theme, parsed, query);
     }
     if Syntax::lookup(query).is_some() {
         let explanation = jet_cli::Explain::lookup(query)
@@ -270,18 +272,26 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
         let diagnostic = jet_foundation::Registry::diagnostic("E2106")
             .expect("E2106 is registered for unknown syntax-token explanations");
         let rendered = diagnostic.render(&[("token", query), ("closest", closest.as_str())]);
-        theme.error_coded(diagnostic.code, &rendered.what, &rendered.why, &rendered.fix);
-        return 2;
+        return explain_error(
+            theme,
+            parsed,
+            diagnostic.code,
+            &rendered.what,
+            &rendered.why,
+            &rendered.fix,
+        );
     }
     let (lens, package) = match ExplainLens::parse(query) {
         Some(lens) => {
             let Some(package) = parsed.positional.get(1) else {
-                theme.error(
+                return explain_error(
+                    theme,
+                    parsed,
+                    "E1274",
                     &format!("explain lens `{query}` needs a package ref"),
                     "causal package explanations need the lens and the package ref.",
                     &format!("write `jet explain {query} <ref>`."),
                 );
-                return 2;
             };
             (lens, package.as_str())
         }
@@ -302,36 +312,69 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
             }
         }
         Ok(None) => {
-            theme.error_coded(
+            explain_error(
+                theme,
+                parsed,
                 "E1274",
                 &format!("no package record or build attempt for `{package}`"),
                 "`jet explain` reads the Hangar Store and persisted Jetpack build attempts; neither contains this package.",
                 &format!("run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help."),
-            );
-            2
+            )
         }
         Err(error) => {
-            theme.error_coded(
+            explain_error(
+                theme,
+                parsed,
                 "E1274",
                 "couldn't read package explanation",
                 &error.to_string(),
                 "repair the Hangar closure/lock record, then retry the explanation.",
-            );
-            2
+            )
         }
     }
 }
 
-fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
+fn explain_error(
+    theme: &Theme,
+    parsed: &Parsed,
+    code: &str,
+    what: &str,
+    why: &str,
+    fix: &str,
+) -> i32 {
+    if parsed.flags.json {
+        let diagnostic = jet_foundation::Diagnostics::Diagnostic::error(
+            code,
+            what.to_string(),
+            why.to_string(),
+            fix.to_string(),
+            None,
+        );
+        print!(
+            "{}",
+            jet_foundation::Diagnostics::render_all_json(
+                &jet_foundation::Diagnostics::ReportPath::from_process(""),
+                "",
+                &[diagnostic],
+            )
+        );
+    } else {
+        theme.error_coded(code, what, why, fix);
+    }
+    2
+}
+
+fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let Some(source) = WorkspaceFile::resolve_workspace_source(&dir) else {
-        theme.error_coded(
+        return explain_error(
+            theme,
+            parsed,
             "E1274",
             &format!("no overlay policy for `{query}`"),
             "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.",
             "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.",
         );
-        return 2;
     };
     let result = match source {
         Ok(source) => WorkspaceFile::evaluate_source(&source.source, &dir, source.role),
@@ -358,13 +401,14 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
     ) {
         Ok(records) => records,
         Err(error) => {
-            theme.error_coded(
+            return explain_error(
+                theme,
+                parsed,
                 "E0998",
                 "workspace overlay policy is malformed",
                 &error.message(),
                 "fix the conflicting overlay facts in `workspace.jet`.",
             );
-            return 2;
         }
     };
     let lock = SemanticLock::SemanticLockFile {
@@ -372,13 +416,14 @@ fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
         ..Default::default()
     };
     let Some(fact) = SemanticLock::explain(&lock, query) else {
-        theme.error_coded(
+        return explain_error(
+            theme,
+            parsed,
             "E1274",
             &format!("no overlay record for `{query}`"),
             "`workspace.jet` has overlay policy, but not that overlay/package key.",
             "query `package-overlay:<overlay>:<package>`.",
         );
-        return 2;
     };
     println!("{}", fact.semantic_key);
     println!("  owners: {}", fact.owners.join(", "));

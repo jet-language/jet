@@ -328,6 +328,86 @@ mod tests {
     }
 
     #[test]
+    fn lock_receipt_root_keeps_entry_reachable_without_other_root_facts() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("receipt-root-output");
+        fs::create_dir_all(out.join("bin")).unwrap();
+        fs::write(out.join("bin/receipt-root"), "receipt-root").unwrap();
+        let envelope = super::super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "path:receipt-root",
+            "path",
+        );
+        let entry = record_verified(
+            &roots,
+            "receipt-root",
+            "1",
+            "path:receipt-root",
+            &out.to_string_lossy(),
+            &out.join("bin/receipt-root").to_string_lossy(),
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        assert!(valid_receipt_digest(&entry.receipt));
+
+        let project = roots.root.join("project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(
+            managed.join("lock"),
+            format!(
+                "version = 1\n\n[[package]]\nname = \"other-name\"\nversion = \"other-version\"\nsource = {{ path = \"{}\" }}\nfingerprint = \"\"\ndependencies = []\nreceipt = \"{}\"\n",
+                entry.reference, entry.receipt
+            ),
+        )
+        .unwrap();
+
+        let live = lock_roots_from(&project).unwrap();
+        let mut meta = parse_meta(&entry.meta_json()).unwrap();
+        meta.envelope.output_hash.clear();
+        meta.version = "not-the-lock-version".to_string();
+        assert!(!is_live(&entry.id, &meta, &LiveRoots::default()));
+        assert!(is_live(&entry.id, &meta, &live));
+    }
+
+    #[test]
+    fn malformed_project_lock_fails_closed_before_hangar_cleanup() {
+        let (roots, _g) = temp_roots();
+        let project = roots.root.join("project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(
+            managed.join("lock"),
+            "version = 1\n\n[build.stamp]\ndirty = maybe\n",
+        )
+        .unwrap();
+
+        let error = lock_roots_from(&project).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("could not parse project lock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_project_lock_is_rejected_before_hangar_cleanup() {
+        use std::os::unix::fs::symlink;
+
+        let (roots, _g) = temp_roots();
+        let project = roots.root.join("project");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        let outside = roots.root.join("outside-lock");
+        fs::create_dir_all(&managed).unwrap();
+        fs::write(&outside, "version = 1\n").unwrap();
+        symlink(&outside, managed.join("lock")).unwrap();
+
+        let error = nearest_lock_path(&project).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("is a symlink"));
+    }
+
+    #[test]
     fn committed_profile_generation_survives_lease_teardown_and_clean() {
         let (roots, _g) = temp_roots();
         let out = roots.root.join("profile-root-output");

@@ -1819,6 +1819,12 @@ fn unique_suffix() -> String {
 /// source hash before a resolver can load its manifest.
 pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
     let path = artifact_path(repo, &entry.name, &entry.version)?;
+    let package_dir = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "registry artifact has no parent")
+    })?;
+    ensure_real_directory_if_present(repo, "registry checkout")?;
+    ensure_real_directory_if_present(&repo.join("artifacts"), "registry artifact root")?;
+    ensure_real_directory_if_present(package_dir, "registry artifact package directory")?;
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             io::Error::new(
@@ -2144,7 +2150,7 @@ fn parse_registry_package_metadata(
             &feature_map,
             &mut active_features,
             &mut BTreeSet::new(),
-        );
+        )?;
     }
     for dependency in dependencies.values_mut() {
         if dependency.roles.contains("optional") && active_features.contains(&dependency.name) {
@@ -2300,20 +2306,23 @@ fn activate_registry_feature(
     features: &BTreeMap<String, Vec<String>>,
     active: &mut BTreeSet<String>,
     visiting: &mut BTreeSet<String>,
-) {
+) -> io::Result<()> {
     if !visiting.insert(feature.to_string()) {
-        return;
+        return Err(invalid_registry_metadata(
+            "registry feature closure contains a cycle",
+        ));
     }
     if let Some(values) = features.get(feature) {
         for value in values {
             if features.contains_key(value) {
-                activate_registry_feature(value, features, active, visiting);
+                activate_registry_feature(value, features, active, visiting)?;
             } else {
                 active.insert(value.clone());
             }
         }
     }
     visiting.remove(feature);
+    Ok(())
 }
 
 fn required_metadata_string(

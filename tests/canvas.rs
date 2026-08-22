@@ -2386,12 +2386,12 @@ fn canvas_and_semindex_share_composed_package_facts() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\ndefaults: { run: app }\noutputs: .{ workstation: .System.{ target: linux.x64 } }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\noutputs: .{ workstation: System{ target: linux.x64 }, prod: Fleet{ hosts: .{ edge: \"system.workstation\" } } }\n",
     )
     .unwrap();
     fs::write(
         dir.join("release.jet"),
-        "Config{ outputs: { app: .Executable{ entry: run } } }\n",
+        "Config{ outputs: .{ app: .Executable{ entry: run } } }\n",
     )
     .unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
@@ -2411,6 +2411,8 @@ fn canvas_and_semindex_share_composed_package_facts() {
         assert!(json.contains("release.jet"), "{json}");
         assert!(json.contains("\"name\":\"demo\""), "{json}");
         assert!(json.contains("\"kind\":\"system\""), "{json}");
+        assert!(json.contains("\"kind\":\"fleet\""), "{json}");
+        assert!(json.contains("system.workstation"), "{json}");
         assert!(json.contains("\"target\":\"linux.x64\""), "{json}");
     }
 }

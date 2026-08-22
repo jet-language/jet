@@ -123,7 +123,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Job status skip / execIfModified | — | **gap** | #787 |
 | Job I/O JSON / exports | — | **gap** | #787 |
 | Generated `files.` (json/toml/sh) | typed `files:` facts + `jet env sync` | **shipped** | #1084 — symlink/seed/copy + `jet env sync` |
-| `git-hooks` / pre-commit catalog | D-ECO6 `git_hooks_path` mention | **gap** | #787 |
+| `git-hooks` / pre-commit catalog | typed `git_hooks_path` + native Git `core.hooksPath` | **shipped** | #1085 |
 | `treefmt` / formatter integrations | D-ECO12 formatter passthrough | **partial** | #787 |
 
 ### F. Processes & services (video-heavy)
@@ -138,8 +138,34 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Automatic port allocation | — | **gap** | #785 |
 | Process↔task dependency graph | — | **gap** | #785 |
 | Alternate managers (process-compose…) | — | **reject** | I8 one supervisor |
-| Service presets (postgres, redis, …) | typed Service; one shared typed constructor registry | **shipped** | — |
+| Service presets (postgres, redis, MySQL/MariaDB, Nginx, …) | typed Service; one shared typed constructor registry with package realization, state initialization, loopback binding, and readiness | **shipped** | — |
 | Service state dirs / init scripts | partial | **partial** | #786 |
+
+#### Service preset catalog and contribution path
+
+The documented devenv catalog has 42 services. Jet exposes the same names
+through one typed `Service` constructor registry, plus the Jet-specific
+`mariadb` preset. The current names are:
+
+`adminer`, `blackfire`, `caddy`, `cassandra`, `clickhouse`, `cockroachdb`,
+`couchdb`, `dynamodb-local`, `elasticmq`, `elasticsearch`, `garage`,
+`httpbin`, `influxdb`, `kafka-connect`, `kafka`, `keycloak`, `mailhog`,
+`mailpit`, `meilisearch`, `memcached`, `minio`, `mongodb`, `mosquitto`,
+`mysql`, `nats`, `nginx`, `nixseparatedebuginfod`, `opensearch`,
+`opentelemetry-collector`, `postgres`, `prometheus`, `rabbitmq`, `redis`,
+`rustfs`, `sqld`, `tailscale`, `temporal`, `tideways`, `typesense`, `varnish`,
+`vault`, and `wiremock`. `mariadb` is an additional Jet catalog entry;
+`postgresql` and `mail` remain aliases of `postgres` and `mailpit`.
+
+The contribution path is the existing typed registry. A built-in row supplies
+the package reference, executable, default port, argument vector, readiness
+probe, and optional state initialization. Host supervision, image projection,
+package realization, and the preset list read that same row. A service that is
+not in the catalog uses the normal explicit `run`, `ports`, `ready`, `after`,
+and state fields; it does not add a shell-string escape hatch or a second
+supervisor. A catalog contribution is complete only when its state setup,
+loopback binding, readiness behavior, failure cleanup, focused production test,
+and this catalog entry are updated together.
 
 ### G. Containers (video)
 
@@ -224,8 +250,8 @@ Small-scope slices measure progress; **TRACKER** cards close only when their sli
 | **#783** | Flake-class graph + bridge | **#794** URI/follows · **#795** lock/update · **#796** outputs · **#797** named shells · **#798** L0204 packages+services · **#799** bridge round-trip |
 | **#784** | Env lifecycle | **#800** trust prompt+allowlist · **#801** hot-reload (devenv 2.1) · **#802** enterShell Tasks · **#803** dotenv · **#804** unsetEnvVars · **#805** `jet env test` · **#806** prompt polish |
 | **#785** | Process supervisor depth | **#807** ready probes · **#808** restart · **#809** watch→restart · **#810** port alloc · **#811** socket activation · **#812** process↔task DAG |
-| **#786** | Service catalog (no 7-cap) | **#813** preset framework · **#814** postgres · **#815** redis · **#816** mysql/mariadb · **#817** nginx · **#818** minio · **#819** expansion toward full set |
-| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#1084** files. symlink/seed/copy + `jet env sync` · **#823** git-hooks · **#824** treefmt |
+| **#786** | Service catalog (no 7-cap) | **#813** preset framework · **#814** postgres · **#815** redis · **#1081** MySQL/MariaDB + Nginx · **#818** minio · **#819** expansion toward full set |
+| **#787** | Env ergonomics | **#820** job-local packages · **#821** job DAG/skip · **#1084** files. symlink/seed/copy + `jet env sync` · **#1085** git-hooks · **#824** treefmt |
 | **#788** | Env containers | **#825** shell OCI · **#826** processes OCI · **#827** copyToRoot · **#828** run/copy/registry · **#829** devcontainer P2 |
 | **#789** | Discoverability | **#830** info cockpit · **#831** search · **#832** env LSP · **#833** doctor |
 | **#790** | **D-ENV-PROFILE1=C** | **#834** named+extends · **#835** hostname/user auto + info disclosure |

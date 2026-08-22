@@ -964,7 +964,7 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         );
     }
     let moment = match fields[4] {
-        "compile" => ReportMoment::Compile,
+        "compile" | "compile/entry" => ReportMoment::Compile,
         "run" => ReportMoment::Run,
         "test" => ReportMoment::Test,
         "tool" => ReportMoment::Tool,

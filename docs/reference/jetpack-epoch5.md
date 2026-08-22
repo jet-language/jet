@@ -229,7 +229,8 @@ module env.dev {
 ## Lifecycle and managed files
 
 Lifecycle facts include dotenv allowlists, unset names, enter and check jobs,
-and reload policy. Secret values never enter the plan or information output.
+the project-relative `git_hooks_path`, and reload policy. Secret values never
+enter the plan or information output.
 
 Managed files use project-relative destinations. `Symlink` points to an
 immutable content object. `Seed` keeps an existing file. `Copy` owns the file
@@ -241,6 +242,7 @@ module env.dev {
     unset: ["RUST_LOG"]
     on_enter: [prepare]
     checks: [smoke]
+    git_hooks_path: "scripts/githooks"
     reload: .Watch.{ paths: ["env.jet"], debounce_ms: 250 }
     files: [
         "config/generated.txt": File{ content: "generated\n", mode: .Copy }
@@ -256,7 +258,10 @@ runs enter jobs, checks, and any explicit hook in a clean declared environment
 and rejects an untrusted hook with `E1329`. Hook working directories must stay
 inside the project, including after symlink resolution. A changed hook or
 lifecycle policy changes the environment trust identity, so the next entry
-needs a new trust decision.
+needs a new trust decision. `git_hooks_path` must name an existing directory
+inside the project. Entry exports Git's native `core.hooksPath` setting for
+the child environment, so Git runs the repository's hooks without mutating
+`.git/config`; `jet env test` uses the same composed environment for CI.
 
 Job metadata stays on the `#Job` marker. Bare jobs use the current project
 directory and remain uncached. Typed fields can add job-local packages, a
@@ -283,7 +288,7 @@ the generated help, shell completions, and manual.
 
 `jet env info` reads one selected typed environment plan. It shows the selected
 environment, packages, services, `jobs`, `checks`, variables, managed file
-destinations, and integration facts. `jet env info --json` emits the same
+destinations, `git_hooks_path`, and integration facts. `jet env info --json` emits the same
 facts for tools. The `--env <name>` selector applies to every fact in the
 report; sibling environment contributions are not merged.
 It is exposed as the matching `jet env info` action in the same CLI surfaces.
@@ -469,6 +474,25 @@ Built-in service presets use one typed constructor registry. The registry gives
 each preset its package reference, executable, default port, argument vector,
 readiness probe, and state setup. Host supervision, image projection, and service
 discovery use these same facts. They do not keep separate preset tables.
+
+PostgreSQL and Redis are available by name without spelling those facts again:
+
+```text
+module env.dev {
+    services: {
+        postgres: { enable: true },
+        redis: { enable: true }
+    }
+}
+```
+
+`postgres` realizes `postgresql@nixpkgs`, initializes `.jet/services/postgres/data`
+with `initdb`, runs `postgres` on loopback port `5432`, and uses `pg_isready` for
+readiness. `redis` realizes `redis@nixpkgs`, uses
+`.jet/services/redis/data`, runs `redis-server` on loopback port `6379`, and uses
+`redis-cli -p 6379 ping` for readiness. An explicit `ports`, `run`, or `ready` field
+overrides only that fact; the service still uses the same supervisor and cleanup
+path.
 
 `after` names a declared service dependency. It is the only dependency spelling;
 the retired `depends_on` spelling is rejected. Jetpack validates names, disabled

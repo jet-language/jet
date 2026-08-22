@@ -9,6 +9,7 @@ use super::workspace_sources::{
     cwd_table, load_workspace_for_source, project_root, workspace_index_required_diagnostic,
     workspace_root_snapshot_or_exit,
 };
+use crate::EnvHook;
 use crate::MemberSelect::{self, SelectRequest};
 use crate::Output::{self, Theme};
 use crate::Provider;
@@ -386,6 +387,34 @@ pub(super) fn compose_env(
                     "couldn't load dotenv file",
                     &format!("{}: {error}", dotenv_path.display()),
                     "fix the dotenv path and keep each assignment in KEY=value form.",
+                );
+                return Err(2);
+            }
+        }
+    }
+    if let Some(relative) = &plan.environment.lifecycle.git_hooks_path {
+        if plan.environment.lifecycle.unset.iter().any(|name| {
+            matches!(
+                name.as_str(),
+                "GIT_CONFIG_COUNT" | "GIT_CONFIG_KEY_0" | "GIT_CONFIG_VALUE_0"
+            )
+        }) {
+            theme.error_coded(
+                "E1333",
+                "the environment Git hook configuration conflicts with `unset`",
+                "Git cannot receive core.hooksPath when its configuration environment is removed",
+                "remove the Git configuration names from `unset`, or remove `git_hooks_path`",
+            );
+            return Err(2);
+        }
+        match EnvHook::git_hooks_environment(&plan.project_root, relative) {
+            Ok(values) => composed_vars.extend(values),
+            Err(error) => {
+                theme.error_coded(
+                    "E1333",
+                    "the environment Git hook path is not usable",
+                    &error,
+                    "create an in-project hook directory and set `git_hooks_path` to its project-relative path",
                 );
                 return Err(2);
             }

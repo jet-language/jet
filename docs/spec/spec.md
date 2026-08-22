@@ -2839,7 +2839,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `jet explain <ref>` prints Store identity, provider facts, dependency and
   closure edges, liveness roots, and rebuild checks. The causal views
   `jet explain why-depends|what-depends|closure|why-live|rebuild <ref>` select
-  one part of the same fact model. `jet explain <ref> --json` emits the stable JSON
+  one part of the same fact model. `jet explain <ref> --json` emits the stable `jet.report/v1`
   projection; code-form `jet explain E1234` keeps the existing diagnostic essay
   behavior.
 - **Hybrid CLI output (D-FE-CLI1):** trivial reads stay quiet, multi-package

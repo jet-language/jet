@@ -605,6 +605,41 @@ pub(crate) fn project_lock_digest(project: Option<&Path>) -> Result<String, Prov
     }
 }
 
+fn validate_project_lock_layout(project: &Path) -> Result<(), ProviderError> {
+    let managed = super::Store::managed_dir(project);
+    match std::fs::symlink_metadata(&managed) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(ProviderError::BadOutput(format!(
+                "project managed directory `{}` is not a real directory",
+                managed.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(ProviderError::BadOutput(format!(
+                "could not inspect project managed directory `{}`: {error}",
+                managed.display()
+            )));
+        }
+    }
+    let lock = super::Store::lock_path(project);
+    match std::fs::symlink_metadata(&lock) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(ProviderError::BadOutput(format!(
+                "project lock `{}` is not a real file",
+                lock.display()
+            )))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(ProviderError::BadOutput(format!(
+            "could not inspect project lock `{}`: {error}",
+            lock.display()
+        ))),
+    }
+}
+
 pub(crate) fn envelope_digest(envelope: &super::Envelope::Envelope) -> String {
     SHA256::sha256_hex(
         format!(
@@ -825,6 +860,9 @@ pub(crate) fn validate_nix_lock_before_store(
             "Nix realization is missing its prepared lock digest".into(),
         ));
     };
+    if let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) {
+        validate_project_lock_layout(project)?;
+    }
     let current = project_lock_digest(ctx.project_dir)?;
     if &current != expected {
         return Err(ProviderError::BadOutput(format!(
@@ -862,32 +900,54 @@ pub(crate) fn record_nix_lock_after_store(
             "Nix Store entry is missing its prepared lock digest".into(),
         ));
     };
+    validate_project_lock_layout(project)?;
     let current_lock_digest = project_lock_digest(Some(project))?;
     if &current_lock_digest != expected_lock_digest {
         return Err(ProviderError::BadOutput(format!(
             "Nix project lock changed after Store registration: prepared `{expected_lock_digest}`, current `{current_lock_digest}`"
         )));
     }
-    super::Lock::record_nix_realization(
+    let expected_lock_digest = expected_lock_digest.to_string();
+    let refreshed = super::RuntimePolicy::with_project_lock(
         project,
-        &entry.name,
-        &entry.version,
-        &entry.reference,
-        &entry.out,
-        super::Lock::LockEnvelope {
-            output_hash: entry.envelope.output_hash.clone(),
-            platform: entry.envelope.platform.clone(),
-            signature: entry.envelope.signature.clone(),
-            provenance: entry.envelope.provenance.clone(),
+        "nix-lock-publication",
+        || {
+            let current_lock_digest = project_lock_digest(Some(project))
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            if current_lock_digest != expected_lock_digest {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Nix project lock changed during Store publication: prepared `{expected_lock_digest}`, current `{current_lock_digest}`"
+                    ),
+                ));
+            }
+            super::Lock::record_nix_realization(
+                project,
+                &entry.name,
+                &entry.version,
+                &entry.reference,
+                &entry.out,
+                super::Lock::LockEnvelope {
+                    output_hash: entry.envelope.output_hash.clone(),
+                    platform: entry.envelope.platform.clone(),
+                    signature: entry.envelope.signature.clone(),
+                    provenance: entry.envelope.provenance.clone(),
+                },
+            )
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            let lock_digest = project_lock_digest(Some(project))
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest)
+                .map_err(|error| {
+                    std::io::Error::other(format!(
+                        "could not refresh the Nix Store producer after lock publication: {error}"
+                    ))
+                })
         },
     )
-    .map_err(ProviderError::BadOutput)?;
-    let lock_digest = project_lock_digest(Some(project))?;
-    super::Store::refresh_nix_lock_digest(roots, entry, &lock_digest).map_err(|error| {
-        ProviderError::BadOutput(format!(
-            "could not refresh the Nix Store producer after lock publication: {error}"
-        ))
-    })
+    .map_err(|error| ProviderError::BadOutput(error.to_string()))?;
+    Ok(refreshed)
 }
 
 /// How a dependency was realized, for the `jet build` per-package report

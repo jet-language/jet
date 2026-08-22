@@ -2270,7 +2270,27 @@ fn project_receipt_projection(
             format!("Hangar entry `{}` has no connected receipt", entry.id),
         )));
     }
+    let lock_path = project.join(crate::Syntax::UNIFIED_LOCK_FILE);
+    if !validate_project_lock_path(&lock_path).map_err(RealizeError::Store)? {
+        return Ok(());
+    }
     super::RuntimePolicy::with_project_lock(project, "receipt-projection", || {
+        if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+            if producer.provider == "nix" {
+                if let Some(expected) = producer.facts.get("nix.lock.digest") {
+                    let current = super::Provider::project_lock_digest(ctx.project_dir)
+                        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+                    if &current != expected {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Nix project lock changed before receipt projection: prepared `{expected}`, current `{current}`"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
         record_receipt_projection(
             project,
             &entry.name,
@@ -2304,9 +2324,11 @@ fn record_receipt_projection(
         ));
     }
     let lock_path = project_root.join(crate::Syntax::UNIFIED_LOCK_FILE);
+    if !validate_project_lock_path(&lock_path)? {
+        return Ok(false);
+    }
     let raw = match fs::read_to_string(&lock_path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
     };
     let mut lock = crate::Lock::parse(&raw).map_err(|error| {
@@ -2318,11 +2340,31 @@ fn record_receipt_projection(
             ),
         )
     })?;
-    let Some(package) = lock.packages.iter_mut().find(|package| {
-        package.name == package_name && receipt_package_matches(package, reference, output_hash)
-    }) else {
-        return Ok(false);
-    };
+    let package_index = lock
+        .packages
+        .iter()
+        .position(|package| {
+            package.name == package_name
+                && receipt_source_matches(package, reference)
+                && receipt_envelope_matches(package, output_hash)
+        })
+        .or_else(|| {
+            lock.packages.iter().position(|package| {
+                package.name == package_name
+                    && receipt_output_matches(package, output_hash)
+                    && receipt_envelope_matches(package, output_hash)
+            })
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Hangar receipt `{receipt}` has no matching package in project lock `{}`",
+                    lock_path.display()
+                ),
+            )
+        })?;
+    let package = &mut lock.packages[package_index];
     if package.receipt.as_deref() == Some(receipt) {
         return Ok(false);
     }
@@ -2332,12 +2374,39 @@ fn record_receipt_projection(
     Ok(true)
 }
 
-fn receipt_package_matches(
-    package: &super::Lock::LockedPackage,
-    reference: &str,
-    output_hash: &str,
-) -> bool {
-    let source_matches = match &package.source {
+fn validate_project_lock_path(path: &Path) -> std::io::Result<bool> {
+    let managed = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("project lock has no managed directory"))?;
+    match fs::symlink_metadata(managed) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "project managed directory `{}` is not a real directory",
+                    managed.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("project lock `{}` is not a real file", path.display()),
+            ))
+        }
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn receipt_source_matches(package: &super::Lock::LockedPackage, reference: &str) -> bool {
+    match &package.source {
         super::Lock::LockSource::Root => reference == "." || reference == "root",
         super::Lock::LockSource::Path(path) => path == reference,
         super::Lock::LockSource::Git { url, .. } => url == reference,
@@ -2353,12 +2422,20 @@ fn receipt_package_matches(
         | super::Lock::LockSource::Registry {
             reference: value, ..
         } => value == reference,
-    };
-    let output_matches = package
+    }
+}
+
+fn receipt_output_matches(package: &super::Lock::LockedPackage, output_hash: &str) -> bool {
+    package
         .envelope
         .as_ref()
-        .is_some_and(|envelope| !output_hash.is_empty() && envelope.output_hash == output_hash);
-    source_matches || output_matches
+        .is_some_and(|envelope| !output_hash.is_empty() && envelope.output_hash == output_hash)
+}
+
+fn receipt_envelope_matches(package: &super::Lock::LockedPackage, output_hash: &str) -> bool {
+    package.envelope.as_ref().is_none_or(|envelope| {
+        output_hash.is_empty() || envelope.output_hash == output_hash
+    })
 }
 
 fn valid_receipt_digest(value: &str) -> bool {
@@ -3006,7 +3083,7 @@ pub(crate) fn commit_external_consumer_root(
 }
 
 fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
-    let mut live = current_lock_roots();
+    let mut live = current_lock_roots()?;
     let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
     let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
     let mut targets = live.output_hashes.clone();
@@ -3652,29 +3729,47 @@ fn read_meta(dir: &Path) -> Option<ParsedMeta> {
     parse_meta(&text)
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct LiveRoots {
     ids: BTreeSet<String>,
     output_hashes: BTreeSet<String>,
     name_versions: BTreeSet<(String, String)>,
+    receipts: BTreeSet<String>,
 }
 
-fn current_lock_roots() -> LiveRoots {
-    let Ok(cwd) = std::env::current_dir() else {
-        return LiveRoots::default();
+fn current_lock_roots() -> std::io::Result<LiveRoots> {
+    let cwd = std::env::current_dir()?;
+    lock_roots_from(&cwd)
+}
+
+fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
+    let Some(lock_path) = nearest_lock_path(start)? else {
+        return Ok(LiveRoots::default());
     };
-    let Some(lock_path) = nearest_lock_path(&cwd) else {
-        return LiveRoots::default();
-    };
-    let Ok(raw) = fs::read_to_string(lock_path) else {
-        return LiveRoots::default();
-    };
-    let Ok(lock) = crate::Lock::parse(&raw) else {
-        return LiveRoots::default();
-    };
+    let raw = fs::read_to_string(&lock_path).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!("could not read project lock `{}`: {error}", lock_path.display()),
+        )
+    })?;
+    let lock = crate::Lock::parse(&raw).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("could not parse project lock `{}`: {error}", lock_path.display()),
+        )
+    })?;
     let mut roots = LiveRoots::default();
     for pkg in lock.packages {
         roots.name_versions.insert((pkg.name, pkg.version));
+        if let Some(receipt) = pkg.receipt {
+            if !valid_receipt_digest(&receipt) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("project lock `{}` contains an invalid Hangar receipt", lock_path.display()),
+                ));
+            }
+            roots.receipts.insert(receipt);
+        }
         if let Some(env) = pkg.envelope {
             if !env.output_hash.is_empty() {
                 roots.output_hashes.insert(env.output_hash);
@@ -3687,23 +3782,69 @@ fn current_lock_roots() -> LiveRoots {
             roots.output_hashes.insert(toolchain.envelope.output_hash);
         }
     }
-    roots
+    Ok(roots)
 }
 
-fn nearest_lock_path(start: &Path) -> Option<PathBuf> {
+fn nearest_lock_path(start: &Path) -> std::io::Result<Option<PathBuf>> {
     let mut dir = Some(start);
     while let Some(current) = dir {
-        let lock = lock_path(current);
-        if lock.is_file() {
-            return Some(lock);
+        let managed = managed_dir(current);
+        match fs::symlink_metadata(&managed) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is a symlink; repair it before Hangar cleanup",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is not a directory; repair it before Hangar cleanup",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(_) => {
+                let lock = lock_path(current);
+                match fs::symlink_metadata(&lock) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "project lock `{}` is a symlink; repair it before Hangar cleanup",
+                                lock.display()
+                            ),
+                        ));
+                    }
+                    Ok(metadata) if metadata.is_file() => return Ok(Some(lock)),
+                    Ok(_) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "project lock `{}` is not a regular file; repair it before Hangar cleanup",
+                                lock.display()
+                            ),
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
         dir = current.parent();
     }
-    None
+    Ok(None)
 }
 
 fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
-    roots.ids.contains(id)
+    roots.receipts.contains(&meta.receipt)
+        || roots.ids.contains(id)
         || (!meta.envelope.output_hash.is_empty()
             && roots.output_hashes.contains(&meta.envelope.output_hash))
         || (meta.envelope.output_hash.is_empty()

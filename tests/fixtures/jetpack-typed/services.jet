@@ -8,15 +8,18 @@
 // grammar either way (open record, required `enable: Bool`) — only the
 // capture/interpretation differs.
 //
-// `redis` needs no `run`/`ready`/`ports` at all: its name matches jetpack's
-// built-in catalog, which supplies the start command, the `redis-cli … ping`
-// readiness probe, and the `redis@nixpkgs` package to realize. `worker`
+// `redis`, `postgres`, `mysql`, `mariadb`, and `nginx` need no `run`/`ready`/`ports` at
+// all: their names match jetpack's built-in catalog, which supplies each
+// start command, data-directory initialization, typed readiness, and package
+// to realize. The database presets bind loopback and probe as root with the
+// fresh no-password account. `worker`
 // spells everything out by hand — any service jetpack doesn't know by name
 // works the same way. `cache` is declared but disabled (`enable: false`):
 // captured for `jetpack services logs` etc, never started.
 module env.dev {
     services: {
         redis: { enable: true },
+        postgres: { enable: true },
         worker: {
             enable: true,
             ports: [8080],

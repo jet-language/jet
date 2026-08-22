@@ -213,11 +213,13 @@ fn jet_env_sync_delegates_to_typed_managed_file_sync() {
 fn jet_env_info_discloses_typed_summary_without_realizing_or_starting_services() {
     let project = Scratch::new("jet-env-info");
     let root = Scratch::new("jet-env-info-root");
+    fs::create_dir_all(project.join("scripts/githooks")).unwrap();
     fs::write(
         project.join("env.jet"),
         r#"module env.dev {
     prompt: $HOME
     packages: [nixpkgs.ripgrep]
+    git_hooks_path: "scripts/githooks"
     services: {
         fixture: {
             enable: false,
@@ -278,6 +280,7 @@ module env.full {
         "\"checks\":[],\"jobs\":[\"lint\"]",
         "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]",
         "\"files\":[\"config/generated.txt\"]",
+        "\"git_hooks_path\":\"scripts/githooks\"",
     ] {
         assert!(
             stdout.contains(fact),
@@ -323,6 +326,7 @@ module env.full {
         "after=database",
         "before_start=lint",
         "sockets=run/fixture.sock",
+        "git hooks path: scripts/githooks",
     ] {
         assert!(
             human_output.contains(fact),

@@ -415,6 +415,30 @@ fn add_typed_text_fact(facts: &mut MetadataFacts, key: impl Into<String>, value:
     facts.typed.insert(key.into(), vec![value.to_string()]);
 }
 
+fn add_conflicting_typed_json_fact(
+    facts: &mut MetadataFacts,
+    key: impl Into<String>,
+    value: &JSONValue,
+) {
+    let key = key.into();
+    let value = json_value_json(value);
+    let existing = facts.typed.get(&key).cloned().unwrap_or_default();
+    if existing.iter().any(|previous| previous != &value) {
+        let previous = existing
+            .iter()
+            .find(|previous| *previous != &value)
+            .map(|previous| (*previous).as_str())
+            .unwrap_or("<missing>");
+        facts.conflicts.push(format!(
+            "typed provider fact `{key}` has conflicting values `{previous}` and `{value}`"
+        ));
+    }
+    let values = facts.typed.entry(key).or_default();
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
 fn json_string_list(value: &JSONValue) -> Option<Vec<String>> {
     match value {
         JSONValue::String(value) => Some(vec![value.clone()]),
@@ -550,6 +574,7 @@ pub struct MetadataFacts {
     pub todos: Vec<String>,
     pub typed: std::collections::BTreeMap<String, Vec<String>>,
     pub replacement_candidates: Vec<ReplacementOverlay>,
+    pub conflicts: Vec<String>,
 }
 
 impl MetadataFacts {
@@ -571,6 +596,7 @@ impl MetadataFacts {
             todos: Vec::new(),
             typed: std::collections::BTreeMap::new(),
             replacement_candidates: Vec::new(),
+            conflicts: Vec::new(),
         }
     }
 }
@@ -3345,7 +3371,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     for (key, value) in &versions {
         add_typed_text_fact(&mut facts, format!("provider.vcpkg.variant.{key}"), value);
     }
-    facts.dependencies = vcpkg_dependencies(&object, &mut facts.typed, &mut losses);
+    facts.dependencies = vcpkg_dependencies(&object, &mut facts, &mut losses);
     if let Some(value) = object.get("supports") {
         match value {
             JSONValue::String(value) if !value.trim().is_empty() => {
@@ -4893,7 +4919,7 @@ fn provider_dependency_field(
         match value {
             JSONValue::String(name) if !name.trim().is_empty() => {
                 dependencies.push(name.clone());
-                add_typed_json_fact(
+                add_conflicting_typed_json_fact(
                     facts,
                     format!("provider.{namespace}.dependency.{kind}.{name}"),
                     value,
@@ -4913,7 +4939,7 @@ fn provider_dependency_field(
                     .find_map(|key| json_string(dependency, key))
                     .unwrap_or_default();
                 dependencies.push(format_dependency(&name, &requirement));
-                add_typed_json_fact(
+                add_conflicting_typed_json_fact(
                     facts,
                     format!("provider.{namespace}.dependency.{kind}.{name}"),
                     value,
@@ -5157,6 +5183,7 @@ fn binary_artifact_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &
 
 fn report_with_identity(facts: MetadataFacts) -> ProviderFactReport {
     let mut losses = Vec::new();
+    let conflicts = facts.conflicts.clone();
     if facts.name.is_empty() {
         losses.push("provider metadata has no package name".to_string());
     }
@@ -5166,7 +5193,7 @@ fn report_with_identity(facts: MetadataFacts) -> ProviderFactReport {
     ProviderFactReport {
         facts,
         losses,
-        conflicts: Vec::new(),
+        conflicts,
         native_format: String::new(),
         native_document: String::new(),
     }
@@ -5245,7 +5272,7 @@ fn json_array_strings(
 
 fn vcpkg_dependencies(
     object: &std::collections::BTreeMap<String, JSONValue>,
-    typed: &mut std::collections::BTreeMap<String, Vec<String>>,
+    facts: &mut MetadataFacts,
     losses: &mut Vec<String>,
 ) -> Vec<String> {
     let Some(value) = object.get("dependencies") else {
@@ -5274,9 +5301,10 @@ fn vcpkg_dependencies(
                 dependencies.push(format_dependency(&name, &version));
                 for key in ["features", "platform", "host", "default-features"] {
                     if let Some(value) = dependency.get(key) {
-                        typed.insert(
+                        add_conflicting_typed_json_fact(
+                            facts,
                             format!("vcpkg.dependency.{name}.{key}"),
-                            vec![json_value_text(value)],
+                            value,
                         );
                         let valid = match key {
                             "features" => matches!(
@@ -6119,6 +6147,28 @@ version = "1.0.0" # package version
             .conflicts
             .iter()
             .any(|conflict| conflict.contains("conflicting native facts")));
+    }
+
+    #[test]
+    fn provider_conformance_reports_conflicting_typed_dependency_projection() {
+        let report = normalize_provider_document(
+            ProviderFamily::Github,
+            r#"{"name":"tool","tag_name":"v1.2.3","dependencies":[{"name":"openssl","version":"1.0.0"},{"name":"openssl","version":"2.0.0"}],"assets":[{"name":"tool-linux","digest":"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","platform":"x86_64-linux"}]}"#,
+        );
+
+        assert!(report.validate().is_err());
+        assert!(report.conflicts.iter().any(|conflict| {
+            conflict.contains("typed provider fact") && conflict.contains("openssl")
+        }));
+
+        let report = normalize_provider_document(
+            ProviderFamily::Vcpkg,
+            r#"{"name":"tool","version-string":"1.2.3","dependencies":[{"name":"zlib","features":["core"]},{"name":"zlib","features":["ssl"]}]}"#,
+        );
+        assert!(report.validate().is_err());
+        assert!(report.conflicts.iter().any(|conflict| {
+            conflict.contains("typed provider fact") && conflict.contains("zlib")
+        }));
     }
 
     #[test]

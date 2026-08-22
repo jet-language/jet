@@ -618,12 +618,6 @@ pub fn verify_cache_transfer(
         }
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
-                if let Err(error) =
-                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)
-                {
-                    failures.push(format!("{mirror}: trust receipt rejected: {error}"));
-                    continue;
-                }
                 let bytes = artifact.nar;
                 if let Err(error) = verify_artifact_bytes(&artifact.info, &bytes) {
                     failures.push(format!("{mirror}: NAR validation failed: {error}"));
@@ -631,6 +625,16 @@ pub fn verify_cache_transfer(
                 }
                 if let Err(error) = verify_decoded_output_hash(roots, &expected, &bytes) {
                     failures.push(format!("{mirror}: output identity failed: {error}"));
+                    continue;
+                }
+                // Admit the signed receipt only after the complete payload has
+                // passed transport, NAR, and output-identity checks. A bad or
+                // compromised mirror must not advance the host pin and then
+                // freeze a later valid receipt behind a rollback decision.
+                if let Err(error) =
+                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)
+                {
+                    failures.push(format!("{mirror}: trust receipt rejected: {error}"));
                     continue;
                 }
                 let receipt = artifact.receipt;
@@ -733,26 +737,26 @@ pub fn substitute_cache_entry(
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
                 let result: io::Result<_> = (|| {
-                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)?;
                     artifact.info.verify(&key)?;
                     verify_artifact_bytes(&artifact.info, &artifact.nar)?;
                     let stats = super::read_nar(&artifact.nar, destination)?;
                     super::seal_node(destination)?;
+                    let actual =
+                        crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
+                            .map_err(io::Error::other)?;
+                    if actual != expected.envelope.output_hash {
+                        return Err(invalid(&format!(
+                            "restored output hash {actual} disagrees with {}",
+                            expected.envelope.output_hash
+                        )));
+                    }
+                    // Keep receipt admission transactional with the restored
+                    // payload. Invalid bytes must not consume a newer pin.
+                    verify_cache_receipt(roots, role, &expected, &artifact.receipt, &key)?;
                     Ok(stats)
                 })();
                 match result {
                     Ok(stats) => {
-                        let actual =
-                            crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
-                                .map_err(io::Error::other)?;
-                        if actual != expected.envelope.output_hash {
-                            let _ = remove_tree(destination);
-                            failures.push(format!(
-                                "{mirror}: restored output hash {actual} disagrees with {}",
-                                expected.envelope.output_hash
-                            ));
-                            continue;
-                        }
                         return Ok(CacheTransferReport {
                             role: binding.role.clone(),
                             mirror: mirror.clone(),

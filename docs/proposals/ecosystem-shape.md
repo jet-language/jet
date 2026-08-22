@@ -70,13 +70,13 @@ The reserved filename supplies the `Package` type: top-level fields construct it
 ```jet
 configs: [app, operations]                     // NEW: D-ECO-SLICENAME1
 
-app :: Config.{                        // NEW: D-ECO-SLICENAME1
+app :: Config{                         // NEW: D-ECO-SLICENAME1
     source: "Source/api"
     deps: .{ http: "4.2" }
-    outputs: .{ api: .Service.{ name: "api", entry: run_api } }
+    outputs: .{ api: Service{ name: "api", entry: run_api } }
 }
 
-operations :: Config.{                 // NEW: D-ECO-SLICENAME1
+operations :: Config{                  // NEW: D-ECO-SLICENAME1
     services: .{
         api: .{ enable: true, from: api, ports: [8080] }
     }
@@ -128,15 +128,15 @@ Outputs are thin projections over facts stored once on the graph. The proposed c
 ```jet
 // NEW: D-SHAPE-OUTPUT-CALLABLE1
 outputs: .{
-    cli: .Executable.{ name: "todo", entry: run }
-    lib: .Library.{ name: "todo_core", modules: [Todo] }
-    api: .Service.{ name: "todo_api", entry: serve }
-    release: .Check.{ name: "release", entry: verify_release }       // NEW: D-ECO-OUTPUT-KINDS1
-    dev: .Environment.{ name: "dev", tools: [ripgrep] }               // NEW: D-ECO-OUTPUT-KINDS1
-    image: .Image.{ name: "todo", from: cli, kind: .Oci }
-    all: .Bundle.{ name: "todo-release", members: [cli, image] }
-    host: .System.{ name: "halcyon", target: linux.x64, packages: [cli] } // NEW: D-ECO-OUTPUT-KINDS1
-    prod: .Fleet.{ name: "prod", hosts: .{ halcyon: "system.halcyon" } }  // NEW: D-ECO-OUTPUT-KINDS1
+    cli: Executable{ name: "todo", entry: run }
+    lib: Library{ name: "todo_core", modules: [Todo] }
+    api: Service{ name: "todo_api", entry: serve }
+    release: Check{ name: "release", entry: verify_release }       // NEW: D-ECO-OUTPUT-KINDS1
+    dev: Environment{ name: "dev", tools: [ripgrep] }               // NEW: D-ECO-OUTPUT-KINDS1
+    image: Image{ name: "todo", from: cli, kind: .Oci }
+    all: Bundle{ name: "todo-release", members: [cli, image] }
+    host: System{ name: "halcyon", target: linux.x64, packages: [cli] } // NEW: D-ECO-OUTPUT-KINDS1
+    prod: Fleet{ name: "prod", hosts: .{ halcyon: "system.halcyon" } }  // NEW: D-ECO-OUTPUT-KINDS1
 }
 ```
 
@@ -1175,8 +1175,8 @@ NixOS may need fewer lines when a module already packages the exact laptop polic
 
 ```text
 $ jet split hosts halcyon --check
-Would keep: systems.halcyon
-Would add: fleets.home.hosts.halcyon -> systems.halcyon
+Would keep: outputs.halcyon (System)
+Would add: outputs.home (Fleet), with hosts.halcyon -> system.halcyon
 Would create: package/fleet.jet::home
 System graph before: sha256:7780…
 System graph after:  sha256:7780…
@@ -1190,12 +1190,11 @@ System graph unchanged: sha256:7780…
 Generated `package/fleet.jet`:
 
 ```jet
-pub home :: Config.{                    // NEW: D-ECO-SLICENAME1
-    fleets: .{
-        home: .Fleet.{                  // NEW: D-ECO-OUTPUT-KINDS1
+pub home :: Config{                     // NEW: D-ECO-SLICENAME1
+    outputs: .{
+        home: Fleet{                    // NEW: D-ECO-OUTPUT-KINDS1
             name: "home"
-            hosts: .{ halcyon: systems.halcyon }
-            rollout: .{ canary: 1, max_parallel: 1, on_failure: .RollbackAndStop }
+            hosts: .{ halcyon: system.halcyon }
         }
     }
 }

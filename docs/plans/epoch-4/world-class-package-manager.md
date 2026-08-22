@@ -348,7 +348,9 @@ live acceptance, and documentation. Work order is binding.
   pins the accepted receipt version and digest per cache role and output, so a
   replayed older receipt or same-version replacement cannot become usable. The
 transfer report and explain JSON expose the accepted receipt version and
-expiry alongside the provenance decision.
+expiry alongside the provenance decision. The host advances that pin only
+after the signed NAR, decoded output, and expected output identity all pass;
+a bad payload cannot consume a newer receipt and freeze a valid one.
   `jet explain --json` reports this as `rebuild.cache_admissions`; the view is
   read-only and distinguishes an accepted, expired, missing, or invalid host
   admission pin.
@@ -785,6 +787,8 @@ Shipped slice evidence:
   persisted build-attempt lookup, so selector and source-authority spellings
   do not hide the same package's failure record.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
+- `jet hangar sign <entry-or-archive> --yes` writes a detached signature for a live entry or signs an archive in place.
+- `jet hangar verify [<entry-or-archive>]` verifies live output bytes and any detached archive signature; an unsigned owner-local entry remains usable.
 - `jet hangar copy` locks and snapshots the source closure, verifies its signed
   archive with the source Hangar key, then imports it through the locked
   destination staging and closure-registration path. A fresh destination does
@@ -793,7 +797,12 @@ Shipped slice evidence:
   re-hashed, a corrupt object is quarantined, and failed import restores the
   prior object; crash leftovers are recoverable through `hangar recover`.
 - Failed-build shell recreates the exact sandbox and declared closure.
-- Stable JSON and LSP use the same fact engine.
+- Stable JSON and LSP use the same fact engine. Hangar status output uses the
+  `jet.report/v1` status schema, and Hangar failures use the registered report
+  renderer with the same What, Why, and Fix fields as other Jet tools.
+- Hangar recovery proofs cover path escape, source mutation, corrupt payloads,
+  stale leases, interrupted repair, and concurrent closure updates. Failed
+  operations preserve the committed object and leave repair evidence.
 
 ### E4-JP20 — advisory, license, SBOM, provenance policy
 

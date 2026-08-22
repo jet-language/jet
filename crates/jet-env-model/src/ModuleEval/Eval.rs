@@ -648,6 +648,23 @@ pub(super) fn lifecycle_merge(
     target.unset.extend(incoming.unset);
     target.on_enter.extend(incoming.on_enter);
     target.checks.extend(incoming.checks);
+    if let Some(path) = incoming.git_hooks_path {
+        if let Some(existing) = &target.git_hooks_path {
+            if existing != &path {
+                return Err(Diagnostic::error(
+                    "E1333",
+                    format!(
+                        "git hook path is declared more than once with conflicting values in module `{module_name}`"
+                    ),
+                    "one environment cannot silently choose between different Git hook directories".to_string(),
+                    "merge the git_hooks_path declarations so they agree, or keep one path owner".to_string(),
+                    None,
+                ));
+            }
+        } else {
+            target.git_hooks_path = Some(path);
+        }
+    }
     if incoming.reload_explicit {
         if target.reload_explicit && target.reload != incoming.reload {
             return Err(Diagnostic::error(
@@ -1101,8 +1118,8 @@ fn evaluate_env_fields(
                 Diagnostic::error(
                     "E1333",
                     format!("environment lifecycle declaration is invalid: {error}"),
-                    "lifecycle fields use typed dotenv, unset, job names, and hook records".to_string(),
-                    "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, or `reload: .Prompt`".to_string(),
+                    "lifecycle fields use typed dotenv, unset, job names, hook records, and Git hook paths".to_string(),
+                    "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, `git_hooks_path: \"scripts/githooks\"`, or `reload: .Prompt`".to_string(),
                     Some(*span),
                 )
             })?;
@@ -1132,6 +1149,7 @@ fn is_lifecycle_field(name: &str) -> bool {
             | Syntax::ENV_FIELD_UNSET
             | Syntax::ENV_FIELD_ON_ENTER
             | Syntax::ENV_FIELD_CHECKS
+            | Syntax::ENV_FIELD_GIT_HOOKS_PATH
             | Syntax::ENV_FIELD_RELOAD
     )
 }

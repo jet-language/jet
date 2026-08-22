@@ -679,20 +679,29 @@ mysqld)
         mkdir -p "$data/mysql"
     else
         data=
+        bound=0
         for arg in "$@"; do
             case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+            case "$arg" in --bind-address=127.0.0.1) bound=1 ;; esac
         done
         [ -n "$data" ]
+        [ "$bound" -eq 1 ]
         : > "$data/.service-running"
         exec sleep 30
     fi
     ;;
 mariadb-install-db)
     data=
+    auth=0
+    skip=0
     for arg in "$@"; do
         case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+        case "$arg" in --auth-root-authentication-method=normal) auth=1 ;; esac
+        case "$arg" in --skip-test-db) skip=1 ;; esac
     done
     [ -n "$data" ]
+    [ "$auth" -eq 1 ]
+    [ "$skip" -eq 1 ]
     mkdir -p "$data/mysql"
     ;;
 postgres)
@@ -707,10 +716,13 @@ postgres)
     ;;
 mariadbd)
     data=
+    bound=0
     for arg in "$@"; do
         case "$arg" in --datadir=*) data=${arg#--datadir=} ;; esac
+        case "$arg" in --bind-address=127.0.0.1) bound=1 ;; esac
     done
     [ -n "$data" ]
+    [ "$bound" -eq 1 ]
     : > "$data/.service-running"
     exec sleep 30
     ;;
@@ -768,9 +780,29 @@ redis-cli)
     [ -f .jet/services/redis/data/.service-running ]
     ;;
 mysqladmin)
+    [ "${1:-}" = ping ]
+    user=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -u) shift; user=${1:-} ;;
+            --user=*) user=${1#--user=} ;;
+        esac
+        shift
+    done
+    [ "$user" = root ]
     [ -f .jet/services/mysql/data/.service-running ]
     ;;
 mariadb-admin)
+    [ "${1:-}" = ping ]
+    user=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -u) shift; user=${1:-} ;;
+            --user=*) user=${1#--user=} ;;
+        esac
+        shift
+    done
+    [ "$user" = root ]
     [ -f .jet/services/mariadb/data/.service-running ]
     ;;
 curl)
@@ -943,6 +975,48 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         );
         wait_for_missing(&service_dir.join("pid"));
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_postgres_preset_initialization_failure_has_terminal_state() {
+    let proj = Scratch::new("postgres-init-failure");
+    let tools = Scratch::new("postgres-init-failure-tools");
+    install_catalog_tools(&tools.path);
+    fs::remove_file(tools.path.join("bin/initdb")).unwrap();
+    let fake = fake_systemd();
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = format!(
+        "{}:{}",
+        fake.bin.display(),
+        current_path.to_string_lossy()
+    );
+    let worker = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "production_catalog_service_worker",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("JETPACK_CATALOG_PROJECT", &proj.path)
+        .env("JETPACK_CATALOG_TOOLS", &tools.path)
+        .env("JETPACK_CATALOG_SYSTEMD_BIN", &fake.bin)
+        .env("JETPACK_CATALOG_NAME", "postgres")
+        .env("JETPACK_SERVICE_SUPERVISOR", "1")
+        .env("PATH", &path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let service_dir = proj.path.join(".jet/services/postgres");
+    let output = worker.wait_with_output().unwrap();
+    assert!(!output.status.success(), "initdb failure must reach the worker");
+    assert!(!service_dir.join("pid").exists());
+    assert!(service_dir.join("supervisor.error").is_file());
+    let lifecycle = fs::read_to_string(service_dir.join("lifecycle")).unwrap();
+    assert!(lifecycle.contains("phase=failed"), "{lifecycle}");
+    assert!(lifecycle.contains("recovery=startup-failed"), "{lifecycle}");
 }
 
 #[cfg(target_os = "linux")]

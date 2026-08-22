@@ -48,6 +48,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
   {bin} hangar path                    print the resolved user Hangar path
+  {bin} hangar verify [<entry-or-archive>] verify Hangar bytes and signatures
   {bin} hangar export <entry> --to <archive.hangar>
                                       export one signed closure archive
   {bin} hangar import <archive.hangar> verify + import a signed archive
@@ -230,6 +231,7 @@ mod tests {
     #[test]
     fn hangar_recovery_is_in_help() {
         assert!(usage_with_color(false).contains("hangar recover"));
+        assert!(usage_with_color(false).contains("hangar verify"));
     }
 
     #[test]

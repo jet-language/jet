@@ -522,6 +522,7 @@ pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts)
         || !facts.lifecycle.unset.is_empty()
         || !facts.lifecycle.on_enter.is_empty()
         || !facts.lifecycle.checks.is_empty()
+        || facts.lifecycle.git_hooks_path.is_some()
         || facts.lifecycle.reload_explicit
         || !facts.presets.is_empty()
         || !facts.package_profiles.is_empty()
@@ -845,7 +846,9 @@ pub fn gate_with_environment(
     }
     let hash = environment_definition_hash(refs, table, secrets, facts);
     let typed = is_typed_environment(facts);
-    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty() || !facts.lifecycle.checks.is_empty();
+    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty()
+        || !facts.lifecycle.checks.is_empty()
+        || facts.lifecycle.git_hooks_path.is_some();
     gate_with_hash(
         theme,
         store,
@@ -887,7 +890,9 @@ pub fn gate_with_environment_and_snapshot(
         source_snapshot,
     );
     let typed = is_typed_environment(facts);
-    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty() || !facts.lifecycle.checks.is_empty();
+    let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty()
+        || !facts.lifecycle.checks.is_empty()
+        || facts.lifecycle.git_hooks_path.is_some();
     gate_with_hash(
         theme,
         store,

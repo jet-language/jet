@@ -1672,18 +1672,22 @@ module system.box {
         let src = std::fs::read_to_string(&path).unwrap();
         let dir = path.parent().unwrap();
         let plan = evaluate_env(&src, dir).unwrap();
-        assert_eq!(plan.dev_services.len(), 3);
+        assert_eq!(plan.dev_services.len(), 4);
         let redis = &plan.dev_services[0];
         assert_eq!(redis.name, "redis");
         assert!(redis.enable);
         assert!(redis.run.is_none(), "redis relies on the built-in catalog");
-        let worker = &plan.dev_services[1];
+        let postgres = &plan.dev_services[1];
+        assert_eq!(postgres.name, "postgres");
+        assert!(postgres.enable);
+        assert!(postgres.run.is_none(), "postgres relies on the built-in catalog");
+        let worker = &plan.dev_services[2];
         assert_eq!(worker.name, "worker");
         assert_eq!(worker.ports, vec![8080]);
         let worker_run = vec!["worker".to_string(), "--port".to_string(), "8080".to_string()];
         assert_eq!(worker.run.as_deref(), Some(worker_run.as_slice()));
         assert!(worker.ready.is_some());
-        let cache = &plan.dev_services[2];
+        let cache = &plan.dev_services[3];
         assert_eq!(cache.name, "cache");
         assert!(!cache.enable);
     }

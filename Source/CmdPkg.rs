@@ -167,38 +167,28 @@ pub(crate) fn run_update(dep: Option<&str>) {
     }
 }
 
-/// `jet hangar verify` (D-CLI-STORE2=A, was `jet store verify`).
-pub(crate) fn run_hangar_verify() {
-    let store_dir = jet::Store::store_dir();
-    let entries = jet::Store::list_entries();
-    if entries.is_empty() {
-        println!("hangar is empty ({})", store_dir.display());
+/// `jet hangar generations` (D-PURE3=B / D-CLI-STORE2=A, was `jet store generations`).
+pub(crate) fn run_hangar_generations(json: bool) {
+    let gens = jet::Store::list_generations();
+    if json {
+        let rows = gens
+            .iter()
+            .map(|g| {
+                format!(
+                    "{{\"number\":{},\"timestamp\":{},\"entry_hash\":{}}}",
+                    g.number,
+                    jet::Diagnostics::json_str(&g.timestamp),
+                    jet::Diagnostics::json_str(&g.entry_hash)
+                )
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"generations\",\"generations\":[{}]}}",
+            jet::Diagnostics::json_str(jet::Diagnostics::REPORT_SCHEMA),
+            rows.join(",")
+        );
         return;
     }
-    println!("verifying {} hangar entries...", entries.len());
-    // Without lockfile context we can only verify tree hashes against themselves.
-    // Full verification requires the lock file; this checks for obvious corruption.
-    let mut ok = 0;
-    let mut bad = 0;
-    for entry in &entries {
-        let name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let th = jet::SHA256::tree_hash(entry);
-        if th.starts_with("sha256-") {
-            ok += 1;
-        } else {
-            eprintln!("  bad: {}", name);
-            bad += 1;
-        }
-    }
-    println!("{} ok, {} bad", ok, bad);
-    if bad > 0 {
-        exit(ExitCodes::USER_ERROR);
-    }
-}
-
-/// `jet hangar generations` (D-PURE3=B / D-CLI-STORE2=A, was `jet store generations`).
-pub(crate) fn run_hangar_generations() {
-    let gens = jet::Store::list_generations();
     if gens.is_empty() {
         println!("no hangar generations recorded yet");
         println!("hint: generations are recorded when packages are installed");
@@ -214,24 +204,45 @@ pub(crate) fn run_hangar_generations() {
 }
 
 /// `jet hangar rollback <gen>` (D-PURE3=B / D-CLI-STORE2=A, was `jet store rollback`).
-pub(crate) fn run_hangar_rollback(gen_str: &str) {
+pub(crate) fn run_hangar_rollback(gen_str: &str, json: bool) {
     let gen_number = match gen_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            crate::cli_error!(@fix "E2104", "`jet hangar rollback` needs a generation number", "run `jet hangar generations` to see available generations");
+            crate::emit_cli_report(
+                "E2104",
+                "`jet hangar rollback` needs a generation number".to_string(),
+                "Jet needs valid command input before it can run this command".to_string(),
+                "run `jet hangar generations` to see available generations".to_string(),
+                json,
+            );
             exit(ExitCodes::USAGE);
         }
     };
     match jet::Store::rollback_to(gen_number) {
         Ok(g) => {
-            println!(
-                "rolled back to generation {} (entry hash: {})",
-                g.number, g.entry_hash
-            );
-            println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
+            if json {
+                println!(
+                    "{{\"schema\":{},\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"rollback\",\"generation\":{},\"entry_hash\":{}}}",
+                    jet::Diagnostics::json_str(jet::Diagnostics::REPORT_SCHEMA),
+                    g.number,
+                    jet::Diagnostics::json_str(&g.entry_hash)
+                );
+            } else {
+                println!(
+                    "rolled back to generation {} (entry hash: {})",
+                    g.number, g.entry_hash
+                );
+                println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
+            }
         }
         Err(e) => {
-            crate::cli_error!(@fix "E2105", e.to_string(), "run `jet hangar generations` to see available generations");
+            crate::emit_cli_report(
+                "E2105",
+                e.to_string(),
+                "Jet could not complete the named file, tool, or operating-system operation".to_string(),
+                "run `jet hangar generations` to see available generations".to_string(),
+                json,
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }

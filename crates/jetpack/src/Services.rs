@@ -40,12 +40,11 @@ const AUTHORITY_STOP_POLL: Duration = Duration::from_millis(25);
 #[cfg(windows)]
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-/// A well-known dev dependency's default package, port, start command, and
-/// readiness probe — used only when the author's `services:` entry doesn't
-/// override `run`/`ready`/`ports` itself. Seed content (U12 does not ratify
-/// a fixed list): add an entry here for any other common dev dependency; a
-/// name with no entry and no explicit `run:` is a plain "don't know how to
-/// start this" error, not a silent no-op.
+/// A documented dev service's default package, port, start command, and
+/// readiness probe — used only when the author's `services:` entry does not
+/// override `run`/`ready`/`ports`. Add a documented service here when its
+/// default command and state setup are known. A name with no entry and no
+/// explicit `run:` is a plain "don't know how to start this" error.
 struct Catalog {
     /// Canonical name first; remaining names are accepted aliases.
     names: &'static [&'static str],
@@ -188,6 +187,78 @@ fn prepare_nginx(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), Stri
         .map_err(|error| format!("couldn't write Nginx preset config: {error}"))
 }
 
+fn tcp_readiness(port: i64) -> ReadyProbe {
+    ReadyProbe::Tcp {
+        host: "127.0.0.1".to_string(),
+        port: u16::try_from(port).unwrap_or(0),
+    }
+}
+
+fn process_readiness(_port: i64) -> ReadyProbe {
+    ReadyProbe::Exec("true".to_string())
+}
+
+fn prepare_garage(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let config = format!(
+        "metadata_dir = \"{0}/meta\"\ndata_dir = \"{0}/data\"\nrpc_bind_addr = \"127.0.0.1:{1}\"\n[s3_api]\napi_bind_addr = \"127.0.0.1:{2}\"\n",
+        data_dir.display(),
+        port.saturating_add(1),
+        port
+    );
+    write_atomic(&data_dir.join("garage.toml"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Garage preset config: {error}"))
+}
+
+fn prepare_kafka(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let controller_port = port.saturating_add(1);
+    let config = format!(
+        "process.roles=broker,controller\nnode.id=1\ncontroller.quorum.voters=1@127.0.0.1:{controller_port}\nlisteners=PLAINTEXT://127.0.0.1:{port},CONTROLLER://127.0.0.1:{controller_port}\nadvertised.listeners=PLAINTEXT://127.0.0.1:{port}\nlistener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT\ncontroller.listener.names=CONTROLLER\ninter.broker.listener.name=PLAINTEXT\nlog.dirs={}/logs\n",
+        data_dir.display(),
+    );
+    write_atomic(&data_dir.join("server.properties"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Kafka preset config: {error}"))
+}
+
+fn prepare_kafka_connect(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let worker = format!(
+        "bootstrap.servers=127.0.0.1:9092\ngroup.id=jet\nkey.converter=org.apache.kafka.connect.storage.StringConverter\nvalue.converter=org.apache.kafka.connect.storage.StringConverter\nrest.port={port}\n"
+    );
+    let connector = "name=jet-file-source\nconnector.class=FileStreamSource\ntasks.max=1\nfile=/dev/null\ntopic=jet\n";
+    write_atomic(
+        &data_dir.join("connect-standalone.properties"),
+        worker.as_bytes(),
+    )
+        .and_then(|_| write_atomic(&data_dir.join("connector.properties"), connector.as_bytes()))
+        .map_err(|error| format!("couldn't write Kafka Connect preset config: {error}"))
+}
+
+fn prepare_mosquitto(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let config = format!(
+        "listener {port} 127.0.0.1\nallow_anonymous true\npersistence true\npersistence_location {}/\n",
+        data_dir.display()
+    );
+    write_atomic(&data_dir.join("mosquitto.conf"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Mosquitto preset config: {error}"))
+}
+
+fn prepare_otel(_port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let config = "receivers: {}\nprocessors: {}\nexporters: {}\nservice:\n  pipelines: {}\n";
+    write_atomic(&data_dir.join("otel-collector.yaml"), config.as_bytes())
+        .map_err(|error| format!("couldn't write OpenTelemetry preset config: {error}"))
+}
+
+fn prepare_prometheus(_port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let config = "global:\n  scrape_interval: 15s\n";
+    write_atomic(&data_dir.join("prometheus.yml"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Prometheus preset config: {error}"))
+}
+
+fn prepare_varnish(_port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
+    let config = "vcl 4.1;\nbackend default {\n  .host = \"127.0.0.1\";\n  .port = \"8080\";\n}\n";
+    write_atomic(&data_dir.join("default.vcl"), config.as_bytes())
+        .map_err(|error| format!("couldn't write Varnish preset config: {error}"))
+}
+
 const CATALOG: &[Catalog] = &[
     Catalog {
         names: &["redis"],
@@ -235,10 +306,13 @@ const CATALOG: &[Catalog] = &[
                 "mysqld".to_string(),
                 format!("--datadir={}", data_dir.display()),
                 format!("--port={port}"),
+                "--bind-address=127.0.0.1".to_string(),
                 "--skip-networking=0".to_string(),
             ]
         },
-        readiness: |port| ReadyProbe::Exec(format!("mysqladmin ping -h 127.0.0.1 -P {port}")),
+        readiness: |port| {
+            ReadyProbe::Exec(format!("mysqladmin ping -h 127.0.0.1 -P {port} -u root"))
+        },
         prepare: prepare_mysql,
     },
     Catalog {
@@ -251,10 +325,13 @@ const CATALOG: &[Catalog] = &[
                 "mariadbd".to_string(),
                 format!("--datadir={}", data_dir.display()),
                 format!("--port={port}"),
+                "--bind-address=127.0.0.1".to_string(),
                 "--skip-networking=0".to_string(),
             ]
         },
-        readiness: |port| ReadyProbe::Exec(format!("mariadb-admin ping -h 127.0.0.1 -P {port}")),
+        readiness: |port| {
+            ReadyProbe::Exec(format!("mariadb-admin ping -h 127.0.0.1 -P {port} -u root"))
+        },
         prepare: prepare_mariadb,
     },
     Catalog {
@@ -332,6 +409,562 @@ const CATALOG: &[Catalog] = &[
             ]
         },
         readiness: |port| ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/")),
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["blackfire"],
+        pkg_ref: "blackfire@nixpkgs",
+        executable: "blackfire",
+        port: 8307,
+        run: |_, _| vec!["blackfire".to_string(), "agent:start".to_string()],
+        readiness: process_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["caddy"],
+        pkg_ref: "caddy@nixpkgs",
+        executable: "caddy",
+        port: 8080,
+        run: |port, data_dir| {
+            vec![
+                "caddy".to_string(),
+                "file-server".to_string(),
+                "--root".to_string(),
+                data_dir.display().to_string(),
+                "--listen".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["cassandra"],
+        pkg_ref: "cassandra_4@nixpkgs",
+        executable: "cassandra",
+        port: 9042,
+        run: |_, _| vec!["cassandra".to_string(), "-f".to_string()],
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["clickhouse"],
+        pkg_ref: "clickhouse@nixpkgs",
+        executable: "clickhouse-server",
+        port: 9000,
+        run: |port, data_dir| {
+            vec![
+                "clickhouse-server".to_string(),
+                "--path".to_string(),
+                data_dir.display().to_string(),
+                "--listen_host".to_string(),
+                "127.0.0.1".to_string(),
+                "--tcp_port".to_string(),
+                port.to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["cockroachdb"],
+        pkg_ref: "cockroachdb@nixpkgs",
+        executable: "cockroachdb",
+        port: 26257,
+        run: |port, data_dir| {
+            vec![
+                "cockroachdb".to_string(),
+                "start-single-node".to_string(),
+                "--insecure".to_string(),
+                format!("--listen-addr=127.0.0.1:{port}"),
+                format!("--http-addr=127.0.0.1:{}", port.saturating_add(1)),
+                format!("--store=path={}", data_dir.display()),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["couchdb"],
+        pkg_ref: "couchdb3@nixpkgs",
+        executable: "couchdb",
+        port: 5984,
+        run: |_, _| vec!["couchdb".to_string()],
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["dynamodb-local"],
+        pkg_ref: "dynamodb-local@nixpkgs",
+        executable: "dynamodb-local",
+        port: 8000,
+        run: |port, data_dir| {
+            vec![
+                "dynamodb-local".to_string(),
+                "-port".to_string(),
+                port.to_string(),
+                "-dbPath".to_string(),
+                data_dir.display().to_string(),
+                "-disableTelemetry".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["elasticmq"],
+        pkg_ref: "elasticmq-server-bin@nixpkgs",
+        executable: "elasticmq-server",
+        port: 9324,
+        run: |_, _| vec!["elasticmq-server".to_string()],
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["elasticsearch"],
+        pkg_ref: "elasticsearch7@nixpkgs",
+        executable: "elasticsearch",
+        port: 9200,
+        run: |port, data_dir| {
+            vec![
+                "elasticsearch".to_string(),
+                format!("-Epath.data={}", data_dir.display()),
+                "-Enetwork.host=127.0.0.1".to_string(),
+                format!("-Ehttp.port={port}"),
+                "-Ediscovery.type=single-node".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["garage"],
+        pkg_ref: "garage_2@nixpkgs",
+        executable: "garage",
+        port: 3900,
+        run: |_, data_dir| {
+            vec![
+                "garage".to_string(),
+                "-c".to_string(),
+                data_dir.join("garage.toml").display().to_string(),
+                "server".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_garage,
+    },
+    Catalog {
+        names: &["httpbin"],
+        pkg_ref: "httpbin@nixpkgs",
+        executable: "gunicorn",
+        port: 8080,
+        run: |port, _| {
+            vec![
+                "gunicorn".to_string(),
+                "httpbin:app".to_string(),
+                "-b".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["influxdb"],
+        pkg_ref: "influxdb2-server@nixpkgs",
+        executable: "influxd",
+        port: 8086,
+        run: |port, data_dir| {
+            vec![
+                "influxd".to_string(),
+                format!("--bolt-path={}", data_dir.join("influxd.bolt").display()),
+                format!("--engine-path={}", data_dir.join("engine").display()),
+                format!("--http-bind-address=127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["kafka-connect"],
+        pkg_ref: "apacheKafka@nixpkgs",
+        executable: "connect-standalone.sh",
+        port: 8083,
+        run: |_, data_dir| {
+            vec![
+                "connect-standalone.sh".to_string(),
+                data_dir.join("connect-standalone.properties").display().to_string(),
+                data_dir.join("connector.properties").display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_kafka_connect,
+    },
+    Catalog {
+        names: &["kafka"],
+        pkg_ref: "apacheKafka@nixpkgs",
+        executable: "kafka-server-start.sh",
+        port: 9092,
+        run: |_, data_dir| {
+            vec![
+                "kafka-server-start.sh".to_string(),
+                data_dir.join("server.properties").display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_kafka,
+    },
+    Catalog {
+        names: &["keycloak"],
+        pkg_ref: "keycloak@nixpkgs",
+        executable: "kc.sh",
+        port: 8080,
+        run: |port, _| {
+            vec![
+                "kc.sh".to_string(),
+                "start-dev".to_string(),
+                format!("--http-port={port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["mailhog"],
+        pkg_ref: "mailhog@nixpkgs",
+        executable: "MailHog",
+        port: 8025,
+        run: |port, _| {
+            vec![
+                "MailHog".to_string(),
+                "-ui-bind-addr".to_string(),
+                format!("127.0.0.1:{port}"),
+                "-api-bind-addr".to_string(),
+                format!("127.0.0.1:{port}"),
+                "-smtp-bind-addr".to_string(),
+                "127.0.0.1:1025".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["meilisearch"],
+        pkg_ref: "meilisearch@nixpkgs",
+        executable: "meilisearch",
+        port: 7700,
+        run: |port, data_dir| {
+            vec![
+                "meilisearch".to_string(),
+                "--db-path".to_string(),
+                data_dir.display().to_string(),
+                "--http-addr".to_string(),
+                format!("127.0.0.1:{port}"),
+                "--no-analytics".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["memcached"],
+        pkg_ref: "memcached@nixpkgs",
+        executable: "memcached",
+        port: 11211,
+        run: |port, _| {
+            vec![
+                "memcached".to_string(),
+                "-l".to_string(),
+                "127.0.0.1".to_string(),
+                "-p".to_string(),
+                port.to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["mongodb"],
+        pkg_ref: "mongodb-ce@nixpkgs",
+        executable: "mongod",
+        port: 27017,
+        run: |port, data_dir| {
+            vec![
+                "mongod".to_string(),
+                "--dbpath".to_string(),
+                data_dir.display().to_string(),
+                "--bind_ip".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                port.to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["mosquitto"],
+        pkg_ref: "mosquitto@nixpkgs",
+        executable: "mosquitto",
+        port: 1883,
+        run: |_, data_dir| {
+            vec![
+                "mosquitto".to_string(),
+                "-c".to_string(),
+                data_dir.join("mosquitto.conf").display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_mosquitto,
+    },
+    Catalog {
+        names: &["nats"],
+        pkg_ref: "nats-server@nixpkgs",
+        executable: "nats-server",
+        port: 4222,
+        run: |port, data_dir| {
+            vec![
+                "nats-server".to_string(),
+                "--port".to_string(),
+                port.to_string(),
+                "--http_port".to_string(),
+                port.saturating_add(4000).to_string(),
+                "--store_dir".to_string(),
+                data_dir.display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["nixseparatedebuginfod"],
+        pkg_ref: "nixseparatedebuginfod2@nixpkgs",
+        executable: "nixseparatedebuginfod",
+        port: 8000,
+        run: |port, _| {
+            vec![
+                "nixseparatedebuginfod".to_string(),
+                "--listen-address".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["opensearch"],
+        pkg_ref: "opensearch@nixpkgs",
+        executable: "opensearch",
+        port: 9200,
+        run: |port, data_dir| {
+            vec![
+                "opensearch".to_string(),
+                format!("-Epath.data={}", data_dir.display()),
+                "-Enetwork.host=127.0.0.1".to_string(),
+                format!("-Ehttp.port={port}"),
+                "-Ediscovery.type=single-node".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["opentelemetry-collector"],
+        pkg_ref: "opentelemetry-collector-contrib@nixpkgs",
+        executable: "otelcol-contrib",
+        port: 13133,
+        run: |_, data_dir| {
+            vec![
+                "otelcol-contrib".to_string(),
+                "--config".to_string(),
+                data_dir.join("otel-collector.yaml").display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_otel,
+    },
+    Catalog {
+        names: &["prometheus"],
+        pkg_ref: "prometheus@nixpkgs",
+        executable: "prometheus",
+        port: 9090,
+        run: |port, data_dir| {
+            vec![
+                "prometheus".to_string(),
+                format!("--config.file={}", data_dir.join("prometheus.yml").display()),
+                format!("--storage.tsdb.path={}", data_dir.display()),
+                format!("--web.listen-address=127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_prometheus,
+    },
+    Catalog {
+        names: &["rabbitmq"],
+        pkg_ref: "rabbitmq-server@nixpkgs",
+        executable: "rabbitmq-server",
+        port: 5672,
+        run: |_, _| vec!["rabbitmq-server".to_string()],
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["rustfs"],
+        pkg_ref: "rustfs@nixpkgs",
+        executable: "rustfs",
+        port: 9000,
+        run: |port, data_dir| {
+            vec![
+                "rustfs".to_string(),
+                data_dir.display().to_string(),
+                "--address".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["sqld"],
+        pkg_ref: "sqld@nixpkgs",
+        executable: "sqld",
+        port: 8080,
+        run: |port, _| {
+            vec![
+                "sqld".to_string(),
+                "--http-listen-addr".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["tailscale"],
+        pkg_ref: "tailscale@nixpkgs",
+        executable: "tailscale",
+        port: 41641,
+        run: |_, _| {
+            vec![
+                "tailscale".to_string(),
+                "funnel".to_string(),
+                "--yes".to_string(),
+            ]
+        },
+        readiness: process_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["temporal"],
+        pkg_ref: "temporal-cli@nixpkgs",
+        executable: "temporal",
+        port: 7233,
+        run: |port, _| {
+            vec![
+                "temporal".to_string(),
+                "server".to_string(),
+                "start-dev".to_string(),
+                "--ip".to_string(),
+                "127.0.0.1".to_string(),
+                format!("--port={port}"),
+                format!("--ui-port={}", port.saturating_add(1000)),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["tideways"],
+        pkg_ref: "tideways-daemon@nixpkgs",
+        executable: "tideways-daemon",
+        port: 9135,
+        run: |port, _| {
+            vec![
+                "tideways-daemon".to_string(),
+                "-address".to_string(),
+                format!("tcp://127.0.0.1:{port}"),
+                "--env".to_string(),
+                "dev".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["typesense"],
+        pkg_ref: "typesense@nixpkgs",
+        executable: "typesense-server",
+        port: 8108,
+        run: |port, data_dir| {
+            vec![
+                "typesense-server".to_string(),
+                "--data-dir".to_string(),
+                data_dir.display().to_string(),
+                "--api-address".to_string(),
+                "127.0.0.1".to_string(),
+                "--api-port".to_string(),
+                port.to_string(),
+                "--api-key".to_string(),
+                "jet-dev".to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["varnish"],
+        pkg_ref: "varnish@nixpkgs",
+        executable: "varnishd",
+        port: 6081,
+        run: |port, data_dir| {
+            vec![
+                "varnishd".to_string(),
+                "-n".to_string(),
+                data_dir.display().to_string(),
+                "-F".to_string(),
+                "-f".to_string(),
+                data_dir.join("default.vcl").display().to_string(),
+                "-s".to_string(),
+                "malloc,100m".to_string(),
+                "-a".to_string(),
+                format!("127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_varnish,
+    },
+    Catalog {
+        names: &["vault"],
+        pkg_ref: "vault-bin@nixpkgs",
+        executable: "vault",
+        port: 8200,
+        run: |port, _| {
+            vec![
+                "vault".to_string(),
+                "server".to_string(),
+                "-dev".to_string(),
+                "-dev-root-token-id=root".to_string(),
+                format!("-dev-listen-address=127.0.0.1:{port}"),
+            ]
+        },
+        readiness: tcp_readiness,
+        prepare: prepare_none,
+    },
+    Catalog {
+        names: &["wiremock"],
+        pkg_ref: "wiremock@nixpkgs",
+        executable: "wiremock",
+        port: 8080,
+        run: |port, data_dir| {
+            vec![
+                "wiremock".to_string(),
+                "--port".to_string(),
+                port.to_string(),
+                "--root-dir".to_string(),
+                data_dir.display().to_string(),
+            ]
+        },
+        readiness: tcp_readiness,
         prepare: prepare_none,
     },
 ];
@@ -4878,6 +5511,51 @@ mod tests {
             ("minio", "minio@nixpkgs", 9000, "minio"),
             ("mailpit", "mailpit@nixpkgs", 8025, "mailpit"),
             ("adminer", "adminer@nixpkgs", 8081, "adminer"),
+            ("blackfire", "blackfire@nixpkgs", 8307, "blackfire"),
+            ("caddy", "caddy@nixpkgs", 8080, "caddy"),
+            ("cassandra", "cassandra_4@nixpkgs", 9042, "cassandra"),
+            ("clickhouse", "clickhouse@nixpkgs", 9000, "clickhouse-server"),
+            ("cockroachdb", "cockroachdb@nixpkgs", 26257, "cockroachdb"),
+            ("couchdb", "couchdb3@nixpkgs", 5984, "couchdb"),
+            ("dynamodb-local", "dynamodb-local@nixpkgs", 8000, "dynamodb-local"),
+            ("elasticmq", "elasticmq-server-bin@nixpkgs", 9324, "elasticmq-server"),
+            ("elasticsearch", "elasticsearch7@nixpkgs", 9200, "elasticsearch"),
+            ("garage", "garage_2@nixpkgs", 3900, "garage"),
+            ("httpbin", "httpbin@nixpkgs", 8080, "gunicorn"),
+            ("influxdb", "influxdb2-server@nixpkgs", 8086, "influxd"),
+            ("kafka-connect", "apacheKafka@nixpkgs", 8083, "connect-standalone.sh"),
+            ("kafka", "apacheKafka@nixpkgs", 9092, "kafka-server-start.sh"),
+            ("keycloak", "keycloak@nixpkgs", 8080, "kc.sh"),
+            ("mailhog", "mailhog@nixpkgs", 8025, "MailHog"),
+            ("meilisearch", "meilisearch@nixpkgs", 7700, "meilisearch"),
+            ("memcached", "memcached@nixpkgs", 11211, "memcached"),
+            ("mongodb", "mongodb-ce@nixpkgs", 27017, "mongod"),
+            ("mosquitto", "mosquitto@nixpkgs", 1883, "mosquitto"),
+            ("nats", "nats-server@nixpkgs", 4222, "nats-server"),
+            (
+                "nixseparatedebuginfod",
+                "nixseparatedebuginfod2@nixpkgs",
+                8000,
+                "nixseparatedebuginfod",
+            ),
+            ("opensearch", "opensearch@nixpkgs", 9200, "opensearch"),
+            (
+                "opentelemetry-collector",
+                "opentelemetry-collector-contrib@nixpkgs",
+                13133,
+                "otelcol-contrib",
+            ),
+            ("prometheus", "prometheus@nixpkgs", 9090, "prometheus"),
+            ("rabbitmq", "rabbitmq-server@nixpkgs", 5672, "rabbitmq-server"),
+            ("rustfs", "rustfs@nixpkgs", 9000, "rustfs"),
+            ("sqld", "sqld@nixpkgs", 8080, "sqld"),
+            ("tailscale", "tailscale@nixpkgs", 41641, "tailscale"),
+            ("temporal", "temporal-cli@nixpkgs", 7233, "temporal"),
+            ("tideways", "tideways-daemon@nixpkgs", 9135, "tideways-daemon"),
+            ("typesense", "typesense@nixpkgs", 8108, "typesense-server"),
+            ("varnish", "varnish@nixpkgs", 6081, "varnishd"),
+            ("vault", "vault-bin@nixpkgs", 8200, "vault"),
+            ("wiremock", "wiremock@nixpkgs", 8080, "wiremock"),
         ];
         let presets = catalog_presets();
         assert_eq!(presets.len(), expected.len());
@@ -4911,11 +5589,15 @@ mod tests {
                 ),
                 "mysql" => assert_eq!(
                     resolved.ready_probe,
-                    Some(ReadyProbe::Exec("mysqladmin ping -h 127.0.0.1 -P 3306".to_string()))
+                    Some(ReadyProbe::Exec(
+                        "mysqladmin ping -h 127.0.0.1 -P 3306 -u root".to_string()
+                    ))
                 ),
                 "mariadb" => assert_eq!(
                     resolved.ready_probe,
-                    Some(ReadyProbe::Exec("mariadb-admin ping -h 127.0.0.1 -P 3306".to_string()))
+                    Some(ReadyProbe::Exec(
+                        "mariadb-admin ping -h 127.0.0.1 -P 3306 -u root".to_string()
+                    ))
                 ),
                 "nginx" => assert_eq!(
                     resolved.ready_probe,
@@ -4937,7 +5619,11 @@ mod tests {
                     resolved.ready_probe,
                     Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8081/".to_string()))
                 ),
-                _ => unreachable!(),
+                "blackfire" | "tailscale" => assert_eq!(
+                    resolved.ready_probe,
+                    Some(ReadyProbe::Exec("true".to_string()))
+                ),
+                _ => assert_eq!(resolved.ready_probe, Some(tcp_readiness(*port))),
             }
         }
         for (alias, canonical) in [("postgresql", "postgres"), ("mail", "mailpit")] {

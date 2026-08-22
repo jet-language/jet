@@ -9,6 +9,8 @@
 //!     active-env-dir state), from the root and from a nested subdirectory;
 //!   * `JET_ENV_DISABLE` unloads an active env; and an unchanged directory is a
 //!     silent no-op (never re-realizes).
+//!   * typed `git_hooks_path` projects native Git hooks through entry and the
+//!     clean `jet env test` CI path, while invalid paths fail before launch.
 //!
 //! These drive `jetpack` directly (same as `env_dev_trust.rs`) so the intercept
 //! in `cmd_enter` is exercised without depending on engine-binary discovery.
@@ -195,6 +197,7 @@ fn export_disable_unloads_active_env() {
     assert!(stdout.contains("export PATH='/usr/bin:/bin'"), "{stdout}");
     assert!(stdout.contains("unset JETPACK_ENV_DIR"), "{stdout}");
     assert!(stdout.contains("unset JETPACK_ENV\n"), "{stdout}");
+    assert!(stdout.contains("unset GIT_CONFIG_COUNT"), "{stdout}");
 }
 
 #[test]
@@ -543,6 +546,159 @@ fn env_test_runs_hooks_checks_and_command_in_a_clean_child() {
         fs::read_to_string(scratch.path.join(".clean-marker")).unwrap(),
         "entered"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let scratch = Scratch::new("git-hooks-enter");
+    let hooks = scratch.path.join("scripts/githooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    fs::write(&hook, "#!/bin/sh\nprintf ran > .git-hook-ran\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        scratch.path.join("env.jet"),
+        "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+    )
+    .unwrap();
+    fs::write(scratch.path.join("tracked.txt"), "tracked\n").unwrap();
+
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["config", "user.name", "Jet Test"],
+        vec!["config", "user.email", "jet-test@example.invalid"],
+        vec!["add", "tracked.txt"],
+    ] {
+        let out = Command::new("git")
+            .current_dir(&scratch.path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git setup failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    let path = fs::canonicalize(&hooks).unwrap();
+    let path_output = Command::new(jetpack_bin())
+        .current_dir(&scratch.path)
+        .args([
+            "enter",
+            "--trust",
+            "--no-color",
+            "--",
+            "git",
+            "config",
+            "--get",
+            "core.hooksPath",
+        ])
+        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .output()
+        .unwrap();
+    assert!(
+        path_output.status.success(),
+        "Git config projection failed: {}",
+        String::from_utf8_lossy(&path_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&path_output.stdout).trim(),
+        path.to_string_lossy()
+    );
+
+    let commit = Command::new(jetpack_bin())
+        .current_dir(&scratch.path)
+        .args(["enter", "--trust", "--no-color", "--", "git", "commit", "-m", "hook"])
+        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .output()
+        .unwrap();
+    assert!(
+        commit.status.success(),
+        "native Git hook run failed: {}",
+        String::from_utf8_lossy(&commit.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(scratch.path.join(".git-hook-ran")).unwrap(),
+        "ran"
+    );
+}
+
+#[test]
+fn env_test_projects_git_hooks_into_the_clean_ci_command() {
+    let scratch = Scratch::new("git-hooks-ci");
+    let hooks = scratch.path.join("scripts/githooks");
+    fs::create_dir_all(&hooks).unwrap();
+    fs::write(
+        scratch.path.join("env.jet"),
+        "module env.ci {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+    )
+    .unwrap();
+    let expected = fs::canonicalize(&hooks).unwrap().to_string_lossy().into_owned();
+    let git = std::env::split_paths(
+        &std::env::var_os("PATH").expect("tests run with Git on PATH"),
+    )
+    .map(|directory| directory.join("git"))
+    .find(|candidate| candidate.is_file())
+    .expect("Git executable must be discoverable for the CI projection test");
+    let out = Command::new(jetpack_bin())
+        .current_dir(&scratch.path)
+        .args([
+            "enter",
+            "--trust",
+            "--env",
+            "ci",
+            "--no-color",
+            "test",
+            "--",
+        ])
+        .arg(&git)
+        .args(["config", "--get", "core.hooksPath"])
+        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "CI environment test failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains(expected.as_str()),
+        "CI command did not receive core.hooksPath: stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn enter_rejects_a_missing_git_hooks_directory_before_launch() {
+    let scratch = Scratch::new("git-hooks-missing");
+    fs::write(
+        scratch.path.join("env.jet"),
+        "module env.dev {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(jetpack_bin())
+        .current_dir(&scratch.path)
+        .args([
+            "enter",
+            "--trust",
+            "--no-color",
+            "--",
+            "sh",
+            "-c",
+            "touch child-ran",
+        ])
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1333"), "missing git hook path diagnostic: {stderr}");
+    assert!(!scratch.path.join("child-ran").exists());
 }
 
 #[cfg(unix)]

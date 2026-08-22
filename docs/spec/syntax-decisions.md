@@ -4402,6 +4402,17 @@ composition, receipts, or lifecycle behavior. It adds no token, `Syntax.rs`
 entry, parser or runtime behavior, grammar rule, diagnostic, snapshot, or
 executable example by itself.
 
+**D-ECO6=A implementation reconciliation** *(ratified 2026-07-14, card
+#532)*: the typed environment field `git_hooks_path` is the Git-hook slice of
+the ratified dev-shell field set. It is a project-relative directory fact.
+Environment entry and `jet env test` pass its resolved directory to native Git
+as `core.hooksPath` for child processes; they do not mutate `.git/config` or
+create a second hook runner. The field is trust-sensitive and appears in the
+environment fingerprint and `jet env info` projection. The field does not
+choose a new `jet env` hook/install/run command spelling; existing typed jobs,
+managed files, and the clean `jet env test` path remain the lifecycle and CI
+surfaces.
+
 **U10 — Package → packages → modules**: a Package (one `package.jet`) lists its
 packages in `packages: { name: … }`; a package **is** a top-level `module` —
 its module name is its identity, its file is discovered by walking the tree
@@ -4641,6 +4652,15 @@ daemon, package background work, new syntax, new manifest fields, and new CLI
 remain forbidden. Structured output exposes backend, generation, phase,
 containment, and recovery facts; a post-Ready crash recovers the Ready
 generation.
+
+**D-JPK service preset implementation note** *(2026-08-22; no new syntax)*:
+the documented devenv service catalog is represented by one typed constructor
+registry. Each row owns the package reference, executable, default port,
+argument vector, typed readiness probe, and any state initialization. Host
+supervision, image projection, package realization, and preset discovery read
+those same rows. The contribution path for a service not yet in the catalog is
+the existing explicit `Service` fields (`run`, `ports`, `ready`, `after`, and
+state fields); it does not add a shell-string field or another supervisor.
 
 **D-JPK-EXECLEASE1=A — Protected native executable lease service**: Linux
 keeps its unprivileged private read-only mount. Official macOS and Windows

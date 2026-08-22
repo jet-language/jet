@@ -676,6 +676,7 @@ pub(super) fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
             || !lifecycle.unset.is_empty()
             || !lifecycle.on_enter.is_empty()
             || !lifecycle.checks.is_empty()
+            || lifecycle.git_hooks_path.is_some()
             || lifecycle.reload_explicit
         {
             projection.omitted.push("environment.lifecycle".to_string());

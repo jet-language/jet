@@ -89,7 +89,7 @@ or source-qualified spelling for the same conversion.
 
 ## Law 6 — Diagnostics and fix hints
 
-- Every fallible function that returns `? E` has at least one corresponding UI snapshot
+- Every fallible function that returns a suffix-zone type (`T? E!`, `E!`, or bare `!`) has at least one corresponding UI snapshot
   showing the error message a user sees when misusing it (I4).
 - Error messages follow the voice and format in `docs/spec/diagnostics.md`:
   what happened, why it happened, how to fix it.

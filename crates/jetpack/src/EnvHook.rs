@@ -15,8 +15,56 @@
 
 use crate::Shell::ShellKind;
 use crate::Syntax;
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
+
+const GIT_CONFIG_COUNT: &str = "GIT_CONFIG_COUNT";
+const GIT_CONFIG_KEY_0: &str = "GIT_CONFIG_KEY_0";
+const GIT_CONFIG_VALUE_0: &str = "GIT_CONFIG_VALUE_0";
+
+/// Resolve the ratified `git_hooks_path` fact to the directory native Git will
+/// use. The model rejects lexical escapes; this runtime check also rejects a
+/// symlinked directory that leaves the project and requires the install target
+/// to exist before entry can claim the hook path is active.
+pub(crate) fn git_hooks_environment(
+    root: &Path,
+    relative: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    let relative_path = Path::new(relative);
+    if relative.trim().is_empty()
+        || relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| component == Component::ParentDir)
+    {
+        return Err(format!(
+            "git hook path `{relative}` must be a non-empty project-relative path without `..`"
+        ));
+    }
+    let root = std::fs::canonicalize(root)
+        .map_err(|error| format!("could not resolve project root for git hooks: {error}"))?;
+    let hooks = std::fs::canonicalize(root.join(relative_path)).map_err(|error| {
+        format!(
+            "git hook path `{relative}` does not name an existing directory: {error}"
+        )
+    })?;
+    if !hooks.is_dir() {
+        return Err(format!(
+            "git hook path `{relative}` does not name a directory"
+        ));
+    }
+    if !hooks.starts_with(&root) {
+        return Err(format!(
+            "git hook path `{relative}` resolves outside the project"
+        ));
+    }
+    let value = hooks.to_string_lossy().into_owned();
+    Ok(BTreeMap::from([
+        (GIT_CONFIG_COUNT.to_string(), "1".to_string()),
+        (GIT_CONFIG_KEY_0.to_string(), "core.hooksPath".to_string()),
+        (GIT_CONFIG_VALUE_0.to_string(), value),
+    ]))
+}
 
 /// Hash every input that can change the checked activation plan. The prompt
 /// hook uses this read-only fingerprint before it emits anything, so changed
@@ -488,9 +536,15 @@ pub fn render_unload(kind: ShellKind, base_path: &str) -> String {
              unset {refs}\n\
              unset {dir}\n\
              unset {hash}\n\
+             unset {git_count}\n\
+             unset {git_key}\n\
+             unset {git_value}\n\
              unset {old}\n",
             path = sh_quote(base_path),
             hash = hash,
+            git_count = GIT_CONFIG_COUNT,
+            git_key = GIT_CONFIG_KEY_0,
+            git_value = GIT_CONFIG_VALUE_0,
         ),
         ShellKind::Fish => format!(
             "set -gx PATH (string split : {path})\n\
@@ -498,9 +552,15 @@ pub fn render_unload(kind: ShellKind, base_path: &str) -> String {
              set -e {refs}\n\
              set -e {dir}\n\
              set -e {hash}\n\
+             set -e {git_count}\n\
+             set -e {git_key}\n\
+             set -e {git_value}\n\
              set -e {old}\n",
             path = fish_quote(base_path),
             hash = hash,
+            git_count = GIT_CONFIG_COUNT,
+            git_key = GIT_CONFIG_KEY_0,
+            git_value = GIT_CONFIG_VALUE_0,
         ),
     }
 }

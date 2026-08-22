@@ -105,6 +105,8 @@ Entering an environment and running project code are different intents.
 - `jet dev` realizes `env(base + env.dev)`, waits for services, then runs
   `fn dev()` with fallback to `fn run()`.
 - `jet test` and `jet build` use `env.test` / `env.build` overlays the same way.
+- An environment `git_hooks_path` selects an in-project hook directory for
+  native Git; `jet env test` projects the same setting for CI.
 
 First entry to a repo with hooks, services, sources, or secrets shows a trust
 summary. The grant is keyed by environment-definition hash and re-prompts when

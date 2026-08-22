@@ -214,12 +214,16 @@ impl TransitionPlan {
         for change in &self.changes {
             let path = safe_path(&self.root, &change.relative)?;
             let current = read_state(&path)?;
+            // A journal is durable before the first file mutation. A crash
+            // can therefore leave a mix of before/after states; fold may
+            // safely finish that rollback as long as no file contains bytes
+            // outside the recorded states.
             let expected = if target_is_forward {
-                &change.before
+                current == change.before
             } else {
-                &change.after
+                current == change.after || current == change.before
             };
-            if current != *expected {
+            if !expected {
                 return Err(TransitionError(format!(
                     "stale transition: {} changed after the plan was created; rerun jet {} --check",
                     change.relative.display(),
@@ -232,6 +236,19 @@ impl TransitionPlan {
         for change in &self.changes {
             let path = safe_path(&self.root, &change.relative)?;
             snapshots.push((path.clone(), read_state(&path)?));
+        }
+
+        // Publish the exact recovery record before touching any authored or
+        // generated file. If the process stops during the multi-file apply,
+        // `jet fold` can restore every path that reached its after-state and
+        // leave any untouched path alone.
+        if target_is_forward {
+            let journal_parent = self
+                .journal_path
+                .parent()
+                .ok_or_else(|| TransitionError("transition journal has no parent".to_string()))?;
+            create_real_dirs(&self.root, journal_parent)?;
+            write_atomic(&self.journal_path, &self.journal)?;
         }
         let result = (|| {
             for change in &self.changes {
@@ -247,13 +264,6 @@ impl TransitionPlan {
                 if self.journal_path.exists() {
                     remove_regular(&self.root, &self.journal_path)?;
                 }
-            } else {
-                let journal_parent = self
-                    .journal_path
-                    .parent()
-                    .ok_or_else(|| TransitionError("transition journal has no parent".to_string()))?;
-                create_real_dirs(&self.root, journal_parent)?;
-                write_atomic(&self.journal_path, &self.journal)?;
             }
             Ok::<(), TransitionError>(())
         })();
@@ -396,7 +406,7 @@ fn split_plan(root: &Path, target: SplitTarget) -> Result<TransitionPlan, Transi
             }
             let destination = PathBuf::from("package/fleet.jet");
             ensure_new_file(&root, &destination)?;
-            let config_text = render_fleet_config(&name);
+            let config_text = render_fleet_config(&name, &output.name);
             let config_facts = ConfigFacts::parse(&config_text, destination.display().to_string())
                 .map_err(|error| transition_parse_error(&destination, error))?;
             root_after = add_config_reference(package_text, &package.configs, &destination)?;
@@ -924,8 +934,13 @@ fn remove_regular(root: &Path, path: &Path) -> Result<(), TransitionError> {
                 path.display()
             )),
         ),
-        Ok(_) => fs::remove_file(path)
-            .map_err(|error| TransitionError(format!("couldn't remove {}: {error}", path.display()))),
+        Ok(_) => {
+            fs::remove_file(path)
+                .map_err(|error| TransitionError(format!("couldn't remove {}: {error}", path.display())))?;
+            sync_directory(path.parent().unwrap_or(root)).map_err(|error| {
+                TransitionError(format!("couldn't sync {}: {error}", path.display()))
+            })
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(TransitionError(format!(
             "couldn't inspect {}: {error}",
@@ -964,6 +979,9 @@ fn create_real_dirs(root: &Path, directory: &Path) -> Result<(), TransitionError
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 fs::create_dir(&cursor).map_err(|error| {
                     TransitionError(format!("couldn't create {}: {error}", cursor.display()))
+                })?;
+                sync_directory(&cursor).map_err(|error| {
+                    TransitionError(format!("couldn't sync {}: {error}", cursor.display()))
                 })?;
             }
             Err(error) => {
@@ -1011,7 +1029,22 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), TransitionError> {
             path.display()
         )));
     }
+    sync_directory(parent).map_err(|error| {
+        TransitionError(format!("couldn't sync {}: {error}", path.display()))
+    })?;
     Ok(())
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        fs::File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn journal_path(
@@ -1910,9 +1943,9 @@ fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> 
     Ok(())
 }
 
-fn render_fleet_config(host: &str) -> String {
+fn render_fleet_config(host: &str, system: &str) -> String {
     format!(
-        "pub home :: Config.{{\n    outputs: .{{\n        home: .Fleet.{{\n            name: \"home\"\n            hosts: .{{ {host}: systems.{host} }}\n        }}\n    }}\n}}\n"
+        "pub home :: Config{{\n    outputs: .{{\n        home: Fleet{{\n            name: \"home\"\n            hosts: .{{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
     )
 }
 
@@ -2253,7 +2286,7 @@ mod tests {
     fn hosts_split_and_fold_restore_exact_root() {
         let root = temp_root("hosts");
         let original =
-            b"name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n";
+            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         split(
             &root,
@@ -2264,10 +2297,95 @@ mod tests {
         )
         .unwrap();
         let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
-        assert!(fleet.contains("hosts: .{ server: systems.server }"), "{fleet}");
+        assert!(fleet.contains("hosts: .{ server: system.server }"), "{fleet}");
         fold(&root, Path::new("package/fleet.jet"), false).unwrap();
         assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original);
         assert!(!root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hosts_split_binds_the_checked_system_name_not_the_output_key() {
+        let root = temp_root("hosts-system-name");
+        fs::write(
+            root.join(PACKAGE_FILE),
+        "name: \"demo\"\noutputs: .{ server: System{ name: \"halcyon\", target: linux.x64 } }\n",
+        )
+        .unwrap();
+        split(
+            &root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+        let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
+        assert!(fleet.contains("hosts: .{ server: system.halcyon }"), "{fleet}");
+        let facts = PackageFacts::load(&root).unwrap().unwrap();
+        let projection = jet_env_model::ModuleEval::project_package_outputs(&facts).unwrap();
+        assert_eq!(projection.systems[0].name, "halcyon");
+        assert_eq!(projection.fleets[0].hosts[0].system, "halcyon");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fold_recovers_a_journaled_partial_split_without_touching_live_bytes() {
+        let root = temp_root("hosts-partial");
+        let original =
+            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\", target: linux.x64 } }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        let plan = split_plan(
+            &root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+        )
+        .unwrap();
+        let journal_parent = plan.journal_path.parent().unwrap();
+        create_real_dirs(&root, journal_parent).unwrap();
+        write_atomic(&plan.journal_path, &plan.journal).unwrap();
+        let generated = root.join("package/fleet.jet");
+        let generated_change = plan
+            .changes
+            .iter()
+            .find(|change| change.relative == Path::new("package/fleet.jet"))
+            .unwrap();
+        apply_state(&root, &generated, generated_change.after.as_deref()).unwrap();
+
+        fold(&root, Path::new("package/fleet.jet"), false).unwrap();
+
+        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(!generated.exists());
+        assert!(!plan.journal_path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_transition_journal_refuses_fold_without_mutation() {
+        let root = temp_root("hosts-corrupt-journal");
+        let original =
+            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\", target: linux.x64 } }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        split(
+            &root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+        let journal = fs::read_dir(root.join(JOURNAL_DIR))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        fs::write(&journal, b"corrupt\n").unwrap();
+        let error = fold(&root, Path::new("package/fleet.jet"), false).unwrap_err();
+        assert!(error.0.contains("unknown format"), "{error}");
+        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original); // root bytes stay live
+        assert!(root.join("package/fleet.jet").is_file());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -2276,7 +2394,7 @@ mod tests {
         let invalid_root = temp_root("hosts-invalid");
         fs::write(
             invalid_root.join(PACKAGE_FILE),
-            "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+            "name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n",
         )
         .unwrap();
         let invalid = split(

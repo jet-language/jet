@@ -145,6 +145,7 @@ fn project_system(path: &str, output: &OutputFact) -> Result<SystemPlan, Package
             "must not be empty",
         ));
     }
+    validate_projection_name(&format!("{path}.name"), &name, "system")?;
     let target_path = format!("{path}.target");
     let target = text_field(fields.get(crate::Syntax::SYSTEM_FIELD_TARGET), &target_path)?;
     if !matches!(target.as_str(), "linux.x64" | "linux.arm64") {
@@ -187,6 +188,7 @@ fn project_fleet(
             "must not be empty",
         ));
     }
+    validate_projection_name(&format!("{path}.name"), &name, "fleet")?;
     let hosts_path = format!("{path}.hosts");
     let hosts = match fields.get(crate::Syntax::FLEET_FIELD_HOSTS) {
         Some(OutputPayload::Object(hosts)) => hosts,
@@ -201,6 +203,7 @@ fn project_fleet(
     let mut projected = Vec::new();
     for (host_name, value) in hosts {
         let host_path = format!("{path}.hosts.{host_name}");
+        validate_projection_name(&host_path, host_name, "host")?;
         let (system, overrides, override_source) = project_host(&host_path, value)?;
         if !systems.contains_key(&system) {
             return Err(PackageOutputError::new(
@@ -457,6 +460,22 @@ fn normalize_system_name(value: &str) -> String {
         .to_string()
 }
 
+fn validate_projection_name(path: &str, value: &str, kind: &str) -> Result<(), PackageOutputError> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return Err(PackageOutputError::new(
+            path,
+            format!("{kind} name `{value}` is not a safe path component"),
+        ));
+    }
+    Ok(())
+}
+
 fn payload_to_ct_value(value: &OutputPayload) -> CtValue {
     match value {
         OutputPayload::Null => CtValue::Unit,
@@ -516,14 +535,14 @@ mod tests {
         let facts = PackageFacts::parse(
             r#"name: "demo"
 outputs: .{
-    workstation: .System.{
+    workstation: System{
         name: "workstation"
         target: linux.x64
         packages: [ripgrep, "fd@nixpkgs", ripgrep]
         services: .{ ssh: .{ enable: true, ports: [22] } }
         options: .{ network: .{ hostName: "workstation" } }
     }
-    prod: .Fleet.{ hosts: .{ edge: "system.workstation" } }
+    prod: Fleet{ hosts: .{ edge: "system.workstation" } }
 }"#,
             "package.jet",
         )
@@ -544,7 +563,7 @@ outputs: .{
     fn rejects_a_system_service_without_enable() {
         let facts = PackageFacts::parse(
             r#"name: "demo"
-outputs: .{ host: .System.{ target: linux.x64, services: .{ ssh: .{} } } }"#,
+outputs: .{ host: System{ target: linux.x64, services: .{ ssh: .{} } } }"#,
             "package.jet",
         )
         .unwrap();
@@ -552,5 +571,23 @@ outputs: .{ host: .System.{ target: linux.x64, services: .{ ssh: .{} } } }"#,
         assert!(error
             .to_string()
             .contains("outputs.host.services.ssh.enable"));
+    }
+
+    #[test]
+    fn rejects_a_fleet_host_that_could_escape_generation_storage() {
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{
+    workstation: System{ target: linux.x64 }
+    prod: Fleet{ hosts: .{ "../escape": system.workstation }
+    }
+}"#,
+            "package.jet",
+        )
+        .unwrap();
+        let error = project_package_outputs(&facts).unwrap_err();
+        let rendered = error.to_string();
+        assert!(rendered.contains("../escape"), "{rendered}");
+        assert!(rendered.contains("safe path component"), "{rendered}");
     }
 }

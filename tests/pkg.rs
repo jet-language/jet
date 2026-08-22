@@ -5965,6 +5965,59 @@ fn registry_corrupt_artifact_is_rejected_before_install() {
 
 #[cfg(unix)]
 #[test]
+fn registry_artifact_parent_symlink_is_rejected_before_hashing() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("registry_artifact_parent_symlink");
+    let repo = tmp.join("registry");
+    let outside = tmp.join("outside");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(outside.join("escape-kit").join("1.0.0")).unwrap();
+    fs::write(
+        outside.join("escape-kit").join("1.0.0").join("package.jet"),
+        "must not be followed",
+    )
+    .unwrap();
+    symlink(&outside, repo.join("artifacts")).unwrap();
+
+    let entry = signed_entry("escape-kit", "1.0.0", "sha256-unchecked", "", "");
+    let error = jet::Publish::verify_artifact(&repo, &entry)
+        .expect_err("registry verification must not follow an artifact-root symlink");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("not a real directory"));
+    assert!(outside.join("escape-kit/1.0.0/package.jet").is_file());
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn registry_feature_cycle_fails_before_staging() {
+    let tmp = tmp_dir("registry_feature_cycle");
+    let repo = tmp.join("registry");
+    let source = tmp.join("source");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.jet"), "package bytes").unwrap();
+    fs::write(
+        source.join("registry.json"),
+        r#"{"name":"cycle-kit","version":"1.0.0","features":{"default":["loop"],"loop":["default"]}}"#,
+    )
+    .unwrap();
+
+    let error = jet::Publish::publish_artifact(&repo, &source, "cycle-kit", "1.0.0", "")
+        .expect_err("cyclic default feature closure must fail before publication");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(
+        error
+            .to_string()
+            .contains("feature closure contains a cycle")
+    );
+    let destination = jet::Publish::artifact_path(&repo, "cycle-kit", "1.0.0").unwrap();
+    assert!(!destination.exists(), "invalid metadata installed an artifact");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[cfg(unix)]
+#[test]
 fn registry_interrupted_artifact_stage_leaves_no_partial() {
     use std::os::unix::fs::symlink;
 

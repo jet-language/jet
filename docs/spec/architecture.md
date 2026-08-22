@@ -114,6 +114,14 @@ jetpack loads that plan for jet os plan and the existing generation writer
 carries the same identity and service facts into plan.json and the source proof.
 Hangar realization and atomic generation
 publication remain in jetpack; the projection adds no store or rollout path.
+System, Fleet, and host names are validated as safe generation path components
+before Fleet deploy facts are staged.
+
+Package splits and folds use the same checked graph and one reversible journal.
+The journal is published before a multi-file mutation, so a stale, corrupt, or
+partially applied transition fails closed and `jet fold` can restore only the
+recorded before/after states. Atomic file publication and the package lock
+protect live bytes from concurrent writers and path escapes.
 
 Environment OCI projection follows the same split. `jet-env-model` owns the
 pure `ImagePlan`; `jetpack::Image` is the one deterministic OCI realization

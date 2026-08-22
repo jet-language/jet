@@ -1,7 +1,9 @@
 //! E4-JP1 Hangar Store v2 — atomic ingest, path law (E1299), verify (E1315).
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
+use std::process::Stdio;
 
 mod common;
 
@@ -172,7 +174,7 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         .split_whitespace()
         .find(|tok| tok.starts_with("sha256-"))
         .expect("digest in ingest status");
-    let verify = jetpack()
+    let verify = jet()
         .args(["hangar", "verify", digest, "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
@@ -182,6 +184,13 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         verify.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&verify.stderr)
+    );
+    let verify_stderr = String::from_utf8_lossy(&verify.stderr);
+    assert!(verify_stderr.contains("verified"), "{verify_stderr}");
+    assert!(
+        !String::from_utf8_lossy(&verify.stdout).contains("hangar is empty"),
+        "top-level `jet hangar verify` bypassed Jetpack: {}",
+        String::from_utf8_lossy(&verify.stdout)
     );
 
     let roots = jetpack::Store::Roots {
@@ -215,6 +224,220 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         "CLI recovery must replay committed package metadata"
     );
     let _ = Path::new("."); // keep Path import used on all cfgs
+}
+
+#[test]
+fn hangar_sign_and_verify_production_path_rejects_tamper() {
+    let root = Scratch::new("hangar-sign-verify-root");
+    let project = Scratch::new("hangar-sign-verify-project");
+    let source = Scratch::new("hangar-sign-verify-source");
+    fs::write(source.join("payload"), "signed bytes\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "signed",
+            "--ref",
+            "signed@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let sign = jet()
+        .args([
+            "hangar",
+            "sign",
+            "signed@fixture",
+            "--yes",
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        sign.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&sign.stderr)
+    );
+    let sign_stdout = String::from_utf8_lossy(&sign.stdout);
+    assert!(sign_stdout.contains("\"schema\":\"jet.report/v1\""), "{sign_stdout}");
+    assert!(sign_stdout.contains("\"action\":\"sign\""), "{sign_stdout}");
+    assert!(sign_stdout.contains("\"signed\":true"), "{sign_stdout}");
+
+    let roots = jetpack::Store::Roots {
+        root: root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "signed@fixture").unwrap();
+    let sidecar = roots.hangar_dir().join(&entry.id).join(".hangar");
+    assert!(sidecar.is_file(), "sign must publish the detached archive sidecar");
+
+    let verify = jet()
+        .args([
+            "hangar",
+            "verify",
+            "signed@fixture",
+            "--json",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        verify.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let verify_stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(verify_stdout.contains("\"schema\":\"jet.report/v1\""), "{verify_stdout}");
+    assert!(verify_stdout.contains("\"action\":\"verify\""), "{verify_stdout}");
+    assert!(verify_stdout.contains("\"signed\":true"), "{verify_stdout}");
+
+    let all_verify = jet()
+        .args(["hangar", "verify", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        all_verify.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&all_verify.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&all_verify.stdout).contains("\"objects\":1"),
+        "{}",
+        String::from_utf8_lossy(&all_verify.stdout)
+    );
+
+    let signed_archive = fs::read(&sidecar).unwrap();
+    let mut corrupted_archive = signed_archive.clone();
+    *corrupted_archive.last_mut().unwrap() ^= 1;
+    fs::write(&sidecar, corrupted_archive).unwrap();
+    let rejected_signature = jet()
+        .args(["hangar", "verify", "signed@fixture", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        rejected_signature.status.code(),
+        Some(2),
+        "stderr: {}\nstdout: {}",
+        String::from_utf8_lossy(&rejected_signature.stderr),
+        String::from_utf8_lossy(&rejected_signature.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&rejected_signature.stderr).contains("Hangar verify failed"),
+        "stderr: {}",
+        String::from_utf8_lossy(&rejected_signature.stderr)
+    );
+    let rejected_signature_json = jet()
+        .args(["hangar", "verify", "signed@fixture", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected_signature_json.status.code(), Some(2));
+    let rejected_signature_json_stdout =
+        String::from_utf8_lossy(&rejected_signature_json.stdout);
+    assert!(
+        rejected_signature_json_stdout.contains("\"schema\":\"jet.report/v1\""),
+        "{rejected_signature_json_stdout}"
+    );
+    assert!(
+        rejected_signature_json_stdout.contains("\"code\":\"E1340\""),
+        "{rejected_signature_json_stdout}"
+    );
+    assert!(rejected_signature_json.stderr.is_empty());
+    fs::write(&sidecar, signed_archive).unwrap();
+
+    make_tree_writable(Path::new(&entry.out));
+    let payload = Path::new(&entry.out).join("payload");
+    fs::write(&payload, "tampered bytes\n").unwrap();
+    let rejected_contents = jet()
+        .args(["hangar", "verify", "signed@fixture", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(rejected_contents.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected_contents.stderr).contains("E1315"),
+        "stderr: {}",
+        String::from_utf8_lossy(&rejected_contents.stderr)
+    );
+    assert_eq!(fs::read_to_string(payload).unwrap(), "tampered bytes\n");
+}
+
+#[test]
+fn hangar_export_plan_does_not_create_archive_or_signer() {
+    let root = Scratch::new("hangar-export-plan-root");
+    let project = Scratch::new("hangar-export-plan-project");
+    let source = Scratch::new("hangar-export-plan-source");
+    fs::write(source.join("payload"), "plan only\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "planned",
+            "--ref",
+            "planned@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let archive = root.path.join("planned.hangar");
+    let planned = jet()
+        .args([
+            "hangar",
+            "export",
+            "planned@fixture",
+            "--to",
+            archive.to_str().unwrap(),
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        planned.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&planned.stderr).contains("plan only"),
+        "stderr: {}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    assert!(!archive.exists());
+    assert!(!root.path.join("trust/hangar.key").exists());
 }
 
 #[test]
@@ -376,7 +599,13 @@ fn hangar_export_import_rekeys_and_rejects_corruption_without_mutation() {
         .env("JETPACK_ROOT", &destination_root.path)
         .output()
         .unwrap();
-    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(
+        rejected.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&rejected.stdout),
+        String::from_utf8_lossy(&rejected.stderr)
+    );
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("Hangar import failed"));
     let after =
         jetpack::Store::find_by_reference(&destination_roots, "portable@fixture").unwrap();
@@ -388,6 +617,107 @@ fn hangar_export_import_rekeys_and_rejects_corruption_without_mutation() {
     assert_eq!(
         fs::read_to_string(Path::new(&after.out).join("payload")).unwrap(),
         "portable bytes\n"
+    );
+}
+
+#[test]
+fn hangar_dump_restore_streams_one_archive_and_preserves_live_data_on_corruption() {
+    let source_root = Scratch::new("hangar-dump-source-root");
+    let destination_root = Scratch::new("hangar-dump-destination-root");
+    let project = Scratch::new("hangar-dump-project");
+    let source = Scratch::new("hangar-dump-source");
+    fs::write(source.join("payload"), "streamed bytes\n").unwrap();
+
+    let ingest = jetpack()
+        .args([
+            "hangar",
+            "ingest",
+            source.path.to_str().unwrap(),
+            "--name",
+            "streamed",
+            "--ref",
+            "streamed@fixture",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &source_root.path)
+        .output()
+        .unwrap();
+    assert!(
+        ingest.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ingest.stderr)
+    );
+
+    let dumped = jet()
+        .args(["hangar", "dump", "streamed@fixture", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &source_root.path)
+        .output()
+        .unwrap();
+    assert!(
+        dumped.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&dumped.stderr)
+    );
+    assert!(
+        dumped.stdout.starts_with(b"jet-hangar-archive-v1\0"),
+        "dump must emit the canonical archive bytes"
+    );
+    let key = source_root.path.join("trust/hangar.key");
+    assert!(key.is_file(), "dump must create the source Hangar signer");
+
+    let restore = |bytes: &[u8]| {
+        let mut child = jet()
+            .args([
+                "hangar",
+                "restore",
+                "--key",
+                key.to_str().unwrap(),
+                "--yes",
+                "--no-color",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &destination_root.path)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.as_mut().unwrap().write_all(bytes).unwrap();
+        drop(child.stdin.take());
+        child.wait_with_output().unwrap()
+    };
+
+    let restored = restore(&dumped.stdout);
+    assert!(
+        restored.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
+    let roots = jetpack::Store::Roots {
+        root: destination_root.path.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "streamed@fixture").unwrap();
+    assert_eq!(
+        fs::read_to_string(Path::new(&entry.out).join("payload")).unwrap(),
+        "streamed bytes\n"
+    );
+
+    let repeated = restore(&dumped.stdout);
+    assert!(
+        repeated.status.success(),
+        "repeated restore stderr: {}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(jetpack::Store::list_checked(&roots).unwrap().len(), 1);
+
+    let mut corrupt = dumped.stdout.clone();
+    *corrupt.last_mut().unwrap() ^= 1;
+    let rejected = restore(&corrupt);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(
+        fs::read_to_string(Path::new(&entry.out).join("payload")).unwrap(),
+        "streamed bytes\n"
     );
 }
 
@@ -452,6 +782,7 @@ fn hangar_copy_roundtrip_is_idempotent_and_conflict_safe() {
         String::from_utf8_lossy(&first.stderr)
     );
     let first_stdout = String::from_utf8_lossy(&first.stdout).into_owned();
+    assert!(first_stdout.contains("\"schema\":\"jet.report/v1\""), "{first_stdout}");
     assert!(first_stdout.contains("\"action\":\"copy\""), "{first_stdout}");
 
     let destination_roots = jetpack::Store::Roots {
@@ -834,10 +1165,10 @@ fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
         .unwrap();
     assert_eq!(stale.status.code(), Some(2));
     let stale_stderr = String::from_utf8_lossy(&stale.stderr);
-    assert!(stale_stderr.contains("error[E1320]"), "{stale_stderr}");
+    assert!(stale_stderr.contains("Error [E1320]"), "{stale_stderr}");
     assert!(stale_stderr.contains("No requested root mutation was applied."));
     let diagnostic = stale_stderr
-        .find("\n  error[E1320]")
+        .find("Error [E1320]")
         .map(|index| &stale_stderr[index..])
         .unwrap_or(&stale_stderr);
     assert_jetos_stderr_snapshot_trimmed("external_root_stale_etag", diagnostic);
