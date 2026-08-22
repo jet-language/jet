@@ -583,6 +583,13 @@ fn callable_policy_targets(items: &[crate::AST::Item]) -> Vec<crate::AST::Func> 
     targets
 }
 
+/// D-STRUCT-POLICY1=A: one checked wrapper function is emitted for each
+/// policy/target pair. The name is compiler-private and deterministic so the
+/// shared TIR can call it without carrying policy semantics in an engine.
+pub(crate) fn callable_policy_wrapper_name(policy: &str, target: &str) -> String {
+    crate::AST::CallablePolicyChain::user_wrapper_name(policy, target)
+}
+
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,
     module_idx: usize,
@@ -1425,6 +1432,8 @@ pub(crate) fn check_module_bodies(
     // parameter in this checking slice, so the wrapper can inspect policy
     // parameters, invoke the captured callable, and return its result without
     // changing the wrapped function type.
+    let mut generated_policy_wrappers = Vec::new();
+    let mut generated_policy_wrapper_names = HashSet::new();
     for target in callable_policy_targets(&module.items) {
         let target_sig = st
             .funcs
@@ -1447,8 +1456,9 @@ pub(crate) fn check_module_bodies(
                 else {
                     continue;
                 };
+                let wrapper_name = callable_policy_wrapper_name(&policy.name, &target.name);
                 let mut wrapper = Func::implicit_run(declaration.body.clone(), declaration.span);
-                wrapper.name = format!("__jet_policy_{}_{}", policy.name, target.name);
+                wrapper.name = wrapper_name.clone();
                 wrapper.name_span = declaration.name_span;
                 wrapper.params = declaration.params.clone();
                 wrapper.params.push(Param {
@@ -1465,8 +1475,19 @@ pub(crate) fn check_module_bodies(
                     variadic_bound_list: None,
                     declared_view_from_names: None,
                 });
+                wrapper.params.extend(target.params.iter().cloned().map(|mut param| {
+                    // The outer callable has already had defaults resolved by
+                    // its checked call contract. The generated wrapper receives
+                    // every target argument explicitly from its closure.
+                    param.default = None;
+                    param
+                }));
                 wrapper.return_type = target_sig.return_type.clone();
                 wrapper.return_type_span = target.return_type_span;
+                wrapper.return_view_provenance = target.return_view_provenance.clone();
+                wrapper.declared_return_view_provenance =
+                    target.declared_return_view_provenance.clone();
+                wrapper.compiler_generated = true;
                 let mut wrapper_summaries = HashMap::new();
                 let mut wrapper_inputs = Vec::new();
                 let mut wrapper_addresses = HashSet::new();
@@ -1499,9 +1520,13 @@ pub(crate) fn check_module_bodies(
                     );
                 }
                 pending_diagnostics_out.extend(wrapper_pending);
+                if generated_policy_wrapper_names.insert(wrapper.name.clone()) {
+                    generated_policy_wrappers.push(crate::AST::Item::Func(wrapper));
+                }
             }
         }
     }
+    module.items.extend(generated_policy_wrappers);
     let _ = st;
     diags
 }

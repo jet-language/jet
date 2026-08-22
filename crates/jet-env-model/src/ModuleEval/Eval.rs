@@ -767,7 +767,10 @@ fn evaluate_package_profile_fields(
     }
     let field_map = fields
         .iter()
-        .filter(|(field, _, _)| field != Syntax::PROFILE_FIELD_PACKAGES)
+        .filter(|(field, _, _)| {
+            field != Syntax::PROFILE_FIELD_PACKAGES
+                && field != Syntax::PROFILE_FIELD_COLLISIONS
+        })
         .map(|(field, span, value)| (field.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
     let computed = evaluate_named_fields(
@@ -815,10 +818,12 @@ fn evaluate_package_profile_fields(
             )
         })?,
     };
-    let collisions = match resolved.get(Syntax::PROFILE_FIELD_COLLISIONS) {
-        None => BTreeMap::new(),
-        Some(value) => package_profile_collisions(value, name, fields)?,
-    };
+    let collisions = fields
+        .iter()
+        .find(|(field, _, _)| field == Syntax::PROFILE_FIELD_COLLISIONS)
+        .map(|(_, _, value)| package_profile_collisions_source(src, name, value.span()))
+        .transpose()?
+        .unwrap_or_default();
     Ok(PackageProfileSpec {
         name: name.to_string(),
         extends,
@@ -839,73 +844,92 @@ fn value_span(
         .unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0))
 }
 
-fn package_profile_collisions(
-    value: &crate::Comptime::CtValue,
+fn package_profile_collisions_source(
+    src: &str,
     name: &str,
-    fields: &[(String, crate::Diagnostics::Span, Expr)],
+    span: crate::Diagnostics::Span,
 ) -> Result<BTreeMap<String, String>, Diagnostic> {
-    let entries = match value {
-        crate::Comptime::CtValue::Map(entries) => {
-            let mut out = Vec::new();
-            for (key, value) in entries {
-                let crate::AST::CtKey::Str(key) = key else {
-                    return Err(Diagnostic::error(
-                        "E1333",
-                        format!("package generation `{name}` has a non-string collision path"),
-                        "collision policy is an exact string path-to-provider map".to_string(),
-                        "use a quoted path as the map key".to_string(),
-                        Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
-                    ));
-                };
-                out.push((key.clone(), value));
-            }
-            out
-        }
-        crate::Comptime::CtValue::Struct { fields, .. } => fields
-            .iter()
-            .map(|(key, value)| (key.clone(), value))
-            .collect::<Vec<_>>(),
-        _ => {
-            return Err(Diagnostic::error(
-                "E1333",
-                format!("package generation `{name}` has invalid `collisions`"),
-                "collision policy is an exact path-to-provider map".to_string(),
-                "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
-                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
-            ));
-        }
+    let Some(fragment) = src.get(span.start..span.end) else {
+        return Err(Diagnostic::error(
+            "E1333",
+            format!("package generation `{name}` has invalid `collisions`"),
+            "collision policy is an exact string path-to-provider map".to_string(),
+            "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
+            Some(span),
+        ));
     };
+    let values = quoted_collision_values(fragment);
+    if values.is_empty() || values.len() % 2 != 0 {
+        return Err(Diagnostic::error(
+            "E1333",
+            format!("package generation `{name}` has invalid `collisions`"),
+            "collision policy is an exact string path-to-provider map".to_string(),
+            "write `collisions: { \"bin/editor\": \"editor@nixpkgs\" }`".to_string(),
+            Some(span),
+        ));
+    }
     let mut out = BTreeMap::new();
-    for (path, provider) in entries {
-        let Some(provider) = string_value(provider) else {
-            return Err(Diagnostic::error(
-                "E1333",
-                format!("package generation `{name}` has a non-string collision provider"),
-                "each exact path needs one explicit provider identity".to_string(),
-                "use a quoted package ref as the map value".to_string(),
-                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
-            ));
-        };
+    for pair in values.chunks_exact(2) {
+        let path = &pair[0];
+        let provider = &pair[1];
         if path.trim().is_empty() || provider.trim().is_empty() || path.contains('\0') {
             return Err(Diagnostic::error(
                 "E1333",
                 format!("package generation `{name}` has an invalid collision entry"),
                 "exact collision paths and provider identities cannot be empty or contain NUL".to_string(),
                 "name the path and the exact package provider".to_string(),
-                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+                Some(span),
             ));
         }
-        if out.insert(path.clone(), provider).is_some() {
+        if out.insert(path.clone(), provider.clone()).is_some() {
             return Err(Diagnostic::error(
                 "E1332",
                 format!("package generation `{name}` repeats collision path `{path}`"),
                 "one generation cannot choose two providers for one exact path".to_string(),
                 "keep one collision selection for the path".to_string(),
-                Some(value_span(fields, Syntax::PROFILE_FIELD_COLLISIONS)),
+                Some(span),
             ));
         }
     }
     Ok(out)
+}
+
+fn quoted_collision_values(fragment: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut chars = fragment.chars();
+    while let Some(character) = chars.next() {
+        if character != '"' {
+            continue;
+        }
+        let mut value = String::new();
+        let mut escaped = false;
+        let mut closed = false;
+        for character in chars.by_ref() {
+            if escaped {
+                value.push(match character {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    '\\' => '\\',
+                    '"' => '"',
+                    other => other,
+                });
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                closed = true;
+                break;
+            } else {
+                value.push(character);
+            }
+        }
+        if !closed {
+            return Vec::new();
+        }
+        values.push(value);
+    }
+    values
 }
 
 /// E3402: builtins that perform ambient I/O or network access. A sandboxed

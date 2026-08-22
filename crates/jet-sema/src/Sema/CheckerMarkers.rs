@@ -793,7 +793,20 @@ impl<'a> crate::Sema::Checker<'a> {
                     valid = false;
                     continue;
                 };
-                if !self.check_type_assignable(&expected, &actual, argument.expr.span()) {
+                let reported = self.check_type_assignable(&expected, &actual, argument.expr.span());
+                if !reported && actual != expected {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "policy argument {} needs {}, but this is {}",
+                            index + 1,
+                            expected.show(),
+                            actual.show()
+                        ),
+                        "a policy argument must satisfy its declared parameter type".to_string(),
+                        format!("pass a value of type {}", expected.show()),
+                        Some(argument.expr.span()),
+                    ));
                     valid = false;
                 }
             }

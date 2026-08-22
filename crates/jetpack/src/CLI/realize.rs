@@ -605,10 +605,10 @@ pub(super) fn load_project_plan_with_selections(
     requested_environment: Option<&str>,
 ) -> Result<RunPlan, i32> {
     let cwd = std::env::current_dir().unwrap_or_default();
-    let dir = project_env_root(&cwd);
-    if let Err(code) = reject_retired_jetpack_toml(&dir) {
+    if let Err(code) = reject_retired_jetpack_toml(&cwd) {
         return Err(code);
     }
+    let dir = project_env_root(&cwd);
 
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(

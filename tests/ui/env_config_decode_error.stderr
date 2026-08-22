@@ -1,7 +1,7 @@
-Stop [E3001]: `panic: config: [at `port`: E2416: env var APP_PORT -> port: expected Int, found text "not-an-int"]`
-  --> tests/ui/env_config_decode_error.jet:18 in run
-     |
-18 |         .Err(errors) :> { panic("config: {errors}") }
-     |                           ^^^^^
- Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).
- Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+Error [E2201]: `jet dev` can't interpret this program yet — it uses an OS fact or process control call
+  --> tests/ui/env_config_decode_error.jet:11:19
+    |
+ 11 |     failed :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"])
+    |                   ^^^^^^
+ Why: `jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build
+ Fix: run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live

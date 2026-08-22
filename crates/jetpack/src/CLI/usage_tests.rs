@@ -24,6 +24,10 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
   {bin} profile plan <name>             plan a source-backed package generation
+  {bin} profile build <name>            build an immutable package generation
+  {bin} profile switch <name>           atomically activate the newest matching generation
+  {bin} profile rollback <name> [gen]   activate an older retained generation
+  {bin} profile generations <name>      list package generation history
   {bin} browser lock <engine> --binary <path>  lock a browser binary into .jet/lock
   {bin} browser provision <engine>@src realize and lock a browser package
   {bin} browser resolve <engine>       verify and print the locked browser
@@ -195,6 +199,10 @@ mod tests {
     fn package_generation_route_is_canonical_and_in_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::PROFILE_SUBCOMMAND));
         assert!(usage_with_color(false).contains("profile plan"));
+        assert!(usage_with_color(false).contains("profile build"));
+        assert!(usage_with_color(false).contains("profile switch"));
+        assert!(usage_with_color(false).contains("profile rollback"));
+        assert!(usage_with_color(false).contains("profile generations"));
         assert_eq!(
             RuntimePolicy::verb_policy(Syntax::PROFILE_SUBCOMMAND, &[]).verb,
             Syntax::PROFILE_SUBCOMMAND

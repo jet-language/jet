@@ -341,7 +341,11 @@ impl ClosureGraph {
 
     pub fn action_outputs(&self, action_key: &str) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
-        for record in self.records.values().filter(|record| record.action_key == action_key) {
+        for record in self
+            .records
+            .values()
+            .filter(|record| record.action_key == action_key)
+        {
             if let Ok(projection) = canonical_action_projection(record) {
                 for (name, digest) in projection.outputs {
                     out.insert(name, digest);
@@ -390,9 +394,7 @@ pub fn closure_graph_structure(roots: &Roots) -> std::io::Result<ClosureGraph> {
     })
 }
 
-pub(super) fn closure_graph_structure_unlocked(
-    roots: &Roots,
-) -> std::io::Result<ClosureGraph> {
+pub(super) fn closure_graph_structure_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {
     migrate_closure_graph_unlocked(roots).map(|(_, graph)| graph)
 }
 
@@ -453,12 +455,8 @@ fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) ->
         return SHA256::sha256_file_hex(path)
             .is_ok_and(|actual| format!("sha256-{actual}") == digest);
     }
-    super::super::Envelope::try_output_hash_of_in_hangar(
-        &object.path,
-        &roots.hangar_dir(),
-        false,
-    )
-    .is_ok_and(|actual| actual == digest)
+    super::super::Envelope::try_output_hash_of_in_hangar(&object.path, &roots.hangar_dir(), false)
+        .is_ok_and(|actual| actual == digest)
 }
 
 pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
@@ -492,10 +490,7 @@ pub fn action_outputs_of(
     Ok(closure_graph(roots)?.action_outputs(action_key))
 }
 
-pub fn actions_for_output(
-    roots: &Roots,
-    digest: &str,
-) -> std::io::Result<Vec<String>> {
+pub fn actions_for_output(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
     Ok(closure_graph(roots)?.actions_for_output(digest))
 }
 
@@ -539,9 +534,11 @@ pub fn entry_action_key(entry: &StoreEntry) -> String {
         ] {
             push_frame(&mut canonical, field);
         }
-        for (key, value) in producer.plan.facts().iter().filter(|(key, _)| {
-            action_replay_fact(key) && !(nix && key.as_str() == "nix.reference")
-        }) {
+        for (key, value) in
+            producer.plan.facts().iter().filter(|(key, _)| {
+                action_replay_fact(key) && !(nix && key.as_str() == "nix.reference")
+            })
+        {
             push_frame(&mut canonical, key.as_bytes());
             push_frame(&mut canonical, value.as_bytes());
         }
@@ -636,10 +633,7 @@ fn migrate_closure_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, Clos
     Ok((migrated, graph))
 }
 
-pub(crate) fn register_entry_unlocked(
-    roots: &Roots,
-    entry: &StoreEntry,
-) -> std::io::Result<bool> {
+pub(crate) fn register_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<bool> {
     register_entry_unlocked_mode(roots, entry, None)
 }
 
@@ -684,7 +678,8 @@ pub(crate) fn register_entries_unlocked(
                         ),
                     ));
                 }
-            } else if let Some(existing) = object_map.insert(object.digest.clone(), object.clone()) {
+            } else if let Some(existing) = object_map.insert(object.digest.clone(), object.clone())
+            {
                 if existing != object {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -787,7 +782,10 @@ fn verify_registration_output(roots: &Roots, entry: &StoreEntry) -> std::io::Res
     if entry.envelope.output_hash.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("cannot register output `{}` without a content digest", entry.out),
+            format!(
+                "cannot register output `{}` without a content digest",
+                entry.out
+            ),
         ));
     }
     if actual != entry.envelope.output_hash {
@@ -833,7 +831,11 @@ pub(super) fn rollback_registration_dir(
 /// `test-seam` feature (never enabled by a release build), so no
 /// production caller can reach it.
 #[cfg(feature = "test-seam")]
-pub fn test_backdate_last_used_at(roots: &Roots, id: &str, last_used_at: u64) -> std::io::Result<()> {
+pub fn test_backdate_last_used_at(
+    roots: &Roots,
+    id: &str,
+    last_used_at: u64,
+) -> std::io::Result<()> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_closure_journal_unlocked(roots)?;
         let mut entry = list_unlocked(roots)
@@ -867,10 +869,7 @@ pub fn remove_closure_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
     })
 }
 
-pub(super) fn tombstone_closure_record_unlocked(
-    roots: &Roots,
-    id: &str,
-) -> std::io::Result<bool> {
+pub(super) fn tombstone_closure_record_unlocked(roots: &Roots, id: &str) -> std::io::Result<bool> {
     let graph = load_graph_structure_mode(roots, true)?;
     if !graph.records.contains_key(id) {
         return Ok(false);
@@ -898,9 +897,7 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
     recover_closure_journal_graph_unlocked(roots).map(|(recovered, _)| recovered)
 }
 
-fn recover_closure_journal_graph_unlocked(
-    roots: &Roots,
-) -> std::io::Result<(usize, ClosureGraph)> {
+fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok((0, ClosureGraph::default()));
@@ -990,9 +987,9 @@ fn descriptor_for_entry(
             };
             let relative = Path::new(relative);
             if relative.is_absolute()
-                || relative.components().any(|component| {
-                    !matches!(component, std::path::Component::Normal(_))
-                })
+                || relative
+                    .components()
+                    .any(|component| !matches!(component, std::path::Component::Normal(_)))
             {
                 return Err(std::io::Error::other(format!(
                     "closure record `{}` has invalid dependency object path `{}`",
@@ -1070,11 +1067,7 @@ fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> 
         BTreeMap::from([("legacy.reference".into(), entry.reference.clone())]),
     )?)
     .map_err(std::io::Error::other)?;
-    producer.bind_cache_provenance(
-        &entry.reference,
-        &entry.envelope.output_hash,
-        identity,
-    );
+    producer.bind_cache_provenance(&entry.reference, &entry.envelope.output_hash, identity);
     entry.producer_record = producer.encode();
     Ok(entry)
 }
@@ -1141,10 +1134,7 @@ fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<Closure
     load_graph_mode_with_proofs(roots, allow_legacy, true)
 }
 
-fn load_graph_structure_mode(
-    roots: &Roots,
-    allow_legacy: bool,
-) -> std::io::Result<ClosureGraph> {
+fn load_graph_structure_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
     load_graph_mode_with_proofs(roots, allow_legacy, false)
 }
 
@@ -1275,7 +1265,9 @@ fn validate_graph_structure_mode(
         }
         for (name, digest) in &record.outputs {
             if !valid_output_name(name) {
-                return Err(format!("closure record `{id}` has invalid output name `{name}`"));
+                return Err(format!(
+                    "closure record `{id}` has invalid output name `{name}`"
+                ));
             }
             if !graph.objects.contains_key(digest) {
                 return Err(format!(
@@ -1372,7 +1364,9 @@ fn validate_applied_entry(
         }
         for (name, digest) in &record.outputs {
             if !valid_output_name(name) {
-                return Err(format!("closure record `{id}` has invalid output name `{name}`"));
+                return Err(format!(
+                    "closure record `{id}` has invalid output name `{name}`"
+                ));
             }
             if !graph.objects.contains_key(digest) {
                 return Err(format!(
@@ -1443,8 +1437,12 @@ fn validate_record_store_proof(
             record.id
         )
     })?;
-    let meta = parse_meta(&record.package_meta)
-        .ok_or_else(|| format!("closure record `{}` has invalid package metadata", record.id))?;
+    let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+        format!(
+            "closure record `{}` has invalid package metadata",
+            record.id
+        )
+    })?;
     if store_validates_complete_closure(roots, record, &meta, &producer) {
         Ok(())
     } else {
@@ -1485,7 +1483,10 @@ fn canonical_action_projection(record: &ClosureRecord) -> Result<CanonicalAction
         });
     }
     let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
-        format!("closure record `{}` has invalid producer record: {error}", record.id)
+        format!(
+            "closure record `{}` has invalid producer record: {error}",
+            record.id
+        )
     })?;
     let outputs: BTreeMap<String, String> = if producer.provider == "nix" {
         producer
@@ -1520,7 +1521,9 @@ fn merge_action_projection(
     action_key: &str,
 ) -> Result<(), String> {
     if action.references != projection.references {
-        return Err(format!("action `{action_key}` has conflicting dependency references"));
+        return Err(format!(
+            "action `{action_key}` has conflicting dependency references"
+        ));
     }
     for (name, digest) in &projection.outputs {
         if let Some(existing) = action.outputs.get(name) {
@@ -1559,8 +1562,7 @@ fn store_validates_complete_closure(
         "nix" if output == local => rehashes_as_recorded(roots, meta, record),
         "nix" if output.starts_with("/nix/store") => {
             let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");
-            root.exists()
-                && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
+            root.exists() && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
         }
         _ => false,
     }
@@ -2030,13 +2032,21 @@ mod integrity_tests {
     fn parser_requires_exact_checksum_framing() {
         let valid = checked("jet-closure-journal-v1\nkind\tdelta\n".to_string());
         assert!(parse_entry(&valid).is_ok());
-        assert!(parse_entry(valid.trim_end()).unwrap_err().contains("truncated"));
+        assert!(parse_entry(valid.trim_end())
+            .unwrap_err()
+            .contains("truncated"));
 
         let mut trailing = valid.clone();
         trailing.push('\n');
-        assert!(parse_entry(&trailing).unwrap_err().contains("invalid checksum frame"));
+        assert!(parse_entry(&trailing)
+            .unwrap_err()
+            .contains("invalid checksum frame"));
 
-        let upper = valid.rsplit_once("checksum\t").unwrap().1.to_ascii_uppercase();
+        let upper = valid
+            .rsplit_once("checksum\t")
+            .unwrap()
+            .1
+            .to_ascii_uppercase();
         let body = valid.rsplit_once("checksum\t").unwrap().0;
         assert!(parse_entry(&format!("{body}checksum\t{upper}"))
             .unwrap_err()
@@ -2046,10 +2056,8 @@ mod integrity_tests {
     #[test]
     fn graph_validation_rejects_external_and_relation_inconsistency() {
         let roots = Roots {
-            root: std::env::temp_dir().join(format!(
-                "jet-closure-integrity-{}",
-                std::process::id()
-            )),
+            root: std::env::temp_dir()
+                .join(format!("jet-closure-integrity-{}", std::process::id())),
             dev_mode: true,
         };
         let digest = "sha256-primary".to_string();
@@ -2088,7 +2096,8 @@ mod integrity_tests {
             .contains("primary is not its `out` output"));
 
         graph.records.get_mut("record").unwrap().primary = digest.clone();
-        graph.records
+        graph
+            .records
             .get_mut("record")
             .unwrap()
             .references

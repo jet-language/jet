@@ -3,16 +3,40 @@ Error [E0066]: this function uses the retired effect-arrow spelling
     |
   4 | fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] :: items.map((x) => f(x))
     |                                       ^
- Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
- Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+ Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
+ Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:4:50
+    |
+  4 | fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] :: items.map((x) => f(x))
+    |                                                  ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:4:59
     |
   4 | fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] :: items.map((x) => f(x))
     |                                                           ^^
- Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
+
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:4:76
+    |
+  4 | fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] :: items.map((x) => f(x))
+    |                                                                            ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:5:18
+    |
+  5 | fn noisy(n: Int) => Int {
+    |                  ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0771]: this needs fn(Int) =[]=> Int, but the function value is fn(n: Int) => Int
   --> tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:11:28
@@ -27,5 +51,5 @@ Error [E0747]: this callback uses the effect `IO`, which the parameter doesn't a
     |
  11 |     r :: transform([1, 2], noisy)
     |                            ^^^^^
- Why: the parameter is `fn(…) =[]=>`, so the callback must be pure; `IO` is outside that bound
- Fix: pass a `fn(…) =[]=>` callback (or a lambda that uses no effects), or widen the parameter's bound
+ Why: the parameter is `fn(…) -[]>`, so the callback must be pure; `IO` is outside that bound
+ Fix: pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound

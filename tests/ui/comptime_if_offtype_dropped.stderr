@@ -1,7 +1,15 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/comptime_if_offtype_dropped.jet:6:24
+    |
+  6 | fn add(a: Int, b: Int) => Int :: a + b
+    |                        ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/comptime_if_offtype_dropped.jet:6:31
     |
   6 | fn add(a: Int, b: Int) => Int :: a + b
     |                               ^^
- Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.

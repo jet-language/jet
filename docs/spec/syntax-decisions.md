@@ -6089,7 +6089,10 @@ Package, package/user generation, process, build, toolchain, System, or Generati
 `~/.local/share/jet/hangar`, macOS uses
 `~/Library/Application Support/Jet/Hangar`, and Windows uses
 `%LOCALAPPDATA%\\Jet\\Hangar`. `jet hangar path` reports the resolved path;
-shared storage remains an administrator opt-in.
+shared storage remains an administrator opt-in. The first command that reaches
+Hangar copies the retired user or root-owned source into a synced staging sibling and
+publishes it with one rename. The source remains intact for rollback; an
+unfinished staging sibling is a repair stop, never a live fallback.
 
 **D-ECO-BROKERBOUNDARY1=A — shared storage uses a transient verifier**
 *(ratified 2026-07-15)*: the optional administrator-installed broker is
@@ -7758,7 +7761,13 @@ Users may declare nominal package-scoped settings through checked bodies,
 arguments/results and visible effects without editing the wrapped signature.
 It extends D-CALLPOLICY1's setting vocabulary while preserving the `#Policy(...)`
 and `apply(...)` spellings; `policy` and `wrap` are the new declaration words,
-and no prior wrapper spelling is retired.
+and no prior wrapper spelling is retired. Parameters use the ordinary checked
+typed/defaulted/variadic call contract. Only a public declaration mints the
+package-owned nominal name; duplicate or built-in collisions are `E0105`, and
+an unknown name reports the declaring package. The wrapper body has one checked
+callable value and cannot edit its signature, effects, errors, defaults,
+variadics, or view provenance. Its semantics lower through the shared Prelude
+path on AOT, Cranelift, interpreter/deopt, and applicable web output.
 
 **2026-08-19 — D-STRUCT-ONCE1=A** *(card #2052; ratified 2026-08-19)*:
 The existing `@loop` may expand marker bodies, top-level impl items, and

@@ -1221,6 +1221,11 @@ enum EvalCallable<'a> {
         captured: HashMap<String, CtValue>,
     },
     Named(&'a str),
+    Policy {
+        wrapper: &'a str,
+        policy_args: Vec<CtValue>,
+        callee: CtValue,
+    },
     ComputeHandle {
         handle: crate::Comptime::ComputeLite::JetComputeHandle,
         kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
@@ -1234,6 +1239,11 @@ enum EvalCallableSnapshot<'a> {
         captured: HashMap<String, CtValue>,
     },
     Named(&'a str),
+    Policy {
+        wrapper: &'a str,
+        policy_args: Vec<CtValue>,
+        callee: CtValue,
+    },
     ComputeHandle {
         handle: crate::Comptime::ComputeLite::JetComputeHandle,
         kind: crate::Comptime::ComputeLite::JetComputeTransformKind,
@@ -3449,6 +3459,15 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 Some(EvalCallable::Named(name)) => EvalCallableSnapshot::Named(*name),
+                Some(EvalCallable::Policy {
+                    wrapper,
+                    policy_args,
+                    callee,
+                }) => EvalCallableSnapshot::Policy {
+                    wrapper: *wrapper,
+                    policy_args: policy_args.clone(),
+                    callee: callee.clone(),
+                },
                 Some(EvalCallable::ComputeHandle { handle, kind, result_ty }) => {
                     EvalCallableSnapshot::ComputeHandle {
                         handle: handle.clone(),
@@ -3488,6 +3507,24 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
                 let mut child = HashMap::new();
                 self.run_func(func, args, &mut child)
+            }
+            EvalCallableSnapshot::Policy {
+                wrapper,
+                policy_args,
+                callee,
+            } => {
+                let func = self
+                    .funcs
+                    .get(wrapper)
+                    .copied()
+                    .ok_or_else(|| {
+                        unsupported(&format!("callable policy wrapper `{wrapper}`"), self.span())
+                    })?;
+                let mut wrapper_args = policy_args;
+                wrapper_args.push(callee);
+                wrapper_args.extend(args);
+                let mut child = HashMap::new();
+                self.run_func(func, wrapper_args, &mut child)
             }
             EvalCallableSnapshot::ComputeHandle { handle, kind, result_ty } => {
                 self.eval_compute_handle(&handle, kind, args, &result_ty)

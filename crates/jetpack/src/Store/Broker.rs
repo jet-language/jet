@@ -191,7 +191,9 @@ fn read_shared_store_config(layout: &BrokerLayout) -> io::Result<Option<SharedSt
         if !matches!(key, "socket" | "shared_root" | "trust_key" | "grants")
             || fields.insert(key, value).is_some()
         {
-            return Err(invalid("shared-store config has an unknown or duplicate field"));
+            return Err(invalid(
+                "shared-store config has an unknown or duplicate field",
+            ));
         }
     }
     let decode = |key: &str| -> io::Result<PathBuf> {
@@ -374,7 +376,9 @@ fn activate_admin_socket() -> io::Result<()> {
             .args(args)
             .status()
             .map_err(|error| {
-                invalid(&format!("could not activate shared-store systemd socket: {error}"))
+                invalid(&format!(
+                    "could not activate shared-store systemd socket: {error}"
+                ))
             })?;
         if !status.success() {
             return Err(invalid(&format!(
@@ -409,7 +413,10 @@ pub fn reuse_shared_entry(
                 if matches!(
                     error.kind(),
                     io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                ) => return Ok(None),
+                ) =>
+            {
+                return Ok(None)
+            }
             Err(error) => return Err(error),
         };
         write_read_request(&mut stream, reference)?;
@@ -422,7 +429,9 @@ pub fn reuse_shared_entry(
         };
         let proof = super::verify_cache_entry(roots, &candidate, reference, expectation);
         if !proof.trusted() {
-            return Err(invalid("shared-store entry failed cache identity verification"));
+            return Err(invalid(
+                "shared-store entry failed cache identity verification",
+            ));
         }
         Ok(Some(candidate))
     }
@@ -456,7 +465,10 @@ pub fn promote_shared_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<boo
                 if matches!(
                     error.kind(),
                     io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-                ) => return Ok(false),
+                ) =>
+            {
+                return Ok(false)
+            }
             Err(error) => return Err(error),
         };
         write_request(&mut stream, &binding, &credential, &archive)?;
@@ -532,10 +544,7 @@ fn promote_staged_archive(
         .unwrap_or_default();
     let stage = incoming.join(format!("{}-{}", std::process::id(), nonce));
     fs::create_dir(&stage)?;
-    atomic_write(
-        &stage.join(STAGE_MARKER),
-        now_secs().to_string().as_bytes(),
-    )?;
+    atomic_write(&stage.join(STAGE_MARKER), now_secs().to_string().as_bytes())?;
     let staged = Roots {
         root: stage.clone(),
         dev_mode: false,
@@ -560,7 +569,9 @@ fn promote_staged_archive(
             .ok_or_else(|| invalid("shared-store archive has no provenance-bound root"))?;
         let actual = provenance_binding_for_entry(root)?;
         if actual != *binding {
-            return Err(invalid("shared-store provenance binding does not match archive"));
+            return Err(invalid(
+                "shared-store provenance binding does not match archive",
+            ));
         }
         crate::RuntimePolicy::with_lock(&shared.root, "shared-store-promote", || {
             Archive::import_archive(shared, &attested, Some(key), false)?;
@@ -582,7 +593,9 @@ fn promote_staged_archive(
 
 #[cfg(not(unix))]
 pub fn serve_shared_store_fd(_roots: &Roots, _fd: i32) -> io::Result<()> {
-    Err(invalid("shared-store socket activation is unsupported on this host"))
+    Err(invalid(
+        "shared-store socket activation is unsupported on this host",
+    ))
 }
 
 #[cfg(test)]
@@ -680,8 +693,7 @@ fn read_request_header(stream: &mut impl Read) -> io::Result<BrokerHeader> {
             .ok_or_else(|| invalid("shared-store request has a malformed field"))?;
         if !matches!(
             key,
-            "op"
-                | "bytes"
+            "op" | "bytes"
                 | "reference"
                 | "source"
                 | "builder"
@@ -691,10 +703,11 @@ fn read_request_header(stream: &mut impl Read) -> io::Result<BrokerHeader> {
                 | "sandbox"
                 | "policy"
                 | "credential"
-        )
-            || fields.insert(key, value).is_some()
+        ) || fields.insert(key, value).is_some()
         {
-            return Err(invalid("shared-store request has an unknown or duplicate field"));
+            return Err(invalid(
+                "shared-store request has an unknown or duplicate field",
+            ));
         }
     }
     match fields
@@ -713,10 +726,9 @@ fn read_request_header(stream: &mut impl Read) -> io::Result<BrokerHeader> {
                 return Err(invalid("shared-store archive exceeds the request limit"));
             }
             let field = |key: &str| -> io::Result<String> {
-                let value = fields
-                    .get(key)
-                    .copied()
-                    .ok_or_else(|| invalid(&format!("shared-store write request has no `{key}`")))?;
+                let value = fields.get(key).copied().ok_or_else(|| {
+                    invalid(&format!("shared-store write request has no `{key}`"))
+                })?;
                 decode_text_field(value, key)
             };
             let binding = ProvenanceBinding {
@@ -741,11 +753,10 @@ fn read_request_header(stream: &mut impl Read) -> io::Result<BrokerHeader> {
             })
         }
         "read" => {
-            if fields
-                .keys()
-                .any(|key| *key != "op" && *key != "reference")
-            {
-                return Err(invalid("shared-store read request cannot include archive bytes"));
+            if fields.keys().any(|key| *key != "op" && *key != "reference") {
+                return Err(invalid(
+                    "shared-store read request cannot include archive bytes",
+                ));
             }
             let encoded = fields
                 .get("reference")
@@ -842,7 +853,9 @@ fn peer_uid(stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
 
 #[cfg(all(unix, not(target_os = "linux")))]
 fn peer_uid(_stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
-    Err(invalid("shared-store peer credentials are unsupported on this Unix host"))
+    Err(invalid(
+        "shared-store peer credentials are unsupported on this Unix host",
+    ))
 }
 
 #[cfg(target_os = "linux")]
@@ -856,7 +869,9 @@ fn current_uid() -> io::Result<u32> {
 
 #[cfg(not(target_os = "linux"))]
 fn current_uid() -> io::Result<u32> {
-    Err(invalid("shared-store enrollment is unsupported on this host"))
+    Err(invalid(
+        "shared-store enrollment is unsupported on this host",
+    ))
 }
 
 #[cfg(unix)]
@@ -888,7 +903,9 @@ fn require_admin_descriptor(path: &Path) -> io::Result<()> {
     require_safe_descriptor(path, "shared-store administrator descriptor")?;
     #[cfg(unix)]
     if owner_uid(path)? != 0 {
-        return Err(invalid("shared-store administrator descriptor is not root-owned"));
+        return Err(invalid(
+            "shared-store administrator descriptor is not root-owned",
+        ));
     }
     Ok(())
 }
@@ -936,7 +953,9 @@ fn read_writer_grant(config: &SharedStoreConfig, uid: u32) -> io::Result<WriterG
     let metadata = fs::symlink_metadata(&grant)
         .map_err(|_| invalid("shared-store peer has no enrollment grant"))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(invalid("shared-store peer enrollment is not a regular file"));
+        return Err(invalid(
+            "shared-store peer enrollment is not a regular file",
+        ));
     }
     if is_admin_config(config) {
         require_admin_descriptor(&grant)?;
@@ -953,7 +972,9 @@ fn read_writer_grant(config: &SharedStoreConfig, uid: u32) -> io::Result<WriterG
 fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
     let mut lines = text.lines();
     if lines.next() != Some(GRANT_MAGIC) {
-        return Err(invalid("shared-store peer enrollment has an unknown format"));
+        return Err(invalid(
+            "shared-store peer enrollment has an unknown format",
+        ));
     }
     let mut seen = BTreeSet::new();
     let mut grant = WriterGrant {
@@ -995,11 +1016,9 @@ fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
                         if !seen.insert("expires") {
                             return Err(invalid("shared-store peer enrollment repeats `expires`"));
                         }
-                        grant.expires = Some(
-                            value
-                                .parse::<u64>()
-                                .map_err(|_| invalid("shared-store peer enrollment expiry is invalid"))?,
-                        );
+                        grant.expires = Some(value.parse::<u64>().map_err(|_| {
+                            invalid("shared-store peer enrollment expiry is invalid")
+                        })?);
                     }
                     "credential" => {
                         if !seen.insert("credential") {
@@ -1058,7 +1077,9 @@ fn parse_writer_grant(text: &str) -> io::Result<WriterGrant> {
         }
     }
     if !grant.read {
-        return Err(invalid("shared-store peer enrollment is missing read authority"));
+        return Err(invalid(
+            "shared-store peer enrollment is missing read authority",
+        ));
     }
     Ok(grant)
 }
@@ -1122,9 +1143,7 @@ pub fn enroll_shared_store(roots: &Roots, uid: &str, writable: bool) -> io::Resu
         .map_err(|_| invalid("shared-store enrollment uid is invalid"))?;
     let caller = current_uid()?;
     #[cfg(unix)]
-    if caller != 0
-        && (is_admin_config(&config) || owner_uid(&config.shared_root)? != caller)
-    {
+    if caller != 0 && (is_admin_config(&config) || owner_uid(&config.shared_root)? != caller) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "only the administrator may enroll a system shared-store user",
@@ -1163,8 +1182,8 @@ fn read_response(stream: &mut impl Read) -> io::Result<bool> {
     if bytes.len() > 4096 {
         return Err(invalid("shared-store response is too large"));
     }
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|_| invalid("shared-store response is not UTF-8"))?;
+    let text =
+        std::str::from_utf8(&bytes).map_err(|_| invalid("shared-store response is not UTF-8"))?;
     let mut lines = text.lines();
     if lines.next() != Some(RESPONSE_MAGIC) {
         return Err(invalid("shared-store response has an unknown format"));
@@ -1178,7 +1197,9 @@ fn read_response(stream: &mut impl Read) -> io::Result<bool> {
             .split_once('=')
             .ok_or_else(|| invalid("shared-store response has a malformed field"))?;
         if key != "status" || status.replace(value).is_some() {
-            return Err(invalid("shared-store response has an unknown or duplicate field"));
+            return Err(invalid(
+                "shared-store response has an unknown or duplicate field",
+            ));
         }
     }
     match status.ok_or_else(|| invalid("shared-store response has no status"))? {
@@ -1216,7 +1237,9 @@ fn read_archive_response(stream: &mut impl Read) -> io::Result<Option<Vec<u8>>> 
             .split_once('=')
             .ok_or_else(|| invalid("shared-store response has a malformed field"))?;
         if !matches!(key, "status" | "bytes") || fields.insert(key, value).is_some() {
-            return Err(invalid("shared-store response has an unknown or duplicate field"));
+            return Err(invalid(
+                "shared-store response has an unknown or duplicate field",
+            ));
         }
     }
     match fields
@@ -1250,26 +1273,32 @@ fn read_archive_response(stream: &mut impl Read) -> io::Result<Option<Vec<u8>>> 
     }
 }
 
-fn validate_config_paths(
-    layout: &BrokerLayout,
-    config: &SharedStoreConfig,
-) -> io::Result<()> {
-    let base = layout
-        .base
-        .canonicalize()
-        .map_err(|error| invalid(&format!("could not resolve shared-store directory: {error}")))?;
+fn validate_config_paths(layout: &BrokerLayout, config: &SharedStoreConfig) -> io::Result<()> {
+    let base = layout.base.canonicalize().map_err(|error| {
+        invalid(&format!(
+            "could not resolve shared-store directory: {error}"
+        ))
+    })?;
     let expected = if layout.admin {
         vec![
             ("socket", PathBuf::from(ADMIN_SOCKET), config.socket.clone()),
             ("shared root", base.join("root"), config.shared_root.clone()),
-            ("trust key", base.join("trust/hangar.key"), config.trust_key.clone()),
+            (
+                "trust key",
+                base.join("trust/hangar.key"),
+                config.trust_key.clone(),
+            ),
             ("grants", base.join("users"), config.grants.clone()),
         ]
     } else {
         vec![
             ("socket", base.join("broker.sock"), config.socket.clone()),
             ("shared root", base.join("root"), config.shared_root.clone()),
-            ("trust key", base.join("trust/hangar.key"), config.trust_key.clone()),
+            (
+                "trust key",
+                base.join("trust/hangar.key"),
+                config.trust_key.clone(),
+            ),
             ("grants", base.join("users"), config.grants.clone()),
         ]
     };
@@ -1325,7 +1354,9 @@ fn validate_managed_directory(path: &Path, label: &str) -> io::Result<()> {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             let expected = Path::new("/var/lib/private/jet/shared-store/root");
             let canonical = fs::canonicalize(path).map_err(|error| {
-                invalid(&format!("{label} managed state target cannot be resolved: {error}"))
+                invalid(&format!(
+                    "{label} managed state target cannot be resolved: {error}"
+                ))
             })?;
             if path != Path::new(ADMIN_BASE).join("root") || canonical != expected {
                 return Err(invalid(&format!("{label} is an unexpected symlink")));
@@ -1410,10 +1441,14 @@ fn require_admin_dir(path: &Path) -> io::Result<()> {
         use std::os::unix::fs::{MetadataExt, PermissionsExt as _};
         let metadata = fs::symlink_metadata(path)?;
         if metadata.uid() != 0 {
-            return Err(invalid("shared-store administrator directory is not root-owned"));
+            return Err(invalid(
+                "shared-store administrator directory is not root-owned",
+            ));
         }
         if metadata.permissions().mode() & 0o022 != 0 {
-            return Err(invalid("shared-store administrator directory is writable by another user"));
+            return Err(invalid(
+                "shared-store administrator directory is writable by another user",
+            ));
         }
     }
     let _ = path;
@@ -1558,7 +1593,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     let partial = parent.join(format!(
         ".{}.partial-{}",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("file"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
         std::process::id()
     ));
     let result = (|| {
@@ -1743,7 +1780,9 @@ fn sweep_stale_incoming_at(incoming: &Path, now: u64) -> io::Result<usize> {
     ensure_real_dir(incoming)?;
     let entries = fs::read_dir(incoming)?.collect::<Result<Vec<_>, _>>()?;
     if entries.len() > MAX_INCOMING_ENTRIES {
-        return Err(invalid("shared-store incoming staging directory has too many entries"));
+        return Err(invalid(
+            "shared-store incoming staging directory has too many entries",
+        ));
     }
     let mut removed = 0;
     for entry in entries {
@@ -1766,7 +1805,9 @@ fn stage_created_at(path: &Path, metadata: &fs::Metadata) -> io::Result<u64> {
         let marker = path.join(STAGE_MARKER);
         if let Ok(marker_metadata) = fs::symlink_metadata(&marker) {
             if marker_metadata.file_type().is_symlink() || !marker_metadata.is_file() {
-                return Err(invalid("shared-store incoming stage marker is not a regular file"));
+                return Err(invalid(
+                    "shared-store incoming stage marker is not a regular file",
+                ));
             }
             let text = bounded_text_file(&marker, 64, "shared-store incoming stage marker")?;
             return text
@@ -1793,7 +1834,9 @@ fn remove_incoming_entry(path: &Path) -> io::Result<()> {
     } else if metadata.is_file() {
         fs::remove_file(path)
     } else {
-        Err(invalid("shared-store incoming staging has an unsupported entry"))
+        Err(invalid(
+            "shared-store incoming staging has an unsupported entry",
+        ))
     }
 }
 
@@ -1889,10 +1932,8 @@ mod tests {
 
     #[test]
     fn configured_paths_must_stay_inside_the_installed_boundary() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-shared-store-config-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-shared-store-config-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join(SHARED_DIR)).unwrap();
         let base = root.join(SHARED_DIR).canonicalize().unwrap();
@@ -1909,17 +1950,17 @@ mod tests {
 
         let layout = user_broker_layout(&roots);
         let error = validate_config_paths(&layout, &config).unwrap_err();
-        assert!(error.to_string().contains("outside the installed private boundary"));
+        assert!(error
+            .to_string()
+            .contains("outside the installed private boundary"));
         let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
     #[test]
     fn peer_authorization_requires_read_and_write_grants() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-shared-store-grants-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-shared-store-grants-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let base = root.join(SHARED_DIR);
         let shared = base.join("root");
@@ -1986,10 +2027,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn admin_service_unit_passes_systemd_unit_validation() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-shared-store-systemd-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-shared-store-systemd-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let trust = root.join("trust");
         let grants = root.join("users");
@@ -2031,17 +2070,16 @@ mod tests {
 
     #[test]
     fn stale_incoming_cleanup_removes_old_stages_and_rejects_symlinks() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-shared-store-incoming-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-shared-store-incoming-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("old-stage")).unwrap();
         fs::create_dir_all(root.join("fresh-stage")).unwrap();
         let now = now_secs();
         fs::write(
             root.join("old-stage").join(STAGE_MARKER),
-            now.saturating_sub(INCOMING_STALE_AFTER_SECS + 1).to_string(),
+            now.saturating_sub(INCOMING_STALE_AFTER_SECS + 1)
+                .to_string(),
         )
         .unwrap();
         fs::write(root.join("fresh-stage").join(STAGE_MARKER), now.to_string()).unwrap();
@@ -2203,10 +2241,8 @@ mod tests {
         use std::os::unix::net::{UnixListener, UnixStream};
         use std::time::{Duration, Instant};
 
-        let socket = std::env::temp_dir().join(format!(
-            "jet-shared-store-peer-{}",
-            std::process::id()
-        ));
+        let socket =
+            std::env::temp_dir().join(format!("jet-shared-store-peer-{}", std::process::id()));
         let _ = fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -2261,5 +2297,4 @@ mod tests {
         };
         let _ = std::os::unix::net::UnixStream::connect(socket).unwrap();
     }
-
 }

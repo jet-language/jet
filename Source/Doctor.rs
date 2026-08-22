@@ -350,14 +350,26 @@ fn check_ffi() -> Vec<Check> {
             "move the path aside without deleting it, then retry `jet hangar path`",
             false,
         )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => out.push(Check::note(
-            "c-ffi",
-            "hangar",
-            format!(
-                "{} not present (created when you realize a C library)",
-                hangar.display()
-            ),
-        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let legacy = jetpack::Store::legacy_user_hangar_dir();
+            let retired = PathBuf::from(crate::Syntax::HANGAR_DIR);
+            let source = [legacy, retired]
+                .into_iter()
+                .find(|path| fs::symlink_metadata(path).is_ok());
+            let detail = if let Some(source) = source {
+                format!(
+                    "{} not present; legacy Hangar at {} awaits atomic migration",
+                    hangar.display(),
+                    source.display()
+                )
+            } else {
+                format!(
+                    "{} not present (created when you realize a C library)",
+                    hangar.display()
+                )
+            };
+            out.push(Check::note("c-ffi", "hangar", detail));
+        }
         Err(error) => out.push(Check::problem(
             "c-ffi",
             "hangar",

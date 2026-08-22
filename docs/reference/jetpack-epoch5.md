@@ -140,6 +140,26 @@ retains the exact reference, selector, resolved source, profile provenance,
 typed metadata, native provider document, and any explicit loss or conflict.
 The command does not realize or change a generation.
 
+The lifecycle commands consume that exact plan:
+
+```text
+jet profile build dev          # realize and record, but do not activate
+jet profile switch dev         # activate the newest generation for this plan
+jet profile generations dev    # inspect retained history
+jet profile rollback dev       # activate the previous retained generation
+jet profile rollback dev 3     # activate one exact retained generation
+```
+
+Each generation is an immutable record under
+`.jet/profiles/<name>/generations/<number>/`. Its `meta.json` is the profile
+lock record: it includes the source fingerprint, every realized output digest,
+the collision contenders and selected provider, and the complete typed
+`provider_facts` carrier. The `complete` witness and the Store lifecycle root
+must agree before a generation can be listed or activated. `current` is an
+atomic pointer, so a switch or rollback exposes either the old or the new
+generation. A source edit changes the plan fingerprint; `switch` then builds a
+new generation instead of silently activating stale facts.
+
 An external provider ref without an exact version, revision, or digest fails
 with E1335. Ambiguous source inference and lossy provider metadata are reported
 as errors; the planner does not invent a default provider or discard a native
@@ -147,9 +167,11 @@ field.
 
 The resolver applies parent generations first. It rejects missing parents,
 cycles, conflicting declarations, adapter packages, unsupported refs, and
-collision choices that do not name a package in the resolved generation. It
-records these facts in the environment trust identity so a source or collision
-change needs a new trust decision.
+collision choices that do not name a package in the resolved generation. Build
+then rejects unresolved byte-different exact-path contenders, and rejects
+file/directory or symlink-target type mismatches. It records these facts in the
+environment trust identity so a source or collision change needs a new trust
+decision.
 
 The built-in catalog covers 58 language families: Ansible, C, Clojure,
 Cplusplus, Crystal, Cue, Dart, Deno, Dotnet, Elixir, Elm, Erlang, Fortran,

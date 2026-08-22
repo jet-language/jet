@@ -21,7 +21,10 @@ const MAX_IMPORTS: usize = super::EVALUATOR_IMPORT_LIMIT;
 const MAX_PATH_BYTES: usize = 4_096;
 const MAX_STRING_PARTS: usize = 256;
 const MAX_STRING_BYTES: usize = super::EVALUATOR_STRING_BYTES;
-const TOKEN_MEMORY_ESTIMATE_BYTES: usize = 192;
+// Keep recursive thunk forcing below the host test-thread stack ceiling. The
+// public expression budget remains 256; this is an implementation stack guard.
+const MAX_THUNK_FORCE_DEPTH: usize = MAX_EVAL_DEPTH / 2;
+const TOKEN_MEMORY_ESTIMATE_BYTES: usize = 256;
 const MAX_OVERLAYS: usize = 64;
 const MAX_DERIVATION_ARGS: usize = 256;
 const MAX_DERIVATION_ENV: usize = 256;
@@ -1083,7 +1086,17 @@ impl Thunk {
             *self.0.borrow_mut() = ThunkState::Failed(error.to_string());
             return Err(error);
         };
+        let force_depth = arena.thunk_force_depth.get();
+        if force_depth >= MAX_THUNK_FORCE_DEPTH {
+            let error = Error::ResourceLimit(format!(
+                "foreign flake evaluation exceeded {MAX_EVAL_DEPTH} expression steps"
+            ));
+            *self.0.borrow_mut() = ThunkState::Failed(error.to_string());
+            return Err(error);
+        }
+        arena.thunk_force_depth.set(force_depth + 1);
         let result = evaluate_expr(&expression, &environment, 0, &arena);
+        arena.thunk_force_depth.set(force_depth);
         match result {
             Ok(value) => {
                 *self.0.borrow_mut() = ThunkState::Evaluated(value.clone());
@@ -1104,6 +1117,7 @@ struct EvaluationArena {
     system: String,
     import_authority: Option<Rc<ImportAuthority>>,
     imports: Cell<usize>,
+    thunk_force_depth: Cell<usize>,
     active_imports: RefCell<Vec<String>>,
     active_flakes: RefCell<Vec<String>>,
 }
@@ -1117,6 +1131,7 @@ impl EvaluationArena {
             system: system.to_string(),
             import_authority,
             imports: Cell::new(0),
+            thunk_force_depth: Cell::new(0),
             active_imports: RefCell::new(Vec::new()),
             active_flakes: RefCell::new(Vec::new()),
         })
@@ -2224,6 +2239,11 @@ fn apply_fetch(
             actual: value_name(&argument),
         });
     };
+    let Some(authority) = arena.import_authority.clone() else {
+        return Err(Error::Unsupported(
+            "fixed-output fetchers require explicit fetch authority and verified bytes".into(),
+        ));
+    };
     let url = match field_value(&fields, "url")? {
         Some(value) => plain_string(value)?,
         None => field_value(&fields, "uri")?
@@ -2259,11 +2279,6 @@ fn apply_fetch(
             ));
         }
     }
-    let Some(authority) = arena.import_authority.clone() else {
-        return Err(Error::Unsupported(
-            "fixed-output fetchers require explicit fetch authority and verified bytes".into(),
-        ));
-    };
     let request = format!("@fetch:{kind}\n{url}\n{hash}\n{name}\n{revision}");
     let path = authority(&request).map_err(|reason| {
         Error::Unsupported(format!(
@@ -2441,9 +2456,9 @@ fn apply_overlays(
     Ok(current)
 }
 
-fn package_parts(
-    value: &Value,
-) -> Result<(String, BTreeMap<String, Thunk>, Option<Rc<ImportAuthority>>), Error> {
+type PackageParts = (String, BTreeMap<String, Thunk>, Option<Rc<ImportAuthority>>);
+
+fn package_parts(value: &Value) -> Result<PackageParts, Error> {
     match value {
         Value::PackageNamespace { prefix, authority } => {
             Ok((prefix.clone(), BTreeMap::new(), authority.clone()))
@@ -3305,6 +3320,22 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::String(left), Value::StringContext { value: right, .. })
         | (Value::StringContext { value: left, .. }, Value::String(right)) => left == right,
         (Value::Package(left), Value::Package(right)) => left == right,
+        (Value::Package(package), Value::String(string))
+        | (Value::String(string), Value::Package(package)) => {
+            package.rsplit(['.', '/', ':']).next() == Some(string.as_str())
+        }
+        (
+            Value::Package(package),
+            Value::StringContext {
+                value: string, ..
+            },
+        )
+        | (
+            Value::StringContext {
+                value: string, ..
+            },
+            Value::Package(package),
+        ) => package.rsplit(['.', '/', ':']).next() == Some(string.as_str()),
         _ => false,
     }
 }

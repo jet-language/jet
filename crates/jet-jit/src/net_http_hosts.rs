@@ -3299,6 +3299,129 @@ pub(crate) fn runtime_tcp_listener_local_socket_addr(listener: i64) -> CtValue {
     }
 }
 
+pub(crate) fn runtime_tcp_stream_set_timeout(stream: i64, timeout_ms: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set_timeout",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_set_timeout(&mut stream, timeout_ms) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_set_read_timeout(stream: i64, timeout_ms: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set_read_timeout",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_set_read_timeout(&mut stream, timeout_ms) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_set_write_timeout(stream: i64, timeout_ms: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set_write_timeout",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_set_write_timeout(&mut stream, timeout_ms) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_nodelay(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "nodelay",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_nodelay(&stream) {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_set_nodelay(stream: i64, enabled: bool) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set_nodelay",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_set_nodelay(&stream, enabled) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_ttl(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "ttl",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_ttl(&stream) {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_set_ttl(stream: i64, ttl: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "set_ttl",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_set_ttl(&stream, ttl) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
+pub(crate) fn runtime_tcp_stream_socket_type(stream: i64) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "socket_type",
+            "TcpStream",
+        ))));
+    };
+    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    CtValue::Str(jet_net_socket_type(&stream))
+}
+
+pub(crate) fn runtime_tcp_stream_sendfile(stream: i64, path: String) -> CtValue {
+    let Some(stream) = tcp_stream(stream) else {
+        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
+            "sendfile",
+            "TcpStream",
+        ))));
+    };
+    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match jet_net_sendfile(&mut stream, &path) {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
+    }
+}
+
 pub(crate) fn runtime_tcp_stream_read(stream: i64) -> CtValue {
     let Some(stream) = tcp_stream(stream) else {
         return CtValue::failed(Box::new(net_error_value(net_invalid_error(

@@ -1,10 +1,34 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/E-CALL-VALUE_call_result_not_called.jet:1:28
+    |
+  1 | fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
+    |                            ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/E-CALL-VALUE_call_result_not_called.jet:1:17
+    |
+  1 | fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
+    |                 ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/E-CALL-VALUE_call_result_not_called.jet:1:35
     |
   1 | fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
     |                                   ^^
- Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
+
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/E-CALL-VALUE_call_result_not_called.jet:1:51
+    |
+  1 | fn make_adder() => fn(Int) => Int :: (value: Int) => value + 1
+    |                                                   ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
 
 Error [E-CALL-VALUE]: a function value is invoked with the retired adjacent-call spelling
   --> tests/ui/E-CALL-VALUE_call_result_not_called.jet:4:23

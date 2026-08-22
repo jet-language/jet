@@ -289,11 +289,11 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
             continue;
         }
         // D-FAIL-ERROR1=A: the formatter omits an explicit default `Err` in a
-        // fallible function return type (`T ! Err` -> `T ?`). Keep that
+        // fallible function return type (`T ! Err` -> `T !`). Keep that
         // canonical spelling rewrite out of the loss comparison without
         // matching ordinary `Err(...)` constructor expressions.
         if matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::TYPE_ERR)
-            && matches!(canonical.last().map(|token| &token.kind), Some(TokKind::Question))
+            && matches!(canonical.last().map(|token| &token.kind), Some(TokKind::Bang))
             && matches!(
                 tokens.get(index + 1).map(|token| &token.kind),
                 Some(TokKind::LBrace | TokKind::Eq)
@@ -1546,8 +1546,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external method",
-            "fn Point.len(self) :> Int { return 1 }\n",
-            "impl Point { fn len(self) :> Int { return 1 } }\n",
+            "fn Point.len(self) Int -> 1\n",
+            "impl Point { fn len(self) Int -> 1 }\n",
         ),
         (
             "enum group separators",
@@ -1576,28 +1576,28 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "arrow unification",
-            "fn run() { if x == { .A -> print(1) } }\n",
             "fn run() { if x == { .A :> print(1) } }\n",
+            "fn run() { if x == { .A -> print(1) } }\n",
         ),
         (
             "dispatch arm block",
-            "fn run() { if x == { .A :> print(1) } }\n",
-            "fn run() { if x == { .A :> { print(1) } } }\n",
+            "fn run() { if x == { .A -> print(1) } }\n",
+            "fn run() { if x == { .A -> { print(1) } } }\n",
         ),
         (
             "bare lambda params",
-            "fn run() { f :: x :> x }\n",
-            "fn run() { f :: (x) :> x }\n",
+            "fn run() { f :: x -> x }\n",
+            "fn run() { f :: (x) -> x }\n",
         ),
         (
             "bare enum variant pattern",
-            "fn run() { if x == { A(v) :> print(v) } }\n",
-            "fn run() { if x == { .A(v) :> print(v) } }\n",
+            "fn run() { if x == { A(v) -> print(v) } }\n",
+            "fn run() { if x == { .A(v) -> print(v) } }\n",
         ),
         (
             "bare None variant pattern",
-            "fn run() { if x == { None :> print(0) } }\n",
-            "fn run() { if x == { .None :> print(0) } }\n",
+            "fn run() { if x == { None -> print(0) } }\n",
+            "fn run() { if x == { .None -> print(0) } }\n",
         ),
         (
             "struct shorthand label",
@@ -1656,8 +1656,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external-method rewrite preserves receiver",
-            "fn Point.len(self) :> Int { return 1 }\n",
-            "impl Other { fn len(self) :> Int { return 1 } }\n",
+            "fn Point.len(self) Int -> 1\n",
+            "impl Other { fn len(self) Int -> 1 }\n",
         ),
         (
             "task-block rewrite preserves body",
@@ -1686,23 +1686,23 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "arm-block rule does not remove explicit braces",
-            "fn run() { if x == { .A :> { print(1) } } }\n",
-            "fn run() { if x == { .A :> print(1) } }\n",
+            "fn run() { if x == { .A -> { print(1) } } }\n",
+            "fn run() { if x == { .A -> print(1) } }\n",
         ),
         (
             "lambda rule does not remove explicit parens",
-            "fn run() { f :: (x) :> x }\n",
-            "fn run() { f :: x :> x }\n",
+            "fn run() { f :: (x) -> x }\n",
+            "fn run() { f :: x -> x }\n",
         ),
         (
             "variant-dot rule requires a PascalCase pattern",
-            "fn run() { if x == { value :> print(value) } }\n",
-            "fn run() { if x == { .value :> print(value) } }\n",
+            "fn run() { if x == { value -> print(value) } }\n",
+            "fn run() { if x == { .value -> print(value) } }\n",
         ),
         (
             "variant-dot rule requires a dispatch arm context",
-            "fn run() { Foo work :> print(1) }\n",
-            "fn run() { .Foo work :> print(1) }\n",
+            "fn run() { Foo work -> print(1) }\n",
+            "fn run() { .Foo work -> print(1) }\n",
         ),
         (
             "shorthand expansion preserves field value",

@@ -885,28 +885,84 @@ fn credentialed_fetch_url(url: &str) -> bool {
         return true;
     }
     let Some((_, query_and_fragment)) = rest.split_once('?') else {
-        return false;
+        return rest
+            .split_once('#')
+            .is_some_and(|(_, fragment)| credential_fields(fragment));
     };
-    let query = query_and_fragment.split('#').next().unwrap_or_default();
-    query.split('&').any(|field| {
-        let key = field.split('=').next().unwrap_or_default();
-        matches!(
-            key.trim().to_ascii_lowercase().as_str(),
-            "auth"
-                | "authorization"
-                | "api_key"
-                | "apikey"
-                | "credential"
-                | "password"
-                | "passwd"
-                | "secret"
-                | "sig"
-                | "signature"
-                | "token"
-                | "access_token"
-                | "refresh_token"
-        )
-    })
+    let (query, fragment) = query_and_fragment
+        .split_once('#')
+        .map_or((query_and_fragment, ""), |(query, fragment)| {
+            (query, fragment)
+        });
+    credential_fields(query) || credential_fields(fragment)
+}
+
+fn credential_fields(fields: &str) -> bool {
+    fields
+        .split(['&', ';'])
+        .any(|field| credential_field_key(field.split('=').next().unwrap_or_default()))
+}
+
+fn credential_field_key(raw: &str) -> bool {
+    let key = percent_decode_ascii(raw.trim())
+        .to_ascii_lowercase()
+        .replace('-', "_");
+    matches!(
+        key.as_str(),
+        "auth"
+            | "authorization"
+            | "api_key"
+            | "apikey"
+            | "credential"
+            | "credentials"
+            | "password"
+            | "passwd"
+            | "secret"
+            | "sig"
+            | "signature"
+            | "token"
+            | "access_token"
+            | "refresh_token"
+            | "oauth_token"
+            | "client_secret"
+            | "private_key"
+            | "x_amz_credential"
+            | "x_amz_signature"
+    ) || key.ends_with("_token")
+        || key.ends_with("_secret")
+        || key.ends_with("_credential")
+        || key.ends_with("_signature")
+        || key.ends_with("_password")
+        || key.ends_with("_api_key")
+}
+
+fn percent_decode_ascii(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                decoded.push((high << 4 | low) as char);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index] as char);
+        index += 1;
+    }
+    decoded
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// Construct the only environment a recipe tool may observe. Build hooks do
@@ -1107,7 +1163,7 @@ fn e1236_credentialed_url() -> Diagnostic {
     Diagnostic::error(
         "E1236",
         "a build fetch contains embedded credentials".to_string(),
-        "build-hook fetch URLs are action inputs and may be retained in cache metadata and logs; URL userinfo and credential query fields are therefore not allowed.".to_string(),
+        "build-hook fetch URLs are action inputs and may be retained in cache metadata and logs; URL userinfo and credential query or fragment fields are therefore not allowed.".to_string(),
         "remove the credentials, use a public or vendored source, and keep authentication outside the build hook.".to_string(),
         None,
     )
@@ -1268,6 +1324,15 @@ mod tests {
         assert!(!out.exists(), "rejected hooks must not publish an output");
         assert!(credentialed_fetch_url(
             "https://example.invalid/source.tar?token=hidden"
+        ));
+        assert!(credentialed_fetch_url(
+            "https://example.invalid/source.tar?download=1#token=hidden"
+        ));
+        assert!(credentialed_fetch_url(
+            "https://example.invalid/source.tar?%74oken=hidden"
+        ));
+        assert!(credentialed_fetch_url(
+            "https://example.invalid/source.tar?X-Amz-Credential=hidden"
         ));
         assert!(!credentialed_fetch_url(
             "https://example.invalid/source.tar?download=1"

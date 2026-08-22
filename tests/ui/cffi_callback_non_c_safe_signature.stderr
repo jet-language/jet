@@ -3,8 +3,24 @@ Error [E0066]: this function uses the retired effect-arrow spelling
     |
   4 |     fn call(cb: fn([Int]) =[]=> Int) => Int = "call"
     |                           ^
- Why: callable results use `:>`, and an explicit effect ceiling uses the same arrow
- Fix: write `:[Effects]>`; use `:[]>` for an explicit purity bound
+ Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
+ Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
+
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/cffi_callback_non_c_safe_signature.jet:4:38
+    |
+  4 |     fn call(cb: fn([Int]) =[]=> Int) => Int = "call"
+    |                                      ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/cffi_callback_non_c_safe_signature.jet:4:38
+    |
+  4 |     fn call(cb: fn([Int]) =[]=> Int) => Int = "call"
+    |                                      ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E3203]: `fn([Int]) =[]=> Int` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_callback_non_c_safe_signature.jet:4:17

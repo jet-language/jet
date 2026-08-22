@@ -1598,6 +1598,17 @@ already-freed arena), these track the views themselves.
 | E0631 | `{view}` cannot be shared — it does not live long enough to {escape}. | `{view}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `~` before it leaves. |
 | E0632 | `{arena}` was reset here, so the value `{view}` points into is gone. | `reset` invalidates every value allocated in the arena; reading the view afterward would read reused memory. | Use the view before `reset`, or re-`alloc` after to get a fresh value. |
 
+## User callable-policy diagnostics (D-CALLPOLICY1 / D-STRUCT-POLICY1)
+
+Callable-policy settings use one package-owned nominal table. `E0003` teaches
+the exact public `pub policy … { wrap(call) { … } }` shape; `E0104` reports a
+wrong setting-argument count; `E0105` reports duplicate or built-in policy
+names; and `E0355` reports an unknown setting, including the package that
+declared the name when it is outside the current package. `E0112` reports a
+typed setting-argument mismatch. The retained `#Policy(...)` and `apply(...)`
+forms never permit a wrapper body to edit the wrapped callable's checked
+signature.
+
 ## Dynamic type diagnostics
 
 | Code | What | Why | Fix |
@@ -1955,7 +1966,7 @@ front-end `.jet` diagnostics).
 | E1233 | In-repo dependency `{name}` is outside the workspace. | A member's `package.jet` depends on another in-repo package, but that package is not in the source repo's `workspace.jet` member index, so the sparse checkout can't include it (D-MONOREF1). | Add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref. |
 | E1234 | `{name}` {version} already exists in the registry index and is not yanked. | Published versions are immutable (D-VERSION1) — a version can never be overwritten, only yanked, so anyone who already locked it keeps building the exact same bytes. | Bump the version in `package.jet` and publish again, or `jet registry yank {version}` the existing one first if it was a mistake (yanking hides it from new resolution; it does not free the version number for reuse). |
 | E1235 | Couldn't reach the registry index at `{url}`. | The git operation against the registry failed — network, auth, or a stale local clone. The registry is a git repo, so `jet registry publish`/`jet registry yank` clone/pull it, write the version line, then commit and push. | Check network access and credentials for `{url}`, or set `JET_REGISTRY_URL` to a reachable mirror. |
-| E1236 | A build fetch is not an allowed locked, credential-free input. | Build hooks admit only content-hash-pinned fetches without URL userinfo or credential query fields; credentials in URLs could enter action identity, cache metadata, or logs (D-JPK-ADAPTER1). | Add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`. |
+| E1236 | A build fetch is not an allowed locked, credential-free input. | Build hooks admit only content-hash-pinned fetches without URL userinfo or credential query/fragment fields; credentials in URLs could enter action identity, cache metadata, or logs (D-JPK-ADAPTER1). | Add the source hash, remove URL credentials, or vendor the source with `jet registry vendor`. |
 | E1237 | A build step tried to write outside the output root. | A build may only install files under its own package output root; writing elsewhere would let a build mutate the machine or other packages (D-JPK-ADAPTER1). | Install into a path under the output root (no `..`, no absolute paths). |
 | E1238 | Build tool `{tool}` is not a realized dependency. | Build tools must be realized adapter `deps:` packages so the build is reproducible; a build never falls through to host `/usr/bin` (D-JPK-ADAPTER1). | Add `{tool}` to the adapter's `deps: […]` list so Jetpack realizes it into the hangar. |
 | E1240 | No Rust build toolchain is available to build this package. | Building an `extern rust` bridge dependency needs a pinned Rust toolchain realized into the hangar, or Nix; neither is present (D-JPK-BUILDTOOL1). | Run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider. |

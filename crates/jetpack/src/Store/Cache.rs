@@ -13,7 +13,7 @@ use crate::TrustRoot::{
     is_cache_builder_revoked, pin_cache_key, verify_pinned_cache_key, TrustKey,
 };
 use crate::SHA256;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -244,11 +244,7 @@ impl CacheBinding {
         out.push_str(BINDING_MAGIC);
         out.push('\n');
         line(&mut out, "role", &self.role)?;
-        line(
-            &mut out,
-            "key",
-            &self.trust_key.to_string_lossy(),
-        )?;
+        line(&mut out, "key", &self.trust_key.to_string_lossy())?;
         line(
             &mut out,
             "write",
@@ -367,8 +363,13 @@ pub fn bind_cache(
 pub fn read_cache_binding(roots: &Roots, role: &str) -> io::Result<CacheBinding> {
     let path = binding_path(roots, role)?;
     let metadata = fs::symlink_metadata(&path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > MAX_BINDING_BYTES {
-        return Err(invalid("cache binding is not a regular file within its limit"));
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_BINDING_BYTES
+    {
+        return Err(invalid(
+            "cache binding is not a regular file within its limit",
+        ));
     }
     let text = String::from_utf8(read_regular_bounded(&path, MAX_BINDING_BYTES)?)
         .map_err(|_| invalid("cache binding is not UTF-8"))?;
@@ -398,7 +399,9 @@ pub fn list_cache_bindings(roots: &Roots) -> io::Result<Vec<CacheBinding>> {
             || !metadata.is_file()
             || metadata.len() > MAX_BINDING_BYTES
         {
-            return Err(invalid("cache binding directory contains a non-regular entry"));
+            return Err(invalid(
+                "cache binding directory contains a non-regular entry",
+            ));
         }
         let file_role = path
             .file_stem()
@@ -439,17 +442,23 @@ pub fn publish_cache_entry(
 ) -> io::Result<CacheTransferReport> {
     let binding = read_cache_binding(roots, role)?;
     if !binding.allow_write {
-        return Err(invalid("cache binding is read-only; publishing needs a write grant"));
+        return Err(invalid(
+            "cache binding is read-only; publishing needs a write grant",
+        ));
     }
     let entry = select_entry(roots, target)?;
     ensure_reproducible_for_shared_cache(roots, &entry)?;
     let output = Path::new(&entry.out);
     let metadata = fs::symlink_metadata(output)?;
     if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
-        return Err(invalid("only a local Hangar file or directory can be published as a NAR"));
+        return Err(invalid(
+            "only a local Hangar file or directory can be published as a NAR",
+        ));
     }
     if entry.envelope.output_hash.is_empty() {
-        return Err(invalid("Hangar entry has no output identity for cache publication"));
+        return Err(invalid(
+            "Hangar entry has no output identity for cache publication",
+        ));
     }
     let actual_output_hash =
         super::try_entry_output_hash(roots, &entry).map_err(io::Error::other)?;
@@ -461,9 +470,8 @@ pub fn publish_cache_entry(
     let (nar, stats) = super::write_nar(output)?;
     let key = read_trust_key(&binding.trust_key)?;
     verify_cache_writer_authority(roots, &entry, role, &key)?;
-    let builder = cache_builder_for_entry(&entry)?;
-    allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
     let info = nar_info_for(&entry, &stats)?;
+    verify_decoded_output_hash(roots, &entry, &nar)?;
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
         let endpoint = match parse_endpoint(mirror) {
@@ -479,6 +487,8 @@ pub fn publish_cache_entry(
         }
         match publish_endpoint(&endpoint, &info, &nar, &key, roots, &entry) {
             Ok(proof) => {
+                let builder = cache_builder_for_entry(&entry)?;
+                allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
                 return Ok(CacheTransferReport {
                     role: binding.role.clone(),
                     mirror: mirror.clone(),
@@ -496,7 +506,10 @@ pub fn publish_cache_entry(
             Err(error) => failures.push(format!("{mirror}: {error}")),
         }
     }
-    Err(invalid(&format!("all cache mirrors rejected publication: {}", failures.join("; "))))
+    Err(invalid(&format!(
+        "all cache mirrors rejected publication: {}",
+        failures.join("; ")
+    )))
 }
 
 pub fn verify_cache_transfer(
@@ -511,7 +524,9 @@ pub fn verify_cache_transfer(
     verify_cache_writer_authority(roots, &expected, role, &key)?;
     let builder = cache_builder_for_entry(&expected)?;
     if !is_cache_builder_allowed(&roots.root, role, &builder).map_err(io::Error::other)? {
-        return Err(invalid("cache builder is not allowlisted for this shared cache role"));
+        return Err(invalid(
+            "cache builder is not allowlisted for this shared cache role",
+        ));
     }
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
@@ -587,7 +602,10 @@ pub fn verify_cache_transfer(
             Err(error) => failures.push(format!("{mirror}: {error}")),
         }
     }
-    Err(invalid(&format!("no verifying cache hit: {}", failures.join("; "))))
+    Err(invalid(&format!(
+        "no verifying cache hit: {}",
+        failures.join("; ")
+    )))
 }
 
 pub fn substitute_cache_entry(
@@ -607,7 +625,9 @@ pub fn substitute_cache_entry(
     verify_cache_writer_authority(roots, &expected, role, &key)?;
     let builder = cache_builder_for_entry(&expected)?;
     if !is_cache_builder_allowed(&roots.root, role, &builder).map_err(io::Error::other)? {
-        return Err(invalid("cache builder is not allowlisted for this shared cache role"));
+        return Err(invalid(
+            "cache builder is not allowlisted for this shared cache role",
+        ));
     }
     let mut failures = Vec::new();
     for mirror in &binding.mirrors {
@@ -662,15 +682,18 @@ pub fn substitute_cache_entry(
         }
         match find_artifact(&endpoint, target, Some(&expected), &key) {
             Ok(Some(artifact)) => {
-                let result = (|| {
+                let result: io::Result<_> = (|| {
                     artifact.info.verify(&key)?;
                     verify_artifact_bytes(&artifact.info, &artifact.nar)?;
-                    super::read_nar(&artifact.nar, destination)
+                    let stats = super::read_nar(&artifact.nar, destination)?;
+                    super::seal_node(destination)?;
+                    Ok(stats)
                 })();
                 match result {
                     Ok(stats) => {
-                        let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
-                            .map_err(io::Error::other)?;
+                        let actual =
+                            crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
+                                .map_err(io::Error::other)?;
                         if actual != expected.envelope.output_hash {
                             let _ = remove_tree(destination);
                             failures.push(format!(
@@ -703,7 +726,10 @@ pub fn substitute_cache_entry(
             Err(error) => failures.push(format!("{mirror}: {error}")),
         }
     }
-    Err(invalid(&format!("no verifying cache hit: {}", failures.join("; "))))
+    Err(invalid(&format!(
+        "no verifying cache hit: {}",
+        failures.join("; ")
+    )))
 }
 
 pub fn cache_binding_json(binding: &CacheBinding) -> String {
@@ -864,8 +890,8 @@ fn find_artifact(
             let Some(info_bytes) = endpoint_get(endpoint, &info_path, MAX_INFO_BYTES)? else {
                 return Ok(None);
             };
-            let text = String::from_utf8(info_bytes)
-                .map_err(|_| invalid("narinfo is not UTF-8"))?;
+            let text =
+                String::from_utf8(info_bytes).map_err(|_| invalid("narinfo is not UTF-8"))?;
             let info = NarInfo::parse(&text)?;
             if info.store_path.rsplit('/').next() != Some(store_name.as_str())
                 || !nar_info_matches_entry(&info, expected)
@@ -918,7 +944,8 @@ fn find_local_artifact(
             Err(_) => continue,
         };
         let store_name = info.store_path.rsplit('/').next().unwrap_or_default();
-        let expected_name = expected.map(|entry| format!("{}-{}", entry.envelope.output_hash, entry.id));
+        let expected_name =
+            expected.map(|entry| format!("{}-{}", entry.envelope.output_hash, entry.id));
         let matches = expected_name.as_deref() == Some(store_name)
             && expected.is_some_and(|entry| nar_info_matches_entry(&info, entry));
         if !matches {
@@ -971,9 +998,7 @@ fn report_for(
         nar_hash: info.nar_hash.clone(),
         nix_nar_hash: None,
         signed_fingerprint: fingerprint_for_info(&info),
-        builder: expected
-            .map(cache_builder_for_report)
-            .unwrap_or_default(),
+        builder: expected.map(cache_builder_for_report).unwrap_or_default(),
         provenance: expected
             .map(cache_provenance_for_report)
             .unwrap_or_default(),
@@ -999,7 +1024,9 @@ fn verify_artifact_bytes(info: &NarInfo, nar: &[u8]) -> io::Result<()> {
         || info.nar_size != nar.len() as u64
         || !super::nar_hash_matches(&info.nar_hash, nar)
     {
-        return Err(invalid("NAR bytes do not match signed FileSize, NarSize, or NarHash"));
+        return Err(invalid(
+            "NAR bytes do not match signed FileSize, NarSize, or NarHash",
+        ));
     }
     super::validate_nar(nar)?;
     Ok(())
@@ -1009,21 +1036,18 @@ fn verify_artifact_bytes(info: &NarInfo, nar: &[u8]) -> io::Result<()> {
 /// validity and NAR digest prove the transport object; the Hangar envelope is
 /// a different digest over the materialized output tree. Decode only into a
 /// private staging path, then remove it on every path.
-fn verify_decoded_output_hash(
-    roots: &Roots,
-    expected: &StoreEntry,
-    nar: &[u8],
-) -> io::Result<()> {
+fn verify_decoded_output_hash(roots: &Roots, expected: &StoreEntry, nar: &[u8]) -> io::Result<()> {
     validate_component(&expected.id, "cache entry id")?;
-    let staging = roots
-        .root
-        .join("cache")
-        .join("verify")
-        .join(format!("{}-{}", expected.id, unique_suffix()));
+    let staging = roots.root.join("cache").join("verify").join(format!(
+        "{}-{}",
+        expected.id,
+        unique_suffix()
+    ));
     validate_path_components(&staging)?;
     ensure_parent(&staging)?;
     let result = (|| {
         super::read_nar(nar, &staging)?;
+        super::seal_node(&staging)?;
         let actual = crate::Envelope::try_output_hash_of(&staging.to_string_lossy())
             .map_err(io::Error::other)?;
         if actual != expected.envelope.output_hash {
@@ -1078,10 +1102,10 @@ fn verify_cache_writer_authority(
 ) -> io::Result<()> {
     verify_pinned_cache_key(&roots.root, role, key).map_err(io::Error::other)?;
     let builder = cache_builder_for_entry(entry)?;
-    if is_cache_builder_revoked(&roots.root, &builder)
-        .map_err(io::Error::other)?
-    {
-        return Err(invalid("cache builder is revoked; rebuild before publishing or using it"));
+    if is_cache_builder_revoked(&roots.root, &builder).map_err(io::Error::other)? {
+        return Err(invalid(
+            "cache builder is revoked; rebuild before publishing or using it",
+        ));
     }
     Ok(())
 }
@@ -1167,11 +1191,8 @@ fn cache_builder_for_entry(entry: &StoreEntry) -> io::Result<String> {
         || provenance.reference != entry.reference
         || provenance.source != producer.immutable_source
         || provenance.builder != builder
-        || provenance.action != super::cache_action_identity(
-            &producer,
-            &entry.reference,
-            &entry.cache_identity,
-        )
+        || provenance.action
+            != super::cache_action_identity(&producer, &entry.reference, &entry.cache_identity)
         || provenance.output != entry.envelope.output_hash
         || provenance.platform != entry.cache_identity.platform
         || provenance.sandbox != "sandbox:policy-bound"
@@ -1248,18 +1269,24 @@ fn parse_endpoint(endpoint: &str) -> io::Result<CacheEndpoint> {
     }
     if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
         validate_http_base(endpoint)?;
-        return Ok(CacheEndpoint::Http(endpoint.trim_end_matches('/').to_string()));
+        return Ok(CacheEndpoint::Http(
+            endpoint.trim_end_matches('/').to_string(),
+        ));
     }
     if endpoint.starts_with("ssh://") || endpoint.starts_with("ssh-ng://") {
         return parse_ssh_endpoint(endpoint);
     }
     if endpoint.starts_with("s3://") {
         validate_s3_uri(endpoint)?;
-        return Ok(CacheEndpoint::S3(endpoint.trim_end_matches('/').to_string()));
+        return Ok(CacheEndpoint::S3(
+            endpoint.trim_end_matches('/').to_string(),
+        ));
     }
     if endpoint.starts_with("daemon://") || endpoint.starts_with("nix://") {
         if endpoint.contains('?') || endpoint.contains('#') {
-            return Err(invalid("Nix store endpoint cannot contain a query or fragment"));
+            return Err(invalid(
+                "Nix store endpoint cannot contain a query or fragment",
+            ));
         }
         return Ok(CacheEndpoint::Nix(endpoint.to_string()));
     }
@@ -1272,7 +1299,9 @@ fn absolute_endpoint_path(raw: &str, label: &str) -> io::Result<PathBuf> {
         return Err(invalid(&format!("{label} must contain an absolute path")));
     }
     if raw.contains('?') || raw.contains('#') {
-        return Err(invalid(&format!("{label} cannot contain a query or fragment")));
+        return Err(invalid(&format!(
+            "{label} cannot contain a query or fragment"
+        )));
     }
     let path = PathBuf::from(raw);
     validate_path_components(&path)?;
@@ -1286,9 +1315,9 @@ fn parse_ssh_endpoint(endpoint: &str) -> io::Result<CacheEndpoint> {
     let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
     if authority.is_empty()
         || authority.starts_with('-')
-        || !authority
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b':' | b'-'))
+        || !authority.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b':' | b'-')
+        })
     {
         return Err(invalid("SSH endpoint has an unsafe host name"));
     }
@@ -1351,7 +1380,12 @@ fn validate_remote_key(key: &str) -> io::Result<()> {
         || key.contains('\0')
         || key.chars().any(char::is_whitespace)
         || key.split('/').any(|part| part == "..")
-        || key.bytes().any(|byte| matches!(byte, b'\'' | b'"' | b'`' | b'$' | b';' | b'&' | b'|' | b'<' | b'>'))
+        || key.bytes().any(|byte| {
+            matches!(
+                byte,
+                b'\'' | b'"' | b'`' | b'$' | b';' | b'&' | b'|' | b'<' | b'>'
+            )
+        })
     {
         return Err(invalid("remote cache path is unsafe"));
     }
@@ -1361,14 +1395,12 @@ fn validate_remote_key(key: &str) -> io::Result<()> {
 fn validate_relative_key(key: &str) -> io::Result<()> {
     if key.is_empty()
         || key.starts_with('/')
-        || key.bytes().any(|byte| {
-            byte == 0
-                || byte.is_ascii_control()
-                || matches!(byte, b'?' | b'#' | b'%')
-        })
-        || Path::new(key).components().any(|component| {
-            matches!(component, Component::ParentDir | Component::Prefix(_))
-        })
+        || key
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || matches!(byte, b'?' | b'#' | b'%'))
+        || Path::new(key)
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
     {
         return Err(invalid("cache object key is unsafe"));
     }
@@ -1396,11 +1428,7 @@ fn endpoint_key(endpoint: &CacheEndpoint, key: &str) -> io::Result<String> {
     }
 }
 
-fn endpoint_get(
-    endpoint: &CacheEndpoint,
-    key: &str,
-    limit: u64,
-) -> io::Result<Option<Vec<u8>>> {
+fn endpoint_get(endpoint: &CacheEndpoint, key: &str, limit: u64) -> io::Result<Option<Vec<u8>>> {
     match endpoint {
         CacheEndpoint::Local(_) => {
             let path = PathBuf::from(endpoint_key(endpoint, key)?);
@@ -1465,7 +1493,10 @@ fn publish_endpoint(
 ) -> io::Result<TransferProof> {
     let caps = endpoint.capabilities();
     if !caps.write {
-        return Err(invalid(&format!("{} endpoint is read-only", endpoint.label())));
+        return Err(invalid(&format!(
+            "{} endpoint is read-only",
+            endpoint.label()
+        )));
     }
     match endpoint {
         CacheEndpoint::Local(root) => {
@@ -1496,7 +1527,10 @@ fn publish_endpoint(
             );
             publish_remote_atomic(
                 endpoint,
-                [(info.url.as_str(), nar), (&info_key, signed_text.as_bytes())],
+                [
+                    (info.url.as_str(), nar),
+                    (&info_key, signed_text.as_bytes()),
+                ],
             )?;
             Ok(TransferProof {
                 nix_nar_hash: None,
@@ -1529,7 +1563,9 @@ fn publish_remote_atomic<'a>(
         let uploaded = endpoint_get(endpoint, &partial, bytes.len() as u64 + 1)?
             .ok_or_else(|| invalid("cache endpoint lost its staged object"))?;
         if uploaded != bytes {
-            return Err(invalid("cache endpoint staged bytes differ from the signed object"));
+            return Err(invalid(
+                "cache endpoint staged bytes differ from the signed object",
+            ));
         }
         promote_remote(endpoint, &partial, key, bytes)?;
     }
@@ -1547,7 +1583,9 @@ fn write_remote_resumable(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> 
         return endpoint_put(endpoint, key, bytes);
     }
     match endpoint {
-        CacheEndpoint::Ssh { target, .. } => ssh_append(target, &endpoint_key(endpoint, key)?, &bytes[offset..]),
+        CacheEndpoint::Ssh { target, .. } => {
+            ssh_append(target, &endpoint_key(endpoint, key)?, &bytes[offset..])
+        }
         _ => endpoint_put(endpoint, key, bytes),
     }
 }
@@ -1562,14 +1600,23 @@ fn promote_remote(
         if existing == bytes {
             return Ok(());
         }
-        return Err(invalid("cache endpoint already has conflicting final bytes"));
+        return Err(invalid(
+            "cache endpoint already has conflicting final bytes",
+        ));
     }
     match endpoint {
         CacheEndpoint::Ssh { target, .. } => {
             ssh_mkdir_for_key(endpoint, final_key)?;
-            ssh_promote(target, &endpoint_key(endpoint, partial)?, &endpoint_key(endpoint, final_key)?)
+            ssh_promote(
+                target,
+                &endpoint_key(endpoint, partial)?,
+                &endpoint_key(endpoint, final_key)?,
+            )
         }
-        CacheEndpoint::S3(_) => s3_promote(endpoint_key(endpoint, partial)?, endpoint_key(endpoint, final_key)?),
+        CacheEndpoint::S3(_) => s3_promote(
+            endpoint_key(endpoint, partial)?,
+            endpoint_key(endpoint, final_key)?,
+        ),
         _ => Err(invalid(&format!(
             "{} cache endpoint cannot promote staged objects",
             endpoint.label()
@@ -1589,7 +1636,9 @@ fn verify_nix_endpoint(
     nix_copy(uri, "--from", &entry.out)?;
     let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
     if actual != entry.envelope.output_hash {
-        return Err(invalid("Nix store output hash disagrees with the Hangar identity"));
+        return Err(invalid(
+            "Nix store output hash disagrees with the Hangar identity",
+        ));
     }
     let (nar, stats) = super::write_nar(Path::new(&entry.out))?;
     let proof = prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes, key)?;
@@ -1612,7 +1661,9 @@ fn verify_hangar_endpoint(
     }
     let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
     if actual != entry.envelope.output_hash {
-        return Err(invalid("local Hangar output hash disagrees with its identity"));
+        return Err(invalid(
+            "local Hangar output hash disagrees with its identity",
+        ));
     }
     let (nar, _) = super::write_nar(Path::new(&entry.out))?;
     Ok(Some(nar))
@@ -1627,11 +1678,20 @@ fn substitute_hangar_endpoint(
         return Ok(None);
     }
     let result = (|| {
+        let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
+        if actual != entry.envelope.output_hash {
+            return Err(invalid(
+                "local Hangar output hash disagrees with its identity",
+            ));
+        }
         copy_tree(Path::new(&entry.out), destination)?;
+        super::seal_node(destination)?;
         let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
             .map_err(io::Error::other)?;
         if actual != entry.envelope.output_hash {
-            return Err(invalid("local Hangar output hash disagrees with its identity"));
+            return Err(invalid(
+                "local Hangar output hash disagrees with its identity",
+            ));
         }
         let (nar, _) = super::write_nar(destination)?;
         Ok(nar)
@@ -1658,10 +1718,13 @@ fn substitute_nix_endpoint(
         let transfer = verify_nix_endpoint(endpoint, entry, key)?
             .ok_or_else(|| invalid("Nix substitution was called for a non-Nix endpoint"))?;
         super::read_nar(&transfer.nar, destination)?;
+        super::seal_node(destination)?;
         let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
             .map_err(io::Error::other)?;
         if actual != entry.envelope.output_hash {
-            return Err(invalid("Nix store output hash disagrees with the Hangar identity"));
+            return Err(invalid(
+                "Nix store output hash disagrees with the Hangar identity",
+            ));
         }
         let (_, stats) = super::write_nar(destination)?;
         if stats.digest != transfer.nar_hash {
@@ -1715,12 +1778,7 @@ fn prove_nix_transfer(
 /// path against the host's configured trusted keys; this HMAC binds that
 /// verified Nix fact to the cache binding that admitted it. The HMAC tag is
 /// an admission proof, not a replacement for Nix's signature check.
-fn nix_admission_fingerprint(
-    uri: &str,
-    path: &str,
-    info: &NixPathInfo,
-    key: &TrustKey,
-) -> String {
+fn nix_admission_fingerprint(uri: &str, path: &str, info: &NixPathInfo, key: &TrustKey) -> String {
     let message = format!(
         "jetpack-nix-transfer-v1\n{uri}\n{path}\n{}\n{}",
         info.nar_hash, info.signed_fingerprint
@@ -1738,7 +1796,11 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| invalid(&format!("Nix store metadata adapter could not start: {error}")))?;
+        .map_err(|error| {
+            invalid(&format!(
+                "Nix store metadata adapter could not start: {error}"
+            ))
+        })?;
     let (status, stdout, stderr) = run_bounded_output(child, MAX_INFO_BYTES, "Nix store metadata")?;
     if !status.success() {
         return Err(invalid(&format!(
@@ -1768,10 +1830,7 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
             object,
         ),
         crate::JSON::JSONValue::Object(object) if object.len() == 1 => {
-            let (path, value) = object
-                .iter()
-                .next()
-                .expect("one-entry Nix metadata object");
+            let (path, value) = object.iter().next().expect("one-entry Nix metadata object");
             (path.as_str(), value.as_object().map_err(io::Error::other)?)
         }
         crate::JSON::JSONValue::Array(_) => {
@@ -1780,7 +1839,9 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
         _ => return Err(invalid("Nix store metadata is not an object")),
     };
     if reported_path != path {
-        return Err(invalid("Nix store metadata path disagrees with the requested path"));
+        return Err(invalid(
+            "Nix store metadata path disagrees with the requested path",
+        ));
     }
     let nar_hash = object
         .get("narHash")
@@ -1788,15 +1849,21 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
         .as_str()
         .map_err(io::Error::other)?
         .to_string();
-    let nar_size = object.get("narSize").map(|value| {
-        let size = match value {
-            crate::JSON::JSONValue::Number(size) if *size >= 0 => *size as u64,
-            crate::JSON::JSONValue::Flt(size)
-                if size.is_finite() && *size >= 0.0 && size.fract() == 0.0 => *size as u64,
-            _ => return Err(invalid("Nix store metadata NarSize is not an integer")),
-        };
-        Ok(size)
-    }).transpose()?;
+    let nar_size = object
+        .get("narSize")
+        .map(|value| {
+            let size = match value {
+                crate::JSON::JSONValue::Number(size) if *size >= 0 => *size as u64,
+                crate::JSON::JSONValue::Flt(size)
+                    if size.is_finite() && *size >= 0.0 && size.fract() == 0.0 =>
+                {
+                    *size as u64
+                }
+                _ => return Err(invalid("Nix store metadata NarSize is not an integer")),
+            };
+            Ok(size)
+        })
+        .transpose()?;
     let signatures = match object.get("signatures") {
         Some(value) => value
             .as_array()
@@ -1806,9 +1873,13 @@ fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
                 let signature = value.as_str().map_err(io::Error::other)?;
                 if signature.is_empty()
                     || signature.len() > 4096
-                    || signature.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+                    || signature
+                        .bytes()
+                        .any(|byte| byte == 0 || byte.is_ascii_control())
                 {
-                    return Err(invalid("Nix store metadata has an invalid signature fingerprint"));
+                    return Err(invalid(
+                        "Nix store metadata has an invalid signature fingerprint",
+                    ));
                 }
                 Ok(signature.to_string())
             })
@@ -1901,43 +1972,31 @@ fn nix_copy(uri: &str, direction: &str, path: &str) -> io::Result<()> {
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(source)?;
-    if metadata.file_type().is_symlink() {
-        return Err(invalid("Nix store output is a symlink"));
-    }
-    if metadata.is_dir() {
-        if destination.exists() {
-            return Err(invalid("cache substitution destination already exists"));
-        }
-        fs::create_dir_all(destination)?;
-        for entry in fs::read_dir(source)? {
-            let entry = entry?;
-            copy_tree(&entry.path(), &destination.join(entry.file_name()))?;
-        }
-        return Ok(());
-    }
-    if !metadata.is_file() {
-        return Err(invalid("Nix store output is not a regular tree"));
-    }
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(source, destination)?;
-    Ok(())
+    super::copy_snapshot_node(source, destination, &mut BTreeMap::new())
 }
 
 fn http_get(url: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
     let child = Command::new("curl")
-        .args(["--silent", "--show-error", "--netrc-optional", "--compressed", "--max-time", "120", "--write-out", "\n%{http_code}", &url])
+        .args([
+            "--silent",
+            "--show-error",
+            "--netrc-optional",
+            "--compressed",
+            "--max-time",
+            "120",
+            "--write-out",
+            "\n%{http_code}",
+            &url,
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| invalid(&format!("HTTP cache adapter could not start: {error}")))?;
-    let (status_result, stdout, stderr) = run_bounded_output(
-        child,
-        limit.saturating_add(64),
-        "HTTP cache response",
-    )?;
+    let (status_result, stdout, stderr) =
+        run_bounded_output(child, limit.saturating_add(64), "HTTP cache response")?;
     let Some(separator) = stdout.iter().rposition(|byte| *byte == b'\n') else {
         return Err(invalid("HTTP cache adapter returned no status"));
     };
@@ -1949,7 +2008,10 @@ fn http_get(url: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
         return Ok(None);
     }
     if !status_result.success() || !(200..300).contains(&status) {
-        return Err(invalid(&format!("HTTP cache GET failed with status {status}: {}", bounded_stderr(&stderr))));
+        return Err(invalid(&format!(
+            "HTTP cache GET failed with status {status}: {}",
+            bounded_stderr(&stderr)
+        )));
     }
     let body = &stdout[..separator];
     if body.len() as u64 > limit {
@@ -1960,22 +2022,47 @@ fn http_get(url: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
 
 fn http_put(url: String, bytes: &[u8]) -> io::Result<()> {
     let mut child = Command::new("curl")
-        .args(["--silent", "--show-error", "--netrc-optional", "--compressed", "--max-time", "120", "--request", "PUT", "--data-binary", "@-", "--output", null_device(), "--write-out", "\n%{http_code}", &url])
+        .args([
+            "--silent",
+            "--show-error",
+            "--netrc-optional",
+            "--compressed",
+            "--max-time",
+            "120",
+            "--request",
+            "PUT",
+            "--data-binary",
+            "@-",
+            "--output",
+            null_device(),
+            "--write-out",
+            "\n%{http_code}",
+            &url,
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| invalid(&format!("HTTP cache adapter could not start: {error}")))?;
-    child.stdin.take().ok_or_else(|| invalid("HTTP cache adapter has no input"))?.write_all(bytes)?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| invalid("HTTP cache adapter has no input"))?
+        .write_all(bytes)?;
     let (status_result, stdout, stderr) = run_bounded_output(child, 64, "HTTP cache response")?;
-    let status = stdout.rsplit(|byte| *byte == b'\n').next()
+    let status = stdout
+        .rsplit(|byte| *byte == b'\n')
+        .next()
         .and_then(|value| std::str::from_utf8(value).ok())
         .and_then(|value| value.trim().parse::<u16>().ok())
         .unwrap_or(0);
     if status_result.success() && (200..300).contains(&status) {
         Ok(())
     } else {
-        Err(invalid(&format!("HTTP cache PUT failed with status {status}: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "HTTP cache PUT failed with status {status}: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2008,7 +2095,10 @@ fn ssh_mkdir(target: &str, root: &str) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("SSH cache mkdir failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "SSH cache mkdir failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2036,12 +2126,19 @@ fn ssh_put(target: &str, path: &str, bytes: &[u8]) -> io::Result<()> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-    child.stdin.take().ok_or_else(|| invalid("SSH cache adapter has no input"))?.write_all(bytes)?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| invalid("SSH cache adapter has no input"))?
+        .write_all(bytes)?;
     let (status, _, stderr) = run_bounded_output(child, 1, "SSH cache response")?;
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("SSH cache PUT failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "SSH cache PUT failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2055,12 +2152,19 @@ fn ssh_append(target: &str, path: &str, bytes: &[u8]) -> io::Result<()> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| invalid(&format!("SSH cache adapter could not start: {error}")))?;
-    child.stdin.take().ok_or_else(|| invalid("SSH cache adapter has no input"))?.write_all(bytes)?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| invalid("SSH cache adapter has no input"))?
+        .write_all(bytes)?;
     let (status, _, stderr) = run_bounded_output(child, 1, "SSH cache response")?;
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("SSH cache append failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "SSH cache append failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2078,7 +2182,10 @@ fn ssh_promote(target: &str, partial: &str, final_path: &str) -> io::Result<()> 
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("SSH cache promotion failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "SSH cache promotion failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2108,12 +2215,19 @@ fn s3_put(uri: String, bytes: &[u8]) -> io::Result<()> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| invalid(&format!("S3 cache adapter could not start: {error}")))?;
-    child.stdin.take().ok_or_else(|| invalid("S3 cache adapter has no input"))?.write_all(bytes)?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| invalid("S3 cache adapter has no input"))?
+        .write_all(bytes)?;
     let (status, _, stderr) = run_bounded_output(child, 4096, "S3 cache response")?;
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("S3 cache PUT failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "S3 cache PUT failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
@@ -2128,12 +2242,17 @@ fn s3_promote(partial: String, final_uri: String) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(invalid(&format!("S3 cache promotion failed: {}", bounded_stderr(&stderr))))
+        Err(invalid(&format!(
+            "S3 cache promotion failed: {}",
+            bounded_stderr(&stderr)
+        )))
     }
 }
 
 fn bounded_stderr(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).trim().to_string()
+    String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
+        .trim()
+        .to_string()
 }
 
 /// Run a host transport with a hard stdout bound. The child is killed as soon
@@ -2189,7 +2308,11 @@ fn run_bounded_output(
 }
 
 fn null_device() -> &'static str {
-    if cfg!(windows) { "NUL" } else { "/dev/null" }
+    if cfg!(windows) {
+        "NUL"
+    } else {
+        "/dev/null"
+    }
 }
 
 fn publish_local_resumable(
@@ -2292,7 +2415,10 @@ fn write_resumable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let partial = path.with_extension("partial");
     let mut offset = 0usize;
     if let Ok(metadata) = fs::symlink_metadata(&partial) {
-        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > bytes.len() as u64 {
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || metadata.len() > bytes.len() as u64
+        {
             let _ = fs::remove_file(&partial);
         } else {
             let existing = read_regular_bounded(&partial, bytes.len() as u64)?;
@@ -2324,7 +2450,9 @@ fn write_resumable(path: &Path, bytes: &[u8]) -> io::Result<()> {
             Ok(())
         } else {
             let _ = fs::remove_file(&partial);
-            Err(invalid("cache object was concurrently published with different bytes"))
+            Err(invalid(
+                "cache object was concurrently published with different bytes",
+            ))
         };
     }
     match fs::hard_link(&partial, path) {
@@ -2340,7 +2468,9 @@ fn write_resumable(path: &Path, bytes: &[u8]) -> io::Result<()> {
             if same {
                 Ok(())
             } else {
-                Err(invalid("cache object was concurrently published with different bytes"))
+                Err(invalid(
+                    "cache object was concurrently published with different bytes",
+                ))
             }
         }
         Err(error) => {
@@ -2435,7 +2565,10 @@ fn validate_component(value: &str, label: &str) -> io::Result<()> {
 }
 
 fn validate_text(value: &str, label: &str) -> io::Result<()> {
-    if value.bytes().any(|byte| byte == 0 || byte == b'\n' || byte == b'\r') {
+    if value
+        .bytes()
+        .any(|byte| byte == 0 || byte == b'\n' || byte == b'\r')
+    {
         return Err(invalid(&format!("{label} contains a line break")));
     }
     Ok(())
@@ -2575,8 +2708,7 @@ mod tests {
     #[test]
     fn nix_sri_hash_is_normalized_to_the_jetpack_digest() {
         assert_eq!(
-            nix_nar_hash_to_jet("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                .unwrap(),
+            nix_nar_hash_to_jet("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap(),
             format!("sha256:{}", "00".repeat(32))
         );
     }

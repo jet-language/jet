@@ -692,12 +692,22 @@ pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";
 
-/// D-JPK-PROFILE1=D: source-backed package generation inspection and generation
-/// commands. The first delivery slice exposes `plan`; switching and history
-/// are owned by the dependent profile cards.
+/// D-JPK-PROFILE1=D: one source-backed package generation engine. Planning,
+/// publication, switching, rollback, and history all address the same
+/// generation records.
 pub const PROFILE_SUBCOMMAND: &str = "profile";
 pub const PROFILE_VERB_PLAN: &str = "plan";
-pub const PROFILE_VERBS: &[&str] = &[PROFILE_VERB_PLAN];
+pub const PROFILE_VERB_BUILD: &str = "build";
+pub const PROFILE_VERB_SWITCH: &str = "switch";
+pub const PROFILE_VERB_ROLLBACK: &str = "rollback";
+pub const PROFILE_VERB_GENERATIONS: &str = "generations";
+pub const PROFILE_VERBS: &[&str] = &[
+    PROFILE_VERB_PLAN,
+    PROFILE_VERB_BUILD,
+    PROFILE_VERB_SWITCH,
+    PROFILE_VERB_ROLLBACK,
+    PROFILE_VERB_GENERATIONS,
+];
 
 /// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock|provision|resolve|list`.
 pub const BROWSER_SUBCOMMAND: &str = "browser";

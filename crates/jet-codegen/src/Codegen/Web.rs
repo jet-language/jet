@@ -1014,6 +1014,12 @@ fn web_wasm_expr_supported(
                 lambda: None,
                 ..
             } => false,
+            TIR::TFnValueKind::Policy { callee, policy_args, .. } => {
+                web_wasm_expr_supported(callee, bundle, file_prefix, reconstructions)
+                    && policy_args.iter().all(|arg| {
+                        web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
+                    })
+            }
             TIR::TFnValueKind::Call { callee, args } => {
                 web_wasm_expr_supported(callee, bundle, file_prefix, reconstructions)
                     && args.iter().all(|arg| {
@@ -1786,6 +1792,10 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 lambda: None,
                 ..
             } => false,
+            TIR::TFnValueKind::Policy { callee, policy_args, .. } => {
+                web_expr_supported(callee)
+                    && policy_args.iter().all(|arg| web_expr_supported(&arg.value))
+            }
             TIR::TFnValueKind::Call { callee, args } => {
                 web_expr_supported(callee)
                     && args.iter().all(|arg| web_expr_supported(&arg.value))
@@ -6316,6 +6326,7 @@ fn wasm_emit_expr(
                 lambda: None,
                 ..
             } => return Err(()),
+            TIR::TFnValueKind::Policy { .. } => return Err(()),
             TIR::TFnValueKind::Call { callee, args } => format!(
                 "({})({})",
                 wasm_emit_expr(callee, funcs, file_prefix, reconstructions)?,
@@ -8675,6 +8686,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 lambda: None,
                 ..
             } => return Err(()),
+            TIR::TFnValueKind::Policy { .. } => return Err(()),
             TIR::TFnValueKind::Call { callee, args } => format!(
                 "({})({})",
                 tir_js_expr(callee, funcs, file_prefix)?,

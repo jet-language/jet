@@ -18,6 +18,81 @@ use crate::Syntax;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+        /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
+        /// binder as ordinary functions, including default expressions and
+        /// their private earlier-parameter references.
+        fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
+            for argument in arguments {
+                let Expr::Call(policy) = &mut argument.expr else {
+                    continue;
+                };
+                if CallablePolicyChain::is_builtin(&policy.name) {
+                    continue;
+                }
+                let Some((_, declaration)) = self
+                    .callable_policy_declarations
+                    .get(&(self.package_scope.to_string(), policy.name.clone()))
+                    .cloned()
+                else {
+                    continue;
+                };
+                let params = declaration
+                    .params
+                    .iter()
+                    .map(|param| crate::Sema::CallBinder::BindParam {
+                        label: param.call_label(),
+                        name: &param.name,
+                        zone: param.zone,
+                        default: param.default.as_deref(),
+                        convention: param.convention,
+                        ty: Some(&param.ty),
+                        variadic: param.variadic,
+                        core_default: None,
+                    })
+                    .collect::<Vec<_>>();
+                let _ = crate::Sema::CallBinder::bind_call_args(
+                    &policy.name,
+                    &params,
+                    &mut policy.args,
+                    span,
+                    &mut self.diags,
+                );
+                self.register_binder_refs(&policy.args);
+            }
+        }
+
+        /// D-VARIADIC1: the policy call has the same fixed list-slot ABI as an
+        /// ordinary function call. Bind first so defaults occupy their slots,
+        /// then pack the user declaration's homogeneous rest tail once.
+        fn normalize_user_policy_arguments(
+            &mut self,
+            arguments: &mut [crate::AST::CallArg],
+        ) {
+            for argument in arguments {
+                let Expr::Call(policy) = &mut argument.expr else {
+                    continue;
+                };
+                if CallablePolicyChain::is_builtin(&policy.name) {
+                    continue;
+                }
+                let Some((_, declaration)) = self
+                    .callable_policy_declarations
+                    .get(&(self.package_scope.to_string(), policy.name.clone()))
+                    .cloned()
+                else {
+                    continue;
+                };
+                if !declaration.params.last().is_some_and(|param| param.variadic) {
+                    continue;
+                }
+                let mut synthetic = crate::AST::Func::implicit_run(Vec::new(), declaration.span);
+                synthetic.name = policy.name.clone();
+                synthetic.params = declaration.params;
+                let signature = crate::Sema::func_to_sig(&synthetic);
+                self.normalize_variadic_call(policy, &signature);
+            }
+        }
+
         /// D-CONC-FREEZE1=A: validate one owned, deeply snapshot-able value.
         /// The result keeps the source type; the frozen proof lives in the
         /// flow store when a binding receives this call.
@@ -94,8 +169,9 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             };
-            let policy_exprs: Vec<Expr> = policy_args.iter().map(|arg| arg.expr.clone()).collect();
-            let chain = match CallablePolicyChain::parse(&policy_exprs) {
+            let parsed_policy_exprs: Vec<Expr> =
+                policy_args.iter().map(|arg| arg.expr.clone()).collect();
+            let chain = match CallablePolicyChain::parse(&parsed_policy_exprs) {
                 Ok(chain) => chain,
                 Err(reason) => {
                     self.diags.push(Diagnostic::error(
@@ -110,16 +186,20 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
+            self.bind_user_policy_arguments(policy_args, call.name_span);
+            let policy_exprs: Vec<Expr> =
+                policy_args.iter().map(|arg| arg.expr.clone()).collect();
             if !self.validate_callable_policy_values(&policy_exprs, call.name_span) {
                 return None;
             }
-            for argument in policy_args {
+            for argument in &mut *policy_args {
                 if let Expr::Call(policy_call) = &mut argument.expr {
                     for value in &mut policy_call.args {
                         self.infer(&mut value.expr);
                     }
                 }
             }
+            self.normalize_user_policy_arguments(policy_args);
             if callee.label.is_some() || callee.spread {
                 self.diags.push(Diagnostic::error(
                     "E0764",

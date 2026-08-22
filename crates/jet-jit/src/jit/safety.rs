@@ -2562,7 +2562,9 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             ((type_name == "Decimal"
                     && matches!(
                         (func.as_str(), args.len()),
-                        ("from_str" | "to_string", 1) | ("add" | "sub" | "mul", 2)
+                        ("from_str" | "to_string", 1)
+                            | ("add" | "sub" | "mul" | "equal", 2)
+                            | ("to_float", 1)
                     ))
                 || (type_name == "Fraction"
                     && matches!(
@@ -2683,6 +2685,13 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     | TIR::TTryConvert::Typed(_)
                     | TIR::TTryConvert::WidenUnion { .. }
             ) && resident_safe_expr(inner, callees)
+        }
+        TExprKind::OptField { base, .. } => {
+            matches!(
+                &base.ty,
+                Type::Option(payload)
+                    if record_type_key(payload).is_some() || jit_tuple_type(payload)
+            ) && resident_safe_expr(base, callees)
         }
         TExprKind::DecodeUnder { segment, inner } => {
             resident_safe_expr(segment, callees) && resident_safe_expr(inner, callees)
@@ -2890,6 +2899,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
             }
             TIR::TFnValueKind::Interrupt { value } => resident_safe_expr(value, callees),
+            // D-STRUCT-POLICY1=A: a policy fn-value forwards the target's whole
+            // argument contract through a generated checked wrapper. The resident
+            // tier has no lowering for that wrapper yet, so decline it here and
+            // let the canonical TIR evaluator run it. Declining preserves one
+            // meaning across tiers; a resident lowering replaces this.
+            TIR::TFnValueKind::Policy { .. } => false,
         },
         TExprKind::PatternMatches { subj, .. } => resident_safe_expr(subj, callees),
         TExprKind::OptionLift2 { f, a, b } => {
@@ -4710,6 +4725,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             | BinOp::Pow
                             | BinOp::FloorDiv
                     )
+                }
+                Type::Named(name) if name == "Decimal" => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
                 }
                 Type::String => matches!(op, BinOp::Add),
                 _ => false,

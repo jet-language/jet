@@ -1,3 +1,11 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/E0409_refutable_test_bind_shape_miss_err.jet:6:32
+    |
+  6 | fn read_choice(choice: Choice) => Int {
+    |                                ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0409]: `err` is not available after a pure pattern miss
   --> tests/ui/E0409_refutable_test_bind_shape_miss_err.jet:7:38
     |

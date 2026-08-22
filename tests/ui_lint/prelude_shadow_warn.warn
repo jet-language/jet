@@ -5,3 +5,11 @@ Warning [L0510] (prelude_alias_shadow): declaration print replaces a Core prelud
     |    ^^^^^
  Why: the readable Core prelude opens this name automatically, and a user declaration wins in its file
  Fix: keep the declaration to accept the shadow, or rename it to use the prelude alias
+
+Warning [L0104] (unused_private_fn): private function `print` is never called or used as a value.
+  --> tests/ui_lint/prelude_shadow_warn.jet:1:4
+    |
+  1 | fn print() {}
+    |    ^^^^^
+ Why: a private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: remove the function, or rename `print` to `_print` when it is intentional.

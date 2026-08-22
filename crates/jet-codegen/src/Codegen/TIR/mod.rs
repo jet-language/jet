@@ -4639,6 +4639,16 @@ pub enum TFnValueKind {
         name: Option<String>,
         lambda: Option<Box<TLambda>>,
     },
+    /// D-STRUCT-POLICY1=A: a checked package policy closes over its typed
+    /// setting values and the supplied callable, then forwards the target's
+    /// full argument contract to the generated checked wrapper function.
+    Policy {
+        wrapper: String,
+        fn_type: Type,
+        policy_args: Vec<TCallArg>,
+        policy_conventions: Vec<crate::AST::AccessConvention>,
+        callee: Box<TExpr>,
+    },
     /// A call through a fn-value. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
     Call {

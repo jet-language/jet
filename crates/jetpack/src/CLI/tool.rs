@@ -474,7 +474,7 @@ fn current_path() -> PathBuf {
     tools_state_dir().join(PROFILE_CURRENT_FILE)
 }
 
-fn now_secs() -> u64 {
+pub(super) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1018,7 +1018,7 @@ fn validate_digest(value: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn read_bounded(path: &Path) -> io::Result<String> {
+pub(super) fn read_bounded(path: &Path) -> io::Result<String> {
     const MAX_PROFILE_METADATA: u64 = 1024 * 1024;
     let file = fs::File::open(path)?;
     if file.metadata()?.len() > MAX_PROFILE_METADATA {
@@ -1032,7 +1032,7 @@ fn read_bounded(path: &Path) -> io::Result<String> {
     String::from_utf8(bytes).map_err(|_| io::Error::other("profile metadata is not UTF-8"))
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1041,7 +1041,7 @@ fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
-fn profile_generation_witness(
+pub(super) fn profile_generation_witness(
     metadata: &str,
     digests: &std::collections::BTreeSet<String>,
 ) -> String {

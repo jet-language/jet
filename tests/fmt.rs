@@ -208,8 +208,8 @@ fn computed_declaration_values_format_stably() {
 fn multi_head_function_surface_round_trips() {
     let src = "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) => Float :: r * r\nfn area(Rect(w: Float, h: Float)) => Float :: w * h\n";
     let once = jet::format_source(src).expect("multi-head functions should format");
-    assert!(once.contains("fn area(Circle(r: Float)) :> Float :: r * r"));
-    assert!(once.contains("fn area(Rect(w: Float, h: Float)) :> Float :: w * h"));
+    assert!(once.contains("fn area(Circle(r: Float)) Float -> r * r"));
+    assert!(once.contains("fn area(Rect(w: Float, h: Float)) Float -> w * h"));
     let twice = jet::format_source(&once).expect("formatted multi-head functions should parse");
     assert_eq!(once, twice, "multi-head formatting must be stable");
 }
@@ -219,7 +219,7 @@ fn alternatives_only_bar_formatting_is_stable() {
     let src = "enum State { Ready Waiting }\n\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> print(\"known\")\n    }\n}\n";
     let once = jet::format_source(src).expect("choice alternatives should format");
     assert!(
-        once.contains(".Ready | .Waiting :>"),
+        once.contains(".Ready | .Waiting ->"),
         "formatter lost the alternatives-only bar:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted alternatives should parse");
@@ -380,7 +380,7 @@ fn step_speed(speed: Int) => Int {
     let out = jet::format_source(src).expect("fmt should accept #Meta attributes");
     for needle in [
         "#Meta(category: \"Movement\", tunable)",
-        "fn step_speed(speed: Int) :> Int {",
+        "fn step_speed(speed: Int) Int {",
         "next :: speed + 1",
     ] {
         assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
@@ -490,7 +490,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     );
     // Arms and their bodies survive. The formatter may add visible arm blocks.
     assert!(
-        out.contains(".Linux :> {") && out.contains(".MacOS :> { print(\"mac\") }"),
+        out.contains(".Linux -> {") && out.contains(".MacOS -> { print(\"mac\") }"),
         "expected OS arms preserved, got:\n{out}"
     );
     assert!(
@@ -498,7 +498,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
         "expected arm bodies preserved, got:\n{out}"
     );
     assert!(
-        out.contains("else :> { print(\"other\") }"),
+        out.contains("else -> { print(\"other\") }"),
         "expected the else arm preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("comptime OS dispatch output should re-fmt");
@@ -536,7 +536,7 @@ fn fmt_keeps_empty_dispatch_arms_compact_and_stable() {
 "#;
     let out = jet::format_source(src).expect("empty dispatch arm should format");
     assert!(
-        out.contains("else :> {}"),
+        out.contains("else -> {}"),
         "empty dispatch arm should stay compact, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("empty dispatch arm should reformat");
@@ -583,7 +583,7 @@ fn fmt_keeps_trailing_dispatch_arm_comments_attached() {
 "#;
     let once = jet::format_source(src).expect("commented dispatch arm should format");
     assert!(
-        once.contains("print(\"one\") }  // The common case."),
+        once.contains("print(\"one\")  // The common case."),
         "formatter moved or dropped the arm comment:\n{once}"
     );
     let twice = jet::format_source(&once).expect("commented dispatch arm should reformat");
@@ -751,9 +751,9 @@ fn fmt_if_expression_preserves_condition_parens() {
     // S68 (D-SG2): `if` as a value round-trips.
     // D-FMTPARENS1=A: author-written grouping parens are always preserved.
     let src = r#"fn run() {
-    m :: if (a > b) :> {
+    m :: if (a > b) -> {
         a
-    } else :> {
+    } else -> {
         b
     }
     if (a > b) {
@@ -763,7 +763,7 @@ fn fmt_if_expression_preserves_condition_parens() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept an if-expression");
     assert!(
-        out.contains("m :: if (a > b) :> {"),
+        out.contains("m :: if (a > b) -> {"),
         "expected parens preserved in if-expression condition, got:\n{out}"
     );
     assert!(
@@ -771,7 +771,7 @@ fn fmt_if_expression_preserves_condition_parens() {
         "expected parens preserved in statement-if condition, got:\n{out}"
     );
     assert!(
-        out.contains("} else :> {"),
+        out.contains("} else -> {"),
         "expected else branch, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("if-expression output should re-fmt");
@@ -903,7 +903,7 @@ fn run() {
         "expected named tuple literal preserved, got:\n{out}"
     );
     assert!(
-        out.contains(":> (max: Int, min: Int)"),
+        out.contains("fn bounds() (max: Int, min: Int) {"),
         "expected canonical named tuple return type preserved, got:\n{out}"
     );
     assert!(
@@ -943,7 +943,7 @@ fn use_collections(items: [String], counts: [String:Int]) {}
 "#;
     let out = jet::format_source(src).expect("fmt should accept collection type sugar");
     assert!(
-        out.contains("fn shell() :> [JSON]"),
+        out.contains("fn shell() [JSON]"),
         "expected list return shorthand, got:\n{out}"
     );
     assert!(
@@ -965,13 +965,13 @@ fn use_collections(items: [String], counts: [String:Int]) {}
 fn fmt_simplify_one_line_return_is_ast_equal_and_stable() {
     let source = "fn answer() => Int {\n    return 42\n}\n";
     let plain = jet::format_source(source).expect("plain fmt should format");
-    assert!(plain.contains("fn answer() :> Int { return 42 }"), "{plain}");
+    assert!(plain.contains("fn answer() Int { return 42 }"), "{plain}");
     assert!(!plain.contains(":: 42"), "plain fmt must not simplify:\n{plain}");
 
     let options = jet::Formatter::FormatOptions { simplify: true };
     let once = jet::format_source_with_options(source, options)
         .expect("simplify fmt should format");
-    assert_eq!(once, "fn answer() :> Int :: 42\n");
+    assert_eq!(once, "fn answer() Int -> 42\n");
 
     let (before_tokens, before_lex_diags) = jet::Lexer::lex(source);
     assert!(before_lex_diags.is_empty(), "{before_lex_diags:?}");
@@ -1054,7 +1054,7 @@ fn fmt_simplify_keeps_a_routed_value_loop_binding() {
     let simplified = jet::format_source_with_options(&plain, options)
         .expect("a routed value loop must not reach the identity assertion");
     assert!(
-        simplified.contains("fn answer() :> Int :: 42"),
+        simplified.contains("fn answer() Int -> 42"),
         "R1 did not fire ahead of the value loop, so nothing moved:\n{simplified}"
     );
 
@@ -1088,7 +1088,7 @@ fn fmt_simplify_keeps_a_struct_literal_return_braced() {
     let once = jet::format_source_with_options(source, options)
         .expect("a struct-literal return must stay parseable under simplify");
     assert!(
-        once.contains("fn make(width: Int, height: Int) :> Rect { return {"),
+        once.contains("fn make(width: Int, height: Int) Rect { return {"),
         "the braced struct-literal return did not survive simplify:\n{once}"
     );
     assert!(
@@ -1180,7 +1180,7 @@ fn fmt_map_type_spacing_is_canonical_and_value_spacing_stays() {
     let source = "fn read(values: [String: Int]) => [String: Int] {\n    return [\"key\": 1]\n}\n";
     let once = jet::format_source(source).expect("map type should format");
     assert!(once.contains("values: [String:Int]"), "{once}");
-    assert!(once.contains(":> [String:Int]"), "{once}");
+    assert!(once.contains(") [String:Int] {"), "{once}");
     assert!(once.contains("[\"key\": 1]"), "map value spacing changed:\n{once}");
     assert!(!once.contains("[String: Int]"), "retired map type spacing remains:\n{once}");
     assert_eq!(once, jet::format_source(&once).expect("map type output should be stable"));
@@ -1447,7 +1447,7 @@ fn fmt_preserves_bin_take_pattern_literal() {
 
 // --- D-FMT1 (revises S44): fitting one-statement control bodies ---
 //
-// A control body with one simple statement and no inner comment uses `:>` when
+// A control body with one simple statement and no inner comment uses `->` when
 // it fits width 100. Wider, nested, or commented bodies keep braces.
 
 /// Assert formatting is idempotent (D-FMTCOLLAPSE1 may rewrite fitting braces).
@@ -1472,9 +1472,7 @@ fn fmt_concurrency_spellings_that_parse_today() {
     joined :: handle.join()
     cancelled :: .Cancelled
     deadline :: .DeadlineBlown
-    loop value, rx :> {
-        tx.send(value)
-    }
+    loop value, rx -> tx.send(value)
     return .Panicked("boom")
 }
 
@@ -1527,7 +1525,7 @@ fn fmt_preserves_single_line_if() {
 #[test]
 fn fmt_preserves_multiline_if() {
     let src = "fn run() {\n    ready :: true\n    if ready {\n        launch()\n    }\n}\n";
-    let expected = "fn run() {\n    ready :: true\n    if ready :> launch()\n}\n";
+    let expected = "fn run() {\n    ready :: true\n    if ready -> launch()\n}\n";
     let out = jet::format_source(src).expect("multiline if should format");
     assert_eq!(out, expected);
     assert_eq!(out, jet::format_source(&out).expect("collapsed if should reformat"));
@@ -1538,7 +1536,7 @@ fn fmt_classic_if_ignores_braces_inside_leading_trivia() {
     let src =
         "fn run() {\n    ready :: true\n    if /* { trivia */ ready { launch() }\n}\n";
     let out = jet::format_source(src).expect("commented classic if should format");
-    let expected = "fn run() {\n    ready :: true\n    if /* { trivia */ ready :> launch()\n}\n";
+    let expected = "fn run() {\n    ready :: true\n    if /* { trivia */ ready -> launch()\n}\n";
     assert_eq!(out, expected);
     assert_eq!(
         out,
@@ -1578,7 +1576,7 @@ fn fmt_if_else_chain_collapses_when_every_branch_fits() {
     let src = "fn run() {\n    if a { x() } else {\n        y()\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should accept the mixed chain");
     assert_eq!(
-        out, "fn run() {\n    if a :> x() else :> y()\n}\n",
+        out, "fn run() {\n    if a -> x() else -> y()\n}\n",
         "fitting if/else branches should collapse, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("collapsed chain should re-fmt");
@@ -1624,7 +1622,7 @@ fn fmt_single_line_nested_forces_expand() {
     );
     // The inner one-line `if` uses the canonical arrow.
     assert!(
-        out.contains("if b :> x()"),
+        out.contains("if b -> x()"),
         "inner single-line if should survive as an arrow, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("nested output should re-fmt");
@@ -1651,13 +1649,13 @@ fn fmt_preserves_single_line_loops_and_fn() {
     assert_fmt_stable(two_bind, "list two-binding loop");
 
 
-    let fn_src = "fn one() :> Int :: 1\n";
+    let fn_src = "fn one() Int -> 1\n";
     assert_fmt_stable(fn_src, "single-line fn body");
 
     let retired_fn_src = "fn one() => Int = 1\n";
     let retired_fn =
         jet::format_source(retired_fn_src).expect("retired fn body should be fixable");
-    assert!(retired_fn.contains("fn one() :> Int :: 1"), "{retired_fn}");
+    assert!(retired_fn.contains("fn one() Int -> 1"), "{retired_fn}");
 
     let empty_fn_src = "fn noop() {}\n";
     assert_fmt_stable(empty_fn_src, "empty single-line fn body");
@@ -1710,15 +1708,15 @@ enum Damage {
 fn run() {
     d := Damage.Fire.Burn
     if d == {
-        .Physical :> { print(\"physical\") }
-        .Fire :> { print(\"fire\") }
-        .Cold :> { print(\"cold\") }
+        .Physical -> { print(\"physical\") }
+        .Fire -> { print(\"fire\") }
+        .Cold -> { print(\"cold\") }
     }
 }
 ";
     assert_fmt_keeps(
         src,
-        &["Physical {", "Blunt", "Pierce", ".Fire :>", "Fire {"],
+        &["Physical {", "Blunt", "Pierce", ".Fire ->", "Fire {"],
         "nested enum variant groups (D-TAG1)",
     );
 }
@@ -2469,7 +2467,7 @@ fn run() {
         &[
             "fn heal(&self, amount: Int)",
             "fn damage(p: &Player, amount: Int)",
-            "fn archive(p: ^Player) :> Int",
+            "fn archive(p: ^Player) Int {",
             "damage(&p, 10)",
             "archive(^p)",
         ],
@@ -2481,11 +2479,11 @@ fn run() {
 fn fmt_memory_denial_d_authority_mem1_stability() {
     // D-AUTHORITY-MEM1: the memory floor lives on the function effect row.
     let src = "\
-fn run() :[!Mem.Alloc]> {
+fn run() -[!Mem.Alloc]> {
     print(\"ok\")
 }
 ";
-    assert_fmt_keeps(src, &["fn run() :[!Mem.Alloc]>"], "D-AUTHORITY-MEM1 effect denial");
+    assert_fmt_keeps(src, &["fn run() -[!Mem.Alloc]>"], "D-AUTHORITY-MEM1 effect denial");
 }
 
 #[test]
@@ -2587,7 +2585,7 @@ fn run() {
 "#;
     assert_fmt_keeps(
         src,
-        &["found :: loop", "break(found, x)", "values :: loop x, xs :>"],
+        &["found :: loop", "break(found, x)", "values :: loop x, xs ->"],
         "loop values",
     );
     let once = jet::format_source(src).expect("fmt should accept loop values");
@@ -2598,7 +2596,7 @@ fn run() {
         "formatter must hide compiler-generated machine labels: {once}"
     );
 
-    let guard_src = "fn run() {\n    values :: loop u, users if u.active :> u.name\n}\n";
+    let guard_src = "fn run() {\n    values :: loop u, users if u.active -> u.name\n}\n";
     let guard_once = jet::format_source(guard_src).expect("guarded loop should format");
     assert_eq!(
         guard_once, guard_src,
@@ -2641,7 +2639,7 @@ fn fmt_unified_loop_headers_and_next_stability() {
             "?? (next)",
             "loop item, [1, 2, 3], 2",
             "?? next",
-            "if value == 1 :> next",
+            "if value == 1 -> next",
         ],
         "unified loop header",
     );
@@ -2670,21 +2668,21 @@ fn fmt_unified_loop_headers_and_next_stability() {
 fn control_bodies_use_arrows_when_they_fit() {
     let src = "fn run() {\n    if true {\n        print(\"yes\")\n    }\n    loop false print(\"no\")\n}\n";
     let once = jet::format_source(src).expect("fmt should recover the retired adjacent loop");
-    assert!(once.contains("if true :> print(\"yes\")"), "{once}");
-    assert!(once.contains("loop false :> print(\"no\")"), "{once}");
+    assert!(once.contains("if true -> print(\"yes\")"), "{once}");
+    assert!(once.contains("loop false -> print(\"no\")"), "{once}");
     let twice = jet::format_source(&once).expect("formatted controls must parse");
     assert_eq!(once, twice);
 }
 
 #[test]
 fn effect_control_arrows_format_as_one_statement_bodies() {
-    let src = "fn run() {\n    if true :> print(\"yes\") else :> print(\"no\")\n    loop false :> print(\"again\")\n    loop :> print(\"forever\")\n    loop item, [1, 2] :> print(item)\n    loop i := 0, i < 2 :> i += 1\n}\n";
+    let src = "fn run() {\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item, [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}\n";
     let once = jet::format_source(src).expect("effect control arrows should format");
-    assert!(once.contains("if true :> print(\"yes\") else :> print(\"no\")"), "{once}");
-    assert!(once.contains("loop false :> print(\"again\")"), "{once}");
-    assert!(once.contains("loop :> print(\"forever\")"), "{once}");
-    assert!(once.contains("loop item, [1, 2] :> print(item)"), "{once}");
-    assert!(once.contains("loop i := 0, i < 2 :> i += 1"), "{once}");
+    assert!(once.contains("if true -> print(\"yes\") else -> print(\"no\")"), "{once}");
+    assert!(once.contains("loop false -> print(\"again\")"), "{once}");
+    assert!(once.contains("loop -> print(\"forever\")"), "{once}");
+    assert!(once.contains("loop item, [1, 2] -> print(item)"), "{once}");
+    assert!(once.contains("loop i := 0, i < 2 -> i += 1"), "{once}");
     assert_eq!(once, jet::format_source(&once).expect("arrow controls should be stable"));
 }
 
@@ -2693,9 +2691,9 @@ fn loop_headers_use_comma_clauses_and_group_two_names() {
     let src = "fn run() {\n    loop item, [1, 2, 3], 2 { print(item) }\n    loop (key, value), counts { print(key) }\n    loop i, 0..<3 { print(i) }\n}\n";
     let once = jet::format_source(src).expect("fmt should accept comma loop headers");
     for expected in [
-        "loop item, [1, 2, 3], 2 :> print(item)",
-        "loop (key, value), counts :> print(key)",
-        "loop i, 0..<3 :> print(i)",
+        "loop item, [1, 2, 3], 2 -> print(item)",
+        "loop (key, value), counts -> print(key)",
+        "loop i, 0..<3 -> print(i)",
     ] {
         assert!(once.contains(expected), "missing `{expected}`:\n{once}");
     }
@@ -3003,7 +3001,7 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["level: Int(0..100)", ":> Int(0..100)", "Int(0..100).from_int(12)"],
+        &["level: Int(0..100)", "Int(0..100) {", "Int(0..100).from_int(12)"],
         "inline range type positions",
     );
 }
@@ -3683,14 +3681,14 @@ fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
     // arrow; guard-table and value arms keep their arrows.
     let src = r#"fn run() {
     ready :: true
-    if ready :> print("inline")
+    if ready -> print("inline")
     if {
-        ready :> print("ready")
-        false :> print("never")
+        ready -> print("ready")
+        false -> print("never")
     }
     label :: if {
-        ready :> "ready"
-        else :> "waiting"
+        ready -> "ready"
+        else -> "waiting"
     }
     print(label)
 }
@@ -3698,11 +3696,11 @@ fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
     let once = jet::format_source(src).expect("subjectless guards should format");
     assert_eq!(once, src, "concise subjectless guards should stay byte-stable");
     for preserved in [
-        "if ready :> print(\"inline\")",
+        "if ready -> print(\"inline\")",
         "if {",
-        "ready :>",
-        "false :>",
-        "else :> \"waiting\"",
+        "ready ->",
+        "false ->",
+        "else -> \"waiting\"",
         "print(label)",
     ] {
         assert!(once.contains(preserved), "formatter lost `{preserved}`:\n{once}");

@@ -61,19 +61,26 @@ fn retired_jetpack_toml_diagnostic() -> Diagnostic {
 }
 
 pub(super) fn reject_retired_jetpack_toml(dir: &Path) -> Result<(), i32> {
-    if !dir.join(Syntax::JETPACK_TOML).is_file() {
-        return Ok(());
+    let mut dir = AuthorityResolver::authority_walk_root(dir)
+        .unwrap_or_else(|error| report_authority_error(error.diagnostic()));
+    loop {
+        if dir.join(Syntax::JETPACK_TOML).is_file() {
+            let diagnostic = retired_jetpack_toml_diagnostic();
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    Syntax::JETPACK_TOML,
+                    "",
+                    std::slice::from_ref(&diagnostic),
+                )
+            );
+            return Err(2);
+        }
+        let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
+            return Ok(());
+        };
+        dir = parent;
     }
-    let diagnostic = retired_jetpack_toml_diagnostic();
-    eprint!(
-        "{}",
-        crate::Diagnostics::render_all(
-            Syntax::JETPACK_TOML,
-            "",
-            std::slice::from_ref(&diagnostic),
-        )
-    );
-    Err(2)
 }
 
 type CheckedWorkspaceSource = (AuthorityResolver, WorkspaceSource);
@@ -315,10 +322,11 @@ fn finish_workspace_load(
 /// The named-source table declared by the current project's env file (empty
 /// when there is none). Used so explicit CLI refs are project-aware.
 pub(super) fn cwd_table() -> RefSpec::SourceTable {
-    let dir = project_root(&std::env::current_dir().unwrap_or_default());
-    if let Err(code) = reject_retired_jetpack_toml(&dir) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = reject_retired_jetpack_toml(&cwd) {
         std::process::exit(code);
     }
+    let dir = project_root(&cwd);
     let table = match checked_env_file(&dir) {
         Ok(Some(env)) => env.source_table(),
         Ok(None) => RefSpec::SourceTable::empty(),

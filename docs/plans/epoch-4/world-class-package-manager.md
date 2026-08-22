@@ -83,7 +83,9 @@ Production blockers after that stop-line:
   E1207;
 - the current package graph and semantic lock layers contain substantial data
   models, but several are not one live resolver/build/store path;
-- user package profiles/generations do not exist;
+- source-backed package profile planning and immutable project-local
+  generations now exist through the shared package/provider fact path;
+  JetOS/user composition and dev-shell projection remain follow-on slices;
 - Nix package realization and direct foreign-shell entry still require
   installed Nix; the bounded literal devShell bridge is native;
 - optional package-author TOFU remains separate from registry/cache authority;
@@ -253,6 +255,9 @@ live acceptance, and documentation. Work order is binding.
   platform artifact kind. Unsupported special objects are rejected.
 - Race-safe no-follow ingest re-stats open handles and aborts if source mutates.
 - Atomic staged ingest, fsync/rename, crash recovery, quarantine.
+- Native per-user path resolution and reversible migration from the retired
+  state/root-owned Hangar source; old state stays live until the synced native
+  copy is atomically published.
 - References/referrers, deriver/action identity, output digest, platform,
   provenance, signatures, and multiple named outputs.
 - Path-independent digest; same bytes deduplicate below package trees.
@@ -488,6 +493,14 @@ live acceptance, and documentation. Work order is binding.
 - Unsupported, lossy, ambiguous, or conflicting provider facts fail with an
   explicit diagnostic; planning never supplies a silent provider default.
 - Power-loss tests permit old or new only; GC protects retained generations.
+
+The source-backed package-generation slice now implements the package view of
+this law. `profile.<name>` resolves through `PackageProfilePlan`, and
+`jet profile build|switch|rollback|generations` records or activates the same
+project-local generation history. The generation lock preserves raw refs,
+provider facts, output digests, and exact-path collision contenders; the
+existing Store lifecycle root protects each realized output. JetOS/user
+composition and exact dev-shell projection are separate delivery slices.
 
 ### E4-JP15 — typed variants and cross compilation
 

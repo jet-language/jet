@@ -102,9 +102,9 @@ fn valid_name(name: &str) -> io::Result<()> {
 ))]
 mod platform {
     use super::*;
-    use std::ffi::{c_char, CStr, CString};
     #[cfg(target_os = "macos")]
     use std::ffi::c_void;
+    use std::ffi::{c_char, CStr, CString};
     #[cfg(any(target_os = "linux", target_os = "android"))]
     use std::fs;
     use std::fs::OpenOptions;
@@ -414,7 +414,9 @@ mod platform {
         if file.metadata()?.file_type().is_file() {
             Ok(())
         } else {
-            Err(io::Error::other("pinned directory member is not a regular file"))
+            Err(io::Error::other(
+                "pinned directory member is not a regular file",
+            ))
         }
     }
 
@@ -458,9 +460,8 @@ mod platform {
             }
             let entry = unsafe { &*entry };
             let length = usize::from(entry.name_length).min(entry.name.len());
-            let bytes = unsafe {
-                std::slice::from_raw_parts(entry.name.as_ptr().cast::<u8>(), length)
-            };
+            let bytes =
+                unsafe { std::slice::from_raw_parts(entry.name.as_ptr().cast::<u8>(), length) };
             if matches!(bytes, b"." | b"..") {
                 continue;
             }
@@ -580,11 +581,7 @@ mod platform {
         }
 
         pub(super) fn open_read(&self, name: &str) -> io::Result<File> {
-            let file = open_member(
-                &self.path.join(name),
-                GENERIC_READ,
-                false,
-            )?;
+            let file = open_member(&self.path.join(name), GENERIC_READ, false)?;
             require_regular(&file)?;
             Ok(file)
         }
@@ -673,9 +670,7 @@ mod platform {
             .custom_flags(contract.directory_flags)
             .open(path)?;
         let metadata = file.metadata()?;
-        if !metadata.is_dir()
-            || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        {
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(io::Error::other(
                 "pinned path component is not a direct directory",
             ));
@@ -839,7 +834,11 @@ mod tests {
             io::ErrorKind::AlreadyExists
         );
         let mut text = String::new();
-        directory.open_read("destination.txn").unwrap().read_to_string(&mut text).unwrap();
+        directory
+            .open_read("destination.txn")
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
         assert_eq!(text, "destination");
         assert!(directory.open_read("source.partial").is_ok());
         let _ = std::fs::remove_dir_all(root);

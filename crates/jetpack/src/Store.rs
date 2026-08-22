@@ -2060,7 +2060,6 @@ pub(crate) struct PreparedProfileGenerationRoot {
     witness: Lifecycle::RootWitness,
 }
 
-#[allow(dead_code)]
 pub(crate) fn prepare_profile_generation_root(
     roots: &Roots,
     owner: &str,

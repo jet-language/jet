@@ -4,7 +4,23 @@ Error [E0031]: Jet doesn't use `unsafe` to call Rust crates
   1 | unsafe extern rust "demo@1" {
     | ^^^^^^
  Why: foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`
- Fix: write: extern rust "crate@version" { fn name(...) :> T = "rust::path"; }
+ Fix: write: extern rust "crate@version" { fn name(...) T = "rust::path"; }
+
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/unsafe_extern_rust_teaching.jet:2:17
+    |
+  2 |     fn answer() => Int :: "demo::answer"
+    |                 ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/unsafe_extern_rust_teaching.jet:2:17
+    |
+  2 |     fn answer() => Int :: "demo::answer"
+    |                 ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 
 Error [E0003]: expected `=` before the Rust path, found `::`
   --> tests/ui/unsafe_extern_rust_teaching.jet:2:24

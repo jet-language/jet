@@ -29,9 +29,7 @@ impl MovePathPermissions {
         let mut current = Some(path);
         while let Some(directory) = current {
             let metadata = fs::symlink_metadata(directory)?;
-            if metadata.is_dir()
-                && !self.original.iter().any(|(saved, _)| saved == directory)
-            {
+            if metadata.is_dir() && !self.original.iter().any(|(saved, _)| saved == directory) {
                 let original = metadata.permissions();
                 let mut writable = original.clone();
                 #[cfg(unix)]
@@ -49,7 +47,9 @@ impl MovePathPermissions {
             }
             current = directory.parent();
         }
-        Err(std::io::Error::other("quarantine path has no Hangar parent"))
+        Err(std::io::Error::other(
+            "quarantine path has no Hangar parent",
+        ))
     }
 
     pub(super) fn renamed(&mut self, from: &Path, to: &Path) {
@@ -88,12 +88,7 @@ pub fn quarantine_invalid_entry(
     expectation: &CacheExpectation,
 ) -> std::io::Result<()> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let expected_id = entry_id(
-            &entry.name,
-            &entry.version,
-            &entry.reference,
-            &entry.out,
-        );
+        let expected_id = entry_id(&entry.name, &entry.version, &entry.reference, &entry.out);
         if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
@@ -129,9 +124,8 @@ pub fn quarantine_invalid_entry(
             return Ok(());
         }
         let quarantine_output = !current.envelope.output_hash.is_empty()
-            && try_entry_output_hash(roots, &current).is_ok_and(|actual| {
-                actual.as_str() != current.envelope.output_hash.as_str()
-            });
+            && try_entry_output_hash(roots, &current)
+                .is_ok_and(|actual| actual.as_str() != current.envelope.output_hash.as_str());
         let hangar = roots.hangar_dir();
         let mut permissions = MovePathPermissions::default();
         let operation = (|| {
@@ -146,9 +140,7 @@ pub fn quarantine_invalid_entry(
                 fs::rename(&record, &destination)?;
                 permissions.renamed(&record, &destination);
             }
-            let canonical_output = hangar
-                .join(OBJECTS_DIR)
-                .join(&current.envelope.output_hash);
+            let canonical_output = hangar.join(OBJECTS_DIR).join(&current.envelope.output_hash);
             let owned_output = (Path::new(&current.out) == canonical_output)
                 .then(|| PathBuf::from(&current.out))
                 .or_else(|| expectation.owned_output.clone());
@@ -235,7 +227,10 @@ pub(super) fn with_after_child_copy_hook<T>(
     }
 
     AFTER_CHILD_COPY_HOOK.with(|slot| {
-        assert!(slot.borrow().is_none(), "after-child-copy hook already installed");
+        assert!(
+            slot.borrow().is_none(),
+            "after-child-copy hook already installed"
+        );
         *slot.borrow_mut() = Some(Box::new(hook));
     });
     let _reset = Reset;
@@ -252,9 +247,8 @@ fn windows_stable_identity(
     let volume = volume.ok_or_else(|| {
         IngestError::Invalid("Windows file identity has no volume serial number".into())
     })?;
-    let file = file.ok_or_else(|| {
-        IngestError::Invalid("Windows file identity has no file index".into())
-    })?;
+    let file =
+        file.ok_or_else(|| IngestError::Invalid("Windows file identity has no file index".into()))?;
     Ok((u64::from(volume), file, len, attributes))
 }
 
@@ -391,7 +385,10 @@ pub(super) fn recover_hangar_staging_unlocked(roots: &Roots) -> std::io::Result<
             } else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("Hangar partial object `{}` is not removable", path.display()),
+                    format!(
+                        "Hangar partial object `{}` is not removable",
+                        path.display()
+                    ),
                 ));
             }
             swept += 1;
@@ -426,7 +423,10 @@ pub(super) fn sweep_abandoned_directory(path: &Path, label: &str) -> std::io::Re
         } else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("{label} contains an unsupported entry `{}`", child.display()),
+                format!(
+                    "{label} contains an unsupported entry `{}`",
+                    child.display()
+                ),
             ));
         }
         swept += 1;
@@ -482,10 +482,7 @@ pub fn ingest_tree(roots: &Roots, req: &IngestRequest) -> Result<IngestedObject,
     outcome.unwrap_or_else(|| Err(IngestError::IO("ingest produced no result".into())))
 }
 
-fn ingest_tree_unlocked(
-    roots: &Roots,
-    req: &IngestRequest,
-) -> Result<IngestedObject, IngestError> {
+fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedObject, IngestError> {
     if !req.outputs.contains_key("out") {
         return Err(IngestError::Invalid(
             "ingest requires a named output `out`".into(),
@@ -671,7 +668,10 @@ fn ingest_tree_unlocked(
         }
 
         register_entry_unlocked(roots, &entry)?;
-        Ok(IngestedObject { entry, deduplicated })
+        Ok(IngestedObject {
+            entry,
+            deduplicated,
+        })
     })();
 
     // Always scrub this stage dir (success moved trees out; failure quarantines).
@@ -679,9 +679,7 @@ fn ingest_tree_unlocked(
         let quarantine_root = hangar.join("quarantine");
         if ensure_real_directory(&quarantine_root, "Hangar quarantine").is_ok() {
             let quarantine = quarantine_root.join(format!("ingest-{stamp}"));
-            if fs::symlink_metadata(&stage).is_ok()
-                && fs::rename(&stage, &quarantine).is_err()
-            {
+            if fs::symlink_metadata(&stage).is_ok() && fs::rename(&stage, &quarantine).is_err() {
                 let _ = fs::remove_dir_all(&stage);
             }
         } else if fs::symlink_metadata(&stage).is_ok() {
@@ -796,7 +794,14 @@ fn semantic_xattr_names(path: &Path) -> Result<Vec<String>, IngestError> {
         )));
     }
     let mut names = vec![0i8; size as usize];
-    let wrote = unsafe { listxattr(path.as_ptr(), names.as_mut_ptr(), names.len(), XATTR_NOFOLLOW) };
+    let wrote = unsafe {
+        listxattr(
+            path.as_ptr(),
+            names.as_mut_ptr(),
+            names.len(),
+            XATTR_NOFOLLOW,
+        )
+    };
     if wrote < 0 {
         return Err(IngestError::IO(format!(
             "listxattr failed: {}",
@@ -845,7 +850,14 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
         )));
     }
     let mut buf = vec![0u8; size as usize];
-    let wrote = unsafe { lgetxattr(c_path.as_ptr(), c_name.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    let wrote = unsafe {
+        lgetxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    };
     if wrote < 0 {
         return Err(IngestError::IO(format!(
             "lgetxattr `{}` on `{}`: {}",
@@ -877,7 +889,14 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
     let c_name = std::ffi::CString::new(name)
         .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
     let size = unsafe {
-        getxattr(c_path.as_ptr(), c_name.as_ptr(), std::ptr::null_mut(), 0, 0, XATTR_NOFOLLOW)
+        getxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            XATTR_NOFOLLOW,
+        )
     };
     if size < 0 {
         return Err(IngestError::IO(format!(
@@ -888,7 +907,14 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
     }
     let mut value = vec![0; size as usize];
     let wrote = unsafe {
-        getxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_mut_ptr(), value.len(), 0, XATTR_NOFOLLOW)
+        getxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_mut_ptr(),
+            value.len(),
+            0,
+            XATTR_NOFOLLOW,
+        )
     };
     if wrote < 0 {
         return Err(IngestError::IO(format!(
@@ -965,7 +991,14 @@ fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestEr
     let c_name = std::ffi::CString::new(name)
         .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
     if unsafe {
-        setxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_ptr(), value.len(), 0, XATTR_NOFOLLOW)
+        setxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_ptr(),
+            value.len(),
+            0,
+            XATTR_NOFOLLOW,
+        )
     } != 0
     {
         return Err(IngestError::IO(format!(
@@ -1103,11 +1136,7 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
 }
 
 #[allow(unreachable_code)]
-fn copy_nofollow_file(
-    src: &Path,
-    dst: &Path,
-    expected: &fs::Metadata,
-) -> Result<(), IngestError> {
+fn copy_nofollow_file(src: &Path, dst: &Path, expected: &fs::Metadata) -> Result<(), IngestError> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1166,7 +1195,7 @@ fn copy_nofollow_file(
     fs::write(dst, &bytes).map_err(|e| IngestError::IO(e.to_string()))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{PermissionsExt as _, MetadataExt as _};
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
         let mode = expected.mode() & 0o7777;
         fs::set_permissions(dst, fs::Permissions::from_mode(mode))
             .map_err(|e| IngestError::IO(e.to_string()))?;
@@ -1181,15 +1210,26 @@ fn copy_open_file(
     dst: &Path,
     expected: &fs::Metadata,
 ) -> Result<(), IngestError> {
-    let opened = file.metadata().map_err(|e| IngestError::IO(e.to_string()))?;
+    let opened = file
+        .metadata()
+        .map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(expected)? {
-        return Err(IngestError::Mutated(format!("`{}` changed before copy", src.display())));
+        return Err(IngestError::Mutated(format!(
+            "`{}` changed before copy",
+            src.display()
+        )));
     }
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| IngestError::IO(e.to_string()))?;
-    let after = file.metadata().map_err(|e| IngestError::IO(e.to_string()))?;
+    std::io::Read::read_to_end(&mut file, &mut bytes)
+        .map_err(|e| IngestError::IO(e.to_string()))?;
+    let after = file
+        .metadata()
+        .map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(&after)? {
-        return Err(IngestError::Mutated(format!("`{}` changed while copying", src.display())));
+        return Err(IngestError::Mutated(format!(
+            "`{}` changed while copying",
+            src.display()
+        )));
     }
     fs::write(dst, bytes).map_err(|e| IngestError::IO(e.to_string()))
 }
@@ -1237,9 +1277,15 @@ mod portability_tests {
     #[test]
     fn nofollow_flag_matches_supported_target_abi() {
         #[cfg(any(target_os = "linux", target_os = "android"))]
-        assert_eq!(super::super::super::Envelope::nofollow_open_flag().unwrap(), 0o400000);
+        assert_eq!(
+            super::super::super::Envelope::nofollow_open_flag().unwrap(),
+            0o400000
+        );
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        assert_eq!(super::super::super::Envelope::nofollow_open_flag().unwrap(), 0x0100);
+        assert_eq!(
+            super::super::super::Envelope::nofollow_open_flag().unwrap(),
+            0x0100
+        );
         #[cfg(not(any(
             target_os = "linux",
             target_os = "android",

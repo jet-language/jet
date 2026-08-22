@@ -125,8 +125,8 @@ fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
 /// adapter as separate stdout/stderr buffers.
 fn emit_run_output(stdout: &str, stderr: &str) {
     print!("{stdout}");
+    let _ = std::io::stdout().flush();
     if !stderr.is_empty() {
-        let _ = std::io::stdout().flush();
         eprint!("{stderr}");
     }
 }

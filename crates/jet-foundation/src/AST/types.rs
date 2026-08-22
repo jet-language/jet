@@ -423,6 +423,12 @@ impl CallablePolicyChain {
         Self::BUILTIN_NAMES.contains(&name)
     }
 
+    /// D-STRUCT-POLICY1=A: compiler-private identity for one checked
+    /// policy/target wrapper. Sema and TIR share this spelling.
+    pub fn user_wrapper_name(policy: &str, target: &str) -> String {
+        format!("__jet_policy_{policy}_{target}")
+    }
+
     /// Parse the one typed policy value used by both declaration markers and
     /// `apply(...)`. A policy is a call expression, never one of the retired
     /// bare scoped-policy identifiers.

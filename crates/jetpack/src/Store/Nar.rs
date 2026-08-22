@@ -137,7 +137,9 @@ impl NarInfo {
         validate_store_path(&self.store_path)?;
         validate_relative_url(&self.url)?;
         if self.compression != "none" {
-            return Err(invalid("only uncompressed NARs are supported by this cache"));
+            return Err(invalid(
+                "only uncompressed NARs are supported by this cache",
+            ));
         }
         validate_digest(&self.nar_hash)?;
         if self.file_size > MAX_NAR_BYTES as u64 || self.nar_size > MAX_NAR_BYTES as u64 {
@@ -173,7 +175,10 @@ impl NarInfo {
                 || signature.sig_hex.is_empty()
                 || signature.algorithm != crate::TrustRoot::ALG_HMAC_SHA256
                 || signature.sig_hex.len() != 64
-                || !signature.sig_hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || !signature
+                    .sig_hex
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
                 || !signatures.insert(signature.key_id.clone())
             {
                 return Err(invalid("narinfo has an invalid or duplicate signature"));
@@ -756,7 +761,9 @@ fn validate_name(value: &str) -> io::Result<()> {
 fn validate_symlink_target(value: &str) -> io::Result<()> {
     if value.is_empty()
         || value.len() > MAX_NAME_BYTES * 4
-        || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
     {
         return Err(invalid("NAR symlink target is invalid"));
     }
@@ -827,7 +834,9 @@ fn validate_store_reference(value: &str) -> io::Result<()> {
         || value.len() > MAX_NAME_BYTES * 4
         || value.contains('/')
         || value.contains('\\')
-        || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
     {
         Err(invalid("narinfo has an unsafe store reference"))
     } else {
@@ -838,18 +847,19 @@ fn validate_store_reference(value: &str) -> io::Result<()> {
 fn validate_relative_url(value: &str) -> io::Result<()> {
     let path = Path::new(value);
     if value.is_empty()
-        || value.bytes().any(|byte| {
-            byte == 0
-                || byte.is_ascii_control()
-                || matches!(byte, b'?' | b'#' | b'%')
-        })
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || matches!(byte, b'?' | b'#' | b'%'))
         || value.contains("//")
         || value.ends_with('/')
         || path.is_absolute()
         || path.components().any(|component| {
             matches!(
                 component,
-                Component::ParentDir | Component::CurDir | Component::RootDir | Component::Prefix(_)
+                Component::ParentDir
+                    | Component::CurDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
             )
         })
     {
@@ -875,7 +885,8 @@ pub(crate) fn nar_hash_matches(expected: &str, bytes: &[u8]) -> bool {
 }
 
 pub(crate) fn normalize_nar_hash(value: &str) -> io::Result<String> {
-    let bytes = decode_sha256(value).ok_or_else(|| invalid("Nix NarHash is not a SHA-256 digest"))?;
+    let bytes =
+        decode_sha256(value).ok_or_else(|| invalid("Nix NarHash is not a SHA-256 digest"))?;
     Ok(format!("sha256:{}", bytes_to_hex(&bytes)))
 }
 
@@ -942,11 +953,7 @@ fn decode_nix_base32(value: &str) -> Option<[u8; 32]> {
 }
 
 fn line(output: &mut String, key: &str, value: &str) -> io::Result<()> {
-    if key.is_empty()
-        || value.contains('\n')
-        || value.contains('\r')
-        || value.contains('\0')
-    {
+    if key.is_empty() || value.contains('\n') || value.contains('\r') || value.contains('\0') {
         return Err(invalid("narinfo field contains a line break"));
     }
     output.push_str(key);
@@ -989,14 +996,18 @@ fn narinfo_name(store_path: &str) -> io::Result<String> {
 fn read_bounded(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit as u64 {
-        return Err(invalid("binary-cache input is not a regular file within its limit"));
+        return Err(invalid(
+            "binary-cache input is not a regular file within its limit",
+        ));
     }
     let file = fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.take((limit as u64).saturating_add(1))
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err(invalid("binary-cache input exceeded its limit while being read"));
+        return Err(invalid(
+            "binary-cache input exceeded its limit while being read",
+        ));
     }
     Ok(bytes)
 }
@@ -1011,7 +1022,9 @@ fn write_or_match(path: &Path, bytes: &[u8]) -> io::Result<()> {
         if read_bounded(path, bytes.len())? == bytes {
             return Ok(());
         }
-        return Err(invalid("binary-cache destination already has conflicting bytes"));
+        return Err(invalid(
+            "binary-cache destination already has conflicting bytes",
+        ));
     }
     if path.exists() {
         return Err(invalid("binary-cache destination is not a regular file"));
@@ -1050,7 +1063,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
             if same {
                 Ok(())
             } else {
-                Err(invalid("binary-cache destination was concurrently published with different bytes"))
+                Err(invalid(
+                    "binary-cache destination was concurrently published with different bytes",
+                ))
             }
         }
         Err(error) => {
@@ -1142,7 +1157,10 @@ mod tests {
         assert_eq!(stats, second_stats);
         let destination = root.with_extension("out");
         read_nar(&first, &destination).unwrap();
-        assert_eq!(fs::read(destination.join("bin/tool")).unwrap(), [0, 1, 2, 255]);
+        assert_eq!(
+            fs::read(destination.join("bin/tool")).unwrap(),
+            [0, 1, 2, 255]
+        );
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(destination);
     }

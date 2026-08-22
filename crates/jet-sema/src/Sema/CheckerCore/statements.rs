@@ -302,7 +302,14 @@ impl<'a> Checker<'a> {
         /// Place type for assignment expected-type flow (`holder.value = .{…}`).
         fn lvalue_type(&self, target: &LValue) -> Option<Type> {
             match target {
-                LValue::Local { name, .. } => self.lookup(name).map(|info| info.ty.clone()),
+                LValue::Local { name, .. } => self
+                    .lookup(name)
+                    .map(|info| info.ty.clone())
+                    .or_else(|| {
+                        self.is_persist_binding(name)
+                            .then(|| self.consts.get(name).cloned())
+                            .flatten()
+                    }),
                 LValue::Field { base, field, .. } => self.compound_field_type(base, field),
                 LValue::Index { base, .. } => match self.compound_expr_type(base)? {
                     Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
@@ -504,17 +511,24 @@ impl<'a> Checker<'a> {
                     op: Some(op),
                     ..
                 } => {
-                    self.lookup(name).and_then(|info| {
-                        let trait_name = match op {
-                            crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
-                            crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
-                            crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
-                            crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
-                            _ => None,
-                        }?;
-                        self.compound_type_implements(&info.ty, trait_name)
-                            .then_some((Expr::Ident(name.clone(), *name_span), *name_span, *op))
-                    })
+                    self.lookup(name)
+                        .map(|info| info.ty.clone())
+                        .or_else(|| {
+                            self.is_persist_binding(name)
+                                .then(|| self.consts.get(name).cloned())
+                                .flatten()
+                        })
+                        .and_then(|ty| {
+                            let trait_name = match op {
+                                crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+                                crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+                                crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+                                crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+                                _ => None,
+                            }?;
+                            self.compound_type_implements(&ty, trait_name)
+                                .then_some((Expr::Ident(name.clone(), *name_span), *name_span, *op))
+                        })
                 }
                 Stmt::Assign {
                     target: LValue::Field { base, field, span },

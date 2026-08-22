@@ -1,6 +1,6 @@
+use super::{CacheExpectation, CacheIdentity, Closure, Roots, StoreEntry};
 use crate::Comptime::Build::BuildPlanReplay;
 use crate::SHA256;
-use super::{CacheExpectation, CacheIdentity, Closure, Roots, StoreEntry};
 use std::collections::BTreeMap;
 
 const HEADER: &str = "jet-producer-record-v1";
@@ -48,8 +48,8 @@ pub(crate) fn refresh_nix_lock_digest(
             "cannot refresh a Nix producer with an empty project lock digest",
         ));
     }
-    let mut producer = ProducerRecord::decode(&entry.producer_record)
-        .map_err(std::io::Error::other)?;
+    let mut producer =
+        ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
     if producer.provider != "nix" {
         return Ok(entry.clone());
     }
@@ -67,7 +67,6 @@ pub(crate) fn refresh_nix_lock_digest(
         Ok(refreshed)
     })
 }
-
 
 /// Immutable producer facts committed beside package/object relations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,7 +106,10 @@ impl ProducerRecord {
     pub fn encode(&self) -> String {
         let mut fields = BTreeMap::from([
             ("provider".to_string(), self.provider.clone()),
-            ("immutable_source".to_string(), self.immutable_source.clone()),
+            (
+                "immutable_source".to_string(),
+                self.immutable_source.clone(),
+            ),
             ("source_digest".to_string(), self.source_digest.clone()),
             ("plan".to_string(), self.plan.encode()),
             ("toolchain_facts".to_string(), self.toolchain_facts.clone()),
@@ -137,7 +139,8 @@ impl ProducerRecord {
         output: &str,
         identity: &CacheIdentity,
     ) {
-        self.facts.insert("cache.reference".into(), reference.into());
+        self.facts
+            .insert("cache.reference".into(), reference.into());
         self.facts
             .insert("cache.source".into(), self.immutable_source.clone());
         self.facts.insert(
@@ -351,7 +354,11 @@ fn validate_adapter_hook_producer(
             producer.facts.get("build.identity").map(String::as_str),
         ));
     }
-    if producer.plan.facts().get("adapter.build.identity").map(String::as_str)
+    if producer
+        .plan
+        .facts()
+        .get("adapter.build.identity")
+        .map(String::as_str)
         != Some(identity.as_str())
     {
         return Err(hook_fact_mismatch(
@@ -365,9 +372,7 @@ fn validate_adapter_hook_producer(
         ));
     }
     let capabilities = recipe.declared_capabilities().join(",");
-    if producer.facts.get("build.capabilities").map(String::as_str)
-        != Some(capabilities.as_str())
-    {
+    if producer.facts.get("build.capabilities").map(String::as_str) != Some(capabilities.as_str()) {
         return Err(hook_fact_mismatch(
             "build.capabilities",
             &capabilities,
@@ -410,9 +415,7 @@ fn validate_adapter_hook_producer(
                 .map(String::as_str),
         ));
     }
-    if producer.facts.get("build.dependencies").map(String::as_str)
-        != Some(dependencies.as_str())
-    {
+    if producer.facts.get("build.dependencies").map(String::as_str) != Some(dependencies.as_str()) {
         return Err(hook_fact_mismatch(
             "build.dependencies",
             &dependencies,
@@ -440,8 +443,7 @@ pub(crate) fn validate_cached_adapter_hook(
             "adapter cache identity is not the exact build-hook identity",
         ));
     }
-    let producer = ProducerRecord::decode(&entry.producer_record)
-        .map_err(std::io::Error::other)?;
+    let producer = ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
     validate_adapter_hook_producer(&producer, plan, table, expectation)
 }
 
@@ -502,7 +504,6 @@ pub(crate) fn bind_adapter_hook_identity(
     realized.cache_identity = expected;
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

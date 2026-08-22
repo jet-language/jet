@@ -1358,6 +1358,11 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
             .collect(),
         TExprKind::FnValue { kind } => match kind {
             TFnValueKind::NamedFn { .. } => Vec::new(),
+            TFnValueKind::Policy {
+                policy_args, callee, ..
+            } => std::iter::once(callee.as_ref())
+                .chain(policy_args.iter().map(|argument| &argument.value))
+                .collect(),
             TFnValueKind::Call { callee, args } => std::iter::once(callee.as_ref())
                 .chain(eval_call_children(args))
                 .collect(),
@@ -8801,8 +8806,16 @@ impl<'a> EvalCtx<'a> {
                 if std::env::var_os("JET_DEBUG_RAW").is_some() {
                     eprintln!("[raw-debug] from_addr address={address:?} span={:?}", self.span());
                 }
-                let CtValue::Int(address) = address else {
-                    return Err(unsupported("raw pointer address", self.span()));
+                let address = match address {
+                    CtValue::Int(address) => address,
+                    // Radix-prefixed literals use the exact Int spill carrier
+                    // even when they fit the pointer ABI. Project that carrier
+                    // at the same boundary as AOT; refusing it here turns a
+                    // valid sentry check into a false dev boundary.
+                    CtValue::BigInt(address) => address
+                        .try_i64()
+                        .ok_or_else(|| unsupported("raw pointer address", self.span()))?,
+                    _ => return Err(unsupported("raw pointer address", self.span())),
                 };
                 let address = usize::try_from(address)
                     .map_err(|_| unsupported("raw pointer address", self.span()))?;
@@ -9657,6 +9670,23 @@ impl<'a> EvalCtx<'a> {
                     lambda: None,
                     ..
                 } => Err(unsupported("rendered function coercion", self.span())),
+                TFnValueKind::Policy {
+                    wrapper,
+                    policy_args,
+                    callee,
+                    ..
+                } => {
+                    let mut values = Vec::with_capacity(policy_args.len());
+                    for argument in policy_args {
+                        values.push(self.eval_expr_child(&argument.value, scope)?);
+                    }
+                    let callee = self.eval_expr_child(callee, scope)?;
+                    Ok(self.store_callable(EvalCallable::Policy {
+                        wrapper,
+                        policy_args: values,
+                        callee,
+                    }))
+                }
                 TFnValueKind::Call { callee, args } => {
                     let callable = self.eval_expr_child(callee, scope)?;
                     let mut argv = Vec::with_capacity(args.len());

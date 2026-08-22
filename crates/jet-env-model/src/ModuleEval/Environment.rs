@@ -666,7 +666,10 @@ impl PackageProfilePlan {
             fingerprint_field(&mut canonical, "collision.path", path);
             fingerprint_field(&mut canonical, "collision.provider", provider);
         }
-        self.fingerprint = jet_pkg_model::SHA256::sha256_hex(canonical.as_bytes());
+        self.fingerprint = format!(
+            "sha256-{}",
+            jet_pkg_model::SHA256::sha256_hex(canonical.as_bytes())
+        );
         self.provider_facts = self
             .packages
             .iter()

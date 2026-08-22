@@ -421,14 +421,43 @@ impl<'a> Parser<'a> {
         }
         let mut workloads = Vec::with_capacity(fields.len());
         for (name, name_span, value) in fields {
-            let Expr::EnumLit { type_name, variant, args, span, .. } = value else {
-                return Err(Diagnostic::error(
-                    "E2903",
-                    format!("performance workload `{name}` is not valid"),
-                    "a compile workload must be `CompilerWorkload.Edit`".to_string(),
-                    "write `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
-                    Some(value.span()),
-                ));
+            // `CompilerWorkload.Edit{ … }` is tokenized as a qualified typed
+            // literal, so the expression parser represents it as a named
+            // `StructLit`, while the older parenthesized form is an
+            // `EnumLit`. Accept both AST spellings at this config seam; they
+            // describe the same closed workload value and the formatter emits
+            // the brace form.
+            let (type_name, variant, args, span) = match value {
+                Expr::EnumLit {
+                    type_name,
+                    variant,
+                    args,
+                    span,
+                    ..
+                } => (type_name, variant, args, span),
+                Expr::StructLit {
+                    type_name,
+                    fields,
+                    span,
+                    ..
+                } if type_name == format!("{}.Edit", Syntax::TYPE_COMPILER_WORKLOAD) => (
+                    Syntax::TYPE_COMPILER_WORKLOAD.to_string(),
+                    "Edit".to_string(),
+                    fields
+                        .into_iter()
+                        .map(|(label, _, expr)| crate::AST::EnumLitArg::Named { label, expr })
+                        .collect(),
+                    span,
+                ),
+                other => {
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        format!("performance workload `{name}` is not valid"),
+                        "a compile workload must be `CompilerWorkload.Edit`".to_string(),
+                        "write `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                        Some(other.span()),
+                    ));
+                }
             };
             if type_name != Syntax::TYPE_COMPILER_WORKLOAD || variant != "Edit" {
                 return Err(Diagnostic::error(

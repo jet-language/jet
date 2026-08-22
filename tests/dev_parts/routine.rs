@@ -1572,8 +1572,26 @@ impl $TYPE.Select {
         let shown = file.to_string_lossy().to_string();
         let stem = format!("aggregate_trait_returns_{index}");
         let aot = compiled_binary_output(&dir, &stem, 0, &stem, &shown);
-        assert_eq!(aot.stdout, "7\n9\n");
-        assert_default_dev_jit_gap(&stem, &shown);
+        let expected = ProgramOutput::ran("7\n9\n".to_string(), String::new(), 0);
+        assert_eq!(aot, expected, "AOT aggregate trait return drifted");
+        jet_jit::reset_jit_trace_for_test();
+        let dev = match dev_iteration_with_timeout(&stem, &shown, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert!(
+                    jet_jit::jit_executed_for_test() || jet_jit::deopt_invoked_for_test(),
+                    "{stem} must run via tiered JIT or interpreter deopt"
+                );
+                ProgramOutput::ran(stdout, stderr, exit_code)
+            }
+            RunOutcome::Problems(diags) => {
+                panic!("default dev returned diagnostics for {stem}: {diags:?}")
+            }
+        };
+        assert_eq!(dev, expected, "default dev aggregate trait return drifted");
         let _ = fs::remove_dir_all(&dir);
     }
 }
@@ -4081,7 +4099,6 @@ fn run() {
                     _ => unreachable!(),
                 };
                 assert_eq!(stdout, expected);
-                assert!(jet_jit::jit_executed_for_test());
                 if expected_case == "raw_alias" {
                     // D-MEM-SENTRY1=A (ratified 2026-08-12, card #1889) is an
                     // owner-ratified I9 instrumentation carve-out: raw memory stays
@@ -4094,6 +4111,10 @@ fn run() {
                     // TIR -- not native execution. This case was authored under
                     // #1216 on 2026-07-27, sixteen days before that ratification.
                     assert!(
+                        !jet_jit::jit_executed_for_test(),
+                        "`raw_alias` must not claim native execution"
+                    );
+                    assert!(
                         jet_jit::deopt_invoked_for_test(),
                         "`raw_alias` must take the D-MEM-SENTRY1 canonical-TIR route"
                     );
@@ -4102,6 +4123,7 @@ fn run() {
                         "`raw_alias` deopt must not trip forbidden fallback"
                     );
                 } else {
+                    assert!(jet_jit::jit_executed_for_test());
                     assert!(!jet_jit::deopt_invoked_for_test());
                 }
             }

@@ -1,7 +1,15 @@
 Warning [L2401] (positional_bool_parameter): public method `listen` has a positional `Bool` parameter `blocking`
   --> tests/ui_lint/l2401_method_bool.jet:6:25
     |
-  6 |     pub fn listen(self, blocking: Bool) => Int :: 0
+  6 |     pub fn listen(self, blocking: Bool) Int -> 0
     |                         ^^^^^^^^
  Why: positional booleans are easy to transpose at the call site
  Fix: callers can write `blocking: true` to make the intent clear (S61 labels)
+
+Warning [L0102] (unused_parameter): parameter `blocking` is never used.
+  --> tests/ui_lint/l2401_method_bool.jet:6:25
+    |
+  6 |     pub fn listen(self, blocking: Bool) Int -> 0
+    |                         ^^^^^^^^
+ Why: an unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
+ Fix: use `blocking`, rename it to `_blocking` when it is intentionally unused, or remove it from the function contract.

@@ -1,17 +1,28 @@
-// D-CALLPOLICY1=E: declaration defaults and apply(...) replacements keep the
-// same checked callable signature.
+// D-CALLPOLICY1=E / D-STRUCT-POLICY1=A: declaration defaults and apply(...)
+// replacements keep the same checked callable signature.
+pub policy audit(topic: String, prefix: String = "audit") {
+    wrap(call) {
+        return "{prefix}:{topic}:{call()}"
+    }
+}
+
+#Policy(audit("users.load")) fn audited_load() String -> "ok"
+
 #Policy(trace("users.load")) fn load_user(id: Int, label: String = "user") String {
     return "{label}:{id}"
 }
 
 fn run() {
+    audited :: apply(audit("users.load"), audited_load)
     selected :: apply(retry(3), load_user)
     bare :: apply(load_user)
+    print(audited())
     print(load_user(6))
     print(selected(7))
     print(bare(8))
 }
 // --- expected output --------------------------------------------------
+// audit:users.load:ok
 // user:6
 // user:7
 // user:8

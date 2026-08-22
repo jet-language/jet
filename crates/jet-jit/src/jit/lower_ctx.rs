@@ -4080,6 +4080,26 @@ impl LowerCtx<'_, '_> {
         result
     }
 
+    fn lower_range_inline_block(&mut self, stmts: &[TStmt]) -> Result<[Value; 3], String> {
+        let saved_vars = self.vars.clone();
+        let saved_var_tys = self.var_tys.clone();
+        let saved_result_option_vars = self.result_option_vars.clone();
+        let result = (|| {
+            let (tail, prefix) = stmts
+                .split_last()
+                .ok_or("jit inline Range block has no result")?;
+            self.lower_stmts(prefix)?;
+            match tail {
+                TStmt::ExprStmt(value) => self.lower_range_expr(value),
+                _ => Err("jit inline Range block has unsupported result statement".to_string()),
+            }
+        })();
+        *self.vars = saved_vars;
+        *self.var_tys = saved_var_tys;
+        self.result_option_vars = saved_result_option_vars;
+        result
+    }
+
     fn lower_result_loop(
         &mut self,
         label: &Option<String>,
@@ -20622,6 +20642,14 @@ impl LowerCtx<'_, '_> {
                 TFnValueKind::Interrupt { .. } => {
                     self.lower_interrupt_callback_value(expr)
                 }
+                // D-STRUCT-POLICY1=A: no resident lowering for the generated
+                // checked policy wrapper yet. `resident_safe_expr` already
+                // declines this kind, so reaching here means the safety gate and
+                // this lowering disagree — report it rather than emit a call
+                // that would skip the policy.
+                TFnValueKind::Policy { .. } => {
+                    Err("jit policy fn value unsupported".to_string())
+                }
                 TFnValueKind::Call { callee, args } => {
                     let fn_ty = callee.ty.clone();
                     let value = self.lower_expr(callee)?;
@@ -28601,6 +28629,7 @@ impl LowerCtx<'_, '_> {
             | TExprKind::MaterializeView(inner) => {
                 self.lower_range_expr(inner)
             }
+            TExprKind::InlineBlock(stmts) => self.lower_range_inline_block(stmts),
             TExprKind::Call { name, args, .. } => {
                 let func_id = self
                     .func_ids

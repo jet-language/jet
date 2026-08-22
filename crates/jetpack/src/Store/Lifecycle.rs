@@ -86,9 +86,6 @@ pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
         return Ok(false);
     }
     let destination = roots.hangar_dir();
-    if existing_hangar_destination(&destination)? {
-        return Ok(false);
-    }
     let parent = destination
         .parent()
         .ok_or_else(|| std::io::Error::other("native Hangar path has no parent"))?;
@@ -99,49 +96,43 @@ pub fn migrate_legacy_hangar(roots: &Roots) -> std::io::Result<bool> {
             .and_then(|name| name.to_str())
             .unwrap_or("hangar")
     ));
-    if node_metadata(&stage)?.is_some() {
-        return Err(std::io::Error::other(format!(
-            "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
-            stage.display()
-        )));
-    }
     let legacy_source = legacy_user_hangar_dir();
-    let Some(source) = find_legacy_source(&legacy_source)? else {
-        return Ok(false);
-    };
-    if source == destination {
-        return Ok(false);
-    }
-    let migrate_unlocked = || {
-        if existing_hangar_destination(&destination)? {
-            return Ok(false);
-        }
+    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         if node_metadata(&stage)?.is_some() {
             return Err(std::io::Error::other(format!(
                 "incomplete Hangar migration remains at `{}`; inspect or remove it before retrying",
                 stage.display()
             )));
         }
-        let Some(source_metadata) = node_metadata(&source)? else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("legacy Hangar source `{}` disappeared", source.display()),
-            ));
-        };
-        if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-            return Err(io::Error::other(format!(
-                "legacy Hangar source `{}` is not a directory",
-                source.display()
-            )));
+        if existing_hangar_destination(&destination)? {
+            return Ok(false);
         }
-        fs::create_dir_all(parent)?;
-        copy_migration_tree(&source, &stage, &source)?;
-        super::fsync_tree(&stage)?;
-        fs::rename(&stage, &destination)?;
-        super::sync_store_directory(parent)?;
-        Ok(true)
-    };
-    super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let Some(source) = find_legacy_source(&legacy_source)? else {
+            return Ok(false);
+        };
+        if source == destination {
+            return Ok(false);
+        }
+        let migrate_unlocked = || {
+            let Some(source_metadata) = node_metadata(&source)? else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("legacy Hangar source `{}` disappeared", source.display()),
+                ));
+            };
+            if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+                return Err(io::Error::other(format!(
+                    "legacy Hangar source `{}` is not a directory",
+                    source.display()
+                )));
+            }
+            fs::create_dir_all(parent)?;
+            copy_migration_tree(&source, &stage, &source)?;
+            super::fsync_tree(&stage)?;
+            fs::rename(&stage, &destination)?;
+            super::sync_store_directory(parent)?;
+            Ok(true)
+        };
         if source == legacy_source {
             let source_root = legacy_user_root();
             if source_root.as_path() == roots.root.as_path() {
@@ -177,8 +168,9 @@ fn copy_migration_tree(source: &Path, destination: &Path, root: &Path) -> std::i
     }
     if metadata.is_dir() {
         fs::create_dir(destination)?;
-        for entry in fs::read_dir(source)? {
-            let entry = entry?;
+        let mut entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
             copy_migration_tree(&entry.path(), &destination.join(entry.file_name()), root)?;
         }
         fs::set_permissions(destination, metadata.permissions())?;
@@ -215,15 +207,14 @@ fn relative_target_stays_in_root(link: &Path, target: &Path, root: &Path) -> boo
             _ => return false,
         }
     }
+    if !normalized.starts_with(root) {
+        return false;
+    }
     let canonical_root = match fs::canonicalize(root) {
         Ok(root) => root,
         Err(_) => return false,
     };
-    match fs::canonicalize(parent.join(target)) {
-        Ok(target) => target.starts_with(canonical_root),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-        Err(_) => false,
-    }
+    existing_path_stays_in_root(&parent.join(target), &canonical_root)
 }
 
 fn absolute_target_stays_in_nix_store(target: &Path) -> bool {
@@ -244,12 +235,31 @@ fn absolute_target_stays_in_nix_store(target: &Path) -> bool {
             _ => return false,
         }
     }
-    match fs::canonicalize(target) {
-        Ok(target) => target.starts_with(compatibility_root),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            normalized.starts_with(compatibility_root)
+    if !normalized.starts_with(compatibility_root) {
+        return false;
+    }
+    let Ok(canonical_root) = fs::canonicalize(compatibility_root) else {
+        return true;
+    };
+    existing_path_stays_in_root(target, &canonical_root)
+}
+
+fn existing_path_stays_in_root(path: &Path, canonical_root: &Path) -> bool {
+    let mut probe = path.to_path_buf();
+    loop {
+        match fs::canonicalize(&probe) {
+            Ok(canonical) => return canonical.starts_with(canonical_root),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let Some(parent) = probe.parent().map(Path::to_path_buf) else {
+                    return false;
+                };
+                if parent == probe {
+                    return false;
+                }
+                probe = parent;
+            }
+            Err(_) => return false,
         }
-        Err(_) => false,
     }
 }
 

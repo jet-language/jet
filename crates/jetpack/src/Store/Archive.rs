@@ -197,11 +197,7 @@ pub fn write_archive_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 /// Verify an archive or one live Hangar entry without changing state.
-pub fn verify_archive(
-    roots: &Roots,
-    target: &str,
-    key: Option<&str>,
-) -> io::Result<ArchiveReport> {
+pub fn verify_archive(roots: &Roots, target: &str, key: Option<&str>) -> io::Result<ArchiveReport> {
     if Path::new(target).is_file() {
         let bytes = read_bounded(Path::new(target))?;
         let archive = Archive::decode(&bytes)?;
@@ -218,7 +214,9 @@ pub fn verify_archive(
         archive.verify_signature(roots, key, false)?;
         verify_archive_contents(roots, &archive)?;
         if !archive.objects.iter().any(|object| object.id == entry.id) {
-            return Err(invalid("the signed archive does not name the requested entry"));
+            return Err(invalid(
+                "the signed archive does not name the requested entry",
+            ));
         }
         return Ok(archive.report());
     }
@@ -318,7 +316,9 @@ pub fn repair_archive(
     let archive = Archive::decode(&bytes)?;
     archive.verify_signature(roots, key, false)?;
     if !archive.objects.iter().any(|object| object.id == entry.id) {
-        return Err(invalid("repair archive does not contain the requested entry"));
+        return Err(invalid(
+            "repair archive does not contain the requested entry",
+        ));
     }
     let object_path = PathBuf::from(&entry.out);
     let hangar = roots.hangar_dir();
@@ -389,7 +389,9 @@ fn build_archive(roots: &Roots, target: &str, include_closure: bool) -> io::Resu
     let mut objects = Vec::new();
     for digest in &digests {
         let object = graph.objects.get(digest).ok_or_else(|| {
-            invalid(&format!("closure object `{digest}` is absent from the Hangar graph"))
+            invalid(&format!(
+                "closure object `{digest}` is absent from the Hangar graph"
+            ))
         })?;
         let path = PathBuf::from(&object.path);
         let canonical_objects = fs::canonicalize(roots.hangar_dir().join("objects"))
@@ -448,10 +450,11 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
     super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
     let objects_dir = roots.hangar_dir().join("objects");
     super::Ingest::ensure_real_directory(&objects_dir, "Hangar object pool")?;
-    let stage = roots
-        .hangar_dir()
-        .join(ARCHIVE_STAGE)
-        .join(format!("{}-{}", std::process::id(), unique_suffix()));
+    let stage = roots.hangar_dir().join(ARCHIVE_STAGE).join(format!(
+        "{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     let stage_objects = stage.join("objects");
     fs::create_dir(&stage)?;
     fs::create_dir(&stage_objects)?;
@@ -461,7 +464,10 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
         for object in &archive.objects {
             if !object.meta.is_empty() {
                 let meta = parse_meta(&object.meta).ok_or_else(|| {
-                    invalid(&format!("package record `{}` has malformed meta.json", object.id))
+                    invalid(&format!(
+                        "package record `{}` has malformed meta.json",
+                        object.id
+                    ))
                 })?;
                 let entry = portable_entry(roots, object, &meta)?;
                 if entry.envelope.output_hash != object.digest {
@@ -516,7 +522,10 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
             let staged = stage_objects.join(digest);
             let destination = objects_dir.join(digest);
             let metadata = fs::symlink_metadata(&destination);
-            if metadata.as_ref().is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            if metadata
+                .as_ref()
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            {
                 rollback_import_moves(&mut moved)?;
                 return Err(invalid(&format!(
                     "existing Hangar object `{digest}` is a symlink"
@@ -591,16 +600,23 @@ fn map_member_path(source_out: &Path, member: &str, destination: &Path) -> io::R
             .components()
             .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
     {
-        return Err(invalid("archive package metadata has an unsafe primary output path"));
+        return Err(invalid(
+            "archive package metadata has an unsafe primary output path",
+        ));
     }
     let member = Path::new(member);
-    let suffix = member.strip_prefix(source_out).map_err(|_| {
-        invalid("archive package metadata points outside its primary output")
-    })?;
+    let suffix = member
+        .strip_prefix(source_out)
+        .map_err(|_| invalid("archive package metadata points outside its primary output"))?;
     if suffix.components().any(|component| {
-        matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
     }) {
-        return Err(invalid("archive package metadata points outside its primary output"));
+        return Err(invalid(
+            "archive package metadata points outside its primary output",
+        ));
     }
     Ok(destination.join(suffix).to_string_lossy().into_owned())
 }
@@ -631,27 +647,42 @@ fn verify_archive_contents(roots: &Roots, archive: &Archive) -> io::Result<()> {
     super::Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
     let archive_stage = roots.hangar_dir().join(ARCHIVE_STAGE);
     super::Ingest::ensure_real_directory(&archive_stage, "Hangar archive staging")?;
-    let stage = roots
-        .hangar_dir()
-        .join(ARCHIVE_STAGE)
-        .join(format!("verify-{}-{}", std::process::id(), unique_suffix()));
+    let stage = roots.hangar_dir().join(ARCHIVE_STAGE).join(format!(
+        "verify-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     let result = (|| {
         fs::create_dir(&stage)?;
         let mut outputs = BTreeSet::new();
-        for object in archive.objects.iter().filter(|object| object.meta.is_empty()) {
+        for object in archive
+            .objects
+            .iter()
+            .filter(|object| object.meta.is_empty())
+        {
             let output = stage.join(&object.digest);
             write_nodes(&output, &object.nodes, object.root_mode)?;
             verify_archive_object(roots, object, Some(&stage))?;
             outputs.insert(object.digest.clone());
         }
-        for object in archive.objects.iter().filter(|object| !object.meta.is_empty()) {
+        for object in archive
+            .objects
+            .iter()
+            .filter(|object| !object.meta.is_empty())
+        {
             let meta = parse_meta(&object.meta)
                 .ok_or_else(|| invalid("archive contains malformed package metadata"))?;
             if meta.envelope.output_hash != object.digest || !outputs.contains(&object.digest) {
                 return Err(invalid("archive package metadata has no matching output"));
             }
-            if meta.references.iter().any(|reference| !outputs.contains(reference)) {
-                return Err(invalid("archive package metadata references a missing output"));
+            if meta
+                .references
+                .iter()
+                .any(|reference| !outputs.contains(reference))
+            {
+                return Err(invalid(
+                    "archive package metadata references a missing output",
+                ));
             }
         }
         Ok(())
@@ -761,10 +792,15 @@ fn collect_nodes_at(
     } else if file_type.is_symlink() {
         let target = fs::read_link(root)?;
         if target.is_absolute() {
-            return Err(invalid("absolute symlinks are not portable Hangar archive nodes"));
+            return Err(invalid(
+                "absolute symlinks are not portable Hangar archive nodes",
+            ));
         }
         let resolved = fs::canonicalize(root).map_err(|error| {
-            invalid(&format!("symlink `{}` is dangling or cyclic: {error}", root.display()))
+            invalid(&format!(
+                "symlink `{}` is dangling or cyclic: {error}",
+                root.display()
+            ))
         })?;
         if !resolved.starts_with(canonical_root) {
             return Err(invalid("symlink target escapes the Hangar output root"));
@@ -772,7 +808,10 @@ fn collect_nodes_at(
         let target = target
             .to_str()
             .ok_or_else(|| invalid("symlink target is not UTF-8"))?;
-        if target.is_empty() || target.contains('\\') || target.bytes().any(|byte| byte.is_ascii_control()) {
+        if target.is_empty()
+            || target.contains('\\')
+            || target.bytes().any(|byte| byte.is_ascii_control())
+        {
             return Err(invalid("symlink target is not portable"));
         }
         out.push(ArchiveNode {
@@ -782,7 +821,9 @@ fn collect_nodes_at(
             bytes: target.replace(std::path::MAIN_SEPARATOR, "/").into_bytes(),
         });
     } else {
-        return Err(invalid("special files are not portable Hangar archive nodes"));
+        return Err(invalid(
+            "special files are not portable Hangar archive nodes",
+        ));
     }
     Ok(())
 }
@@ -803,7 +844,10 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
         }
         fs::create_dir_all(&path)?;
     }
-    for node in nodes.iter().filter(|node| matches!(node.kind, ArchiveNodeKind::File)) {
+    for node in nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ArchiveNodeKind::File))
+    {
         let path = root.join(&node.path);
         if !is_under(&path, root) {
             return Err(invalid("archive node escapes its output root"));
@@ -817,7 +861,10 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
         write_atomic(&path, &node.bytes)?;
         set_mode(&path, node.mode)?;
     }
-    for node in nodes.iter().filter(|node| matches!(node.kind, ArchiveNodeKind::Hardlink)) {
+    for node in nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ArchiveNodeKind::Hardlink))
+    {
         let path = root.join(&node.path);
         let target = hardlink_target(root, &node.bytes)?;
         if !target.is_file() {
@@ -828,7 +875,10 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
         }
         fs::hard_link(&target, &path)?;
     }
-    for node in nodes.iter().filter(|node| matches!(node.kind, ArchiveNodeKind::Symlink)) {
+    for node in nodes
+        .iter()
+        .filter(|node| matches!(node.kind, ArchiveNodeKind::Symlink))
+    {
         let path = root.join(&node.path);
         let target = std::str::from_utf8(&node.bytes)
             .map_err(|_| invalid("archive symlink target is not UTF-8"))?;
@@ -854,9 +904,12 @@ fn write_nodes(root: &Path, nodes: &[ArchiveNode], root_mode: u32) -> io::Result
 }
 
 fn symlink_or_hardlink_target(root: &Path, link: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
-    let target = std::str::from_utf8(bytes)
-        .map_err(|_| invalid("archive link target is not UTF-8"))?;
-    if target.is_empty() || target.contains('\\') || target.bytes().any(|byte| byte.is_ascii_control()) {
+    let target =
+        std::str::from_utf8(bytes).map_err(|_| invalid("archive link target is not UTF-8"))?;
+    if target.is_empty()
+        || target.contains('\\')
+        || target.bytes().any(|byte| byte.is_ascii_control())
+    {
         return Err(invalid("archive link target is not portable"));
     }
     let relative = Path::new(target);
@@ -887,8 +940,8 @@ fn symlink_or_hardlink_target(root: &Path, link: &Path, bytes: &[u8]) -> io::Res
 }
 
 fn hardlink_target(root: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
-    let target = std::str::from_utf8(bytes)
-        .map_err(|_| invalid("archive hardlink target is not UTF-8"))?;
+    let target =
+        std::str::from_utf8(bytes).map_err(|_| invalid("archive hardlink target is not UTF-8"))?;
     validate_relative(target)?;
     Ok(root.join(target))
 }
@@ -901,7 +954,10 @@ fn create_relative_symlink(target: &str, link: &Path) -> io::Result<()> {
     }
     #[cfg(windows)]
     {
-        let resolved = link.parent().unwrap_or_else(|| Path::new(".")).join(target_path);
+        let resolved = link
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(target_path);
         if resolved.is_dir() {
             std::os::windows::fs::symlink_dir(target_path, link)
         } else {
@@ -911,7 +967,9 @@ fn create_relative_symlink(target: &str, link: &Path) -> io::Result<()> {
     #[cfg(not(any(unix, windows)))]
     {
         let _ = (target_path, link);
-        Err(invalid("portable Hangar symlinks are unsupported on this host"))
+        Err(invalid(
+            "portable Hangar symlinks are unsupported on this host",
+        ))
     }
 }
 
@@ -931,9 +989,7 @@ fn validate_no_path_collisions(nodes: &[ArchiveNode]) -> io::Result<()> {
                 .get(&ancestor)
                 .is_some_and(|kind| *kind != ArchiveNodeKind::Directory)
             {
-                return Err(invalid(
-                    "archive contains a file/link path collision",
-                ));
+                return Err(invalid("archive contains a file/link path collision"));
             }
         }
     }
@@ -1022,7 +1078,8 @@ fn signing_key(roots: &Roots, requested: Option<&str>, create: bool) -> io::Resu
     }
     let bytes = read_bounded_limit(&path, 4096, "archive signer key")?;
     let secret = decode_secret(&bytes)?;
-    TrustKey::from_secret(secret).map_err(|error| invalid(&format!("invalid archive signer key: {error}")))
+    TrustKey::from_secret(secret)
+        .map_err(|error| invalid(&format!("invalid archive signer key: {error}")))
 }
 
 fn key_path(roots: &Roots, requested: &str) -> PathBuf {
@@ -1109,7 +1166,12 @@ impl Archive {
         }
     }
 
-    fn verify_signature(&self, roots: &Roots, requested: Option<&str>, allow_unsigned: bool) -> io::Result<()> {
+    fn verify_signature(
+        &self,
+        roots: &Roots,
+        requested: Option<&str>,
+        allow_unsigned: bool,
+    ) -> io::Result<()> {
         let Some(signature) = &self.signature else {
             if allow_unsigned {
                 return Ok(());
@@ -1204,13 +1266,16 @@ impl Archive {
             validate_id(&id)?;
             validate_digest(&digest)?;
             if !meta.is_empty() {
-                parse_meta(&meta).ok_or_else(|| invalid("archive contains malformed package metadata"))?;
+                parse_meta(&meta)
+                    .ok_or_else(|| invalid("archive contains malformed package metadata"))?;
                 if !package_ids.insert(id.clone()) {
                     return Err(invalid("archive contains duplicate package records"));
                 }
             } else {
                 if id != digest || !output_digests.insert(digest.clone()) {
-                    return Err(invalid("archive contains duplicate or mismatched output records"));
+                    return Err(invalid(
+                        "archive contains duplicate or mismatched output records",
+                    ));
                 }
             }
             let root_mode = reader.u32()?;
@@ -1270,7 +1335,9 @@ impl Archive {
             return Err(invalid("archive has trailing bytes"));
         }
         if !objects.iter().any(|object| object.id == root_id) {
-            return Err(invalid("archive root does not name an archived record or output"));
+            return Err(invalid(
+                "archive root does not name an archived record or output",
+            ));
         }
         Ok(Self {
             root_id,
@@ -1376,7 +1443,10 @@ fn validate_id(value: &str) -> io::Result<()> {
 }
 
 fn validate_digest(value: &str) -> io::Result<()> {
-    if !value.starts_with("sha256-") || value.len() != 71 || !value[7..].bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !value.starts_with("sha256-")
+        || value.len() != 71
+        || !value[7..].bytes().all(|b| b.is_ascii_hexdigit())
+    {
         return Err(invalid(&format!("invalid output digest `{value}`")));
     }
     Ok(())
@@ -1409,7 +1479,9 @@ fn validate_relative(value: &str) -> io::Result<()> {
 }
 
 fn portable_path(path: &Path) -> io::Result<String> {
-    let value = path.to_str().ok_or_else(|| invalid("archive path is not UTF-8"))?;
+    let value = path
+        .to_str()
+        .ok_or_else(|| invalid("archive path is not UTF-8"))?;
     if value.is_empty() {
         return Err(invalid("archive path is empty"));
     }
@@ -1504,13 +1576,17 @@ fn read_bounded_limit(path: &Path, limit: usize, label: &str) -> io::Result<Vec<
         return Err(invalid("archive input may not be a symlink"));
     }
     if !metadata.is_file() || metadata.len() > limit as u64 {
-        return Err(invalid(&format!("{label} is not a regular file within the size limit")));
+        return Err(invalid(&format!(
+            "{label} is not a regular file within the size limit"
+        )));
     }
     let file = fs::File::open(path)?;
     let mut bytes = Vec::with_capacity((metadata.len() as usize).min(limit));
     file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err(invalid(&format!("{label} exceeded its bound while being read")));
+        return Err(invalid(&format!(
+            "{label} exceeded its bound while being read"
+        )));
     }
     Ok(bytes)
 }
@@ -1649,10 +1725,13 @@ mod tests {
     #[test]
     fn archive_roundtrip_preserves_binary_nodes() {
         let archive = Archive {
-            root_id: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            root_id: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
             objects: vec![ArchiveObject {
-                id: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                id: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .into(),
+                digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .into(),
                 meta: String::new(),
                 root_mode: 0o755,
                 nodes: vec![ArchiveNode {
@@ -1739,7 +1818,9 @@ mod tests {
             .verify_signature(&roots, Some(key_path.to_str().unwrap()), false)
             .unwrap();
         let error = attest_archive(&roots, &attested, key_path.to_str().unwrap()).unwrap_err();
-        assert!(error.to_string().contains("must not carry a client signature"));
+        assert!(error
+            .to_string()
+            .contains("must not carry a client signature"));
         let _ = remove_tree(&root);
     }
 }

@@ -206,6 +206,15 @@ Per-user Hangar is the default (`NEW: D-ECO-HANGARPATH1`):
 | macOS | `~/Library/Application Support/Jet/Hangar` |
 | Windows | `%LOCALAPPDATA%\Jet\Hangar` |
 
+The first Jetpack command that reaches Hangar migrates an older user Hangar
+from `$XDG_STATE_HOME/jet/hangar` (or the retired `/etc/jet/hangar` source).
+It copies into a sibling `.hangar-migration.partial`, syncs the complete tree,
+then publishes the native path with one rename. The source remains untouched,
+so the migration can be rolled back by discarding only the verified native copy
+and restoring the old resolver. An abandoned staging tree blocks further use
+until it is inspected or moved aside; Jetpack never merges or follows an unsafe
+source node.
+
 `/etc/jet/hangar` is retired as a default. An administrator may install the ratified socket-activated shared-store broker. It starts per request, exits when idle, never evaluates user source, rebuilds only under ephemeral sandbox identities, and re-verifies bytes, signatures, provenance, and writer authority before promotion (`NEW: D-ECO-BROKERBOUNDARY1`). This is a transient verifier, not a resident daemon or default privileged helper.
 
 Packages, package/user generations, running processes, builds, toolchains, Systems, and Fleets create automatic closure roots. Manual roots cover only external consumers:

@@ -3375,6 +3375,105 @@ pub fn ambient_core_call(
                 crate::net_http_rt::runtime_tcp_listener_local_socket_addr(listener),
             ))
         }
+        ("core.net", "set_timeout" | "set_read_timeout" | "set_write_timeout") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net TCP timeout stream", span)));
+            };
+            let Some(CtValue::Int(timeout_ms)) = args.get(1) else {
+                return Some(Err(unsupported("core.net TCP timeout value", span)));
+            };
+            if args.len() != 2 {
+                return Some(Err(unsupported("core.net TCP timeout arguments", span)));
+            }
+            Some(Ok(match method {
+                "set_timeout" => crate::net_http_rt::runtime_tcp_stream_set_timeout(
+                    stream,
+                    *timeout_ms,
+                ),
+                "set_read_timeout" => crate::net_http_rt::runtime_tcp_stream_set_read_timeout(
+                    stream,
+                    *timeout_ms,
+                ),
+                "set_write_timeout" => crate::net_http_rt::runtime_tcp_stream_set_write_timeout(
+                    stream,
+                    *timeout_ms,
+                ),
+                _ => unreachable!(),
+            }))
+        }
+        ("core.net", "nodelay" | "ttl") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net TCP stream", span)));
+            };
+            if args.len() != 1 {
+                return Some(Err(unsupported("core.net TCP stream arguments", span)));
+            }
+            Some(Ok(match method {
+                "nodelay" => crate::net_http_rt::runtime_tcp_stream_nodelay(stream),
+                "ttl" => crate::net_http_rt::runtime_tcp_stream_ttl(stream),
+                _ => unreachable!(),
+            }))
+        }
+        ("core.net", "set_nodelay") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net.set_nodelay stream", span)));
+            };
+            let Some(CtValue::Bool(enabled)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.set_nodelay value", span)));
+            };
+            if args.len() != 2 {
+                return Some(Err(unsupported("core.net.set_nodelay arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_tcp_stream_set_nodelay(
+                stream, *enabled,
+            )))
+        }
+        ("core.net", "set_ttl") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net.set_ttl stream", span)));
+            };
+            let Some(CtValue::Int(ttl)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.set_ttl value", span)));
+            };
+            if args.len() != 2 {
+                return Some(Err(unsupported("core.net.set_ttl arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_tcp_stream_set_ttl(
+                stream, *ttl,
+            )))
+        }
+        ("core.net", "socket_type") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net.socket_type stream", span)));
+            };
+            if args.len() != 1 {
+                return Some(Err(unsupported("core.net.socket_type arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_tcp_stream_socket_type(
+                stream,
+            )))
+        }
+        ("core.net", "sendfile") => {
+            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            else {
+                return Some(Err(unsupported("core.net.sendfile stream", span)));
+            };
+            let Some(CtValue::Str(path)) = args.get(1) else {
+                return Some(Err(unsupported("core.net.sendfile path", span)));
+            };
+            if args.len() != 2 {
+                return Some(Err(unsupported("core.net.sendfile arguments", span)));
+            }
+            Some(Ok(crate::net_http_rt::runtime_tcp_stream_sendfile(
+                stream,
+                path.clone(),
+            )))
+        }
         ("core.net", "udp_bind") => {
             let Some(CtValue::Str(address)) = args.first() else {
                 return Some(Err(unsupported("core.net.udp_bind address", span)));

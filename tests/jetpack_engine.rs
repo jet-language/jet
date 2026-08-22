@@ -74,7 +74,7 @@ fn hangar_path_reports_the_native_user_data_location() {
 }
 
 #[test]
-fn hangar_migration_copies_legacy_state_and_keeps_a_rollback_source() {
+fn hangar_migration_round_trips_without_consuming_legacy_state() {
     let legacy = Scratch::new("hangar-migration-legacy");
     let data = Scratch::new("hangar-migration-data");
     let old_hangar = legacy.join("jet/hangar");
@@ -103,6 +103,31 @@ fn hangar_migration_copies_legacy_state_and_keeps_a_rollback_source() {
         fs::read_to_string(old_hangar.join("migration-marker")).unwrap(),
         "legacy bytes"
     );
+    assert!(!data.join("jet/.hangar-migration.partial").exists());
+
+    fs::remove_dir_all(&new_hangar).unwrap();
+    let rollback = jet()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", &legacy.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert!(
+        rollback.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(new_hangar.join("migration-marker")).unwrap(),
+        "legacy bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(old_hangar.join("migration-marker")).unwrap(),
+        "legacy bytes"
+    );
+    assert!(!data.join("jet/.hangar-migration.partial").exists());
 }
 
 #[cfg(target_os = "linux")]
@@ -151,6 +176,33 @@ fn hangar_migration_rejects_path_escape_and_leaves_repair_state_visible() {
     assert_eq!(fs::read_to_string(&outside).unwrap(), "must stay outside");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn hangar_migration_rejects_missing_path_escape() {
+    use std::os::unix::fs::symlink;
+
+    let legacy = Scratch::new("hangar-migration-missing-escape-legacy");
+    let data = Scratch::new("hangar-migration-missing-escape-data");
+    let old_hangar = legacy.join("jet/hangar");
+    fs::create_dir_all(&old_hangar).unwrap();
+    symlink("../../missing-target", old_hangar.join("escape")).unwrap();
+
+    let output = jet()
+        .args(["hangar", "path", "--no-color"])
+        .env_remove("JETPACK_ROOT")
+        .env("XDG_STATE_HOME", &legacy.path)
+        .env("XDG_DATA_HOME", &data.path)
+        .env_remove("LOCALAPPDATA")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2604"), "{stderr}");
+    assert!(stderr.contains("escapes its migration root"), "{stderr}");
+    assert!(!data.join("jet/hangar").exists());
+    assert!(data.join("jet/.hangar-migration.partial").is_dir());
+}
+
 #[cfg(unix)]
 #[test]
 fn hangar_migration_rejects_destination_symlink_without_following_it() {
@@ -194,6 +246,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
         dev_mode: false,
     };
     fs::write(source.join("payload"), "cache bytes\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("payload", source.join("alias")).unwrap();
     let entry = jetpack::Store::ingest_tree(
         &roots,
         &jetpack::Store::IngestRequest {
@@ -245,6 +299,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
         fs::read_to_string(restored.join("out/payload")).unwrap(),
         "cache bytes\n"
     );
+    #[cfg(unix)]
+    assert_eq!(fs::read_link(restored.join("out/alias")).unwrap(), Path::new("payload"));
 
     // A corrupt first mirror is advisory failure. Lookup must continue to the
     // next ordered mirror and never install its bytes.
@@ -626,6 +682,137 @@ module profile.dev {
 }
 
 #[test]
+fn package_generation_lifecycle_preserves_source_facts_and_history() {
+    let project = Scratch::new("profile-generation-lifecycle");
+    let root = Scratch::new("profile-generation-root");
+    let fixtures = Scratch::new("profile-generation-fixtures");
+    let staging = Scratch::new("profile-generation-staging");
+    write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+    fs::write(
+        project.join("env.jet"),
+        "module profile.dev { packages: [default.greet] }\n",
+    )
+    .unwrap();
+
+    let run = |args: &[&str]| {
+        jetpack()
+            .args(args)
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap()
+    };
+    let built = run(["profile", "build", "dev", "--no-color", "--offline"].as_slice());
+    assert!(
+        built.status.success(),
+        "build stderr: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let generation_dir = project.join(".jet/profiles/dev/generations/1");
+    let metadata = fs::read_to_string(generation_dir.join("meta.json")).unwrap();
+    assert!(metadata.contains("jet-package-generation-v1"));
+    assert!(metadata.contains("\"raw\":\"greet@default\""));
+    assert!(metadata.contains("\"provider_facts\":{"));
+    assert!(metadata.contains("\"output_hash\":\"sha256-"));
+    assert!(!project.join(".jet/profiles/dev/current").exists());
+
+    let switched = run(["profile", "switch", "dev", "--no-color", "--offline"].as_slice());
+    assert!(
+        switched.status.success(),
+        "switch stderr: {}",
+        String::from_utf8_lossy(&switched.stderr)
+    );
+    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
+        .unwrap()
+        .contains("\"generation\":1"));
+
+    let rebuilt = run(["profile", "build", "dev", "--no-color", "--offline"].as_slice());
+    assert!(
+        rebuilt.status.success(),
+        "second build stderr: {}",
+        String::from_utf8_lossy(&rebuilt.stderr)
+    );
+    let history = run(["profile", "generations", "dev", "--json"].as_slice());
+    assert!(history.status.success());
+    let history_stdout = String::from_utf8_lossy(&history.stdout);
+    assert!(history_stdout.contains("\"generation\":1"));
+    assert!(history_stdout.contains("\"generation\":2"));
+
+    let rolled_back = run(["profile", "rollback", "dev", "--no-color"].as_slice());
+    assert!(
+        rolled_back.status.success(),
+        "rollback stderr: {}",
+        String::from_utf8_lossy(&rolled_back.stderr)
+    );
+    assert!(fs::read_to_string(project.join(".jet/profiles/dev/current"))
+        .unwrap()
+        .contains("\"generation\":1"));
+}
+
+#[test]
+fn package_generation_build_rejects_unresolved_exact_path_collision() {
+    let project = Scratch::new("profile-generation-collision-project");
+    let root = Scratch::new("profile-generation-collision-root");
+    let fixtures = Scratch::new("profile-generation-collision-fixtures");
+
+    for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
+        let staging = Scratch::new(&format!("profile-generation-{package}-staging"));
+        let bin = staging.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let editor = bin.join("editor");
+        fs::write(&editor, contents).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        jetpack::Store::seal_local_output(&staging.path).unwrap();
+        let digest = jetpack::Envelope::try_output_hash_of(&staging.path.to_string_lossy())
+            .unwrap();
+        let out_dir = root.join("hangar/objects").join(&digest);
+        fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+        let mut permissions = fs::metadata(&staging.path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        fs::set_permissions(&staging.path, permissions).unwrap();
+        fs::rename(&staging.path, &out_dir).unwrap();
+        jetpack::Store::seal_local_output(&out_dir).unwrap();
+        fs::write(
+            fixtures.join(&format!("nixpkgs-{package}.json")),
+            format!(
+                "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-{package}.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+                out_dir.to_string_lossy()
+            ),
+        )
+        .unwrap();
+    }
+
+    fs::write(
+        project.join("env.jet"),
+        "module profile.dev { packages: [default.left, default.right] }\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["profile", "build", "dev", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "{stderr}");
+    assert!(stderr.contains("unresolved package collision"), "{stderr}");
+    assert!(stderr.contains("left@default"), "{stderr}");
+    assert!(stderr.contains("right@default"), "{stderr}");
+    assert!(stderr.contains("sha256-"), "{stderr}");
+}
+
+#[test]
 fn package_generation_plan_reports_inheritance_cycles() {
     let project = Scratch::new("profile-plan-cycle");
     fs::write(
@@ -655,7 +842,7 @@ module sources {
     sources: { remote: acme/tools@github }
 }
 module profile.dev {
-    packages: [hello@remote]
+    packages: [remote.hello]
 }
 "#,
     )
@@ -678,7 +865,7 @@ fn package_generation_plan_rejects_lossy_external_provider_facts() {
     let project = Scratch::new("profile-plan-lossy-provider");
     fs::write(
         project.join("env.jet"),
-        "module profile.dev { packages: [tool@cran] }\n",
+        "module profile.dev { packages: [cran.tool] }\n",
     )
     .unwrap();
     let output = jetpack()
@@ -1630,7 +1817,7 @@ fn typed_env_copy_adapter_realizes_local_source() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -1697,7 +1884,7 @@ fn typed_env_build_recipe_realizes_local_source() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -1752,7 +1939,7 @@ fn typed_env_build_recipe_uses_declared_tool_dependencies() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -1815,7 +2002,7 @@ fn typed_env_build_hook_approval_binds_declared_dependency_refs() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -1885,7 +2072,7 @@ module dev {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&second.stderr);
-    assert_eq!(second.status.code(), Some(2), "stderr: {stderr}");
+    assert_eq!(second.status.code(), Some(1), "stderr: {stderr}");
     assert!(stderr.contains("E1255"), "changed dependency was accepted: {stderr}");
     assert!(stderr.contains("build hook"), "wrong trust failure: {stderr}");
 }
@@ -1908,7 +2095,7 @@ fn typed_env_prebuilt_adapter_runs_from_path() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "weirdctl",
@@ -2064,7 +2251,7 @@ fn typed_env_bad_adapter_is_e1270() {
         proj.join("env.jet"),
         r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "broken",
@@ -2099,7 +2286,7 @@ fn channel_update_writes_exact_lock_and_build_uses_it_offline() {
         r#"
 module dev {
     sources: { default: acme/tools#latest@github }
-    env.dev: Env.{ packages: [default.greet] }
+    env.dev: Env{ packages: [default.greet] }
 }
 "#,
     )
@@ -2168,7 +2355,7 @@ fn channel_build_without_lock_is_e1271() {
         r#"
 module dev {
     sources: { default: acme/tools#latest@github }
-    env.dev: Env.{ packages: [default.greet] }
+    env.dev: Env{ packages: [default.greet] }
 }
 "#,
     )
@@ -2202,7 +2389,7 @@ module dev {
         trunk: acme/tools#main@github,
         stable: acme/tools#v0.x@github,
     }
-    env.dev: Env.{ packages: [trunk.greet, stable.greet] }
+    env.dev: Env{ packages: [trunk.greet, stable.greet] }
 }
 "#,
     )
@@ -2253,7 +2440,7 @@ fn outdated_reports_newer_channel_without_mutating_lock() {
         r#"
 module dev {
     sources: { default: acme/tools#latest@github }
-    env.dev: Env.{ packages: [default.greet] }
+    env.dev: Env{ packages: [default.greet] }
 }
 "#,
     )
@@ -3720,7 +3907,7 @@ fn typed_core_source_inferred_from_pack_jet() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env.{{\n        packages: [mine.hello],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env{{\n        packages: [mine.hello],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -3776,7 +3963,7 @@ fn core_provider_builds_library_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env.{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -4041,7 +4228,31 @@ fn jetpack_toml_retirement_fires_e1225_from_cli() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(stderr, include_str!("cli/jetpack_toml_retired.txt"));
+    assert!(
+        stderr.ends_with(include_str!("cli/jetpack_toml_retired.txt")),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn jetpack_toml_retirement_fires_from_nested_directory() {
+    let project = Scratch::new("retired-toml-nested");
+    let nested = project.join("packages/app/src");
+    let root = Scratch::new("retired-toml-nested-root");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(project.join("jetpack.toml"), "[repo]\nname = \"old\"\n").unwrap();
+    let out = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&nested)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.ends_with(include_str!("cli/jetpack_toml_retired.txt")),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]

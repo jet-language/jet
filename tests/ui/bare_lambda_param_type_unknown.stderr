@@ -1,10 +1,18 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/bare_lambda_param_type_unknown.jet:2:12
+    |
+  2 |     f :: x => x + 1
+    |            ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+
 Error [E0801]: tell me the type of `x`
   --> tests/ui/bare_lambda_param_type_unknown.jet:2:10
     |
   2 |     f :: x => x + 1
     |          ^
  Why: this lambda parameter has no type to go on
- Fix: write `(x: Int) => …` (or whatever type fits)
+ Fix: write `(x: Int) -> …` (or whatever type fits)
 
 Error [E0116]: `f` doesn't hand back a value
   --> tests/ui/bare_lambda_param_type_unknown.jet:3:11
@@ -12,4 +20,4 @@ Error [E0116]: `f` doesn't hand back a value
   3 |     print(f(5))
     |           ^
  Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `f` on its own line, or declare it as `fn f(…) Type :> …`
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `f` on its own line, or declare it as `fn f(…) Type -> …`

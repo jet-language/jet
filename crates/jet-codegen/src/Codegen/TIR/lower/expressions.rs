@@ -3147,6 +3147,78 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     && !env.locals.contains_key(&call.name)
                     && call.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
                 {
+                    let target_name = match &call.args.last().expect("checked above").expr {
+                        Expr::Ident(name, _) => Some(name.as_str()),
+                        Expr::Paren(inner, _) => match inner.as_ref() {
+                            Expr::Ident(name, _) => Some(name.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    let user_policy = call.args[..call.args.len().saturating_sub(1)]
+                        .iter()
+                        .find_map(|argument| {
+                            let Expr::Call(policy) = &argument.expr else {
+                                return None;
+                            };
+                            if crate::AST::CallablePolicyChain::is_builtin(&policy.name) {
+                                return None;
+                            }
+                            let target_name = target_name?;
+                            let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(
+                                &policy.name,
+                                target_name,
+                            );
+                            cx.sigs.contains_key(&wrapper).then_some((wrapper, policy))
+                        });
+                    if let Some((wrapper, policy)) = user_policy {
+                        let callee = lower_expr(
+                            &call.args.last().expect("checked above").expr,
+                            cx,
+                            env,
+                        );
+                        let policy_sig = cx
+                            .sigs
+                            .get(&wrapper)
+                            .expect("sema materialized the user policy wrapper");
+                        let policy_args = policy
+                            .args
+                            .iter()
+                            .enumerate()
+                            .map(|(index, argument)| {
+                                lower_one_call_arg(
+                                    argument,
+                                    policy_sig.get(index).cloned(),
+                                    env,
+                                    cx,
+                                )
+                            })
+                            .collect();
+                        let policy_conventions = policy
+                            .args
+                            .iter()
+                            .enumerate()
+                            .map(|(index, _)| {
+                                policy_sig
+                                    .get(index)
+                                    .map(|(convention, _)| *convention)
+                                    .unwrap_or(AccessConvention::Read)
+                            })
+                            .collect();
+                        let fn_type = callee.ty.clone();
+                        return TExpr {
+                            ty: fn_type.clone(),
+                            kind: TExprKind::FnValue {
+                                kind: TFnValueKind::Policy {
+                                    wrapper,
+                                    fn_type,
+                                    policy_args,
+                                    policy_conventions,
+                                    callee: Box::new(callee),
+                                },
+                            },
+                        };
+                    }
                     return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
                 }
                 // Early comptime registration runs before sema annotates calls with

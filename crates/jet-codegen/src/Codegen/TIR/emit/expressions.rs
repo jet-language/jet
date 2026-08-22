@@ -1,5 +1,5 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BinOp, CtFloat, Type, UnOp};
+use crate::AST::{AccessConvention, BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
 use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
@@ -77,6 +77,92 @@ fn emit_tir_lambda(lam: &TLambda) -> String {
 
 fn emit_tir_lambda_sync(lam: &TLambda) -> String {
     emit_tir_lambda_with_arc(lam, true)
+}
+
+/// D-STRUCT-POLICY1=A: marshal one checked policy closure to its generated
+/// wrapper. The wrapper itself is ordinary typed TIR; this helper only creates
+/// the reusable function value and preserves the callable's argument contract.
+fn emit_policy_fn_value(
+    wrapper: &str,
+    fn_type: &Type,
+    policy_args: &[crate::Codegen::TIR::TCallArg],
+    policy_conventions: &[AccessConvention],
+    callee: &TExpr,
+    cx: &Cx,
+) -> String {
+    let Type::Fn {
+        params,
+        call_metadata,
+        ..
+    } = fn_type
+    else {
+        return emit_tir_expr(callee, cx);
+    };
+    let conventions = call_metadata
+        .as_ref()
+        .map(|metadata| metadata.conventions.clone())
+        .unwrap_or_else(|| vec![AccessConvention::Read; params.len()]);
+    let callee_name = mangle_generated("policy_callee");
+    let mut prep = vec![format!(
+        "let {callee_name} = ({});",
+        emit_tir_expr(callee, cx)
+    )];
+    let mut policy_names = Vec::with_capacity(policy_args.len());
+    for (index, argument) in policy_args.iter().enumerate() {
+        let name = mangle_generated(&format!("policy_arg_{index}"));
+        prep.push(format!(
+            "let {name} = ({});",
+            emit_tir_expr(&argument.value, cx)
+        ));
+        policy_names.push(name);
+    }
+    let params = params
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            let convention = conventions
+                .get(index)
+                .copied()
+                .unwrap_or(AccessConvention::Read);
+            format!(
+                "{}: {}",
+                mangle_generated(&format!("policy_call_arg_{index}")),
+                crate::Codegen::rust_param_type(cx, convention, ty)
+            )
+        })
+        .collect::<Vec<_>>();
+    let target_names = (0..params.len())
+        .map(|index| mangle_generated(&format!("policy_call_arg_{index}")))
+        .collect::<Vec<_>>();
+    let mut wrapper_args = Vec::with_capacity(policy_names.len() + target_names.len() + 1);
+    for (index, name) in policy_names.iter().enumerate() {
+        let convention = policy_conventions
+            .get(index)
+            .copied()
+            .unwrap_or(AccessConvention::Read);
+        let ty = &policy_args[index].value.ty;
+        wrapper_args.push(match convention {
+            AccessConvention::Move => name.clone(),
+            AccessConvention::Write => format!("&mut {name}"),
+            AccessConvention::Read if !ty.is_scalar() => format!("&{name}"),
+            AccessConvention::Read => name.clone(),
+        });
+    }
+    // The generated wrapper's `call` parameter is a read-only function value.
+    wrapper_args.push(format!("&{callee_name}"));
+    wrapper_args.extend(target_names.iter().cloned());
+    let wrapper_call = format!(
+        "{}({})",
+        cx.mangle_name(wrapper),
+        wrapper_args.join(", ")
+    );
+    format!(
+        "{{ {} std::rc::Rc::new(move |{}| {}) as {} }}",
+        prep.join(" "),
+        params.join(", "),
+        wrapper_call,
+        cx.rust_type(fn_type)
+    )
 }
 
 pub(super) fn is_view(ty: &Type) -> bool {
@@ -6230,6 +6316,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `Expr::CallValue`.
         TExprKind::FnValue { kind } => match kind {
             TFnValueKind::NamedFn { wrapper, .. } => wrapper.clone(),
+            TFnValueKind::Policy {
+                wrapper,
+                fn_type,
+                policy_args,
+                policy_conventions,
+                callee,
+            } => emit_policy_fn_value(
+                wrapper,
+                fn_type,
+                policy_args,
+                policy_conventions,
+                callee,
+                cx,
+            ),
             TFnValueKind::Call { callee, args } => {
                 format!(
                     "({})({})",

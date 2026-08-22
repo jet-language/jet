@@ -1,3 +1,11 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/E0405_refutable_test_bind_route_must_diverge.jet:1:16
+    |
+  1 | fn parse_age() => Int ! String {
+    |                ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0405]: `??` must diverge after a refutable binding
   --> tests/ui/E0405_refutable_test_bind_route_must_diverge.jet:6:32
     |

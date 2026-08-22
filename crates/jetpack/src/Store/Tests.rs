@@ -347,10 +347,13 @@ mod tests {
         let snapshot = Lifecycle::snapshot(&roots).unwrap();
         let root = snapshot.roots.values().next().unwrap();
         assert_eq!(root.identity.kind, Lifecycle::RootKind::ExternalConsumer);
-        assert_eq!(root.identity.id.as_str(), format!(
-            "external-consumer:jetos-generation:{}",
-            SHA256::sha256_hex(b"host\0generation")
-        ));
+        assert_eq!(
+            root.identity.id.as_str(),
+            format!(
+                "external-consumer:jetos-generation:{}",
+                SHA256::sha256_hex(b"host\0generation")
+            )
+        );
         assert_eq!(root.identity.producer.as_str(), "jetos-generation");
         assert_eq!(root.identity.incarnation.get(), 1);
         assert_eq!(root.identity.witness.as_str(), witness);
@@ -465,18 +468,16 @@ mod tests {
             .find(|root| root.identity.kind == Lifecycle::RootKind::Manual)
             .unwrap();
         assert_eq!(root.metadata.label.as_deref(), Some("backup-sdk"));
-        assert_eq!(root.metadata.reference.as_deref(), Some(second_reference.as_str()));
+        assert_eq!(
+            root.metadata.reference.as_deref(),
+            Some(second_reference.as_str())
+        );
         assert_eq!(root.revision, 2);
         assert_eq!(root.identity.incarnation.get(), 2);
 
-        let stale_remove = unregister_external_root_at(
-            &roots,
-            principal,
-            "backup-sdk",
-            "1.1",
-            now + 3,
-        )
-        .unwrap_err();
+        let stale_remove =
+            unregister_external_root_at(&roots, principal, "backup-sdk", "1.1", now + 3)
+                .unwrap_err();
         assert!(matches!(stale_remove, ExternalRootError::Conflict { .. }));
         unregister_external_root_at(&roots, principal, "backup-sdk", "2.2", now + 3).unwrap();
         unregister_external_root_at(&roots, principal, "backup-sdk", "2.2", now + 4).unwrap();
@@ -526,12 +527,7 @@ mod tests {
     #[test]
     fn verified_cache_rejects_deleted_and_tampered_outputs() {
         let (roots, _g) = temp_roots();
-        let ingested = ingest_fixture(
-            &roots,
-            "verified-cache",
-            &[("out", "trusted")],
-            Vec::new(),
-        );
+        let ingested = ingest_fixture(&roots, "verified-cache", &[("out", "trusted")], Vec::new());
         let entry = ingested.entry;
         let out = PathBuf::from(&entry.out);
         let reference = entry.reference.as_str();
@@ -663,12 +659,7 @@ mod tests {
         )
         .unwrap();
         entry.bin = out.join("../other").to_string_lossy().into_owned();
-        let proof = verify_cache_entry(
-            &roots,
-            &entry,
-            "escape@mine",
-            &test_expectation(&out),
-        );
+        let proof = verify_cache_entry(&roots, &entry, "escape@mine", &test_expectation(&out));
         assert!(!proof.closure);
         assert!(!proof.trusted());
     }
@@ -725,9 +716,15 @@ mod tests {
         perms.set_mode(0o755);
         fs::set_permissions(&helper, perms).unwrap();
 
-        assert_eq!(migrate_nix_gc_roots_with(&roots, &prefix, &helper).unwrap(), 1);
+        assert_eq!(
+            migrate_nix_gc_roots_with(&roots, &prefix, &helper).unwrap(),
+            1
+        );
         let root = roots.hangar_dir().join(entry.id).join(NIX_GC_ROOT);
-        assert_eq!(fs::canonicalize(root).unwrap(), fs::canonicalize(out).unwrap());
+        assert_eq!(
+            fs::canonicalize(root).unwrap(),
+            fs::canonicalize(out).unwrap()
+        );
     }
 
     #[test]
@@ -763,8 +760,14 @@ mod tests {
         };
 
         quarantine_invalid_entry(&roots, &entry, &expectation).unwrap();
-        assert_eq!(fs::read_to_string(survivor.join("keep")).unwrap(), "survivor");
-        assert_eq!(fs::read_to_string(expected.join("bad")).unwrap(), "candidate");
+        assert_eq!(
+            fs::read_to_string(survivor.join("keep")).unwrap(),
+            "survivor"
+        );
+        assert_eq!(
+            fs::read_to_string(expected.join("bad")).unwrap(),
+            "candidate"
+        );
     }
 
     #[test]
@@ -786,10 +789,10 @@ mod tests {
         assert!(fs::read_dir(roots.hangar_dir().join("quarantine"))
             .unwrap()
             .flatten()
-            .any(|item| item.file_name().to_string_lossy().starts_with(&format!(
-                "output-{}-",
-                entry.envelope.output_hash
-            ))));
+            .any(|item| item
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("output-{}-", entry.envelope.output_hash))));
         ingest_fixture(&roots, "sealed", &[("out", "tampered")], Vec::new());
     }
 
@@ -976,7 +979,10 @@ mod tests {
 
         let error = quarantine_invalid_entry(&roots, &ingested.entry, &mismatch).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
-        assert_eq!(fs::metadata(&hangar).unwrap().permissions().mode() & 0o777, 0o555);
+        assert_eq!(
+            fs::metadata(&hangar).unwrap().permissions().mode() & 0o777,
+            0o555
+        );
         assert!(hangar.join(&ingested.entry.id).exists());
 
         fs::set_permissions(&hangar, fs::Permissions::from_mode(0o755)).unwrap();
@@ -1006,13 +1012,9 @@ mod tests {
             &test_identity(),
         )
         .unwrap();
-        let hit = find_verified_by_reference(
-            &roots,
-            "leased@mine",
-            &test_expectation(&out),
-        )
-        .unwrap()
-        .unwrap();
+        let hit = find_verified_by_reference(&roots, "leased@mine", &test_expectation(&out))
+            .unwrap()
+            .unwrap();
         fs::write(out.join("payload"), "mutated outside cooperative lock").unwrap();
         hit.lease.validate().unwrap();
         let stable = hit
@@ -1094,7 +1096,10 @@ mod tests {
             missing.consumption_status(),
             ConsumptionStatus::NonConsumable { .. }
         ));
-        assert!(missing.lease.stable_path(&missing_out.to_string_lossy()).is_err());
+        assert!(missing
+            .lease
+            .stable_path(&missing_out.to_string_lossy())
+            .is_err());
     }
 
     #[cfg(target_os = "linux")]
@@ -1107,11 +1112,7 @@ mod tests {
         let tool = out.join("bin/tool");
         fs::create_dir_all(tool.parent().unwrap()).unwrap();
         fs::write(out.join("bin/tool-real"), "#!/bin/sh\nprintf trusted").unwrap();
-        fs::set_permissions(
-            out.join("bin/tool-real"),
-            fs::Permissions::from_mode(0o555),
-        )
-        .unwrap();
+        fs::set_permissions(out.join("bin/tool-real"), fs::Permissions::from_mode(0o555)).unwrap();
         symlink("tool-real", &tool).unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
@@ -1130,13 +1131,9 @@ mod tests {
             &test_identity(),
         )
         .unwrap();
-        let hit = find_verified_by_reference(
-            &roots,
-            "fd-view@mine",
-            &test_expectation(&out),
-        )
-        .unwrap()
-        .unwrap();
+        let hit = find_verified_by_reference(&roots, "fd-view@mine", &test_expectation(&out))
+            .unwrap()
+            .unwrap();
         let stable_tool = hit.lease.stable_path(&tool.to_string_lossy()).unwrap();
 
         let moved = roots.root.join("fd-view-original");
@@ -1144,11 +1141,7 @@ mod tests {
         fs::rename(&out, &moved).unwrap();
         fs::create_dir_all(attacker.join("bin")).unwrap();
         fs::write(attacker.join("bin/tool"), "#!/bin/sh\nprintf attacker").unwrap();
-        fs::set_permissions(
-            attacker.join("bin/tool"),
-            fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        fs::set_permissions(attacker.join("bin/tool"), fs::Permissions::from_mode(0o755)).unwrap();
         symlink(&attacker, &out).unwrap();
 
         hit.lease.validate().unwrap();
@@ -1178,7 +1171,10 @@ mod tests {
             .unwrap();
         assert!(nested.status.success());
         assert_eq!(String::from_utf8(nested.stdout).unwrap(), "trusted");
-        assert_eq!(fs::read_to_string(out.join("bin/tool")).unwrap(), "#!/bin/sh\nprintf attacker");
+        assert_eq!(
+            fs::read_to_string(out.join("bin/tool")).unwrap(),
+            "#!/bin/sh\nprintf attacker"
+        );
     }
 
     #[test]
@@ -1234,9 +1230,7 @@ mod tests {
             &entry,
             &expectation,
             |key, message, signature| {
-                key == "public-key"
-                    && message.contains("source=source-v1")
-                    && signature == "abcd"
+                key == "public-key" && message.contains("source=source-v1") && signature == "abcd"
             }
         ));
     }
@@ -1625,7 +1619,13 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code(), "E1299");
-        assert!(err.what().contains("store path") || err.why().contains("reserved") || err.why().contains("CON") || format!("{err:?}").contains("reserved"), "{err:?}");
+        assert!(
+            err.what().contains("store path")
+                || err.why().contains("reserved")
+                || err.why().contains("CON")
+                || format!("{err:?}").contains("reserved"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -1708,8 +1708,9 @@ mod tests {
             fs::read_link(Path::new(&ingested.entry.out).join("payload-link")).unwrap(),
             PathBuf::from("payload")
         );
-        let actual = super::super::super::Envelope::try_output_hash_of(&installed.to_string_lossy())
-            .unwrap();
+        let actual =
+            super::super::super::Envelope::try_output_hash_of(&installed.to_string_lossy())
+                .unwrap();
         assert_eq!(ingested.entry.named_outputs.get("dev"), Some(&actual));
         verify_hangar_object(&roots, &ingested.entry).unwrap();
     }
@@ -1808,15 +1809,13 @@ mod tests {
             vec![dev.clone(), primary.clone()]
         );
         let action = entry_action_key(&consumer.entry);
-        assert_eq!(action_outputs_of(&roots, &action).unwrap().get("dev"), Some(&dev));
+        assert_eq!(
+            action_outputs_of(&roots, &action).unwrap().get("dev"),
+            Some(&dev)
+        );
         assert_eq!(actions_for_output(&roots, &primary).unwrap(), vec![action]);
 
-        ingest_fixture(
-            &roots,
-            "base",
-            &[("out", "base")],
-            vec![primary.clone()],
-        );
+        ingest_fixture(&roots, "base", &[("out", "base")], vec![primary.clone()]);
         let transitive = transitive_references_of(&roots, &primary).unwrap();
         assert!(transitive.contains(&base.entry.envelope.output_hash));
         assert!(transitive.contains(&middle.entry.envelope.output_hash));
@@ -1948,13 +1947,8 @@ mod tests {
     #[test]
     fn closure_action_key_excludes_realized_outputs_but_keeps_action_facts() {
         let (roots, _g) = temp_roots();
-        let mut entry = ingest_fixture(
-            &roots,
-            "action-projection",
-            &[("out", "bytes")],
-            Vec::new(),
-        )
-        .entry;
+        let mut entry =
+            ingest_fixture(&roots, "action-projection", &[("out", "bytes")], Vec::new()).entry;
         let original_record = entry.producer_record.clone();
         let original = entry_action_key(&entry);
         let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
@@ -1991,34 +1985,48 @@ mod tests {
                     ("nix.drv_path".into(), drv.into()),
                     ("nix.reference".into(), reference.into()),
                     ("nix.output.out".into(), output.into()),
-                ])).unwrap(),
+                ]))
+                .unwrap(),
                 format!("nix-derivation:{drv}"),
                 "policy=test\nplatform=test",
-                BTreeMap::from([
-                    ("nix.output.out".into(), output.into()),
-                ]),
-            ).unwrap().encode()
+                BTreeMap::from([("nix.output.out".into(), output.into())]),
+            )
+            .unwrap()
+            .encode()
         };
         first.reference = "first@nixpkgs".into();
         first.cache_identity.source_fingerprint = "sha256-first-output".into();
-        first.producer_record = nix_record("/nix/store/action.drv", "/nix/store/first", "first@nixpkgs");
+        first.producer_record =
+            nix_record("/nix/store/action.drv", "/nix/store/first", "first@nixpkgs");
         let action = entry_action_key(&first);
 
         let mut second = first.clone();
         second.reference = "alias:second".into();
         second.cache_identity.source_fingerprint = "sha256-second-output".into();
-        second.producer_record = nix_record("/nix/store/action.drv", "/nix/store/second", "alias:second");
+        second.producer_record =
+            nix_record("/nix/store/action.drv", "/nix/store/second", "alias:second");
         assert_eq!(entry_action_key(&second), action);
 
-        second.producer_record = nix_record("/nix/store/other.drv", "/nix/store/second", "alias:second");
+        second.producer_record =
+            nix_record("/nix/store/other.drv", "/nix/store/second", "alias:second");
         assert_ne!(entry_action_key(&second), action);
     }
 
     #[test]
     fn nix_multi_projection_registers_recovers_queries_and_rolls_back_conflict() {
         let (roots, _g) = temp_roots();
-        let out = ingest_fixture(&roots, "projection-out-bytes", &[("out", "out")], Vec::new());
-        let dev = ingest_fixture(&roots, "projection-dev-bytes", &[("out", "dev")], Vec::new());
+        let out = ingest_fixture(
+            &roots,
+            "projection-out-bytes",
+            &[("out", "out")],
+            Vec::new(),
+        );
+        let dev = ingest_fixture(
+            &roots,
+            "projection-dev-bytes",
+            &[("out", "dev")],
+            Vec::new(),
+        );
         let conflict = ingest_fixture(&roots, "projection-bad-dev", &[("out", "bad")], Vec::new());
         let drv = "/nix/store/multi-projection.drv";
         let project = |mut entry: StoreEntry, id: &str, output_name: &str| {
@@ -2038,11 +2046,14 @@ mod tests {
                     ("nix.drv_path".into(), drv.into()),
                     ("nix.reference".into(), entry.reference.clone()),
                     (format!("nix.output.{output_name}"), path.clone()),
-                ])).unwrap(),
+                ]))
+                .unwrap(),
                 format!("nix-derivation:{drv}"),
                 "policy=test\nplatform=test",
                 BTreeMap::from([(format!("nix.output.{output_name}"), path)]),
-            ).unwrap().encode();
+            )
+            .unwrap()
+            .encode();
             entry
         };
         let out = project(out.entry, "projection-out", "out");
@@ -2054,7 +2065,8 @@ mod tests {
         crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &out)?;
             register_entry_unlocked(&roots, &dev)
-        }).unwrap();
+        })
+        .unwrap();
         fs::remove_file(roots.hangar_dir().join(&dev.id).join("meta.json")).unwrap();
         let outputs = action_outputs_of(&roots, &action).unwrap();
         assert_eq!(outputs.get("out"), Some(&out.envelope.output_hash));
@@ -2064,7 +2076,8 @@ mod tests {
         let before = closure_graph(&roots).unwrap();
         let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &bad)
-        }).unwrap_err();
+        })
+        .unwrap_err();
         assert!(error.to_string().contains("conflicting bytes"));
         assert_eq!(closure_graph(&roots).unwrap(), before);
     }
@@ -2072,7 +2085,8 @@ mod tests {
     #[test]
     fn closure_empty_reference_proof_rejects_unknown_provider() {
         let (roots, _g) = temp_roots();
-        let mut entry = ingest_fixture(&roots, "unknown-proof", &[("out", "bytes")], Vec::new()).entry;
+        let mut entry =
+            ingest_fixture(&roots, "unknown-proof", &[("out", "bytes")], Vec::new()).entry;
         entry.id = "unknown-proof-record".into();
         let original = ProducerRecord::decode(&entry.producer_record).unwrap();
         entry.producer_record = ProducerRecord::new(
@@ -2083,17 +2097,25 @@ mod tests {
             original.toolchain_facts,
             original.policy_facts,
             BTreeMap::from([("closure.authority".into(), "hangar-cas".into())]),
-        ).unwrap().encode();
+        )
+        .unwrap()
+        .encode();
         let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &entry)
-        }).unwrap_err();
+        })
+        .unwrap_err();
         assert!(error.to_string().contains("store-validated closure proof"));
     }
 
     #[test]
     fn closure_rejects_named_out_that_disagrees_with_primary() {
         let (roots, _g) = temp_roots();
-        let primary = ingest_fixture(&roots, "named-out-primary", &[("out", "primary")], Vec::new());
+        let primary = ingest_fixture(
+            &roots,
+            "named-out-primary",
+            &[("out", "primary")],
+            Vec::new(),
+        );
         let other = ingest_fixture(&roots, "named-out-other", &[("out", "other")], Vec::new());
         let mut conflicting = primary.entry.clone();
         conflicting
@@ -2116,17 +2138,17 @@ mod tests {
         conflicting.id = "conflicting-projection".into();
         conflicting.out = named.entry.out.clone();
         conflicting.envelope.output_hash = named.entry.envelope.output_hash.clone();
-        conflicting.named_outputs = BTreeMap::from([(
-            "out".to_string(),
-            named.entry.envelope.output_hash.clone(),
-        )]);
+        conflicting.named_outputs =
+            BTreeMap::from([("out".to_string(), named.entry.envelope.output_hash.clone())]);
         let error = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
             register_entry_unlocked(&roots, &conflicting)
         })
         .unwrap_err();
         assert!(error.to_string().contains("conflicting bytes"));
         assert_eq!(action_outputs_of(&roots, &action).unwrap().len(), 1);
-        assert!(!action_outputs_of(&roots, &action).unwrap().contains_key("dev"));
+        assert!(!action_outputs_of(&roots, &action)
+            .unwrap()
+            .contains_key("dev"));
     }
 
     #[test]
@@ -2148,7 +2170,11 @@ mod tests {
             .unwrap();
         let legacy_referrers = roots.hangar_dir().join("referrers");
         fs::create_dir_all(&legacy_referrers).unwrap();
-        fs::write(legacy_referrers.join("fake.refs"), "fallback-must-not-win\n").unwrap();
+        fs::write(
+            legacy_referrers.join("fake.refs"),
+            "fallback-must-not-win\n",
+        )
+        .unwrap();
         std::fs::OpenOptions::new()
             .append(true)
             .open(transaction)
@@ -2217,7 +2243,10 @@ mod tests {
         let abandoned = roots.hangar_dir().join(".stage/abandoned");
         fs::create_dir_all(&abandoned).unwrap();
         fs::write(abandoned.join("payload"), "partial").unwrap();
-        let meta = roots.hangar_dir().join(&ingested.entry.id).join("meta.json");
+        let meta = roots
+            .hangar_dir()
+            .join(&ingested.entry.id)
+            .join("meta.json");
         let expected = ingested.entry.meta_json();
         fs::write(&meta, "stale").unwrap();
 
@@ -2229,8 +2258,10 @@ mod tests {
     #[test]
     fn closure_legacy_migration_is_idempotent() {
         let (roots, _g) = temp_roots();
-        let mut first = ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
-        let mut second = ingest_fixture(&roots, "legacy-second", &[("out", "second")], Vec::new()).entry;
+        let mut first =
+            ingest_fixture(&roots, "legacy-first", &[("out", "first")], Vec::new()).entry;
+        let mut second =
+            ingest_fixture(&roots, "legacy-second", &[("out", "second")], Vec::new()).entry;
         first.references = vec![second.envelope.output_hash.clone()];
         second.references = vec![first.envelope.output_hash.clone()];
         fs::write(
@@ -2250,14 +2281,21 @@ mod tests {
         let graph = closure_graph(&roots).unwrap();
         assert!(graph.records.contains_key(&first.id));
         assert!(graph.records.contains_key(&second.id));
-        assert_eq!(graph.direct_references(&first.envelope.output_hash), first.references);
-        assert_eq!(graph.direct_references(&second.envelope.output_hash), second.references);
+        assert_eq!(
+            graph.direct_references(&first.envelope.output_hash),
+            first.references
+        );
+        assert_eq!(
+            graph.direct_references(&second.envelope.output_hash),
+            second.references
+        );
     }
 
     #[test]
     fn closure_legacy_migration_rejects_atomically() {
         let (roots, _g) = temp_roots();
-        let mut entry = ingest_fixture(&roots, "legacy-invalid", &[("out", "invalid")], Vec::new()).entry;
+        let mut entry =
+            ingest_fixture(&roots, "legacy-invalid", &[("out", "invalid")], Vec::new()).entry;
         entry.references = vec!["sha256-missing".to_string()];
         fs::write(
             roots.hangar_dir().join(&entry.id).join("meta.json"),
@@ -2450,89 +2488,89 @@ mod tests {
         assert_eq!(closure_graph(&roots).unwrap().records.len(), 70);
     }
 
-/// Minimal scoped tempdir for tests (std-only; auto-removes on drop).
-#[cfg(test)]
-mod tempdir {
-    use std::path::PathBuf;
+    /// Minimal scoped tempdir for tests (std-only; auto-removes on drop).
+    #[cfg(test)]
+    mod tempdir {
+        use std::path::PathBuf;
 
-    pub struct Guard {
-        pub path: PathBuf,
-    }
+        pub struct Guard {
+            pub path: PathBuf,
+        }
 
-    impl Guard {
-        pub fn new(tag: &str) -> Guard {
-            let mut path = std::env::temp_dir();
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            path.push(format!("{tag}-{nanos}-{:?}", std::thread::current().id()));
-            std::fs::create_dir_all(&path).unwrap();
-            Guard { path }
+        impl Guard {
+            pub fn new(tag: &str) -> Guard {
+                let mut path = std::env::temp_dir();
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                path.push(format!("{tag}-{nanos}-{:?}", std::thread::current().id()));
+                std::fs::create_dir_all(&path).unwrap();
+                Guard { path }
+            }
+        }
+
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
         }
     }
 
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+    #[test]
+    fn store_stays_split_along_existing_phases() {
+        const MAX_MODULE_LINES: usize = 2500;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
+        let store = read("src/Store.rs");
+        let ingest = read("src/Store/Ingest.rs");
+        let closure = read("src/Store/Closure.rs");
+        let tests = read("src/Store/Tests.rs");
+        let tests_production = tests
+            .split("#[test]\nfn store_stays_split_along_existing_phases")
+            .next()
+            .unwrap();
+
+        for (relative, source) in [
+            ("src/Store.rs", store.as_str()),
+            ("src/Store/Ingest.rs", ingest.as_str()),
+            ("src/Store/Closure.rs", closure.as_str()),
+            ("src/Store/Tests.rs", tests_production),
+        ] {
+            assert!(
+                source.lines().count() < MAX_MODULE_LINES,
+                "{relative} must stay below the card #510 module boundary"
+            );
+            assert!(!source.contains("include!("));
+            assert!(!source.contains("#[path"));
         }
+        assert!(store.contains("\nmod Ingest;\npub use Ingest::*;"));
+        assert!(store.contains("\nmod Closure;\npub use Closure::*;"));
+        assert!(store.contains("\n#[cfg(test)]\nmod Tests;"));
+
+        let ordered = [
+            "pub struct IngestRequest",
+            "pub fn recover_hangar_staging",
+            "pub fn ingest_tree",
+            "fn copy_nofollow_tree",
+            "fn stable_meta_identity",
+        ];
+        let positions: Vec<usize> = ordered
+            .iter()
+            .map(|needle| ingest.find(needle).unwrap())
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        let closure_ordered = [
+            "pub fn closure_graph",
+            "pub fn referrers_of",
+            "pub fn migrate_closure_graph",
+            "fn load_graph",
+            "fn validate_graph",
+        ];
+        let positions: Vec<usize> = closure_ordered
+            .iter()
+            .map(|needle| closure.find(needle).unwrap())
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     }
-}
-
-#[test]
-fn store_stays_split_along_existing_phases() {
-    const MAX_MODULE_LINES: usize = 2500;
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
-    let store = read("src/Store.rs");
-    let ingest = read("src/Store/Ingest.rs");
-    let closure = read("src/Store/Closure.rs");
-    let tests = read("src/Store/Tests.rs");
-    let tests_production = tests
-        .split("#[test]\nfn store_stays_split_along_existing_phases")
-        .next()
-        .unwrap();
-
-    for (relative, source) in [
-        ("src/Store.rs", store.as_str()),
-        ("src/Store/Ingest.rs", ingest.as_str()),
-        ("src/Store/Closure.rs", closure.as_str()),
-        ("src/Store/Tests.rs", tests_production),
-    ] {
-        assert!(
-            source.lines().count() < MAX_MODULE_LINES,
-            "{relative} must stay below the card #510 module boundary"
-        );
-        assert!(!source.contains("include!("));
-        assert!(!source.contains("#[path"));
-    }
-    assert!(store.contains("\nmod Ingest;\npub use Ingest::*;"));
-    assert!(store.contains("\nmod Closure;\npub use Closure::*;"));
-    assert!(store.contains("\n#[cfg(test)]\nmod Tests;"));
-
-    let ordered = [
-        "pub struct IngestRequest",
-        "pub fn recover_hangar_staging",
-        "pub fn ingest_tree",
-        "fn copy_nofollow_tree",
-        "fn stable_meta_identity",
-    ];
-    let positions: Vec<usize> = ordered
-        .iter()
-        .map(|needle| ingest.find(needle).unwrap())
-        .collect();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    let closure_ordered = [
-        "pub fn closure_graph",
-        "pub fn referrers_of",
-        "pub fn migrate_closure_graph",
-        "fn load_graph",
-        "fn validate_graph",
-    ];
-    let positions: Vec<usize> = closure_ordered
-        .iter()
-        .map(|needle| closure.find(needle).unwrap())
-        .collect();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-}
 }

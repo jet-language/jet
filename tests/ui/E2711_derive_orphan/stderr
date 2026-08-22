@@ -1,10 +1,18 @@
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --> tests/ui/E2711_derive_orphan/main.jet:6:15
+    |
+  6 |     print("ok")
+    |               ^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/E2711_derive_orphan/main.jet:8:1
     |
   8 | 
     | ^
- Why: A one-expression function body uses `:>`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `::` with `:>`; `jet fmt` applies this fix.
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: Replace `::` with `->`; `jet fmt` applies this fix.
 
 Error [E2711]: derive orphan rule: neither `derive T.Named` nor `Bar` is local
  Why: a generated implementation is owned locally only when the derive provider or target type lives in the entry module

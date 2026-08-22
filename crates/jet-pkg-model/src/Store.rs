@@ -58,7 +58,7 @@ pub fn lock_path(project: &Path) -> PathBuf {
 /// 1. `JETPACK_ROOT` if set (tests, custom installs).
 /// 2. The platform data directory from D-ECO-HANGARPATH1 otherwise.
 pub fn resolve() -> Roots {
-    if let Some(dir) = std::env::var_os("JETPACK_ROOT") {
+    if let Some(dir) = environment_path("JETPACK_ROOT") {
         return Roots {
             root: PathBuf::from(dir),
             dev_mode: false,
@@ -73,15 +73,19 @@ pub fn resolve() -> Roots {
 fn home_dir() -> PathBuf {
     #[cfg(windows)]
     {
-        return std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(PathBuf::from)
+        return environment_path("USERPROFILE")
+            .or_else(|| environment_path("HOME"))
             .unwrap_or_else(|| PathBuf::from("."));
     }
     #[cfg(not(windows))]
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
+    environment_path("HOME")
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn environment_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn user_data_root() -> PathBuf {
@@ -91,15 +95,14 @@ fn user_data_root() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        return std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
+        return environment_path("LOCALAPPDATA")
             .unwrap_or_else(|| home_dir().join("AppData").join("Local"))
             .join("Jet");
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
+        environment_path("XDG_DATA_HOME")
+            .filter(|path| path.is_absolute())
             .unwrap_or_else(|| home_dir().join(".local").join("share"))
             .join("jet")
     }
@@ -108,8 +111,8 @@ fn user_data_root() -> PathBuf {
 /// The pre-D-ECO-HANGARPATH1 user root. It is kept as a migration source only;
 /// new resolution never selects it.
 pub fn legacy_user_root() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
+    environment_path("XDG_STATE_HOME")
+        .filter(|path| path.is_absolute())
         .unwrap_or_else(|| home_dir().join(".local").join("state"))
         .join("jet")
 }
