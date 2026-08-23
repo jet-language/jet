@@ -172,6 +172,14 @@ pub(super) fn complete_bundle_check(
                 let param = &run_fn.params[0];
                 let cli_module = jet_foundation::CLISchema::entry_type_module(bundle)
                     .unwrap_or(bundle.entry);
+                if std::env::var_os("JET_DEBUG_CLI").is_some() {
+                    eprintln!(
+                        "cli-debug sema module={cli_module} param={:?} cli={:?} derives={:?}",
+                        param.ty,
+                        states[cli_module].trait_reg.implements_trait("RunArgs", "CLI"),
+                        states[cli_module].trait_reg.derives.keys().collect::<Vec<_>>()
+                    );
+                }
                 match cli_entry_param_shape(
                     &bundle.modules[cli_module].items,
                     &param.ty,

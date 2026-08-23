@@ -723,6 +723,28 @@ impl FlowFacts {
         }
     }
 
+    /// Join the ordinary loop path with explicit `break` exits. A break makes
+    /// the body flow unreachable, but its facts still describe the path that
+    /// reaches the statement after the loop.
+    pub(crate) fn after_loop_with_breaks(
+        before: &Self,
+        after_body: &Self,
+        break_paths: &[Self],
+    ) -> Self {
+        if break_paths.is_empty() {
+            return Self::after_loop(before, after_body);
+        }
+        if !before.reachable {
+            return before.clone();
+        }
+        let mut paths = vec![before.clone()];
+        if after_body.reachable {
+            paths.push(after_body.clone());
+        }
+        paths.extend(break_paths.iter().filter(|path| path.reachable).cloned());
+        Self::merge_paths(before, &paths)
+    }
+
     fn plane<P: Plane>(paths: &[Self], pick: impl Fn(&Self) -> &Facts<P>) -> Vec<Facts<P>> {
         paths.iter().map(|facts| pick(facts).clone()).collect()
     }

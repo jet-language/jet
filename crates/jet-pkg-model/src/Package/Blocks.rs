@@ -1071,7 +1071,8 @@ fn parse_authority_trust_body(body: &str) -> Result<TrustPolicy, PackageParseErr
 fn parse_provider_authority_body(providers: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
     let mut out = Vec::new();
     let mut seen_providers = HashSet::new();
-    for (provider, value) in key_value_entries(providers).map_err(authority_error)? {
+    for (raw_provider, value) in key_value_entries(providers).map_err(authority_error)? {
+        let provider = unquote(&raw_provider);
         if !seen_providers.insert(provider.clone()) {
             return Err(authority_bad(format!("authority.providers.{provider} is declared more than once")));
         }
@@ -1162,7 +1163,8 @@ fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, Pack
         .ok_or_else(|| err("`authority.trust.services` must be `{ name: allow|prompt|deny }`"))?;
     let mut services = Vec::new();
     let mut seen = HashSet::new();
-    for (name, value) in key_value_entries(body)? {
+    for (raw_name, value) in key_value_entries(body)? {
+        let name = unquote(&raw_name);
         if !seen.insert(name.clone()) {
             return Err(err(format!("authority.trust.services.{name} is declared more than once")));
         }

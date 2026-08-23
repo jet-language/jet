@@ -1,6 +1,8 @@
 #![allow(dead_code, unused_imports)]
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 include!("corelib_parts/support.rs");
 
 #[cfg(any(unix, windows))]
@@ -74,6 +76,47 @@ fn run() {{
     assert!(
         stdout.ends_with("closed:error\n"),
         "closed input was not typed: {stdout:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn terminal_session_behavior_matches_all_execution_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_session_fixture_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    child :: process.cmd(["{fixture}", "terminal"]).terminal().spawn() ?? panic("spawn failed")
+    session :: child.terminal ?? panic("missing terminal session")
+    session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("resize failed")
+    exited :: child.exited() ?? panic("poll failed")
+    print(!exited)
+    child.stdin.write("typed\n") ?? panic("write failed")
+    result :: child.wait() ?? panic("wait failed")
+    print(result.success)
+    print(result.output.contains("input:typed"))
+    print(result.output.contains("size:30x100"))
+    if child.stdin.write("late") == {{
+        .Ok(_) -> {{ print(false) }}
+        .Err(_) -> {{ print(true) }}
+    }}
+}}
+"#,
+        fixture = fixture,
+    );
+    tir_support::assert_tiers_agree(
+        "process_session_terminal_behavior",
+        &src,
+        "true\ntrue\ntrue\ntrue\ntrue\n",
     );
     let _ = fs::remove_dir_all(&dir);
 }

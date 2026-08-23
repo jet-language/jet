@@ -1518,6 +1518,8 @@ pub(crate) struct Checker<'a> {
     /// Nested yielding loops push independent slots.
     collect_item_types: Vec<Option<Type>>,
     loop_value_frames: Vec<LoopValueFrame>,
+    /// Flow facts captured by `break` exits, aligned with loop_value_frames.
+    loop_break_flows: Vec<Vec<FlowFacts::FlowFacts>>,
     pending_loop_value: Option<(LoopValueKind, Option<String>)>,
     /// D-LOOP-STMT-ARROW1=C: the body currently being checked came from a
     /// statement-position loop arrow. Its ordinary expression statement may

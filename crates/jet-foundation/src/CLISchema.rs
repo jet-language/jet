@@ -291,7 +291,13 @@ fn selected_entry_type(items: &[Item]) -> Option<&str> {
                         let is_local_type = items
                             .iter()
                             .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
-                        if is_local_type || name.contains('.') {
+                        if is_local_type || name.contains('.') || name.contains("::") {
+                            return Some(name.as_str());
+                        }
+                        // An unqualified imported struct keeps its source leaf
+                        // in the entry AST. It is typed CLI when the direct
+                        // scalar path does not recognize the parameter.
+                        if direct_run_function(items).is_none() {
                             return Some(name.as_str());
                         }
                     }
@@ -372,7 +378,10 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
                     .items
                     .iter()
                     .any(|item| matches!(item, Item::Struct(s) if s.name == name.as_str()));
-                if is_local_type || name.contains('.') {
+                if is_local_type || name.contains('.') || name.contains("::") {
+                    return Some((bundle.entry, name.as_str()));
+                }
+                if direct_run_function(&entry.items).is_none() {
                     return Some((bundle.entry, name.as_str()));
                 }
             }
@@ -397,6 +406,9 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
 /// otherwise the type must be public in one directly imported file module.
 pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     let (source, name) = selected_entry_type_source(bundle)?;
+    if std::env::var_os("JET_DEBUG_CLI").is_some() {
+        eprintln!("cli-debug entry_type_module source={source} name={name} entry={}", bundle.entry);
+    }
     let entry = &bundle.modules[source];
     if name == "run"
         && entry
@@ -405,6 +417,13 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
             .any(|item| matches!(item, Item::Func(function) if function.name == "run"))
     {
         return Some(source);
+    }
+    if let Some(owner) = bundle.name_ledger.nominal_module(name) {
+        let leaf = name.rsplit_once("::").map_or(name, |(_, leaf)| leaf);
+        return bundle
+            .name_ledger
+            .visible(source, owner, leaf)
+            .then_some(owner);
     }
     let (wanted_alias, leaf) = name
         .split_once('.')
@@ -417,7 +436,7 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     {
         return Some(source);
     }
-    entry
+    let mut candidates = entry
         .imports
         .iter()
         .filter_map(|import| {
@@ -430,7 +449,16 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
                 .visible(source, target, leaf)
                 .then_some(target)
         })
-        .last()
+        .collect::<Vec<_>>();
+    if std::env::var_os("JET_DEBUG_CLI").is_some() {
+        eprintln!("cli-debug candidates={candidates:?}");
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
+    match candidates.as_slice() {
+        [target] => Some(*target),
+        _ => None,
+    }
 }
 
 /// Checked schema for a typed `fn run`, including a CLI type declared in a

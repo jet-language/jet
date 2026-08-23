@@ -59,6 +59,9 @@ Read dependency provenance
 .B inspect digest
 Write the one-file LLM surface digest
 .TP
+.B inspect env
+List typed environment reads in a config surface
+.TP
 .B inspect semindex
 Search the code index
 .TP
@@ -138,7 +141,7 @@ Restore a signed Hangar archive from stdin
 Sign a Hangar object or archive
 .TP
 .B hangar recover
-Recover abandoned Hangar staging and leases
+Recover Hangar staging, build scratch, and leases
 .TP
 .B hangar rollback
 Restore an earlier package-store generation
@@ -178,6 +181,9 @@ Run Jet maintenance tools
 .TP
 .B self lsp
 Start the language server
+.TP
+.B self exec
+Execute one command in an authority-bound workspace
 .TP
 .B diff
 Compare two Jet programs by meaning
@@ -396,6 +402,12 @@ with merge install-driver: Git worktree to configure
 .B --json
 emit machine-readable facts or diagnostics
 .TP
+.B --topic
+with inspect digest: emit one digest topic
+.TP
+.B --list-topics
+with inspect digest: list digest topics
+.TP
 .B --kind
 with inspect gates/authority: filter one gate kind
 .TP
@@ -457,7 +469,7 @@ with shared-store enroll: grant read-only broker access
 with shared-store broker: inherited broker socket descriptor
 .TP
 .B -p
-with run/dev/debug/test/check/build/jobs: pick a workspace member by name
+with run/dev/debug/check/build/jobs: pick a workspace member by name
 .TP
 .B --annotated
 with new: include commented example deps
@@ -521,6 +533,9 @@ with rewrite commands: preview changes without writing
 .TP
 .B --edition
 with fix: apply edition migration rewrites --edition=<year>
+.TP
+.B --all
+with fix: apply safety classes beyond formatting and behavior-preserving
 .TP
 .B --try-anyway
 with dev: interpret past unsupported features (no guarantees)
@@ -633,6 +648,12 @@ with test: ignore fn test and use the stock harness
 .B --measure
 with test: measure `.measure` claims
 .TP
+.B --record
+with run/dev/test: record a named replay as --record=<name>
+.TP
+.B --replay
+with debug: consume a named replay as --replay=<name>
+.TP
 .B --iterations
 with fuzz: case budget --iterations=<n> (default 1000)
 .TP
@@ -649,7 +670,7 @@ with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)
 with prove: project the human report by an exact evidence facet
 .TP
 .B --facts
-with expand: project inline, memory, web, effects, layout, derive, or callable-signature facts --facts=<lens>
+with expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>
 .TP
 .B --annotations
 with budget: CI annotations auto, none, or github

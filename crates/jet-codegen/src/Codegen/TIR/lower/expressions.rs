@@ -3597,7 +3597,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
                 // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
                 if !env.locals.contains_key(&call.name) {
-                    if let Some(wrapper) = cx.extern_funcs.get(&call.name).cloned() {
+                    if let Some(extern_fn) = cx.extern_funcs.get(&call.name).cloned() {
+                        let wrapper = extern_fn.wrapper;
+                        let c_abi = extern_fn.c_abi;
                         return in_own_frame(|| {
                             let sig = cx.sigs.get(&call.name).cloned();
                             let eargs = call
@@ -3618,6 +3620,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 ty: call_return_type(cx, &call.name),
                                 kind: TExprKind::ExternCall {
                                     wrapper,
+                                    c_abi,
                                     args: eargs,
                                 },
                             };
@@ -6016,7 +6019,7 @@ pub(crate) fn wrap_foreign_undo(
         kind => (Vec::new(), TExpr { ty: result_ty.clone(), kind }),
     };
     enum Forward {
-        Extern { wrapper: String },
+        Extern { wrapper: String, c_abi: bool },
         Module {
             form: TModuleCallForm,
             type_args: Vec<Type>,
@@ -6027,8 +6030,12 @@ pub(crate) fn wrap_foreign_undo(
         Module(TCallArg),
     }
     let (forward, args) = match foreign.kind {
-        TExprKind::ExternCall { wrapper, args } => (
-            Forward::Extern { wrapper },
+        TExprKind::ExternCall {
+            wrapper,
+            c_abi,
+            args,
+        } => (
+            Forward::Extern { wrapper, c_abi },
             args.into_iter().map(Arg::Extern).collect::<Vec<_>>(),
         ),
         TExprKind::ModuleCall {
@@ -6208,8 +6215,9 @@ pub(crate) fn wrap_foreign_undo(
     };
     prefix.push(TStmt::ExprStmt(registration));
     let forward_kind = match forward {
-        Forward::Extern { wrapper } => TExprKind::ExternCall {
+        Forward::Extern { wrapper, c_abi } => TExprKind::ExternCall {
             wrapper,
+            c_abi,
             args: forward_extern_args,
         },
         Forward::Module { form, type_args } => TExprKind::ModuleCall {
@@ -6551,6 +6559,7 @@ mod source_order_tests {
             ty: unit_type(),
             kind: TExprKind::ExternCall {
                 wrapper: "ordered".to_string(),
+                c_abi: false,
                 args: vec![
                     TExternArg { value: print(), clone: false, mut_borrow: false },
                     TExternArg { value: division(), clone: false, mut_borrow: false },

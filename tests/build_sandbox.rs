@@ -340,7 +340,7 @@ fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
             tool: "cmd".to_string(),
             args: vec![
                 "/C".to_string(),
-                "if defined JET_WINDOWS_HOST_SECRET (exit /b 13) else echo ok>%JET_BUILD_OUTPUT%\\ok"
+                "if defined JET_WINDOWS_HOST_SECRET (exit /b 13) else type \"%CD%\\input\" > \"%JET_BUILD_OUTPUT%\\ok\""
                     .to_string(),
             ],
         }],
@@ -367,7 +367,7 @@ fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
     }
     assert_eq!(
         std::fs::read_to_string(out.join("ok")).unwrap().trim(),
-        "ok"
+        "source"
     );
     std::fs::remove_dir_all(&base).ok();
 }

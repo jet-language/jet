@@ -2,8 +2,10 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-node "$repo/scripts/agent/check-agent-doc-flags.mjs"
-node "$repo/scripts/agent/check-unsafe-ratchet.mjs"
+# Keep stdout reserved for probe data (for example, the four temp-root rows).
+# Preflight status belongs on stderr so callers can parse stdout safely.
+node "$repo/scripts/agent/check-agent-doc-flags.mjs" >&2
+node "$repo/scripts/agent/check-unsafe-ratchet.mjs" >&2
 if [ "${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
   "$repo/scripts/agent/clean-nix-tmp.sh"
 fi

@@ -339,7 +339,7 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
     let ret = m
         .return_type
         .as_ref()
-        .map(|t| format!(" => {}", t.name()))
+        .map(|t| format!(" {}", t.name()))
         .unwrap_or_default();
     format!("fn {}({}){}", m.name, params, ret)
 }

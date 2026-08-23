@@ -484,6 +484,12 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::RetiredAuthorityField { field, replacement } => {
             e1206_retired_authority(&file, field, replacement)
         }
+        PackageParseError::BadMemoryPolicy { detail }
+            if detail.contains("retired memory floor")
+                || detail.contains("memory floors belong in `authority.holds.deny`") =>
+        {
+            e1206_retired_memory(&file, detail)
+        }
         PackageParseError::BadMemoryPolicy { detail } => {
             e1206(&file, &format!("memory policy is malformed: {detail}"))
         }
@@ -574,8 +580,19 @@ fn e1206_retired_authority(_file: &str, field: &str, replacement: &str) -> Diagn
     Diagnostic::error(
         "E1206",
         format!("`{field}` is retired"),
-        format!("`{field}` moved into the one `authority:` block."),
+        format!("`{field}` moved into `{replacement}` in the one `authority:` block."),
         format!("write `{replacement}` inside `authority: .{{ … }}`"),
+        None,
+    )
+}
+
+fn e1206_retired_memory(_file: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("`{}` uses a retired memory floor", Syntax::PACKAGE_FILE),
+        format!("{detail}; memory floors belong in `authority.holds.deny`."),
+        "write the denial in `authority.holds.deny` inside `authority: .{ holds: { deny: […] } }`"
+            .to_string(),
         None,
     )
 }

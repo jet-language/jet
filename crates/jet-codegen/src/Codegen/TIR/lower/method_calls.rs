@@ -2972,7 +2972,9 @@ fn lower_method_call_impl(
                             // foreign modules have no wrapper and remain ModuleCall
                             // values below.
                             let wrapper_key = format!("{rust_mod}::{method}");
-                            if let Some(wrapper) = cx.extern_funcs.get(&wrapper_key).cloned() {
+                            if let Some(extern_fn) = cx.extern_funcs.get(&wrapper_key).cloned() {
+                                let wrapper = extern_fn.wrapper;
+                                let c_abi = extern_fn.c_abi;
                                 return in_own_frame(|| {
                                     let eargs = args
                                         .iter()
@@ -2989,6 +2991,7 @@ fn lower_method_call_impl(
                                         ty: ret.clone(),
                                         kind: TExprKind::ExternCall {
                                             wrapper,
+                                            c_abi,
                                             args: eargs,
                                         },
                                     };
@@ -3111,11 +3114,13 @@ fn lower_method_call_impl(
                             .import_sigs
                             .get(&(alias.clone(), method.to_string()))
                             .cloned();
-                        if let Some(wrapper) = cx
+                        if let Some(extern_fn) = cx
                             .extern_funcs
                             .get(&format!("{mod_name}::{method}"))
                             .cloned()
                         {
+                            let wrapper = extern_fn.wrapper;
+                            let c_abi = extern_fn.c_abi;
                             return in_own_frame(|| {
                                 let eargs = args
                                     .iter()
@@ -3138,6 +3143,7 @@ fn lower_method_call_impl(
                                     ty,
                                     kind: TExprKind::ExternCall {
                                         wrapper,
+                                        c_abi,
                                         args: eargs,
                                     },
                                 };
@@ -3191,11 +3197,13 @@ fn lower_method_call_impl(
                             .get(&format!("{mod_name}::{method}"))
                             .map(String::as_str);
                         let sig = cx.import_signature_for_function(&env.fn_name, alias, method);
-                        if let Some(wrapper) = cx
+                        if let Some(extern_fn) = cx
                             .extern_funcs
                             .get(&format!("{mod_name}::{method}"))
                             .cloned()
                         {
+                            let wrapper = extern_fn.wrapper;
+                            let c_abi = extern_fn.c_abi;
                             return in_own_frame(|| {
                                 let eargs = args
                                     .iter()
@@ -3216,6 +3224,7 @@ fn lower_method_call_impl(
                                     ty,
                                     kind: TExprKind::ExternCall {
                                         wrapper,
+                                        c_abi,
                                         args: eargs,
                                     },
                                 };

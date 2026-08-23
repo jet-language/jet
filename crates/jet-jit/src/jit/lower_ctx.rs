@@ -20742,7 +20742,7 @@ impl LowerCtx<'_, '_> {
                     Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
                 }
             },
-            TExprKind::ExternCall { wrapper, args } => {
+            TExprKind::ExternCall { wrapper, args, .. } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let wid = self.runtime.heap.alloc_string(wrapper.clone());
                     let wrapper_v = self.b.ins().iconst(types::I64, wid);

@@ -102,7 +102,8 @@ pub fn package_facts_diagnostic(entry: &Path, error: &str) -> Diagnostic {
 
 /// Find the nearest validated workspace lock for a source entry. Overlay
 /// policy is deliberately read from the persisted lock so Canvas, the
-/// semantic index, and Jetpack do not each reparse workspace policy.
+/// semantic index, and Jetpack do not each reparse workspace policy. A lock
+/// without a workspace source is not an authority boundary.
 pub fn workspace_overlay_policy_for_entry(
     entry: &Path,
 ) -> Result<Option<jet_pkg_model::Overlay::OverlayPolicy>, Diagnostic> {
@@ -122,11 +123,7 @@ pub fn workspace_overlay_policy_for_entry(
                 return Ok(workspace_lock_at(&resolver)?
                     .and_then(|plan| (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)))
             }
-            Ok(None) => {
-                if let Some(plan) = workspace_lock_at(&resolver)? {
-                    return Ok((!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy));
-                }
-            }
+            Ok(None) => {}
         }
         let Some(next) = dir.parent() else {
             return Ok(None);

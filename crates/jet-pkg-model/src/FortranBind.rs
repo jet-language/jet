@@ -448,7 +448,7 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         out.push_str("    fn ");
         out.push_str(&routine.jet_name);
         render_abi_params(&mut out, &routine.params);
-    out.push_str(" -> ");
+        out.push(' ');
         out.push_str(routine.result.jet());
         out.push_str(" = \"");
         if routine.has_arrays() {
@@ -469,13 +469,8 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         // stop path, not a grantable positive effect. The generated wrapper
         // publishes only its FFI leaf; the shared sema reachability pass keeps
         // the deny-only stop row available to prohibition checks.
-        out.push_str(if routine.has_arrays() {
-            " :[FFI.Fortran]> "
-        } else {
-            " :[FFI.Fortran]> "
-        });
         out.push_str(routine.result.jet());
-        out.push_str(" {\n");
+        out.push_str(" -[FFI.Fortran]> {\n");
         for (name, param) in &routine.params {
             if let Param::Array { extents, .. } = param {
                 let len: usize = extents.iter().product();

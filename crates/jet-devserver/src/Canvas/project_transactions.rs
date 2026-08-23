@@ -182,7 +182,7 @@ pub(super) fn apply_project_add_target(
         after.push('\n');
     }
     after.push_str(&format!(
-        "{name}: Output :: .{kind}.{{ name: \"{}\", entry: {entry} }}\n",
+        "{name}: Output :: .{kind}{{ name: \"{}\", entry: {entry} }}\n",
         manifest_string(&name)
     ));
     jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())

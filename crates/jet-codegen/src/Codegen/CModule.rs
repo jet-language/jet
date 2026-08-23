@@ -19,7 +19,7 @@ const UTF8_RETURN_PANIC: &str =
     "a C function declared to return String returned bytes that are not valid UTF-8";
 const UTF8_WRITE_PANIC: &str =
     "a C function writing through a String capability returned bytes that are not valid UTF-8";
-const INT_RANGE_MESSAGE: &str = "a default Int value does not fit in the C i64 range";
+pub(crate) const INT_RANGE_MESSAGE: &str = "a default Int value does not fit in the C i64 range";
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every

@@ -836,8 +836,6 @@ mod windows {
         // ConPTY owns the two opposite pipe ends after creation. `raw` is
         // consumed by the child console's own mode; the pipe remains binary.
         let console = ConsoleGuard::create(config, input_read.raw(), output_write.raw())?;
-        drop(input_read);
-        drop(output_write);
 
         let job = Job::create()?;
         let application = make_wide(executable)?;
@@ -904,6 +902,11 @@ mod windows {
         {
             return Err(error("CreateProcessW(ConPTY)"));
         }
+        // Microsoft requires these handles to stay open through
+        // CreateProcessW. Closing the host copies now lets the pseudoconsole
+        // observe a broken channel once the child/session closes its copies.
+        drop(input_read);
+        drop(output_write);
         let process = HandleGuard::new(information.process)?;
         let thread = match HandleGuard::new(information.thread) {
             Ok(thread) => thread,

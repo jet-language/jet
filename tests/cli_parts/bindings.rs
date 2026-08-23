@@ -297,7 +297,7 @@ end module matrix_math
     assert!(generated.contains("a.len() != 6"));
     // D-PANICROOT1=A: the extent guard returns a fallible result; the
     // generated wrapper publishes only its FFI leaf.
-    assert!(generated.contains(":[FFI.Fortran]>"));
+    assert!(generated.contains("-[FFI.Fortran]>"));
     assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
 
     fs::write(

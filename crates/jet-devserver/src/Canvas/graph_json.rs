@@ -660,20 +660,18 @@ fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -
             .join(", "),
     );
     out.push(')');
-    if let Some((param, _)) = &f.effect_via {
-        out.push_str(" =[via ");
-        out.push_str(param);
-        out.push_str("]=>");
-    } else if let Some(effects) = &f.declared_effects {
-        out.push_str(" =[");
-        out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
-        out.push_str("]=>");
-    } else if f.return_type.is_some() {
-        out.push_str(" =>");
-    }
     if let Some(ret) = &f.return_type {
         out.push(' ');
         out.push_str(&ret.name());
+    }
+    if let Some((param, _)) = &f.effect_via {
+        out.push_str(" -[via ");
+        out.push_str(param);
+        out.push_str("]>");
+    } else if let Some(effects) = &f.declared_effects {
+        out.push_str(" -[");
+        out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+        out.push_str("]>");
     }
     out
 }

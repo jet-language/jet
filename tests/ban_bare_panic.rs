@@ -42,8 +42,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-foundation/src/Outcome.rs",
-        1,
-        "spliced into generated user programs (flat prelude); ice! is not in that crate",
+        2,
+        "one #[test] assertion fixture plus one generated diagnostic-template guard",
     ),
     (
         "crates/jet-foundation/src/XmlPull.rs",
@@ -59,6 +59,21 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-codegen/src/Prelude/Core.rs",
         4,
         "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/Core/FSWalk.rs",
+        8,
+        "include_str! filesystem-walk runtime template — user-program failure path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs",
+        1,
+        "include_str! fake-data runtime template — user-program failure path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs",
+        2,
+        "#[cfg(test)] interrupt-queue assertion fixtures",
     ),
     (
         "crates/jet-codegen/src/Prelude/Layout.rs",
@@ -151,6 +166,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[test] target-cycle error-shape assertion fixture",
     ),
     (
+        "crates/jet-comptime/src/Comptime/Build/execution_runtime.rs",
+        4,
+        "#[cfg(test)] hostile-executor assertion fixtures",
+    ),
+    (
         "crates/jet-lexer/src/lib.rs",
         2,
         "#[cfg(test)] string-token assertion fixtures",
@@ -162,7 +182,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-parser/src/lib.rs",
-        6,
+        12,
         "#[cfg(test)] generic-module parser assertion fixtures",
     ),
     (
@@ -234,6 +254,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "Source/Interpreter.rs",
         1,
         "#[test]-only assertion fixture",
+    ),
+    (
+        "Source/CmdPerf.rs",
+        5,
+        "#[test] Chrome trace projection assertion fixtures",
     ),
     (
         "Source/LSP/mod.rs",

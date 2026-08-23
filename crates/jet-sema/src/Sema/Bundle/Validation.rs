@@ -1904,6 +1904,7 @@ fn check_func_body_bundle_scoped(
         loop_labels: Vec::new(),
         collect_item_types: Vec::new(),
         loop_value_frames: Vec::new(),
+        loop_break_flows: Vec::new(),
         pending_loop_value: None,
         arrow_loop_body: false,
         last_loop_result_type: None,

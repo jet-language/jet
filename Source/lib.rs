@@ -965,7 +965,7 @@ fn workspace_build_root_diagnostic(
     // Workspace policy parsing already owns the registered E3503 wording.
     // Preserve it instead of replacing the diagnostic with a path-shaped
     // variant that loses the build-authority contract.
-    if diagnostic.code == "E3503" {
+    if matches!(diagnostic.code.as_str(), "E3503" | "E1221") {
         return diagnostic.clone();
     }
     Diagnostic::error(

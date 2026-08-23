@@ -128,7 +128,7 @@ fn render(lib: &str, functions: &[Function]) -> String {
         if let Some(result) = function.result { out.push(' '); out.push_str(if matches!(result, Scalar::Handle) { "Handle" } else { result.jet() }); out.push_str(" ->"); }
         out.push_str(" {\n    ");
         if function.result.is_some() { out.push_str("return "); }
-        if matches!(function.result, Some(Scalar::Handle)) { out.push_str("Handle.{ value: "); }
+        if matches!(function.result, Some(Scalar::Handle)) { out.push_str("Handle{ value: "); }
         out.push_str("abi."); out.push_str(&function.name); out.push('(');
         for (index, (name, ty)) in function.params.iter().enumerate() {
             if index > 0 { out.push_str(", "); }

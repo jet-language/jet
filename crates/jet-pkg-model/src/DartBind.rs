@@ -261,7 +261,7 @@ pub fn bind_compute_provenance(
     identity.push(0);
     identity.extend_from_slice(canonical.to_string_lossy().as_bytes());
     Ok(format!(
-        "schema=jet-dart-compute-v1\nsha256={}\ncompute={}\ncontract_provenance_sha256={}\n",
+        "{base}compute_sha256={}\ncompute={}\ncontract_provenance_sha256={}\n",
         crate::SHA256::sha256_hex(&identity),
         canonical.display(),
         crate::SHA256::sha256_hex(base.as_bytes())

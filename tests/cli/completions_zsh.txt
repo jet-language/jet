@@ -22,7 +22,7 @@ commands=(
         'notebook:Open a Jet notebook (.jetnb) or Jupyter adapter'
         'import:Convert supported source code into editable Jet'
         'new:Create a Jet project'
-        'fmt:Format Jet source files'
+        'fmt:Format Jet and configured project files'
         'fix:Apply safe automatic fixes, including `fix memory`'
         'audit:Inspect implicit copies, exercised memory witnesses, or dependencies'
         'lint:Run optional code-quality checks'
@@ -63,6 +63,8 @@ flags=(
         '--report[with structural diff/merge\: text, json, or editor report]'
         '--repo[with merge install-driver\: Git worktree to configure]'
         '--json[emit machine-readable facts or diagnostics]'
+        '--topic[with inspect digest\: emit one digest topic]'
+        '--list-topics[with inspect digest\: list digest topics]'
         '--kind[with inspect gates/authority\: filter one gate kind]'
         '--quiet[suppress non-error status output]'
         '--color[color\: auto | always | never]'
@@ -83,7 +85,7 @@ flags=(
         '--lock[with fetch\: lock a manifest-less script'\''s inline deps instead of fetching a project]'
         '--read-only[with shared-store enroll\: grant read-only broker access]'
         '--fd[with shared-store broker\: inherited broker socket descriptor]'
-        '-p[with run/dev/debug/test/check/build/jobs\: pick a workspace member by name]'
+        '-p[with run/dev/debug/check/build/jobs\: pick a workspace member by name]'
         '--annotated[with new\: include commented example deps]'
         '--force[with publish\: bypass pre-publish gate (with warning)]'
         '--no-sign[with publish\: skip the optional author signature (registry metadata is still signed)]'
@@ -105,6 +107,7 @@ flags=(
         '--fix[with doctor\: apply auto-fixable problems]'
         '--dry-run[with rewrite commands\: preview changes without writing]'
         '--edition[with fix\: apply edition migration rewrites --edition=<year>]'
+        '--all[with fix\: apply safety classes beyond formatting and behavior-preserving]'
         '--try-anyway[with dev\: interpret past unsupported features (no guarantees)]'
         '--interpret[with dev\: force the tier-0 TIR interpreter]'
         '--trace-tiers[with run/dev\: print per-function Cranelift vs interpreter tier selection; with test\: print AOT marker]'
@@ -142,12 +145,14 @@ flags=(
         '--serial[with test\: run tests one at a time instead of the parallel default]'
         '--show-default[with test\: ignore fn test and use the stock harness]'
         '--measure[with test\: measure `.measure` claims]'
+        '--record[with run/dev/test\: record a named replay as --record=<name>]'
+        '--replay[with debug\: consume a named replay as --replay=<name>]'
         '--iterations[with fuzz\: case budget --iterations=<n> (default 1000)]'
         '--time[with fuzz\: wall-clock budget in seconds --time=<n>]'
         '--seed[with fuzz\: base PRNG seed --seed=<n> (default\: fixed, reproducible)]'
         '--corpus[with fuzz\: corpus directory --corpus=<dir> (default\: .jet/fuzz/<test>)]'
         '--lens[with prove\: project the human report by an exact evidence facet]'
-        '--facts[with expand\: project inline, memory, web, effects, layout, derive, or callable-signature facts --facts=<lens>]'
+        '--facts[with expand\: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>]'
         '--annotations[with budget\: CI annotations auto, none, or github]'
         '--baseline[with budget update\: selected baseline name]'
         '--bootstrap[with budget update\: create absent or stale baseline history]'
@@ -181,10 +186,10 @@ _describe -t commands 'command' commands
 elif (( CURRENT == 3 )); then
 case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
-            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'guarantees:Show memory-safety guarantees by component' 'provenance:Read dependency provenance' 'digest:Write the one-file LLM surface digest' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'gates:Read the complete compile-time gate ledger' 'authority:Read rights-bearing gates from the ledger' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' 'structure:Inspect liveness, lifecycle, and import-edge facts' ;;
-            hangar) _values 'action' 'path:Show the resolved user Hangar path' 'verify:Check package-store integrity' 'repair:Repair a damaged Hangar object from a signed archive' 'copy:Copy a verified closure between local Hangars' 'import:Verify and import a signed Hangar archive' 'export:Export a signed Hangar closure' 'dump:Stream a signed Hangar archive' 'restore:Restore a signed Hangar archive from stdin' 'sign:Sign a Hangar object or archive' 'recover:Recover abandoned Hangar staging and leases' 'rollback:Restore an earlier package-store generation' 'generations:List package-store generations' 'du:Show disk use for each stored object' ;;
+            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'guarantees:Show memory-safety guarantees by component' 'provenance:Read dependency provenance' 'digest:Write the one-file LLM surface digest' 'env:List typed environment reads in a config surface' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'gates:Read the complete compile-time gate ledger' 'authority:Read rights-bearing gates from the ledger' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' 'structure:Inspect liveness, lifecycle, and import-edge facts' ;;
+            hangar) _values 'action' 'path:Show the resolved user Hangar path' 'verify:Check package-store integrity' 'repair:Repair a damaged Hangar object from a signed archive' 'copy:Copy a verified closure between local Hangars' 'import:Verify and import a signed Hangar archive' 'export:Export a signed Hangar closure' 'dump:Stream a signed Hangar archive' 'restore:Restore a signed Hangar archive from stdin' 'sign:Sign a Hangar object or archive' 'recover:Recover Hangar staging, build scratch, and leases' 'rollback:Restore an earlier package-store generation' 'generations:List package-store generations' 'du:Show disk use for each stored object' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
-            self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'upgrade:Show how to install a newer Jet release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' ;;
+            self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'upgrade:Show how to install a newer Jet release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' 'exec:Execute one command in an authority-bound workspace' ;;
             env) _values 'action' 'test:Run environment checks in a clean environment' 'hook:Print the shell auto-activation hook' 'sync:Apply typed managed environment files' 'info:Show the typed environment plan' ;;
             shared-store) _values 'action' 'install:Install the optional shared Hangar broker' 'enroll:Grant a user shared-store broker access' 'status:Show shared-store broker configuration' 'broker:Serve one shared-store broker request' ;;
             os) _values 'action' 'push:Deploy one or more Jetos machines' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;

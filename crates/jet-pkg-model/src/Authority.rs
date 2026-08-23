@@ -294,6 +294,9 @@ impl AuthorityError {
 
     pub fn workspace_diagnostic(&self) -> Diagnostic {
         match self {
+            Self::ManifestParse { path, error } => {
+                crate::Manifest::manifest_parse_diagnostic(path, error)
+            }
             Self::WorkspaceAmbiguous(paths) => {
                 let refs = paths.iter().map(PathBuf::as_path).collect::<Vec<_>>();
                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)

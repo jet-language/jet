@@ -34,14 +34,14 @@ baseline is refreshed.
     {
       "package": "docs",
       "file": "docs/reference/syntax-surface.jet",
-      "line": 527,
+      "line": 529,
       "column": 1,
       "reason": "reads through a raw pointer; addr must be live and valid"
     },
     {
       "package": "docs",
       "file": "docs/reference/syntax-surface.jet",
-      "line": 530,
+      "line": 532,
       "column": 5,
       "reason": "addr is the address of a live Int on this frame"
     },
@@ -244,7 +244,7 @@ baseline is refreshed.
     {
       "package": "tests",
       "file": "tests/ui/cffi_out_pointer_requires_unsafe.jet",
-      "line": 13,
+      "line": 12,
       "column": 1,
       "reason": "the local slot remains live for the complete C call"
     },
@@ -307,7 +307,7 @@ baseline is refreshed.
     {
       "package": "tests",
       "file": "tests/ui/crypto_expert_nonce_callback_bound_precedence.jet",
-      "line": 12,
+      "line": 13,
       "column": 5,
       "reason": "fixed interop vector"
     },
@@ -524,8 +524,8 @@ baseline is refreshed.
 
 | crate/package | file | line | reason |
 | --- | --- | ---: | --- |
-| docs | docs/reference/syntax-surface.jet | 527:1 | "reads through a raw pointer; addr must be live and valid" |
-| docs | docs/reference/syntax-surface.jet | 530:5 | "addr is the address of a live Int on this frame" |
+| docs | docs/reference/syntax-surface.jet | 529:1 | "reads through a raw pointer; addr must be live and valid" |
+| docs | docs/reference/syntax-surface.jet | 532:5 | "addr is the address of a live Int on this frame" |
 | examples | examples/features/crypto/crypto_migration.jet | 26:5 | "AES-256-GCM protocol interoperability" |
 | examples | examples/features/crypto/random_api_split.jet | 28:5 | "compare the typed and raw HKDF rungs" |
 | examples | examples/features/crypto/vault_keys.jet | 36:5 | "restore audited raw signing-key material" |
@@ -554,7 +554,7 @@ baseline is refreshed.
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
-| tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 13:1 | "the local slot remains live for the complete C call" |
+| tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 12:1 | "the local slot remains live for the complete C call" |
 | tests | tests/ui/crypto_argon2id_literal_policy.jet | 7:5 | "fixed password-hash vectors" |
 | tests | tests/ui/crypto_argon2id_literal_policy_type_precedence.jet | 7:5 | "fixed password-hash vector" |
 | tests | tests/ui/crypto_argon2id_literal_policy_valid.jet | 7:5 | "protocol-selected password policy" |
@@ -563,7 +563,7 @@ baseline is refreshed.
 | tests | tests/ui/crypto_expert_material_length_type_precedence.jet | 5:5 | "fixed interop vector" |
 | tests | tests/ui/crypto_expert_material_length_valid.jet | 5:5 | "protocol-selected interop material" |
 | tests | tests/ui/crypto_expert_material_length_valid.jet | 17:5 | "fixed interop vectors" |
-| tests | tests/ui/crypto_expert_nonce_callback_bound_precedence.jet | 12:5 | "fixed interop vector" |
+| tests | tests/ui/crypto_expert_nonce_callback_bound_precedence.jet | 13:5 | "fixed interop vector" |
 | tests | tests/ui/crypto_expert_nonce_correct.jet | 5:5 | "fixed interop vectors" |
 | tests | tests/ui/crypto_expert_nonce_effect_bound_precedence.jet | 10:5 | "fixed interop vector" |
 | tests | tests/ui/crypto_expert_nonce_effect_precedence.jet | 10:5 | "fixed interop vector" |

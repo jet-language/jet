@@ -178,6 +178,9 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     );
     let parts = jet_driver::ProjectParts::scan(&project_root);
     let project_revision = project_revision_from_files(&files);
+    let package_diagnostic = jet_semindex::package_facts_for_entry(path)
+        .err()
+        .map(|error| jet_semindex::package_facts_diagnostic(path, &error));
     ProjectContext {
         entry_path: path.to_path_buf(),
         project_root,
@@ -189,7 +192,8 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         project_revision,
         // File inventory is also an authority read. Keep its error visible to
         // the caller instead of turning a failed read into an empty project.
-        authority_diagnostic: collection_diagnostic
+        authority_diagnostic: package_diagnostic
+            .or(collection_diagnostic)
             .or(manifest_diagnostic)
             .or(ecosystem_diagnostic)
             .or_else(|| {
@@ -366,6 +370,7 @@ fn collect_project_files(
     let mut paths = Vec::new();
     let mut authority_diagnostic = None;
     let mut workspace_source_failed = false;
+    let mut workspace_member_roots = Vec::new();
     let resolver = match AuthorityResolver::open(project_root) {
         Ok(resolver) => Some(resolver),
         Err(error) => {
@@ -406,6 +411,7 @@ fn collect_project_files(
                     Ok(snapshot) => {
                         for member in snapshot.plan.members {
                             let member_dir = root.join(member.path);
+                            workspace_member_roots.push(member_dir.clone());
                             push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PACKAGE_FILE));
                         }
                     }
@@ -421,7 +427,11 @@ fn collect_project_files(
                     && workspace_root.is_some_and(|root| {
                         file.path == root.join(jet_driver::Syntax::WORKSPACE_FILE)
                     });
-                (!is_fallback_workspace).then_some(file.path)
+                let is_declared_workspace_source = workspace_root.is_none()
+                    || workspace_member_roots
+                        .iter()
+                        .any(|member_root| path_is_within(&file.path, member_root));
+                (is_declared_workspace_source && !is_fallback_workspace).then_some(file.path)
             })),
             Err(error) => {
                 authority_diagnostic.get_or_insert_with(|| error.diagnostic());
@@ -541,8 +551,15 @@ pub(super) fn workspace_project_json(project_root: &Path, workspace_root: Option
     let source = match workspace_source_path(root) {
         Ok(source) => source,
         Err(diagnostic) => {
+            let source_path = root
+                .join(jet_driver::Syntax::WORKSPACE_FILE)
+                .symlink_metadata()
+                .ok()
+                .map(|_| rel_path(project_root, &root.join(jet_driver::Syntax::WORKSPACE_FILE)))
+                .unwrap_or_default();
             return format!(
-                "{{\"path\":\"\",\"members\":[],\"diagnostics\":[{}]}}",
+                "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
+                json_str(&source_path),
                 diagnostic_json(&diagnostic)
             );
         }
@@ -883,11 +900,12 @@ fn canonical_package_project_json(
         .collect::<Vec<_>>()
         .join(",");
     Some(format!(
-        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
         json_str(&rel_path(project_root, dir)),
         json_str(&rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE))),
         json_str(&facts.name),
         json_optional_str(facts.version.as_deref()),
+        json_str(facts.target.as_deref().unwrap_or("native")),
         deps,
         facts
             .outputs
@@ -1145,5 +1163,3 @@ pub(super) fn lock_project_json(project_root: &Path) -> String {
         json_str(&revision)
     )
 }
-
-

@@ -88,6 +88,12 @@ pub(crate) struct CoverageBranch {
     pub(crate) function: String,
 }
 
+#[derive(Clone)]
+pub(crate) struct ExternFn {
+    pub(crate) wrapper: String,
+    pub(crate) c_abi: bool,
+}
+
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
@@ -236,8 +242,8 @@ pub(crate) struct Cx {
     pub(crate) root_prefix: String,
     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
     pub(crate) ffi_crate: Option<String>,
-    /// M7: Jet function name -> wrapper symbol in the FFI crate.
-    pub(crate) extern_funcs: HashMap<String, String>,
+    /// M7: Jet function name -> wrapper symbol and boundary kind in the FFI crate.
+    pub(crate) extern_funcs: HashMap<String, ExternFn>,
     /// D-BOUND-UNDO1=A: foreign binding name -> compensating Jet function.
     /// Lowering reads this fact; engines only marshal the resulting rollback hook.
     pub(crate) foreign_undos: HashMap<String, String>,
@@ -3001,16 +3007,28 @@ pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
     build_cx_items(&prog.items, src, file, None, &extern_funcs)
 }
 
-fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
-    fn collect(items: &[Item], map: &mut HashMap<String, String>) {
+fn extern_func_map(items: &[Item]) -> HashMap<String, ExternFn> {
+    fn collect(items: &[Item], map: &mut HashMap<String, ExternFn>) {
         for item in items {
             if let Item::ExternRust(block) = item {
                 for ef in &block.functions {
-                    map.insert(ef.name.clone(), format!("jet_ffi_{}", ef.name));
+                    map.insert(
+                        ef.name.clone(),
+                        ExternFn {
+                            wrapper: format!("jet_ffi_{}", ef.name),
+                            c_abi: false,
+                        },
+                    );
                 }
             } else if let Item::Func(func) = item {
                 if func.inline_foreign.is_some() {
-                    map.insert(func.name.clone(), format!("jet_ffi_{}", func.name));
+                    map.insert(
+                        func.name.clone(),
+                        ExternFn {
+                            wrapper: format!("jet_ffi_{}", func.name),
+                            c_abi: false,
+                        },
+                    );
                 }
             } else if let Item::CModule(module) = item {
                 for function in module
@@ -3020,7 +3038,10 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
                 {
                     map.insert(
                         function.name.clone(),
-                        format!("jet_ffi_{}", function.name),
+                        ExternFn {
+                            wrapper: format!("jet_ffi_{}", function.name),
+                            c_abi: true,
+                        },
                     );
                 }
             } else if let Item::CodeModule(module) = item {
@@ -3087,7 +3108,7 @@ fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
     map
 }
 
-pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
+pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, ExternFn> {
     let mut map = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let module_funcs = extern_func_map(&module.items);
@@ -3106,7 +3127,10 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Str
                     }) {
                         map.insert(
                             foreign_binding_method_key(&def.type_name, &method.name),
-                            String::new(),
+                            ExternFn {
+                                wrapper: String::new(),
+                                c_abi: false,
+                            },
                         );
                     }
                 }
@@ -3954,7 +3978,7 @@ pub(crate) fn build_cx_items(
     src: &str,
     file: &str,
     link: Option<&FfiLink>,
-    extern_funcs: &HashMap<String, String>,
+    extern_funcs: &HashMap<String, ExternFn>,
 ) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),

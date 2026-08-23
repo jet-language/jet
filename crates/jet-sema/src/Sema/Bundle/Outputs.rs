@@ -22,7 +22,8 @@ pub(super) fn cli_entry_param_shape(_items: &[Item], ty: &Type, reg: &TraitRegis
     let Type::Named(name) = ty else {
         return CLIEntryShape::Invalid;
     };
-    let name = name.rsplit('.').next().unwrap_or(name);
+    let name = name.rsplit_once("::").map_or(name.as_str(), |(_, leaf)| leaf);
+    let name = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
     if reg.implements_trait(name, "CLI") {
         return CLIEntryShape::Struct;
     }

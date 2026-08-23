@@ -24,6 +24,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Item::Impl] status=readonly method facts, source edits.
 - [Item::Const] status=readonly symbol facts, source edits.
 - [Item::MarkerDecl] status=readonly marker registry facts, source edits.
+- [Item::FactDecl] status=readonly fact declaration registry facts, source edits.
 - [Item::Test] status=readonly marker scope, source edits.
 - [Item::ExternRust] status=unsupported expert FFI surface, source edits only.
 - [Item::Module] status=readonly Jetpack contribution facts, source edits.
@@ -35,6 +36,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Item::ProtocolDecl] status=readonly protocol facts, source edits.
 - [Item::EffectDecl] status=source through Code lens/source transactions; no dedicated graph projection.
 - [Item::UserDerive] status=readonly derive facts, source edits.
+- [Item::TemplateLoop] status=readonly item-template expansion facts, source edits.
 - [Item::GenericModule] status=readonly module-template facts, source edits.
 - [Item::ModuleAlias] status=readonly module alias facts, source edits.
 

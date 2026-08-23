@@ -16,6 +16,14 @@ question it answers.
 | Wall-clock session | Which symbols consume wall time, CPU, task, lock, or I/O time? | `jet perf run app.jet`, then `jet perf view <trace.jettrace>` | `jet perf run`, `jet perf test`, and `jet perf attach` record sessions. The ratified user-verb on-ramp is `--record=<name>`. | `.jettrace` uses the shared `jet.trace` v1 envelope. This is the historical recorder home. |
 | Browser rows | Which browser, WebAssembly, or DOM rows consume time? | `jet dev --target=web`, then `jet perf attach <pid>` | The dev server sends payload-free relay rows. `jet perf attach` requests collection. | The relay uses `jet.browser.relay.v1` as transport. `jet perf attach` maps rows into `.jettrace` and `jet.trace` v1. The transport stays separate because it is not a user report or second artifact. |
 
+`jet perf export <trace.jettrace> --chrome` writes Chrome Trace Event JSON. Open
+the output in Perfetto UI or `chrome://tracing`. Captured wall/cpu, allocation,
+browser, task-span, I/O, lock, and native rows become complete (`X`) events;
+process, domain, and task lanes use metadata (`M`) events. Unavailable states,
+async flows, counters, screenshots, and source-map events remain outside this
+projection. `--pprof` and `--otel` remain Jet JSON projections, not wire-format
+exports.
+
 ## Recorder boundary
 
 D-RUN-RECORD1=A ratifies `--record=<name>` on `run`, `dev`, and `test` as the

@@ -54,7 +54,8 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     // the rest of the list) before checking for `unsafe` in user code.
     let user = common::strip_vetted_prelude_modules(&out.rust);
     assert!(
-        !user.contains("unsafe"),
+        user.lines()
+            .all(|line| common::unsafe_keyword_columns(line).is_empty()),
         "`unsafe` leaked outside the vetted prelude helpers"
     );
 
@@ -120,7 +121,7 @@ fn view_escape_is_e0631() {
     let src = r#"
 use core.mem
 
-fn leak() Int {
+fn leak() Int -> {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     return x

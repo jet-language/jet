@@ -9,7 +9,7 @@ mod tir_support;
 
 use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
 
-const SEED: &str = "fn bits(n: Int) Int {\n    return n\n}\n";
+const SEED: &str = "fn bits(n: Int) Int -> {\n    return n\n}\n";
 
 /// D-BITNOT1=A: on the width-free default `Int`, turning over every bit is the
 /// same as `-x - 1`. Proving the identity rather than a table of constants is
@@ -100,7 +100,7 @@ fn bit_not_on_bool_is_unchanged() {
         return;
     }
     let src = "
-fn yes() Bool {
+fn yes() Bool -> {
     return true
 }
 

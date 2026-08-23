@@ -432,3 +432,41 @@ fn run() {
     );
     assert_tiers_agree("compute_vulkan_operations", source, expected);
 }
+
+#[test]
+fn portable_accelerator_vulkan_rejects_nonfinite_kernel_output() {
+    let source = r#"
+use core.compute as compute
+
+fn run() {
+    seed :: compute.matrix(1, 1, 100.0) ?? panic("seed")
+    one :: compute.matrix(1, 1, 1.0) ?? panic("one")
+    f32_seed :: compute.matmul_f32_tile(seed, one) ?? panic("f32")
+    request :: compute.on_device(f32_seed, compute.device_vulkan())
+    if request == {
+        .Err(_) -> print("vulkan:unavailable")
+        .Ok(value) -> {
+            result :: compute.exp(value)
+            if result == {
+                .Ok(_) -> print("nonfinite:accepted")
+                .Err(_) -> print("nonfinite:rejected")
+            }
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = run_default_multi(
+        "compute_vulkan_nonfinite",
+        "main.jet",
+        &[("main.jet", source)],
+    );
+    assert_eq!(code, 0, "Vulkan non-finite probe failed: {stderr}");
+    if stdout == "vulkan:unavailable\n" {
+        if std::env::var_os("JET_REQUIRE_VULKAN").is_some() {
+            panic!("Vulkan production path was not available: {stderr}");
+        }
+        return;
+    }
+    assert_eq!(stdout, "nonfinite:rejected\n");
+    assert_tiers_agree("compute_vulkan_nonfinite", source, &stdout);
+}

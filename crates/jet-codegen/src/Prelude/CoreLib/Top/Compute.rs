@@ -3428,6 +3428,11 @@ mod jet_compute_vulkan {
                 }
             }
             unsafe { (self.api.unmap_memory)(self.device, self.memory) };
+            if output.iter().any(|value| !value.is_finite()) {
+                return Err(JetComputeError::Arithmetic(
+                    "Vulkan kernel produced a non-finite F32 value".to_string(),
+                ));
+            }
             Ok(output)
         }
     }

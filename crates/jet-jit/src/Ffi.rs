@@ -323,6 +323,16 @@ fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic 
     )
 }
 
+fn int_result(value: i64) -> CtValue {
+    const SMALL_MIN: i64 = -(1i64 << 62);
+    const SMALL_MAX: i64 = (1i64 << 62) - 1;
+    if (SMALL_MIN..=SMALL_MAX).contains(&value) {
+        CtValue::Int(value)
+    } else {
+        CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_int(value))
+    }
+}
+
 fn release_cabi_buffer(
     free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
     ptr: *mut u8,
@@ -384,6 +394,13 @@ pub(crate) fn call_ctvalue(
         .collect::<Result<_, _>>()?;
     let int_arg = |index: usize| match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
+        Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| {
+            ffi_diag(
+                wrapper,
+                "a default Int value does not fit in the C i64 range",
+                span,
+            )
+        }),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not an Int"),
@@ -411,7 +428,7 @@ pub(crate) fn call_ctvalue(
             type FnStrInt = unsafe extern "C" fn(*const u8, usize) -> i64;
             let f: FnStrInt = unsafe { std::mem::transmute(entry.ptr) };
             let value = strings[0].as_deref().expect("String ABI argument");
-            Ok(CtValue::Int(unsafe { f(value.as_ptr(), value.len()) }))
+            Ok(int_result(unsafe { f(value.as_ptr(), value.len()) }))
         }
         ([ParamAbi::String], RetAbi::String) => {
             type FnStr = unsafe extern "C" fn(*const u8, usize, *mut *mut u8, *mut usize) -> i32;
@@ -445,7 +462,7 @@ pub(crate) fn call_ctvalue(
             type FnIntStrInt = unsafe extern "C" fn(i64, *const u8, usize) -> i64;
             let f: FnIntStrInt = unsafe { std::mem::transmute(entry.ptr) };
             let code = strings[1].as_deref().expect("String ABI argument");
-            Ok(CtValue::Int(unsafe {
+            Ok(int_result(unsafe {
                 f(int_arg(0)?, code.as_ptr(), code.len())
             }))
         }
@@ -541,12 +558,12 @@ pub(crate) fn call_ctvalue(
         ([ParamAbi::Int], RetAbi::Int) => {
             type FnInt = unsafe extern "C" fn(i64) -> i64;
             let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(CtValue::Int(unsafe { f(int_arg(0)?) }))
+            Ok(int_result(unsafe { f(int_arg(0)?) }))
         }
         ([ParamAbi::Int, ParamAbi::Int], RetAbi::Int) => {
             type FnIntInt = unsafe extern "C" fn(i64, i64) -> i64;
             let f: FnIntInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(CtValue::Int(unsafe { f(int_arg(0)?, int_arg(1)?) }))
+            Ok(int_result(unsafe { f(int_arg(0)?, int_arg(1)?) }))
         }
         ([ParamAbi::Int], RetAbi::Unit) => {
             type FnInt = unsafe extern "C" fn(i64);
@@ -596,7 +613,7 @@ pub(crate) fn call_ctvalue(
         ([], RetAbi::Int) => {
             type FnUnitInt = unsafe extern "C" fn() -> i64;
             let f: FnUnitInt = unsafe { std::mem::transmute(entry.ptr) };
-            Ok(CtValue::Int(unsafe { f() }))
+            Ok(int_result(unsafe { f() }))
         }
         ([], RetAbi::Bool) => {
             type FnUnitBool = unsafe extern "C" fn() -> i8;
@@ -643,12 +660,23 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
         .iter()
         .zip(argv)
         .map(|(abi, value)| match abi {
-            ParamAbi::Int => CtValue::Int(value),
-            ParamAbi::Float => CtValue::Float(CtFloat::f64(f64::from_bits(value as u64))),
-            ParamAbi::Bool => CtValue::Bool(value != 0),
-            ParamAbi::String => CtValue::Str(clone_string(value)),
+            ParamAbi::Int => crate::Encoding::json_rt::jet_int_to_i64(value)
+                .map(CtValue::Int)
+                .ok_or(()),
+            ParamAbi::Float => {
+                Ok(CtValue::Float(CtFloat::f64(f64::from_bits(value as u64))))
+            }
+            ParamAbi::Bool => Ok(CtValue::Bool(value != 0)),
+            ParamAbi::String => Ok(CtValue::Str(clone_string(value))),
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<CtValue>, ()>>();
+    let ct_args: Vec<CtValue> = match ct_args {
+        Ok(args) => args,
+        Err(()) => {
+            trap("E1003: a default Int value does not fit in the C i64 range");
+            return 0;
+        }
+    };
     let value = match call_ctvalue(&name, &ct_args, None, Span::new(0, 0)) {
         Ok(value) => value,
         Err(error) => {
@@ -658,7 +686,14 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     };
     match value {
         CtValue::Unit => 0,
-        CtValue::Int(value) => value,
+        CtValue::Int(value) => crate::Encoding::json_rt::jet_int_from_i64(value),
+        CtValue::BigInt(value) => match value.try_i64() {
+            Some(value) => crate::Encoding::json_rt::jet_int_from_i64(value),
+            None => {
+                trap("E1003: a default Int value does not fit in the C i64 range");
+                0
+            }
+        },
         CtValue::Float(value) => value.as_f64().to_bits() as i64,
         CtValue::Bool(value) => i64::from(value),
         CtValue::Str(value) => alloc_string(value),

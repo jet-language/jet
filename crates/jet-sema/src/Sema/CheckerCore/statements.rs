@@ -150,6 +150,39 @@ impl<'a> Checker<'a> {
             }
         }
 
+        fn push_loop_break_frame(&mut self) {
+            self.loop_break_flows.push(Vec::new());
+        }
+
+        fn record_break_flow(&mut self, frame_index: usize) {
+            let flow = self.flow.clone();
+            if let Some(paths) = self.loop_break_flows.get_mut(frame_index) {
+                paths.push(flow);
+            }
+        }
+
+        fn join_loop_flow(
+            &mut self,
+            before_loop: &crate::Sema::FlowFacts::FlowFacts,
+            after_body: &crate::Sema::FlowFacts::FlowFacts,
+        ) {
+            let mut break_paths = self
+                .loop_break_flows
+                .pop()
+                .expect("loop break frame matches loop value frame");
+            let depth = self.flow.depth;
+            for path in &mut break_paths {
+                while path.depth > depth {
+                    path.leave_scope();
+                }
+            }
+            self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop_with_breaks(
+                before_loop,
+                after_body,
+                &break_paths,
+            );
+        }
+
         fn check_break_value(
             &mut self,
             target: Option<(&str, crate::Diagnostics::Span)>,
@@ -222,6 +255,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            self.record_break_flow(frame_index);
         }
 
         pub(in crate::Sema) fn check_break_without_value(
@@ -229,12 +263,12 @@ impl<'a> Checker<'a> {
             target: Option<(&str, crate::Diagnostics::Span)>,
             span: crate::Diagnostics::Span,
         ) {
-            let frame = match target {
+            let frame_index = match target {
                 Some((name, name_span)) => {
                     let found = self
                         .loop_value_frames
                         .iter()
-                        .rfind(|frame| frame.label.as_deref() == Some(name));
+                        .rposition(|frame| frame.label.as_deref() == Some(name));
                     if found.is_none() {
                         self.diags.push(undefined_loop_label(
                             name,
@@ -245,13 +279,14 @@ impl<'a> Checker<'a> {
                     }
                     found
                 }
-                None => self.loop_value_frames.last(),
+                None => self.loop_value_frames.len().checked_sub(1),
             };
-            let Some(frame) = frame else {
+            let Some(frame_index) = frame_index else {
                 self.diags
                     .push(loop_control_outside(Syntax::KW_BREAK, span));
                 return;
             };
+            let frame = &self.loop_value_frames[frame_index];
             if frame.kind == LoopValueKind::Result {
                 self.diags.push(Diagnostic::error(
                     "E0076",
@@ -262,6 +297,7 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
+            self.record_break_flow(frame_index);
         }
 
         fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
@@ -1901,6 +1937,7 @@ impl<'a> Checker<'a> {
                         self.declare_loop_label(n, *label_span);
                     }
                     self.push_loop_value_frame(label.as_ref());
+                    self.push_loop_break_frame();
                     self.loop_depth += 1;
                     // D-FACT-FLOW1: one loop rule for every plane — a body may run zero
                     // times, so the facts after the loop join the zero-turn path with the
@@ -1911,7 +1948,7 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.arrow_loop_body = previous_arrow_loop_body;
                     let after_body = self.flow.clone();
-                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
+                    self.join_loop_flow(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     if after_body.reachable {
                         if let Some((name, span)) = drained_collection(cond, body) {
@@ -1954,6 +1991,7 @@ impl<'a> Checker<'a> {
                     // path with the path one walk of the body left behind.
                     let before_loop = self.flow.clone();
                     self.push_loop_value_frame(label.as_ref());
+                    self.push_loop_break_frame();
                     match kind {
                         ForKind::Range { start, end, step, exclusive } => {
                             for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
@@ -2372,7 +2410,7 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_loop_value_frame();
                     let after_body = self.flow.clone();
-                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
+                    self.join_loop_flow(&before_loop, &after_body);
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
@@ -2436,6 +2474,7 @@ impl<'a> Checker<'a> {
                     self.check_binding(init);
                     self.require_bool(cond, "a counted loop condition");
                     self.push_loop_value_frame(label.as_ref());
+                    self.push_loop_break_frame();
                     self.loop_depth += 1;
                     let before_loop = self.flow.clone();
                     let previous_arrow_loop_body = self.arrow_loop_body;
@@ -2446,7 +2485,7 @@ impl<'a> Checker<'a> {
                         self.check_stmt(step.as_mut());
                     }
                     let after_body = self.flow.clone();
-                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
+                    self.join_loop_flow(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     self.pop_loop_value_frame();
                     self.pop_scope();
@@ -2467,6 +2506,7 @@ impl<'a> Checker<'a> {
                         self.declare_loop_label(n, *label_span);
                     }
                     self.push_loop_value_frame(label.as_ref());
+                    self.push_loop_break_frame();
                     self.loop_depth += 1;
                     let before_loop = self.flow.clone();
                     let previous_arrow_loop_body = self.arrow_loop_body;
@@ -2474,7 +2514,7 @@ impl<'a> Checker<'a> {
                     self.check_block(inner, true);
                     self.arrow_loop_body = previous_arrow_loop_body;
                     let after_body = self.flow.clone();
-                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
+                    self.join_loop_flow(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     self.pop_loop_value_frame();
                     if label.is_some() {

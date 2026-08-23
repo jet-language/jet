@@ -50,6 +50,7 @@ use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::INT_RANGE_MESSAGE;
 
 fn emit_tir_lambda_with_arc(lam: &TLambda, force_arc: bool) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
@@ -5577,20 +5578,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(2)
                         ),
                         ("BrowserPage", "cookie") => format!(
-                            "{}jet_browser_page_cookie(&({}), &({}))",
+                            "{}jet_browser_page_cookie(&({}), &({})).map({}jet_outcome_of)",
                             root,
                             recv,
-                            a(0)
+                            a(0),
+                            root
                         ),
                         ("BrowserPage", "clear_cookies") => {
                             format!("{}jet_browser_page_clear_cookies(&({}))", root, recv)
                         }
                         ("BrowserPage", "storage_get") => format!(
-                            "{}jet_browser_page_storage_get(&({}), &({}), &({}))",
+                            "{}jet_browser_page_storage_get(&({}), &({}), &({})).map({}jet_outcome_of)",
                             root,
                             recv,
                             a(0),
-                            a(1)
+                            a(1),
+                            root
                         ),
                         ("BrowserPage", "storage_set") => format!(
                             "{}jet_browser_page_storage_set(&({}), &({}), &({}), &({}))",
@@ -6413,23 +6416,37 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // here, like Phase 10's regex form); the AST falls back to "jet_ffi" when it is
         // `None` (always `Some` when an extern call is present, but mirror it exactly).
         // Args use the extern arg form (`(…).clone()` for a non-scalar Read).
-        TExprKind::ExternCall { wrapper, args } => {
+        TExprKind::ExternCall {
+            wrapper,
+            c_abi,
+            args,
+        } => {
             let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             let arg_str = args
                 .iter()
                 .map(|a| {
-                    let s = emit_tir_expr(&a.value, cx);
+                    let mut s = emit_tir_expr(&a.value, cx);
                     if a.mut_borrow {
-                        format!("&mut ({s})")
+                        s = format!("&mut ({s})");
                     } else if a.clone {
-                        format!("({}).clone()", s)
-                    } else {
-                        s
+                        s = format!("({}).clone()", s);
                     }
+                    if *c_abi && matches!(&a.value.ty, Type::Int) {
+                        s = format!(
+                            "{root}jet_std::jet_int_to_i64({s}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"))",
+                            root = cx.root_prefix,
+                        );
+                    }
+                    s
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}::{}({})", crate_name, wrapper, arg_str)
+            let call = format!("{}::{}({})", crate_name, wrapper, arg_str);
+            if *c_abi && matches!(&e.ty, Type::Int) {
+                format!("{}jet_std::jet_int_from_i64({call})", cx.root_prefix)
+            } else {
+                call
+            }
         }
     }
 }

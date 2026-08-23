@@ -66,9 +66,23 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     };
     let active: Vec<_> = specs.into_iter().filter(|located| applicable(&located.spec, "native", "dev")).collect();
     let store = BudgetStore::new(&root);
-    let built = match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None, options.bootstrap) {
-        Ok(report) => report,
-        Err(error) => return tool_failure(&options, &error),
+    let cached = if options.command == "check" && !cache_has_live_baseline(&root, &active) {
+        match compatible_report(&root, &bundle, &active, "native", "dev", None) {
+            Ok(report) => report,
+            Err(error) => return tool_failure(&options, &error),
+        }
+    } else {
+        None
+    };
+    let built = match cached {
+        Some(report) => match cached_built_report(report, &root, &bundle, &active) {
+            Ok(report) => report,
+            Err(error) => return tool_failure(&options, &error),
+        },
+        None => match build_report(&root, &store, &bundle, &effect_facts, &active, &measured_start, "native", "dev", None, None, options.bootstrap) {
+            Ok(report) => report,
+            Err(error) => return tool_failure(&options, &error),
+        },
     };
     let report_id = text_field(&built.value, "report_id").expect("verified report id").to_string();
     let report_path = format!(".jet/perf/reports/{report_id}.json");
@@ -180,7 +194,7 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
 
 #[derive(Clone)]
 struct StoredBuildFact{name:String,source:String,evidence:String,outcome:String,reason:String}
-struct StoredBuildReport{report_id:String,facts:Vec<StoredBuildFact>}
+struct StoredBuildReport{report_id:String,value:CanonicalJson,facts:Vec<StoredBuildFact>}
 
 fn artifact_identity(path:&Path)->Result<ArtifactIdentity,String>{let path=if path.is_absolute(){path.to_path_buf()}else{std::env::current_dir().map_err(|error|format!("cannot resolve build output directory: {error}"))?.join(path)};let metadata=std::fs::symlink_metadata(&path).map_err(|error|format!("built artifact is unavailable: {error}"))?;if metadata.file_type().is_symlink()||!metadata.is_file(){return Err("built artifact is not a regular file".into())}let digest=jet::SHA256::sha256_file_hex(&path).map_err(|error|format!("cannot hash built artifact: {error}"))?;Ok((path,metadata.len(),digest))}
 
@@ -199,10 +213,80 @@ fn compatible_report(root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedB
         if actual_subject.get("member_sources")!=expected_subject.get("member_sources")||actual_subject.get("artifact")!=expected_subject.get("artifact")||actual_subject.get("target_class")!=expected_subject.get("target_class")||actual_subject.get("target_triple")!=expected_subject.get("target_triple")||actual_subject.get("profile")!=expected_subject.get("profile")||actual_tool.get("digest")!=expected_tool.get("digest"){continue}
         let Some(CanonicalJson::Array(measurements))=content.get("measurements")else{continue};let mut facts=Vec::new();let mut ids=std::collections::BTreeSet::new();let mut valid=true;
         for measurement in measurements{let Ok(measurement)=as_object(measurement)else{valid=false;break};let Ok(budget_id)=text_map(measurement,"budget_id")else{valid=false;break};let Some((hash,context,expected_provider))=expected.get(budget_id)else{valid=false;break};if measurement.get("budget_spec_sha256")!=Some(&CanonicalJson::String(hash.clone()))||measurement.get("context_key")!=Some(&CanonicalJson::String(context.clone()))||measurement.get("provider")!=Some(expected_provider){valid=false;break}let Some(decision)=measurement.get("decision")else{valid=false;break};let Ok(decision)=as_object(decision)else{valid=false;break};let(Ok(evidence),Ok(outcome),Ok(reason),Ok(source))=(text_map(decision,"evidence"),text_map(decision,"policy_outcome"),text_map(decision,"reason"),text_map(measurement,"source"))else{valid=false;break};if !expected_ids.contains(budget_id){valid=false;break}ids.insert(budget_id.to_string());let name=measurement.get("budget_spec").and_then(|value|as_object(value).ok()).and_then(|spec|text_map(spec,"name").ok()).unwrap_or_else(||budget_id.rsplit_once(':').map(|(_,name)|name).unwrap_or(budget_id));facts.push(StoredBuildFact{name:name.into(),source:source.into(),evidence:evidence.into(),outcome:outcome.into(),reason:reason.into()});}
-        if valid&&ids==expected_ids{return Ok(Some(StoredBuildReport{report_id:report_id.into(),facts}))}
+        if valid&&ids==expected_ids{return Ok(Some(StoredBuildReport{report_id:report_id.into(),value:report,facts}))}
     }
     Ok(None)
 }
+
+fn cache_has_live_baseline(root:&Path,specs:&[LocatedBudgetSpec])->bool{
+    specs.iter().filter_map(|located|located.spec.comparison_fact.baseline.as_deref()).any(|baseline|{
+        let path=root.join(".jet").join("perf").join("baselines").join("names").join(format!("{baseline}.json"));
+        std::fs::symlink_metadata(path).is_ok_and(|metadata|metadata.file_type().is_file())
+    })
+}
+
+fn cached_built_report(stored:StoredBuildReport,root:&Path,bundle:&jet::AST::ProgramBundle,specs:&[LocatedBudgetSpec])->Result<BuiltReport,String>{
+    let value=stored.value;
+    let content=as_object(as_object(&value)?.get("content").ok_or("cached budget report has no content")?)?;
+    let CanonicalJson::Array(measurements)=content.get("measurements").ok_or("cached budget report has no measurements")? else{return Err("cached budget report measurements are not an array".into())};
+    let mut results=Vec::new();
+    for raw in measurements{
+        let measurement=as_object(raw)?;
+        let budget_id=text_map(measurement,"budget_id")?;
+        let located=specs.iter().find(|located|format!("{}:{}",located.spec.role,located.spec.name)==budget_id).ok_or_else(||format!("cached budget report contains unexpected budget `{budget_id}`"))?;
+        let (source,line,column)=source_location(root,bundle,located);
+        let decision=as_object(measurement.get("decision").ok_or("cached budget measurement has no decision")?)?;
+        let evidence=cached_evidence(text_map(decision,"evidence")?)?;
+        let outcome=cached_outcome(text_map(decision,"policy_outcome")?)?;
+        let reason=text_map(decision,"reason")?.to_string();
+        let metric=measurement.get("metric").ok_or("cached budget measurement has no metric")?.clone();
+        let trend=decision.get("trend").ok_or("cached budget decision has no trend")?.clone();
+        let comparison=measurement.get("comparison").ok_or("cached budget measurement has no comparison")?.clone();
+        let baseline_report_ids=cached_report_ids(measurement.get("history"))?;
+        let stale=reason.starts_with("named baseline compatible history is stale");
+        results.push(ResultRow{
+            id:budget_id.into(),
+            name:text_map(as_object(measurement.get("budget_spec").ok_or("cached budget measurement has no budget spec")?)?,"name")?.into(),
+            source,
+            line,
+            column,
+            metric:metric.clone(),
+            metric_label:cached_metric_label(&metric)?,
+            unit:text_map(measurement,"unit")?.into(),
+            direction:text_map(measurement,"direction")?.into(),
+            comparison,
+            sample:cached_rational(decision.get("point").ok_or("cached budget decision has no point")?)?,
+            lower95:cached_optional_rational(decision.get("lower95"))?,
+            upper95:cached_optional_rational(decision.get("upper95"))?,
+            trend,
+            baseline_report_ids,
+            stale,
+            outcome,
+            evidence,
+            enforcement:cached_enforcement(text_map(measurement,"enforcement")?)?,
+            reason,
+        });
+    }
+    results.sort_by(|a,b|result_rank(a).cmp(&result_rank(b)).then_with(||a.id.cmp(&b.id)));
+    let fail=results.iter().filter(|row|row.outcome==PolicyOutcome::Fail).count();
+    Ok(BuiltReport{bytes:value.bytes(),value,results,fail})
+}
+
+fn cached_metric_label(metric:&CanonicalJson)->Result<String,String>{
+    let metric=as_object(metric)?;
+    let name=text_map(metric,"name")?;
+    let Some(CanonicalJson::String(percentile))=metric.get("percentile")else{return Ok(name.into())};
+    let mut chars=percentile.chars();
+    let first=chars.next().unwrap_or_default().to_ascii_uppercase();
+    Ok(format!("{name}({first}{})",chars.as_str()))
+}
+
+fn cached_rational(value:&CanonicalJson)->Result<Rational,String>{let value=as_object(value)?;Rational::parse(wire_map(value,"num")?,wire_map(value,"den")?)}
+fn cached_optional_rational(value:Option<&CanonicalJson>)->Result<Option<Rational>,String>{match value{None|Some(CanonicalJson::Null)=>Ok(None),Some(value)=>cached_rational(value).map(Some)}}
+fn cached_report_ids(value:Option<&CanonicalJson>)->Result<Vec<String>,String>{let Some(value)=value else{return Ok(Vec::new())};if matches!(value,CanonicalJson::Null){return Ok(Vec::new())}let value=as_object(value)?.get("report_ids").ok_or("cached budget history has no report ids")?;let CanonicalJson::Array(values)=value else{return Err("cached budget history report ids are not an array".into())};values.iter().map(|value|match value{CanonicalJson::String(value)=>Ok(value.clone()),_=>Err("cached budget history report id is not text".into())}).collect()}
+fn cached_evidence(value:&str)->Result<Evidence,String>{match value{"pass"=>Ok(Evidence::Pass),"regression"=>Ok(Evidence::Regression),"inconclusive"=>Ok(Evidence::Inconclusive),"unavailable"=>Ok(Evidence::Unavailable),other=>Err(format!("cached budget evidence `{other}` is invalid"))}}
+fn cached_outcome(value:&str)->Result<PolicyOutcome,String>{match value{"pass"=>Ok(PolicyOutcome::Pass),"warn"=>Ok(PolicyOutcome::Warn),"fail"=>Ok(PolicyOutcome::Fail),other=>Err(format!("cached budget outcome `{other}` is invalid"))}}
+fn cached_enforcement(value:&str)->Result<Enforcement,String>{match value{"warn"=>Ok(Enforcement::Warn),"fail"=>Ok(Enforcement::Fail),other=>Err(format!("cached budget enforcement `{other}` is invalid"))}}
 
 fn emit_stored_build_gates(stored:&StoredBuildReport)->i32{let mut failed=0;for fact in &stored.facts{if fact.outcome=="fail"{failed+=1;let code=if fact.evidence=="unavailable"{"E2906"}else{"E2907"};let state=if fact.evidence=="unavailable"{"has no usable evidence"}else if fact.evidence=="inconclusive"{"is inconclusive"}else{"regressed"};eprintln!("Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",fact.name,fact.source,fact.reason,if code=="E2906"{"correct the provider evidence or bootstrap only when absent or stale evidence is eligible"}else{"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception"});}}let short=&stored.report_id[..12];if failed>0{eprintln!("budgets failed: {} · report {short}",count(failed,"budget failed","budgets failed"));1}else{eprintln!("budgets: {} passed · report {short}",count(stored.facts.len(),"budget","budgets"));0}}
 fn build_gate_tool_failure(why:&str)->i32{eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");1}

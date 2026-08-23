@@ -4523,12 +4523,15 @@ pub enum TExprKind {
     /// `extern_funcs` arm emits `{ffi_crate}::{wrapper}(args)` with args lowered via
     /// `emit_extern_call_args` (a DISTINCT arg form — a non-scalar `Read` param is
     /// `(…).clone()`, NOT `&(…)`). `wrapper` is the resolved FFI symbol; `args` carry
-    /// the resolved per-arg clone decision. `cx.ffi_crate` is program-level (read at
-    /// emit, like Phase 10's regex form). I1: an extern call introduces no Rust
+    /// the resolved per-arg clone decision. `c_abi` marks the hidden C bridge,
+    /// whose scalar boundary needs the Prelude's Jet/C conversion at the call
+    /// site. `cx.ffi_crate` is program-level (read at emit, like Phase 10's regex
+    /// form). I1: an extern call introduces no Rust
     /// `unsafe` by itself — this reproduces the AST emit byte-for-byte, which emits no
     /// `unsafe`.
     ExternCall {
         wrapper: String,
+        c_abi: bool,
         args: Vec<TExternArg>,
     },
 }

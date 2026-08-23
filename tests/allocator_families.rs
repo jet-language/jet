@@ -172,13 +172,7 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
     let user = common::strip_vetted_prelude_modules(&output.rust);
     let unsafe_lines = user
         .lines()
-        .filter(|line| {
-            line.contains("unsafe")
-                && !(
-                    (src.contains(":= uninit") || src.contains("{ uninit }") || src.contains("{uninit}"))
-                        && line.contains("MaybeUninit")
-                )
-        })
+        .filter(|line| !common::unsafe_keyword_columns(line).is_empty())
         .collect::<Vec<_>>();
     assert!(
         unsafe_lines.is_empty(),

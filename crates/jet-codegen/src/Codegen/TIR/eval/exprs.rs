@@ -9706,7 +9706,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 self.eval_call(&target, args, scope)
             }
-            TExprKind::ExternCall { wrapper, args } => {
+            TExprKind::ExternCall { wrapper, args, .. } => {
                 // The evaluator carries CtValue values, so the ownership clone
                 // recorded on a non-scalar FFI read is already implicit in the
                 // value copy. Keep the call itself on the ambient bridge: the

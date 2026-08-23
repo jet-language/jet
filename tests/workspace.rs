@@ -116,7 +116,7 @@ fn unique_temp_dir(tag: &str) -> PathBuf {
 
 #[test]
 fn e0995_no_workspace_module_fires() {
-    let src = "module dev { env.dev: Env.{ packages: [] } }\n";
+    let src = "module dev { env.dev: Env{ packages: [] } }\n";
     let d = WorkspaceFile::evaluate(src, Path::new("/tmp"))
         .expect_err("must fail when workspace module is absent");
     assert_eq!(

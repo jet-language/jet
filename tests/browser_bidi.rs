@@ -769,7 +769,7 @@ fn run() {
 
     drop_context :: session.context() ?? panic("drop context")
     drop_page :: drop_context.page() ?? panic("drop page")
-    session.close() ?? return
+    session.close() ?? return Err("close")
 }
 "#
     .replace("__ENDPOINT__", &endpoint);
@@ -926,7 +926,7 @@ fn native_bidi_profile_drives_isolated_session_and_redacts_trace() {
     let (code, stdout, stderr) =
         common::build_and_run("jet_browser_bidi", "browser_bidi", &source);
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert!(stdout.contains("caps:true:true:bidi-2025.5"), "{stdout}");
+    assert!(stdout.contains("abilities:true:true:bidi-2025.5"), "{stdout}");
     assert!(stdout.contains("event:log.entryAdded"), "{stdout}");
     assert!(
         stdout.contains(r#"raw:{"message":"ready","ready":true}"#),
@@ -978,7 +978,7 @@ fn native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks() {
     let source = r#"
 use core.web.browser as browser
 
-fn connect_outcome(endpoint: String) String {
+fn connect_outcome(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
@@ -986,17 +986,17 @@ fn connect_outcome(endpoint: String) String {
     return "unexpected-success"
 }
 
-fn profile_outcome() String {
+fn profile_outcome() String -> {
     profile :: browser.profile("rolling") ?? return "caught"
     return "unexpected-success"
 }
 
-fn timeout_outcome() String {
+fn timeout_outcome() String -> {
     timeout :: browser.timeout(0) ?? return "caught"
     return "unexpected-success"
 }
 
-fn cdp_outcome(endpoint: String) String {
+fn cdp_outcome(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -1004,7 +1004,7 @@ fn cdp_outcome(endpoint: String) String {
     return "unexpected-success"
 }
 
-fn valid_outcome(endpoint: String) String {
+fn valid_outcome(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
@@ -1012,7 +1012,7 @@ fn valid_outcome(endpoint: String) String {
     return "connected"
 }
 
-fn closed_protocol_outcome(endpoint: String) String {
+fn closed_protocol_outcome(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -1263,9 +1263,12 @@ fn run() {
     timeout :: browser.timeout(500) ?? panic("timeout")
     session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
     bidi :: session.protocol("bidi") ?? panic("protocol")
-    print(bidi.send("webExtension.install", "{{}}") ?? "failed")
-    print(bidi.send("network.futureCommand", "{{}}") ?? "blocked")
-    print(bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked")
+    install_outcome :: bidi.send("webExtension.install", "{{}}") ?? "failed"
+    print(install_outcome)
+    unknown_outcome :: bidi.send("network.futureCommand", "{{}}") ?? "blocked"
+    print(unknown_outcome)
+    cdp_outcome :: bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked"
+    print(cdp_outcome)
     session.close() ?? panic("close")
 }
 "#
@@ -2322,7 +2325,7 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "caps:true:true\nblocked-smuggle\nblocked-shape\nblocked-empty\nblocked-colon\ncdp:{\"result\":{\"cacheDisabled\":true}}\ntrace:true:true:true\n"
+        "abilities:true:true\nblocked-smuggle\nblocked-shape\nblocked-empty\nblocked-colon\ncdp:{\"result\":{\"cacheDisabled\":true}}\ntrace:true:true:true\n"
     );
     assert!(!stdout.contains("CDP_SUCCESS_SECRET"), "{stdout}");
     assert!(!stderr.contains("CDP_SUCCESS_SECRET"), "{stderr}");
@@ -2389,7 +2392,7 @@ fn native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire() 
     let source = r#"
 use core.web.browser as browser
 
-fn missing_cdp(endpoint: String) String {
+fn missing_cdp(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2398,7 +2401,7 @@ fn missing_cdp(endpoint: String) String {
     return "unexpected-open"
 }
 
-fn hostile_cdp(endpoint: String) String {
+fn hostile_cdp(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2421,7 +2424,7 @@ fn run() {
         &source,
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "caps:false\ncaught-capability\ncaught-wire\n");
+    assert_eq!(stdout, "abilities:false\ncaught-capability\ncaught-wire\n");
     assert!(!stdout.contains("CDP_HOSTILE_SECRET"), "{stdout}");
     assert!(!stderr.contains("CDP_HOSTILE_SECRET"), "{stderr}");
     assert!(!stdout.contains("SECRET STACK"), "{stdout}");
@@ -2749,7 +2752,7 @@ fn native_bidi_privacy_receipt_hostile_and_closed_paths() {
     let source = r#"
 use core.web.browser as browser
 
-fn hostile(endpoint: String) String {
+fn hostile(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -2757,7 +2760,7 @@ fn hostile(endpoint: String) String {
     return "unexpected-success"
 }
 
-fn closed_receipt(endpoint: String) String {
+fn closed_receipt(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3014,7 +3017,7 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "privacy:true:false:true\ncaps:true:true:bidi-2025.5\nisolated:true\n{}\nreceipt:true:true:true:false\n"
+        "privacy:true:false:true\nabilities:true:true:bidi-2025.5\nisolated:true\n{}\nreceipt:true:true:true:false\n"
     );
     assert!(!stdout.contains("MATRIX_SUCCESS_SECRET"), "{stdout}");
     assert!(!stderr.contains("MATRIX_SUCCESS_SECRET"), "{stderr}");
@@ -3133,12 +3136,12 @@ fn native_bidi_browser_surface_hostile_matrix() {
     let source = r#"
 use core.web.browser as browser
 
-fn bad_profile() String {
+fn bad_profile() String -> {
     browser.profile("not-a-profile") ?? return "caught-profile"
     return "unexpected-profile"
 }
 
-fn missing_cdp(endpoint: String) String {
+fn missing_cdp(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3146,7 +3149,7 @@ fn missing_cdp(endpoint: String) String {
     return "unexpected-cdp"
 }
 
-fn wire_error(endpoint: String) String {
+fn wire_error(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
@@ -3154,7 +3157,7 @@ fn wire_error(endpoint: String) String {
     return "unexpected-wire"
 }
 
-fn closed_ops(endpoint: String) String {
+fn closed_ops(endpoint: String) String -> {
     profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
     timeout :: browser.timeout(250) ?? return "unexpected-timeout"
     session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
