@@ -351,10 +351,69 @@ fn validate_adapter_hook_producer(
     plan: &jet_env_model::ModuleEval::AdapterPlan,
     table: &jet_pkg_model::RefSpec::SourceTable,
     expectation: &CacheExpectation,
+    require_current_backend: bool,
 ) -> std::io::Result<()> {
     let jet_env_model::ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe else {
         return Ok(());
     };
+    let recorded_sandbox = producer.facts.get("build.sandbox").map(String::as_str);
+    let planned_sandbox = producer
+        .plan
+        .facts()
+        .get("adapter.build.sandbox")
+        .map(String::as_str);
+    if require_current_backend {
+        let sandbox = crate::RuntimePolicy::detect_sandbox();
+        if sandbox.level != crate::RuntimePolicy::SandboxLevel::Strong {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "executable adapter cache requires a native sandbox before launch: {}",
+                    sandbox.reason
+                ),
+            ));
+        }
+        for (name, expected, actual) in [
+            ("build.sandbox", sandbox.mechanism.as_str(), recorded_sandbox),
+            ("adapter.build.sandbox", sandbox.mechanism.as_str(), planned_sandbox),
+        ] {
+            if actual != Some(expected) {
+                return Err(hook_fact_mismatch(name, expected, actual));
+            }
+        }
+    } else {
+        let Some(recorded_sandbox) = recorded_sandbox else {
+            return Err(hook_fact_mismatch("build.sandbox", "recorded native backend", None));
+        };
+        if !matches!(
+            recorded_sandbox,
+            "linux-bwrap" | "macos-seatbelt" | "windows-appcontainer"
+        ) {
+            return Err(hook_fact_mismatch(
+                "build.sandbox",
+                "recorded native backend",
+                Some(recorded_sandbox),
+            ));
+        }
+        if planned_sandbox != Some(recorded_sandbox) {
+            return Err(hook_fact_mismatch(
+                "adapter.build.sandbox",
+                recorded_sandbox,
+                planned_sandbox,
+            ));
+        }
+    }
+    let producer_policy = producer.facts.get("build.sandbox_policy");
+    let plan_policy = producer.plan.facts().get("adapter.build.sandbox_policy");
+    if producer_policy.is_none() || producer_policy != plan_policy {
+        return Err(hook_fact_mismatch(
+            "build.sandbox_policy",
+            producer_policy
+                .map(String::as_str)
+                .unwrap_or("<recorded policy>"),
+            plan_policy.map(String::as_str),
+        ));
+    }
     if producer.provider != "adapter" {
         return Err(hook_fact_mismatch(
             "provider",
@@ -480,7 +539,7 @@ pub(crate) fn validate_cached_adapter_hook(
         ));
     }
     let producer = ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
-    validate_adapter_hook_producer(&producer, plan, table, expectation)
+    validate_adapter_hook_producer(&producer, plan, table, expectation, false)
 }
 
 pub(crate) fn bind_adapter_hook_identity(
@@ -496,7 +555,7 @@ pub(crate) fn bind_adapter_hook_identity(
     ) {
         return Ok(());
     }
-    validate_adapter_hook_producer(&realized.producer, plan, table, expectation)?;
+    validate_adapter_hook_producer(&realized.producer, plan, table, expectation, true)?;
     let expected = crate::Provider::adapter_cache_identity(
         &expectation.identity.source_fingerprint,
         realized

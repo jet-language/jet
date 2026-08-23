@@ -15982,6 +15982,9 @@ impl LowerCtx<'_, '_> {
                     if module == "core.process" {
                         return in_own_frame(|| -> Result<Value, String> {
                             let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                                "workspace" if args.is_empty() => {
+                                    return Ok(self.call_host(self.host.coll.authority_workspace, &[]));
+                                }
                                 "cmd" if args.len() == 1 => {
                                     (self.host.process.cmd, vec![self.lower_expr(&args[0])?])
                                 }
@@ -25740,6 +25743,8 @@ impl LowerCtx<'_, '_> {
                         "terminal" if args.is_empty() => (self.host.process.spec_terminal, 0),
                         "terminal" => (self.host.process.spec_terminal_with_policy, 1),
                         "abilities" => (self.host.process.spec_abilities, 0),
+                        "under" => (self.host.process.spec_under, 1),
+                        "plan" => (self.host.process.spec_plan, 0),
                         "run" => (self.host.process.spec_run, 0),
                         "run_checked" => (self.host.process.spec_run_checked, 0),
                         "spawn" => (self.host.process.spec_spawn, 0),

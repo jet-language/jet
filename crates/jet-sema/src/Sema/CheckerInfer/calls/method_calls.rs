@@ -3907,6 +3907,14 @@ impl<'a> Checker<'a> {
                                     &mut args[0],
                                 );
                             }
+                            "under" if args.len() == 1 => {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named(Syntax::TYPE_ABILITIES.to_string()),
+                                    &mut args[0],
+                                );
+                            }
                             _ => {
                                 for a in args.iter_mut() {
                                     self.infer(&mut a.expr);

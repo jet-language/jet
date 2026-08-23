@@ -1246,14 +1246,27 @@ fn sanitize_test_name(name: &str) -> String {
 fn jet_std_process_exit(code: i64) -> ! {
     jet_runtime_explicit_exit(code)
 }
+fn jet_std_process_workspace() -> JetAuthority {
+    JetAuthority::workspace()
+}
 fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     jet_process_spec_run(&jet_std_process_cmd(cmd))
 }
 fn jet_std_process_run_with_authority(
     cmd: &Vec<String>,
-    _authority: &JetAuthority,
+    authority: &JetAuthority,
 ) -> Result<jet_std::ProcessResult, jet_std::IOError> {
-    jet_std_process_run(cmd)
+    let spec = jet_process_spec_under_wire(
+        jet_std_process_cmd(cmd),
+        &jet_authority_to_wire(authority),
+    );
+    jet_process_spec_run(&spec)
+}
+fn jet_std_process_spec_under(
+    spec: jet_std::ProcessSpec,
+    authority: &JetAuthority,
+) -> jet_std::ProcessSpec {
+    jet_process_spec_under_wire(spec, &jet_authority_to_wire(authority))
 }
 fn jet_std_process_pipeline(
     specs: &Vec<jet_std::ProcessSpec>,

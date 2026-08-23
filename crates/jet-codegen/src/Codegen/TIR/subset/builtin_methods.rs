@@ -216,7 +216,8 @@ pub(crate) fn is_process_handle_method_name(
                 // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: beginner and
                 // expert terminal opt-in plus the keyed host report.
                 | ("terminal", 0 | 1)
-                | ("env_clear" | "detached" | "abilities" | "run" | "run_checked" | "spawn", 0)
+                | ("env_clear" | "detached" | "abilities" | "plan" | "run" | "run_checked" | "spawn", 0)
+                | ("under", 1)
                 | ("timeout" | "output_limit", 1)
         ),
         Some("ProcessChild") => matches!(

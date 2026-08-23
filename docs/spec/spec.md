@@ -2940,9 +2940,10 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   channel, policy fingerprint, and update command from the same source policy.
 - **No daemon / no root (U28):** jetpack is a one-shot, user-owned process:
   no resident daemon, no root-owned default hangar, no privileged sandbox
-  helper. Concurrent commands coordinate through file locks. If unprivileged
-  sandboxing is unavailable, Jetpack emits L0205; `jetpack config sandbox
-  require` makes that condition E1275 instead.
+  helper. Concurrent commands coordinate through file locks. Linux executable
+  recipe actions use the native Bubblewrap boundary; if the required backend
+  is unavailable, Jetpack emits L0205 and refuses the executable action, while
+  `jetpack config sandbox require` makes that condition E1275 before launch.
 - **Universal trust grants (D-JPK-GRANTCMD1/SCHEMA1):** `jet trust` is the
   public command family for the unified grant graph. `jet trust list` shows
   package, build, env, service, image, fleet, and jetos authority grants;

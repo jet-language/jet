@@ -71,8 +71,9 @@ fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
         jet_std::ProcessStreamMode::Inherit => std::process::Stdio::inherit(),
     }
 }
-fn jet_process_command_base(
+fn jet_process_command_base_with_identity(
     spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
 ) -> Result<std::process::Command, jet_std::IOError> {
     if spec.cmd.is_empty() {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
@@ -82,7 +83,8 @@ fn jet_process_command_base(
             Some("process command needs at least one word".to_string()),
         )));
     }
-    let mut command = std::process::Command::new(&spec.cmd[0]);
+    let mut command =
+        std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
     command.args(&spec.cmd[1..]);
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
@@ -132,8 +134,9 @@ fn jet_process_command_base(
 // stream with one controlling process group, so it cannot be silently coerced
 // into a pipeline edge. Keep the failure explicit and direct callers to
 // `spawn()` for the terminal-backed child.
-fn jet_process_command(
+fn jet_process_command_with_identity(
     spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
 ) -> Result<std::process::Command, jet_std::IOError> {
     if spec.terminal.is_some() {
         return Err(jet_std::IOError::other(
@@ -142,16 +145,32 @@ fn jet_process_command(
             "terminal sessions cannot be used as pipeline stages; spawn the session directly",
         ));
     }
-    jet_process_command_base(spec)
+    jet_process_command_base_with_identity(spec, executable_identity)
 }
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    let launch_plan = if spec.policy_wire.is_some() {
+        Some(jet_process_spec_plan(spec)?)
+    } else {
+        None
+    };
+    jet_process_spec_backend_check(spec)?;
     jet_process_terminal_backend_check(spec)?;
     if spec.terminal.is_some() {
-        return jet_process_terminal_spawn(spec);
+        return jet_process_terminal_spawn(
+            spec,
+            launch_plan
+                .as_ref()
+                .map(|plan| plan.executable_identity.as_str()),
+        );
     }
-    let mut command = jet_process_command_base(spec)?;
+    let mut command = jet_process_command_base_with_identity(
+        spec,
+        launch_plan
+            .as_ref()
+            .map(|plan| plan.executable_identity.as_str()),
+    )?;
     if spec.detached {
         command.stdin(std::process::Stdio::null());
         command.stdout(std::process::Stdio::null());
@@ -189,6 +208,7 @@ fn jet_process_spec_spawn(
 #[cfg(unix)]
 fn jet_process_terminal_spawn(
     spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
     if spec.detached {
         return Err(jet_std::IOError::other(
@@ -210,7 +230,7 @@ fn jet_process_terminal_spawn(
             error,
         )
     })?;
-    let mut command = jet_process_command_base(spec)?;
+    let mut command = jet_process_command_base_with_identity(spec, executable_identity)?;
     let stdin = pair.slave.try_clone().map_err(|error| {
         jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
     })?;
@@ -259,6 +279,7 @@ fn jet_process_terminal_spawn(
 #[cfg(not(unix))]
 fn jet_process_terminal_spawn(
     spec: &jet_std::ProcessSpec,
+    _executable_identity: Option<&str>,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
     jet_process_terminal_backend_check(spec)?;
     Err(jet_std::IOError::other(
@@ -389,10 +410,25 @@ fn jet_process_spec_pipeline(
             Some("process.pipeline needs at least one command".to_string()),
         )));
     }
+    let launch_plans = specs
+        .iter()
+        .map(|spec| {
+            if spec.policy_wire.is_some() {
+                jet_process_spec_plan(spec).map(Some)
+            } else {
+                Ok(None)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let mut children: Vec<std::process::Child> = Vec::new();
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
-    for spec in specs {
-        let mut command = jet_process_command(spec)?;
+    for (spec, launch_plan) in specs.iter().zip(launch_plans.iter()) {
+        let mut command = jet_process_command_with_identity(
+            spec,
+            launch_plan
+                .as_ref()
+                .map(|plan| plan.executable_identity.as_str()),
+        )?;
         if let Some(stdout) = prev_stdout.take() {
             command.stdin(std::process::Stdio::from(stdout));
         }

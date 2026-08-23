@@ -50,7 +50,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #204 | live | `tests/jetpack_platform.rs` | #433 drives a native package through provider, lease, Hangar, offline, missing-component, and clean-store paths; the focused lane runs on Linux, macOS, and Windows CI. Host/tool gaps fail closed; hostile child confinement remains #398. |
 | #205 | live | `tests/jetpack_discovery.rs` | Local index discovery only; no live registry claim. |
 | #206 | live | `tests/jetpack_build_debug.rs` | Local debuggability path only. |
-| #207 | model-only | `crates/jetpack/src/RuntimePolicy.rs` | #398 owns enforced OS sandbox. |
+| #207 | live | `crates/jetpack/src/RuntimePolicy.rs`, `crates/jetpack/src/Recipe.rs` | #398 Linux slice owns the enforced Bubblewrap child boundary and actual policy receipt; other platform backends remain separate. |
 | #208 | fixture-only | `tests/jetpack_offline.rs` | #395/#433 own syscall denial and live closure proof. |
 | #6 | compatibility-only | `tests/pkg.rs` | #423 owns live registry consumption and delivery. |
 | #139 | schema-only | `Source/Publish/Schema.rs` | #393 landed canonical Store v2; #395 owns the live cache protocol over its envelope and store. |
@@ -89,8 +89,9 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 
 - Cache/index envelopes, trust facts, semantic-lock models, provider metadata,
   and offline fixtures cannot appear in release claims as live protocols.
-- Sandbox detection cannot appear as confinement. Until #398 lands,
-  every build is reported as fallback/unsandboxed.
+- Sandbox detection cannot appear as confinement. Linux executable recipe
+  actions now report the verified Bubblewrap boundary; unavailable backends
+  remain fallback and refuse executable actions.
 - Installed-Nix compatibility cannot appear as native Nix interoperability.
 - Active cards #393–#434 are completion owners. Legacy cards stay historical
   evidence; closing a successor requires its own hostile/live acceptance.

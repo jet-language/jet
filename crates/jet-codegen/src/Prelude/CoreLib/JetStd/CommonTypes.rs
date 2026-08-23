@@ -408,6 +408,21 @@
         // flag is the one opt-in. A launch that asks for a terminal never runs
         // without one: it fails when no native PTY/ConPTY backend is available.
         pub terminal: Option<TerminalPolicy>,
+        // D-AGENT-EXEC1: an authority-bound spec carries the canonical policy
+        // wire value. It is deliberately opaque here; ProcessPolicy.rs owns
+        // interpretation, digesting, planning, and backend refusal.
+        pub policy_wire: Option<String>,
+    }
+
+    /// D-AGENT-EXEC1: the dry-run record shared by AOT, JIT, and interpreter.
+    /// A plan is only returned after executable identity resolution and backend
+    /// selection. Receipt production remains the adjacent receipt slice.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ProcessPlan {
+        pub executable_identity: String,
+        pub argv: Vec<String>,
+        pub policy_digest: String,
+        pub backend: String,
     }
 
     #[derive(Clone, Debug)]
@@ -2542,6 +2557,14 @@
     impl super::JetShow for ProcessSpec {
         fn jet_show(&self) -> String {
             format!("ProcessSpec({:?})", self.cmd)
+        }
+    }
+    impl super::JetShow for ProcessPlan {
+        fn jet_show(&self) -> String {
+            format!(
+                "ProcessPlan {{ executable: {}, backend: {}, policy_digest: {} }}",
+                self.executable_identity, self.backend, self.policy_digest
+            )
         }
     }
     impl super::JetShow for ProcessChild {

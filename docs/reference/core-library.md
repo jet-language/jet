@@ -1451,6 +1451,26 @@ value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
 `stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
 `terminal()` or `terminal(policy)`.
 
+#### Authority-bound execution (D-AGENT-EXEC1=A)
+
+`process.workspace()` returns the ordinary `Abilities` value for the safe
+workspace default. It grants repository reads and private build-directory
+writes. It denies network, home, secrets, devices, and inherited handles. Bind
+that value to the existing process object with `under(abilities)`:
+
+```jet
+abilities :: process.workspace()
+spec :: process.cmd(["cargo", "test"]).under(abilities)
+plan :: spec.plan()
+```
+
+Experts widen the same value with exact rights before binding it. `plan()`
+resolves the executable identity without spawning, records argv, backend, and
+the policy digest, and refuses before launch when the host has no #398/#893
+isolation backend. Launch checks the same policy digest and backend boundary;
+it never silently falls back to ambient authority. The final receipt uses that
+same digest and is redacted by the receipt slice.
+
 #### Explicit termination cleanup law (D-FAIL-EXIT1)
 
 `process.exit(code)` and `os.stop(code)` use one explicit-stop boundary. The
@@ -3848,14 +3868,14 @@ are checked, broadcast gradients reduce to the input shape, and scalar-loss
 requirements reject non-scalar outputs. Gradient receipts inherit the primal
 placement and profile.
 
-`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle`, explicit `metal`, and
-explicit `cuda`
-backends publish stable backend, version, profile, cache identity, and closed
+`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle`, explicit `metal`,
+`cuda`, and `vulkan` backends, plus the browser-owned `webgpu` provider.
+They publish stable backend, version, profile, cache identity, and closed
 feature lists in placement receipts. General operations report their actual
 `F64Strict+Reproducible` profile by default and retain
 `F32Strict+Reproducible` when their inputs carry that explicit profile; the
-tiled path reports real F32 arithmetic and ordered reduction on CPU, Metal, or
-CUDA. Metal and CUDA capability negotiation and unsupported-operation checks
+tiled path reports real F32 arithmetic and ordered reduction on CPU, Metal, CUDA,
+or Vulkan. Metal, CUDA, and Vulkan capability negotiation and unsupported-operation checks
 fail before launch; no host tier inserts a CPU fallback.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a

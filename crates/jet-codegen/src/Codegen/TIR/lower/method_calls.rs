@@ -3693,6 +3693,10 @@ fn lower_method_call_impl(
                     ok: Box::new(Type::Named("ProcessResult".to_string())),
                     err: Box::new(Type::Named("IOError".to_string())),
                 },
+                (Some("ProcessSpec"), "plan") => Type::Result {
+                    ok: Box::new(Type::Named("ProcessPlan".to_string())),
+                    err: Box::new(Type::Named("IOError".to_string())),
+                },
                 (Some("ProcessSpec"), "spawn") => Type::Result {
                     ok: Box::new(Type::Named("ProcessChild".to_string())),
                     err: Box::new(Type::Named("IOError".to_string())),

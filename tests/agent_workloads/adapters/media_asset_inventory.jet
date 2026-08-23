@@ -1,0 +1,30 @@
+use core.files as fs
+use core.net.mime as mime
+use core.process as process
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: media_asset_inventory INPUT_ROOT")
+    root :: args.get(1) ?? panic("missing input root")
+    entries :: fs.walk(root) ?? panic("cannot walk media")
+    rows := [String]{}
+    loop entry in entries {
+        if !entry.is_dir {
+            name :: entry.relative
+            extension :: Path.from(name).extension()
+            if extension == .Val(value) {
+                if mime.from_extension(value) == .Val(media_type) {
+                    parsed :: mime.parse(media_type) ?? panic("cannot parse media type")
+                    bytes :: fs.read_bytes(entry.path) ?? panic("cannot read media")
+                    rows.push("asset|{name}|{parsed.essence()}|{bytes.len()}")
+                } else {
+                    rows.push("reject|{name}|extension")
+                }
+            } else {
+                rows.push("reject|{name}|extension")
+            }
+        }
+    }
+    rows.sort()
+    loop row in rows -> print(row)
+}

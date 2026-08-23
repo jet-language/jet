@@ -660,6 +660,30 @@ fn run() -[FFI.Ada, IO]> {
 }
 
 #[test]
+fn ada_bind_launders_gnat_failure_as_e3208() {
+    let dir=isolated_cwd("ada_bind_failure");let source=dir.join("broken.ads");
+    fs::write(&source,r#"with Interfaces.C;
+package Broken is
+   function Value (Input : Interfaces.C.long_long)
+     return Interfaces.C.long_long
+     with Export, Convention => C, External_Name => "broken_value";
+end Broken;
+"#).unwrap();
+    fs::write(dir.join("broken.adb"),r#"with Interfaces.C;
+package body Broken is
+   function Value (Input : Interfaces.C.long_long) return Interfaces.C.long_long is
+   begin
+      return Input + ;
+   end Value;
+end Broken;
+"#).unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","ada"]).arg(&source).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.ads:"));
+    check_snapshot("bind_ada_invalid_e3208.txt",&scrub(&stderr,&source));
+}
+
+#[test]
 fn pascal_bind_runs_scalar_and_owned_class_lifecycle() {
     let dir=isolated_cwd("pascal_bind_lifecycle");let source=dir.join("inventory.pas");
     fs::write(&source,r#"library inventory;
@@ -765,7 +789,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     let host=fs::read_to_string(cache.join("callbacks_host.dart")).unwrap();assert!(host.contains("NativeCallable<Int64 Function(Int64)>.isolateLocal"));assert!(host.find("reset();").unwrap()<host.find("callback.close();").unwrap());
     let provenance=fs::read_to_string(cache.join("callbacks.provenance")).unwrap();assert!(provenance.contains("compute=")&&provenance.contains("contract_provenance_sha256=")&&provenance.contains("sdk="));
     let native_path=native.to_string_lossy().replace('\\',"\\\\").replace('\'',"\\'");
-    fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\ntypedef ComputeFloatNative = Double Function(Double);\ntypedef ComputeFloatDart = double Function(double);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); final computeFloat = jetDartLibrary.lookupFunction<ComputeFloatNative, ComputeFloatDart>('compute_float'); print(compute(21)); print(computeFloat(5.0)); shutdownJetDart(); }}\n")).unwrap();
+    fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\ntypedef ComputeFloatNative = Double Function(Double);\ntypedef ComputeFloatDart = double Function(double);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); final computeFloat = jetDartLibrary.lookupFunction<ComputeFloatNative, ComputeFloatDart>('compute-float'); print(compute(21)); print(computeFloat(5.0)); shutdownJetDart(); }}\n")).unwrap();
     let run=Command::new("dart").args(["run","host.dart"]).current_dir(&dir).output().unwrap();assert!(run.status.success(),"Dart host failed:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n2.5\n");
 }
 

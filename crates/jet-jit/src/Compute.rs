@@ -420,6 +420,9 @@ mod semantics {
             let cpu = f32_tensor(vec![2], vec![2.0, 3.0]);
             let result = jet_compute_on_device(&cpu, JetComputeDevice::Vulkan);
             if !jet_compute_vulkan::available() {
+                if let Err(error) = jet_compute_vulkan::probe() {
+                    eprintln!("SKIP Vulkan: {error:?}");
+                }
                 let error = result.expect_err("unavailable Vulkan must not fall back to CPU");
                 assert!(
                     matches!(&error, JetComputeError::Unsupported(_) | JetComputeError::Device(_)),

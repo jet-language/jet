@@ -96,6 +96,14 @@ impl<'a> Checker<'a> {
                 self.check_deprecation(item_name, dep, span);
             }
             self.check_foreign_transaction_call(&sig, item_name, span);
+            if let Some(diagnostic) = crate::Sema::FFI::foreign_call_boundary_error(
+                &sig,
+                item_name,
+                self.in_unsafe,
+                span,
+            ) {
+                self.diags.push(diagnostic);
+            }
             self.record_current_function_reference(mangled, span);
             self.record_edge(mangled.to_string(), span);
             if let Some(identity) = self.code_module_identities.get(alias).cloned() {
@@ -385,6 +393,14 @@ impl<'a> Checker<'a> {
                     self.check_deprecation(name, dep, span);
                 }
                 self.check_foreign_transaction_call(&sig, name, span);
+                if let Some(diagnostic) = crate::Sema::FFI::foreign_call_boundary_error(
+                    &sig,
+                    name,
+                    self.in_unsafe,
+                    span,
+                ) {
+                    self.diags.push(diagnostic);
+                }
                 // D-APILABEL1=A: a call across a module boundary binds by the
                 // same law as a local one. Without this a label here was read
                 // positionally, so `other.schedule(delay: 1, task: 2)` bound

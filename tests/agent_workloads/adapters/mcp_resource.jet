@@ -1,0 +1,51 @@
+use core.process as process
+use core.sys as env
+
+fn frame(body: String) String -> {
+    return "Content-Length: {body.len()}\n\n{body}"
+}
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: mcp_resource INPUT_ROOT")
+    root :: args.get(1) ?? panic("missing input root")
+    case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
+    jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet binary")
+    project := "{root}/readonly"
+    if case_name == "mcp-environment-denied" -> project = "{root}/denied"
+    root_uri :: "file://{project}"
+    bodies := [
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{{}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{{}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/read\",\"params\":{{\"uri\":\"jet://environment\"}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{{\"uri\":\"jet://missing\"}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":{{}}}}",
+        "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}"
+    ]
+    payload := ""
+    loop body in bodies -> payload += frame(body)
+    duration :: Duration.seconds(10) ?? panic("duration")
+    child :: process.cmd([jet, "self", "lsp"])
+        .cwd(project)
+        .env("HOME", "/agent-secret")
+        .stdin(.Stream)
+        .timeout(duration)
+        .spawn() ?? panic("MCP server failed to launch")
+    child.stdin.write(payload) ?? panic("MCP request failed to write")
+    result :: child.wait() ?? panic("MCP server failed to wait")
+    if !result.success {
+        panic("MCP server failed: {result.code} {result.errors}")
+    }
+    if case_name == "mcp-environment-denied" {
+        if !result.output.contains("-32002") -> panic("MCP denied case did not fail closed")
+        if result.output.contains("/agent-secret") -> panic("MCP denied case leaked HOME")
+        print("mcp=denied\nerror=-32002\nsecret=redacted")
+    } else {
+        loop marker in ["active_environment", "codex-agent", "mcp.read", "generated.txt", "lint"] {
+            if !result.output.contains(marker) -> panic("MCP resource omitted {marker}")
+        }
+        if result.output.contains("/agent-secret") -> panic("MCP resource leaked HOME")
+        print("mcp=readonly\nresource=jet://environment\ngrant=mcp.read\nside-effects=none")
+    }
+}

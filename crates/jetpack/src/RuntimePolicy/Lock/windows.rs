@@ -67,10 +67,8 @@ struct PinnedComponent {
 
 unsafe extern "system" {
     fn SetHandleInformation(handle: Handle, mask: u32, flags: u32) -> i32;
-    fn GetFileInformationByHandle(
-        handle: Handle,
-        information: *mut ByHandleFileInformation,
-    ) -> i32;
+    fn GetFileInformationByHandle(handle: Handle, information: *mut ByHandleFileInformation)
+        -> i32;
     fn LockFileEx(
         handle: Handle,
         flags: u32,
@@ -125,7 +123,10 @@ fn open_with_create(path: &Path, create: bool) -> io::Result<LockFile> {
 
 fn pin_parent_components(path: &Path) -> io::Result<Vec<PinnedComponent>> {
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "jetpack lock path has no parent")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "jetpack lock path has no parent",
+        )
     })?;
     let mut paths = parent
         .ancestors()
@@ -197,9 +198,8 @@ fn open_directory_raw(path: &Path) -> io::Result<File> {
 fn file_identity(file: &File) -> io::Result<FileIdentity> {
     let mut information = std::mem::MaybeUninit::<ByHandleFileInformation>::uninit();
     // SAFETY: live handle; Windows initializes complete output on success.
-    if unsafe {
-        GetFileInformationByHandle(file.as_raw_handle().cast(), information.as_mut_ptr())
-    } == 0
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), information.as_mut_ptr()) }
+        == 0
     {
         return Err(io::Error::last_os_error());
     }
@@ -217,7 +217,9 @@ pub(super) fn validate_path(lock: &LockFile, path: &Path) -> io::Result<()> {
         return Err(io::Error::other("jetpack lock validation path changed"));
     }
     if lock.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Err(io::Error::other("jetpack lock handle became a reparse point"));
+        return Err(io::Error::other(
+            "jetpack lock handle became a reparse point",
+        ));
     }
     for component in &lock.parents {
         if component.file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -302,10 +304,8 @@ mod tests {
 
     #[test]
     fn reparse_points_fail_closed_when_creation_is_permitted() {
-        let root = std::env::temp_dir().join(format!(
-            "jetpack-lockfileex-reparse-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jetpack-lockfileex-reparse-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let target = root.join("target");
         let link = root.join("lock");

@@ -550,6 +550,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.",
         ),
+        ProviderError::SandboxUnavailable(reason) => theme.error_coded(
+            "E1275",
+            "build sandboxing is required but unavailable",
+            reason,
+            "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
+        ),
         ProviderError::Channel(reason) => theme.error_coded(
             "E1271",
             "source channel could not be resolved",

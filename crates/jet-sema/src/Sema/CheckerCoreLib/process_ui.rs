@@ -239,7 +239,8 @@ pub(crate) fn parsed_args_method_return(
     }
 }
 
-/// D-PROCESS1: type-check `ProcessSpec` builder/run/spawn methods.
+/// D-PROCESS1/D-AGENT-EXEC1: type-check `ProcessSpec` builder, authority, plan,
+/// run, and spawn methods.
 pub(crate) fn process_spec_method_return(
     method: &str,
     n_args: usize,
@@ -263,6 +264,11 @@ pub(crate) fn process_spec_method_return(
             }),
         })),
         ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
+        ("under", 1) => Some(Some(spec_ty.clone())),
+        ("plan", 0) => Some(Some(result_ty(
+            Type::Named("ProcessPlan".to_string()),
+            io_error_ty(),
+        ))),
         ("run" | "run_checked", 0) => Some(Some(result_ty(
             Type::Named("ProcessResult".to_string()),
             io_error_ty(),
@@ -279,8 +285,12 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        ("env_clear" | "detached" | "run" | "run_checked" | "spawn" | "abilities", _) => {
+        ("env_clear" | "detached" | "plan" | "run" | "run_checked" | "spawn" | "abilities", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
+            Some(None)
+        }
+        ("under", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }
         ("terminal", _) => {

@@ -15,9 +15,8 @@ use super::targets::BuildPath;
 use super::validation::resolve_under;
 use super::{RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     fs, io,
@@ -25,6 +24,8 @@ use std::{
 };
 
 static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
+#[cfg(target_os = "macos")]
+static MACOS_PROFILE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 const MAX_REMOTE_EXECUTION_ATTEMPTS: usize = 2;
 
 struct RemoteAttemptFailure {
@@ -99,9 +100,576 @@ pub enum BuildExecutionError {
     InvalidGraph(BuildError),
 }
 
-/// Execute canonical action graph. Linux uses bubblewrap with a private mount,
-/// PID, IPC, UTS and network namespace (network shared only when granted).
-/// There is no unsandboxed fallback.
+/// The one native child-isolation substrate shared by hermetic build actions
+/// and Jetpack adapter recipes. The policy is deliberately a receipt, not a
+/// claim inferred from user namespaces or a tool's exit status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeSandboxStatus {
+    pub available: bool,
+    pub mechanism: String,
+    pub policy: String,
+    pub reason: String,
+}
+
+#[derive(Debug)]
+pub enum NativeSandboxError {
+    Unsupported(String),
+    Io(String),
+}
+
+#[derive(Debug)]
+pub struct NativeSandboxOutput {
+    pub output: Output,
+    pub mechanism: String,
+    pub policy: String,
+}
+
+/// Probe the exact native backend before a build claims strong isolation.
+/// Each platform reports only a backend that can prepare the same boundary
+/// used for real actions.
+pub fn native_sandbox_status() -> NativeSandboxStatus {
+    if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+        return NativeSandboxStatus {
+            available: false,
+            mechanism: "test-sandbox-unavailable".to_string(),
+            policy: "not-enforced".to_string(),
+            reason: "test sandbox override prevents the native backend probe".to_string(),
+        };
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return macos_sandbox_status();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let native = super::windows_sandbox::status();
+        return NativeSandboxStatus {
+            available: native.available,
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
+        };
+    }
+
+    #[cfg(all(
+        not(target_os = "linux"),
+        not(target_os = "macos"),
+        not(target_os = "windows")
+    ))]
+    {
+        return NativeSandboxStatus {
+            available: false,
+            mechanism: "unsupported".to_string(),
+            policy: "not-enforced".to_string(),
+            reason:
+                "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"
+                    .to_string(),
+        };
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if !cfg!(target_os = "linux") {
+            return NativeSandboxStatus {
+                available: false,
+                mechanism: "unsupported".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "Jetpack's native child sandbox is implemented only on Linux".to_string(),
+            };
+        }
+        let Some(bwrap) = find_program_path("bwrap") else {
+            return NativeSandboxStatus {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "bubblewrap (`bwrap`) is not available on PATH".to_string(),
+            };
+        };
+        let Some(probe) = find_program_path("sh") else {
+            return NativeSandboxStatus {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "bubblewrap is present but no immutable shell probe is available"
+                    .to_string(),
+            };
+        };
+        let policy = native_sandbox_policy(false, false);
+        let mut command = native_sandbox_command(&bwrap, None, None, &BTreeMap::new(), false);
+        command.args([probe.as_os_str(), std::ffi::OsStr::new("-c")]);
+        command.arg("exit 0");
+        match command.status() {
+            Ok(status) if status.success() => NativeSandboxStatus {
+                available: true,
+                mechanism: "linux-bwrap".to_string(),
+                policy,
+                reason: "bubblewrap completed the isolated backend probe".to_string(),
+            },
+            Ok(status) => NativeSandboxStatus {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: format!("bubblewrap backend probe exited with {}", status),
+            },
+            Err(error) => NativeSandboxStatus {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: format!("bubblewrap backend probe failed: {error}"),
+            },
+        }
+    }
+}
+
+/// Run one executable action through the shared native sandbox. `source_dir`
+/// is read-only when `output_dir` is present; only that output directory is
+/// writable. With no output directory, the private work tree is writable for
+/// the hermetic BuildPlan executor and is copied back through declared outputs.
+pub fn run_native_sandboxed(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+) -> Result<NativeSandboxOutput, NativeSandboxError> {
+    #[cfg(target_os = "macos")]
+    {
+        return run_macos_native_sandboxed(
+            executable,
+            args,
+            source_dir,
+            output_dir,
+            env,
+            share_network,
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return super::windows_sandbox::run(
+            executable,
+            args,
+            source_dir,
+            output_dir,
+            env,
+            share_network,
+        )
+        .map(|result| NativeSandboxOutput {
+            output: result.output,
+            mechanism: result.mechanism,
+            policy: result.policy,
+        });
+    }
+
+    #[cfg(all(
+        not(target_os = "linux"),
+        not(target_os = "macos"),
+        not(target_os = "windows")
+    ))]
+    {
+        return Err(NativeSandboxError::Unsupported(
+            "Jetpack's native child sandbox is implemented only on Linux, macOS, and Windows"
+                .to_string(),
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if !cfg!(target_os = "linux") {
+            return Err(NativeSandboxError::Unsupported(
+                "Jetpack's native child sandbox is implemented only on Linux".to_string(),
+            ));
+        }
+        if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+            return Err(NativeSandboxError::Unsupported(
+                "test sandbox override prevents child execution".to_string(),
+            ));
+        }
+        let status = native_sandbox_status();
+        if !status.available {
+            return Err(NativeSandboxError::Unsupported(status.reason));
+        }
+        let bwrap = find_program_path("bwrap").ok_or_else(|| {
+            NativeSandboxError::Unsupported(
+                "bubblewrap (`bwrap`) is not available on PATH".to_string(),
+            )
+        })?;
+        let executable = executable.canonicalize().map_err(|error| {
+            NativeSandboxError::Unsupported(format!("sandbox executable is unavailable: {error}"))
+        })?;
+        if !executable.starts_with("/nix/store") || !executable.is_file() {
+            return Err(NativeSandboxError::Unsupported(format!(
+                "sandbox executable `{}` is outside the immutable tool closure",
+                executable.display()
+            )));
+        }
+        let source_dir = real_directory(source_dir)?;
+        let output_dir = output_dir.map(real_directory).transpose()?;
+        let policy = native_sandbox_policy(output_dir.is_some(), share_network);
+        let mut command = native_sandbox_command(
+            &bwrap,
+            Some(&source_dir),
+            output_dir.as_deref(),
+            env,
+            share_network,
+        );
+        command.arg(&executable).args(args).stdin(Stdio::null());
+        let output = command
+            .output()
+            .map_err(|error| NativeSandboxError::Io(error.to_string()))?;
+        Ok(NativeSandboxOutput {
+            output,
+            mechanism: "linux-bwrap".to_string(),
+            policy,
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
+
+#[cfg(target_os = "macos")]
+fn macos_sandbox_policy(output_is_separate: bool, share_network: bool) -> String {
+    format!(
+        "filesystem={};process=declared-tool-and-fork;network={};environment=clear;devices=denied;resources=none-declared",
+        if output_is_separate {
+            "source-readonly,output-readwrite"
+        } else {
+            "private-workspace-readwrite"
+        },
+        if share_network { "declared-shared" } else { "denied" },
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_sandbox_status() -> NativeSandboxStatus {
+    if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+        return NativeSandboxStatus {
+            available: false,
+            mechanism: "macos-seatbelt-unavailable".to_string(),
+            policy: "not-enforced".to_string(),
+            reason: "test sandbox override prevents the native macOS backend probe".to_string(),
+        };
+    }
+    if !Path::new(MACOS_SANDBOX_EXEC).is_file() {
+        return NativeSandboxStatus {
+            available: false,
+            mechanism: "macos-seatbelt-unavailable".to_string(),
+            policy: "not-enforced".to_string(),
+            reason: format!("native macOS backend `{MACOS_SANDBOX_EXEC}` is unavailable"),
+        };
+    }
+
+    let profile = match write_macos_profile(macos_probe_profile()) {
+        Ok(path) => path,
+        Err(error) => {
+            return NativeSandboxStatus {
+                available: false,
+                mechanism: "macos-seatbelt-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: format!("native macOS backend profile could not be prepared: {error}"),
+            };
+        }
+    };
+    let status = Command::new(MACOS_SANDBOX_EXEC)
+        .arg("-f")
+        .arg(&profile)
+        .arg("/usr/bin/true")
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = fs::remove_file(&profile);
+    match status {
+        Ok(status) if status.success() => NativeSandboxStatus {
+            available: true,
+            mechanism: "macos-seatbelt".to_string(),
+            policy: macos_sandbox_policy(true, false),
+            reason: "native macOS Seatbelt completed the isolated backend probe".to_string(),
+        },
+        Ok(status) => NativeSandboxStatus {
+            available: false,
+            mechanism: "macos-seatbelt-unavailable".to_string(),
+            policy: "not-enforced".to_string(),
+            reason: format!("native macOS Seatbelt backend probe exited with {status}"),
+        },
+        Err(error) => NativeSandboxStatus {
+            available: false,
+            mechanism: "macos-seatbelt-unavailable".to_string(),
+            policy: "not-enforced".to_string(),
+            reason: format!("native macOS Seatbelt backend probe failed: {error}"),
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_macos_native_sandboxed(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+) -> Result<NativeSandboxOutput, NativeSandboxError> {
+    if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+        return Err(NativeSandboxError::Unsupported(
+            "test sandbox override prevents child execution".to_string(),
+        ));
+    }
+    let status = macos_sandbox_status();
+    if !status.available {
+        return Err(NativeSandboxError::Unsupported(status.reason));
+    }
+    let executable = executable.canonicalize().map_err(|error| {
+        NativeSandboxError::Unsupported(format!("sandbox executable is unavailable: {error}"))
+    })?;
+    let source_dir = real_directory(source_dir)?;
+    let output_dir = output_dir.map(real_directory).transpose()?;
+    let output_is_separate = output_dir.is_some();
+    let profile = macos_build_profile(
+        &executable,
+        &source_dir,
+        output_dir.as_deref(),
+        share_network,
+    )?;
+
+    let mut command = Command::new(MACOS_SANDBOX_EXEC);
+    command
+        .arg("-f")
+        .arg(&profile)
+        .arg(&executable)
+        .args(args)
+        .env_clear()
+        .stdin(Stdio::null())
+        .current_dir(&source_dir);
+    if let Some(output_dir) = output_dir.as_deref() {
+        command.env("JET_BUILD_OUTPUT", output_dir);
+    }
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let result = command.output();
+    let _ = fs::remove_file(&profile);
+    let output = result.map_err(|error| NativeSandboxError::Io(error.to_string()))?;
+    Ok(NativeSandboxOutput {
+        output,
+        mechanism: "macos-seatbelt".to_string(),
+        policy: macos_sandbox_policy(output_is_separate, share_network),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_probe_profile() -> &'static str {
+    concat!(
+        "(version 1)\n",
+        "(deny default)\n",
+        "(import \"system.sb\")\n",
+        "(allow process-exec (literal \"/usr/bin/true\"))\n",
+        "(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n",
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn macos_build_profile(
+    executable: &Path,
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    share_network: bool,
+) -> Result<PathBuf, NativeSandboxError> {
+    let executable = sbpl_path(executable)?;
+    let source_dir = sbpl_path(source_dir)?;
+    let output_dir = output_dir.map(sbpl_path).transpose()?;
+    let mut profile = String::from(
+        "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-fork)\n(allow process-exec\n",
+    );
+    profile.push_str(&format!("  (literal \"{executable}\")\n)\n"));
+    profile.push_str("(allow file-read*\n");
+    profile.push_str(&format!("  (subpath \"{source_dir}\")\n"));
+    if let Some(output_dir) = output_dir.as_deref() {
+        profile.push_str(&format!("  (subpath \"{output_dir}\")\n"));
+    }
+    profile.push_str(&format!("  (literal \"{executable}\")\n"));
+    profile.push_str("  (subpath \"/System\")\n");
+    profile.push_str("  (subpath \"/usr/lib\")\n");
+    profile.push_str("  (subpath \"/usr/bin\")\n");
+    profile.push_str("  (subpath \"/bin\")\n");
+    profile.push_str("  (subpath \"/sbin\")\n");
+    profile.push_str("  (subpath \"/nix/store\"))\n");
+    if let Some(output_dir) = output_dir.as_deref() {
+        profile.push_str(&format!("(allow file-write* (subpath \"{output_dir}\"))\n"));
+    } else {
+        profile.push_str(&format!("(allow file-write* (subpath \"{source_dir}\"))\n"));
+    }
+    if share_network {
+        profile.push_str("(allow network*)\n");
+    } else {
+        profile.push_str("(deny network*)\n");
+    }
+    profile.push_str("(deny device*)\n");
+    write_macos_profile(&profile)
+}
+
+#[cfg(target_os = "macos")]
+fn sbpl_path(path: &Path) -> Result<String, NativeSandboxError> {
+    let value = path.to_str().ok_or_else(|| {
+        NativeSandboxError::Unsupported(format!(
+            "sandbox path is not valid UTF-8: {}",
+            path.display()
+        ))
+    })?;
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            character if character.is_control() => {
+                return Err(NativeSandboxError::Unsupported(
+                    "sandbox path contains a control character".to_string(),
+                ));
+            }
+            character => escaped.push(character),
+        }
+    }
+    Ok(escaped)
+}
+
+#[cfg(target_os = "macos")]
+fn write_macos_profile(profile: &str) -> Result<PathBuf, NativeSandboxError> {
+    let path = std::env::temp_dir().join(format!(
+        "jet-native-sandbox-{}-{}.sb",
+        std::process::id(),
+        MACOS_PROFILE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| {
+            NativeSandboxError::Io(format!("could not create sandbox profile: {error}"))
+        })?;
+    if let Err(error) = file.write_all(profile.as_bytes()) {
+        let _ = fs::remove_file(&path);
+        return Err(NativeSandboxError::Io(format!(
+            "could not write sandbox profile: {error}"
+        )));
+    }
+    Ok(path)
+}
+
+fn real_directory(path: &Path) -> Result<PathBuf, NativeSandboxError> {
+    let canonical = path.canonicalize().map_err(|error| {
+        NativeSandboxError::Io(format!("sandbox directory `{}`: {error}", path.display()))
+    })?;
+    if !canonical.is_dir() {
+        return Err(NativeSandboxError::Io(format!(
+            "sandbox path `{}` is not a directory",
+            path.display()
+        )));
+    }
+    Ok(canonical)
+}
+
+fn native_sandbox_command(
+    bwrap: &Path,
+    source_dir: Option<&Path>,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+) -> Command {
+    let mut command = Command::new(bwrap);
+    command
+        .arg("--die-with-parent")
+        .arg("--new-session")
+        .arg("--unshare-all")
+        .arg("--unshare-user")
+        .arg("--disable-userns")
+        .arg("--assert-userns-disabled")
+        .arg("--cap-drop")
+        .arg("ALL")
+        .arg("--ro-bind-try")
+        .arg("/nix/store")
+        .arg("/nix/store")
+        .arg("--proc")
+        .arg("/proc")
+        .arg("--dev")
+        .arg("/dev")
+        .arg("--size")
+        .arg("67108864")
+        .arg("--tmpfs")
+        .arg("/tmp")
+        .arg("--clearenv")
+        .arg("--setenv")
+        .arg("PATH")
+        .arg("/nix/store");
+    match (source_dir, output_dir) {
+        (Some(source), Some(output)) => {
+            command
+                .arg("--dir")
+                .arg("/work")
+                .arg("--ro-bind")
+                .arg(source)
+                .arg("/work/source")
+                .arg("--bind")
+                .arg(output)
+                .arg("/work/output")
+                .arg("--chdir")
+                .arg("/work/source")
+                .arg("--setenv")
+                .arg("JET_BUILD_OUTPUT")
+                .arg("/work/output");
+        }
+        (Some(source), None) => {
+            command
+                .arg("--bind")
+                .arg(source)
+                .arg("/work")
+                .arg("--chdir")
+                .arg("/work");
+        }
+        (None, None) => {
+            command
+                .arg("--dir")
+                .arg("/work")
+                .arg("--chdir")
+                .arg("/work");
+        }
+        (None, Some(output)) => {
+            command
+                .arg("--bind")
+                .arg(output)
+                .arg("/work")
+                .arg("--chdir")
+                .arg("/work");
+        }
+    }
+    if share_network {
+        command.arg("--share-net");
+    }
+    for (key, value) in env {
+        command.arg("--setenv").arg(key).arg(value);
+    }
+    command
+}
+
+fn native_sandbox_policy(output_is_separate: bool, share_network: bool) -> String {
+    format!(
+        "filesystem={};process=private-pid,parent-death;network={};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB",
+        if output_is_separate {
+            "source-readonly,output-private-copy"
+        } else {
+            "private-workspace-readwrite"
+        },
+        if share_network { "declared-shared" } else { "isolated" },
+    )
+}
+
+/// Execute the canonical action graph through the platform-native child
+/// boundary. Linux uses Bubblewrap, macOS Seatbelt, and Windows AppContainer;
+/// there is no unsandboxed fallback.
 pub fn execute_build_plan(
     plan: &BuildPlan,
     project_root: &Path,
@@ -615,38 +1183,24 @@ fn execute_one_action(
         }
     }
 
-    let bwrap = find_program_path("bwrap").ok_or(BuildExecutionError::SandboxUnavailable)?;
-    let mut command = Command::new(bwrap);
-    command
-        .arg("--die-with-parent")
-        .arg("--new-session")
-        .arg("--unshare-all")
-        .arg("--ro-bind")
-        .arg("/nix/store")
-        .arg("/nix/store")
-        .arg("--proc")
-        .arg("/proc")
-        .arg("--dev")
-        .arg("/dev")
-        .arg("--tmpfs")
-        .arg("/tmp")
-        .arg("--bind")
-        .arg(&sandbox)
-        .arg("/work")
-        .arg("--chdir")
-        .arg("/work")
-        .arg("--clearenv");
-    if grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net) {
-        command.arg("--share-net");
-    }
-    command.arg("--setenv").arg("PATH").arg("/nix/store");
-    for (key, value) in action.env.iter().filter(|(key, _)| {
-        action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str())
-    }) {
-        command.arg("--setenv").arg(key).arg(value);
-    }
-    command.arg(executable).args(&action.argv[1..]);
-    let output = command.output().map_err(|e| io_action(action, e))?;
+    let env = action
+        .env
+        .iter()
+        .filter(|(key, _)| {
+            action.env_allowlist.is_empty() || action.env_allowlist.contains(key.as_str())
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let output = run_native_sandboxed(
+        &executable,
+        &action.argv[1..],
+        &sandbox,
+        None,
+        &env,
+        grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net),
+    )
+    .map_err(|error| native_sandbox_error(action, error))?
+    .output;
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() {
         let _ = fs::remove_dir_all(&sandbox);
@@ -1462,24 +2016,21 @@ fn execute_probes(
                         detail: "pkg-config not found".to_string(),
                     });
                 };
-                let mut cmd = Command::new(pkg_config);
-                cmd.arg("--exists");
+                let mut args = vec!["--exists".to_string()];
                 if let Some(version) = min_version {
-                    cmd.arg(format!("{package} >= {version}"));
+                    args.push(format!("{package} >= {version}"));
                 } else {
-                    cmd.arg(package);
+                    args.push(package.clone());
                 }
-                match cmd.status() {
-                    Ok(status) => (
-                        status.success(),
-                        format!("pkg-config exit {}", status.code().unwrap_or(1)),
-                    ),
-                    Err(e) => (false, e.to_string()),
-                }
+                let output = run_probe_sandboxed(&pkg_config, &args, None)?;
+                (
+                    output.status.success(),
+                    format!("pkg-config exit {}", output.status.code().unwrap_or(1)),
+                )
             }
             ProbeKind::HeaderCheck { header } => {
                 let source = format!("#include <{header}>\nint main(void) {{ return 0; }}\n");
-                run_compile_probe(plan, probe.toolchain, &source)
+                run_compile_probe(plan, probe.toolchain, &source)?
             }
             ProbeKind::CompileCheck { includes, code, .. } => {
                 let mut source = String::new();
@@ -1489,7 +2040,7 @@ fn execute_probes(
                 source.push_str("int main(void) {\n");
                 source.push_str(code);
                 source.push_str("\nreturn 0;\n}\n");
-                run_compile_probe(plan, probe.toolchain, &source)
+                run_compile_probe(plan, probe.toolchain, &source)?
             }
         };
         facts.push(BuildProbeFact {
@@ -1510,62 +2061,82 @@ fn execute_probes(
     Ok(facts)
 }
 
-fn run_compile_probe(plan: &BuildPlan, toolchain: ToolchainHandle, source: &str) -> (bool, String) {
+fn run_probe_sandboxed(
+    executable: &Path,
+    args: &[String],
+    source: Option<(&Path, &str)>,
+) -> Result<Output, BuildExecutionError> {
+    let root = std::env::temp_dir().join(format!(
+        "jet-build-probe-{}-{}",
+        std::process::id(),
+        REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+    ));
+    if let Err(error) = fs::create_dir_all(&root) {
+        let _ = fs::remove_dir_all(&root);
+        return Err(BuildExecutionError::IO {
+            action: "build probe sandbox".to_string(),
+            detail: error.to_string(),
+        });
+    }
+    if let Some((path, contents)) = source {
+        if let Err(error) = fs::write(root.join(path), contents) {
+            let _ = fs::remove_dir_all(&root);
+            return Err(BuildExecutionError::IO {
+                action: "build probe input".to_string(),
+                detail: error.to_string(),
+            });
+        }
+    }
+    let result = run_native_sandboxed(executable, args, &root, None, &BTreeMap::new(), false);
+    let _ = fs::remove_dir_all(&root);
+    result
+        .map(|output| output.output)
+        .map_err(|error| match error {
+            NativeSandboxError::Unsupported(_) => BuildExecutionError::SandboxUnavailable,
+            NativeSandboxError::Io(detail) => BuildExecutionError::IO {
+                action: "build probe sandbox".to_string(),
+                detail,
+            },
+        })
+}
+
+fn run_compile_probe(
+    plan: &BuildPlan,
+    toolchain: ToolchainHandle,
+    source: &str,
+) -> Result<(bool, String), BuildExecutionError> {
     let compiler = ["cc", "clang", "gcc"]
         .into_iter()
         .find_map(|name| resolve_program_path(plan, toolchain, name));
     let Some(compiler) = compiler else {
-        return (
+        return Ok((
             false,
             "no C compiler (`cc`, `clang`, or `gcc`) was found".to_string(),
-        );
+        ));
     };
-    let mut child = match Command::new(&compiler)
-        .args(["-x", "c", "-fsyntax-only", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(error) => {
-            return (
-                false,
-                format!("could not start {}: {error}", compiler.display()),
-            )
-        }
-    };
-    let Some(mut stdin) = child.stdin.take() else {
-        return (false, "could not open compiler input".to_string());
-    };
-    if let Err(error) = stdin.write_all(source.as_bytes()) {
-        return (
-            false,
-            format!("could not send source to {}: {error}", compiler.display()),
-        );
-    }
-    drop(stdin);
-    match child.wait_with_output() {
-        Ok(output) if output.status.success() => (
+    let args = vec![
+        "-x".to_string(),
+        "c".to_string(),
+        "-fsyntax-only".to_string(),
+        "probe.c".to_string(),
+    ];
+    let output = run_probe_sandboxed(&compiler, &args, Some((Path::new("probe.c"), source)))?;
+    Ok(if output.status.success() {
+        (
             true,
             format!("{} accepted the syntax probe", compiler.display()),
-        ),
-        Ok(output) => {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            (
-                false,
-                if detail.is_empty() {
-                    format!("{} rejected the syntax probe", compiler.display())
-                } else {
-                    detail
-                },
-            )
-        }
-        Err(error) => (
+        )
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        (
             false,
-            format!("could not wait for {}: {error}", compiler.display()),
-        ),
-    }
+            if detail.is_empty() {
+                format!("{} rejected the syntax probe", compiler.display())
+            } else {
+                detail
+            },
+        )
+    })
 }
 
 fn find_program_path(program: &str) -> Option<PathBuf> {
@@ -1753,9 +2324,37 @@ fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {
     }
 }
 
+fn native_sandbox_error(action: &BuildAction, error: NativeSandboxError) -> BuildExecutionError {
+    match error {
+        NativeSandboxError::Unsupported(_) => BuildExecutionError::SandboxUnavailable,
+        NativeSandboxError::Io(detail) => BuildExecutionError::IO {
+            action: action.name.clone(),
+            detail,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_hostile_corpus_is_consumable_by_hermetic_execution() {
+        let corpus = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+        ));
+        let rows = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 7);
+        for row in rows {
+            assert_eq!(row.len(), 4, "malformed hostile corpus row");
+            assert_eq!(row[3], "blocked-or-unsupported");
+        }
+    }
 
     #[test]
     fn remote_output_restore_rolls_back_until_committed() {

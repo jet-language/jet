@@ -1476,7 +1476,9 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }
     if needs_compute {
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_compute\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
+        out.push_str("\n// JET_VETTED_UNSAFE_END: jet_compute\n");
     }
     if needs_net {
         // DNS + NetHTTP (TCP/TLS) already in kernel closure.
@@ -2235,7 +2237,7 @@ pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
 /// D-FFI-CAP1: connect a validated `#Close(close)` descriptor to the same
 /// nominal cleanup protocol used by ordinary Jet resources. The bridge owns
 /// the foreign transport; this generated impl only marshals the consumed
-/// handle to the already-checked `jet_ffi_<close>` wrapper.
+/// handle to the already-checked foreign close wrapper.
 pub(crate) fn emit_synthetic_foreign_close_impls(
     cx: &Cx,
     items: &[Item],
@@ -2246,6 +2248,7 @@ pub(crate) fn emit_synthetic_foreign_close_impls(
         functions: &[crate::AST::ExternFn],
         out: &mut String,
         emitted: &mut HashSet<String>,
+        direct_c: bool,
     ) {
         let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         for function in functions {
@@ -2255,10 +2258,19 @@ pub(crate) fn emit_synthetic_foreign_close_impls(
             let Some(return_type) = &function.return_type else {
                 continue;
             };
-            let ty = cx.rust_type(return_type);
+            let ty = if direct_c {
+                qualify_named_rust_type(cx, return_type)
+            } else {
+                cx.rust_type(return_type)
+            };
             if emitted.insert(ty.clone()) {
+                let close_call = if direct_c {
+                    format!("{}(self)", mangle(close_name))
+                } else {
+                    format!("{ffi}::jet_ffi_{close_name}(self)")
+                };
                 out.push_str(&format!(
-                    "impl __jet_Close for {ty} {{ fn close(self) {{ {ffi}::jet_ffi_{close_name}(self); }} }}\n"
+                    "impl __jet_Close for {ty} {{ fn close(self) {{ {close_call}; }} }}\n"
                 ));
             }
         }
@@ -2272,8 +2284,12 @@ pub(crate) fn emit_synthetic_foreign_close_impls(
     ) {
         for item in items {
             match item {
-                Item::ExternRust(block) => emit_functions(cx, &block.functions, out, emitted),
-                Item::CModule(module) => emit_functions(cx, &module.functions, out, emitted),
+                Item::ExternRust(block) => {
+                    emit_functions(cx, &block.functions, out, emitted, false)
+                }
+                Item::CModule(module) => {
+                    emit_functions(cx, &module.functions, out, emitted, true)
+                }
                 Item::CodeModule(module) => {
                     if let Some(body) = &module.body {
                         collect(cx, body, out, emitted);

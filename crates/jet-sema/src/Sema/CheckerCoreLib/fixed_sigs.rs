@@ -660,6 +660,10 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.process", "exit") => Some((vec![(read, int)], None)),
+        ("core.process", "workspace") => Some((
+            vec![],
+            Some(Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+        )),
         ("core.process", "run") => Some((
             vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
             Some(result_ty(

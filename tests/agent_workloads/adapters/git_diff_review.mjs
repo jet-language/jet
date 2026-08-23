@@ -28,7 +28,7 @@ function gitDiff(root) {
         maxBuffer: 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error?.code === 1) {
+        if (!error || error.code === 1) {
           resolve(stdout);
         } else {
           reject(new Error(`git diff exit ${error?.code ?? 0}: ${stderr.trim()}`));

@@ -38,7 +38,7 @@ fn runtime_policy_names_no_daemon_no_root_contract() {
 }
 
 #[test]
-fn sandbox_fallback_warns_and_require_mode_errors() {
+fn sandbox_default_never_allows_unsandboxed_build_and_require_mode_errors() {
     let cwd = Scratch::new("cwd");
     let home = Scratch::new("home");
     let root = Scratch::new("root");
@@ -52,11 +52,8 @@ fn sandbox_fallback_warns_and_require_mode_errors() {
         .output()
         .unwrap();
     let warn_err = String::from_utf8_lossy(&warn.stderr);
-    assert!(warn_err.contains("L0205"), "stderr: {warn_err}");
-    assert!(
-        warn_err.contains("jetpack config sandbox require"),
-        "stderr: {warn_err}"
-    );
+    assert!(!warn_err.contains("L0205"), "stderr: {warn_err}");
+    assert!(!warn_err.contains("unsandboxed"), "stderr: {warn_err}");
 
     let warn_json = jetpack()
         .args(["build", "--json", "--no-color"])
@@ -67,14 +64,8 @@ fn sandbox_fallback_warns_and_require_mode_errors() {
         .output()
         .unwrap();
     let warn_json_err = String::from_utf8_lossy(&warn_json.stderr);
-    assert!(
-        warn_json_err.contains("\"code\": \"L0205\""),
-        "stderr: {warn_json_err}"
-    );
-    assert!(
-        warn_json_err.contains("\"severity\": \"warning\""),
-        "stderr: {warn_json_err}"
-    );
+    assert!(!warn_json_err.contains("\"code\": \"L0205\""), "stderr: {warn_json_err}");
+    assert!(!warn_json_err.contains("unsandboxed"), "stderr: {warn_json_err}");
 
     let require = jetpack()
         .args(["config", "sandbox", "require", "--no-color"])
@@ -97,7 +88,7 @@ fn sandbox_fallback_warns_and_require_mode_errors() {
     let fail_err = String::from_utf8_lossy(&fail.stderr);
     assert!(fail_err.contains("E1275"), "stderr: {fail_err}");
     assert!(
-        fail_err.contains("jetpack config sandbox allow"),
+        fail_err.contains("approved remote builder, or enable the native sandbox"),
         "stderr: {fail_err}"
     );
 
@@ -146,7 +137,10 @@ fn available_userns_never_labels_unsandboxed_child_strong() {
     assert_eq!(child.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&child.stderr);
     assert!(stderr.contains("E1275"), "stderr: {stderr}");
-    assert!(stderr.contains("has not entered a jail"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("has not entered a jail"),
+        "stderr: {stderr}"
+    );
     assert!(!stderr.contains("strong"), "stderr: {stderr}");
 }
 

@@ -4820,9 +4820,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         recv,
                         a(0)
                     ),
+                    "under" => format!(
+                        "{}jet_std_process_spec_under({}, &({}))",
+                        root,
+                        recv,
+                        a(0)
+                    ),
                     "abilities" => {
                         format!("{}jet_process_spec_abilities(&({}))", root, recv)
                     }
+                    "plan" => format!("{}jet_process_spec_plan(&({}))", root, recv),
                     "run" => format!("{}jet_process_spec_run(&({}))", root, recv),
                     "run_checked" => {
                         format!("{}jet_process_spec_run_checked(&({}))", root, recv)

@@ -52,7 +52,7 @@ watchdog=
   printf '%s\n' 'git diff timed out' >&2
   exit 2
 }
-((code == 1)) || {
+((code == 0 || code == 1)) || {
   error=$(<"$error_file")
   printf 'git diff exit %d: %s\n' "$code" "$error" >&2
   exit 2
@@ -112,6 +112,8 @@ for ((i = 1; i < ${#rows[@]}; i += 1)); do
   rows[j]=$value
 done
 
-printf '%s\n' "${rows[@]}"
+if ((${#rows[@]} > 0)); then
+  printf '%s\n' "${rows[@]}"
+fi
 printf 'summary|added=%d|modified=%d|deleted=%d\n' \
   "$added" "$modified" "$deleted"

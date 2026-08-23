@@ -198,6 +198,35 @@ fn run() {
 }
 
 #[test]
+fn ffi_capability_boundary_is_safe_for_qualified_c_calls() {
+    let root = common::unique_tmp("jet_ffi_qualified_capability_boundary");
+    fs::create_dir_all(&root).unwrap();
+    let source = r#"
+use c.cap as c
+#Extern module c.cap {
+    fn borrow(value: &Int) = "jet_cap_borrow"
+}
+fn run() {
+    value := 1
+    c.borrow(&value)
+}
+"#;
+    let path = root.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let diagnostics = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        "a qualified raw capability call must be rejected with E0702: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics.iter().any(|diagnostic| diagnostic.code == "E3103"),
+        "a qualified capability gate must use E0702, not E3103: {diagnostics:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn cffi_write_capability_round_trips_through_the_native_c_boundary() {
     if !have_rustc() {
         eprintln!("note: skipping cffi_write_capability_round_trips (need rustc)");
@@ -279,6 +308,73 @@ fn run() {
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n42\n");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn cffi_close_capability_round_trips_through_the_native_c_boundary() {
+    if !have_rustc() {
+        eprintln!("note: skipping cffi_close_capability_round_trips (need rustc)");
+        return;
+    }
+    let root = common::unique_tmp("jet_ffi_c_close");
+    fs::create_dir_all(&root).unwrap();
+    declare_local_c_dep(&root, "close");
+    build_local_c_provider(
+        &root,
+        "close",
+        "#include <stdint.h>\ntypedef struct { int64_t value; } CloseHandle;\nstatic int64_t released;\nCloseHandle jet_close_acquire(void) { return (CloseHandle){41}; }\nvoid jet_close_release(CloseHandle handle) { released = handle.value; }\nint64_t jet_close_released(void) { return released; }\n",
+    );
+    let path = root.join("main.jet");
+    let source = r#"
+use c.close as c
+#Layout(c)
+struct Handle {
+    value: I64
+}
+#Extern module c.close {
+    #Close(release)
+    fn acquire() Handle = "jet_close_acquire";
+    fn release(handle: ^Handle) = "jet_close_release";
+    fn released() I64 = "jet_close_released";
+}
+fn run() {
+    handle := c.acquire()
+    close(^handle)
+    print(c.released())
+}
+"#;
+    fs::write(&path, source).unwrap();
+    let output = jet::compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "C #Close fixture was rejected:\n{}",
+            jet::render_diagnostics(path.to_str().unwrap(), source, &d)
+        )
+    });
+    assert!(output.rust.contains("impl __jet_Close for"));
+    assert!(output.rust.contains("__jet_release(self)"));
+    assert!(!output.rust.contains("jet_ffi_release(self)"));
+    let rs = root.join("main.rs");
+    let bin = root.join("main_bin");
+    fs::write(&rs, &output.rust).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-lclose")
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "I2: rustc rejected the C #Close wrapper:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "41\n");
     let _ = fs::remove_dir_all(root);
 }
 
@@ -1666,7 +1762,7 @@ use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
 #Extern module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
-fn load(id: U64) Record String! {
+fn load(id: U64) Record String! -> {
     slot := Record{id: 0, flags: 0}
     status := I32{ 1 }
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
@@ -1793,6 +1889,9 @@ fn run() {
         .arg("-L")
         .arg(format!("native={}", root.display()))
         .arg("-ljetc436");
+    if let Some(link) = out.ffi.as_ref() {
+        add_ffi_bridge_args(&mut rustc, link);
+    }
     let status = rustc.output().unwrap();
     assert!(
         status.status.success(),

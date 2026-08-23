@@ -1,7 +1,6 @@
 use super::parse::Parsed;
 use super::realize::load_project_plan_with_selections;
 use super::trust_env_build::compose_env;
-use jet_env_model::ModuleEval;
 use crate::Output::Theme;
 use crate::RuntimePolicy;
 use crate::Secrets;
@@ -10,6 +9,7 @@ use crate::Shell::Env;
 use crate::Store;
 use crate::Syntax;
 use crate::Trust;
+use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -80,7 +80,10 @@ pub(super) fn wait_for_services_ready(
                 return Err(format!("service `{}` has an unsupported field", svc.name));
             }
             if let Err(()) = run_before_start_jobs(theme, parsed, roots, project_dir, entry, svc) {
-                return Err(format!("before_start task for service `{}` failed", svc.name));
+                return Err(format!(
+                    "before_start task for service `{}` failed",
+                    svc.name
+                ));
             }
             theme.detail(&format!(
                 "waiting for service `{}` to become healthy…",
@@ -145,7 +148,10 @@ fn run_before_start_jobs(
         );
         if code != 0 {
             theme.error(
-                &format!("service `{}` prerequisite job `{task}` failed", service.name),
+                &format!(
+                    "service `{}` prerequisite job `{task}` failed",
+                    service.name
+                ),
                 "the service was not started because its declared finite job did not complete.",
                 "fix the job, then run the service again.",
             );
@@ -169,7 +175,17 @@ pub(super) fn run_lifecycle_hooks(
     phase: &str,
 ) -> Result<(), i32> {
     run_lifecycle_hooks_with_mode(
-        theme, parsed, roots, project_dir, entry, env, hooks, phase, false, false, false,
+        theme,
+        parsed,
+        roots,
+        project_dir,
+        entry,
+        env,
+        hooks,
+        phase,
+        false,
+        false,
+        false,
     )
 }
 
@@ -186,7 +202,17 @@ pub(super) fn run_lifecycle_hooks_silent(
     phase: &str,
 ) -> Result<(), i32> {
     run_lifecycle_hooks_with_mode(
-        theme, parsed, roots, project_dir, entry, env, hooks, phase, false, false, true,
+        theme,
+        parsed,
+        roots,
+        project_dir,
+        entry,
+        env,
+        hooks,
+        phase,
+        false,
+        false,
+        true,
     )
 }
 
@@ -204,7 +230,17 @@ pub(super) fn run_lifecycle_hooks_clean(
     phase: &str,
 ) -> Result<(), i32> {
     run_lifecycle_hooks_with_mode(
-        theme, parsed, roots, project_dir, entry, env, hooks, phase, true, true, true,
+        theme,
+        parsed,
+        roots,
+        project_dir,
+        entry,
+        env,
+        hooks,
+        phase,
+        true,
+        true,
+        true,
     )
 }
 
@@ -264,21 +300,17 @@ fn run_lifecycle_hooks_with_mode(
             );
             return Err(2);
         }
-        let cwd = hook
-            .cwd
-            .as_deref()
-            .map(PathBuf::from)
-            .map(|path| {
-                if path.is_absolute()
-                    || path
-                        .components()
-                        .any(|component| component == std::path::Component::ParentDir)
-                {
-                    None
-                } else {
-                    Some(project_dir.join(path))
-                }
-            });
+        let cwd = hook.cwd.as_deref().map(PathBuf::from).map(|path| {
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir)
+            {
+                None
+            } else {
+                Some(project_dir.join(path))
+            }
+        });
         let Some(cwd) = cwd.flatten().or_else(|| {
             if hook.cwd.is_some() {
                 None
@@ -297,7 +329,10 @@ fn run_lifecycle_hooks_with_mode(
             Ok(root) => root,
             Err(error) => {
                 theme.error(
-                    &format!("couldn't resolve lifecycle {phase} hook '{}' project root", hook.name),
+                    &format!(
+                        "couldn't resolve lifecycle {phase} hook '{}' project root",
+                        hook.name
+                    ),
                     &error.to_string(),
                     "run the hook from an existing project directory.",
                 );
@@ -392,7 +427,10 @@ fn selected_service_order(
             continue;
         }
         for dependency in Services::dependency_names(&services[index]) {
-            if let Some(index) = services.iter().position(|service| service.name == dependency) {
+            if let Some(index) = services
+                .iter()
+                .position(|service| service.name == dependency)
+            {
                 pending.push(index);
             }
         }
@@ -526,15 +564,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_jobs(
-                        theme,
-                        parsed,
-                        &roots,
-                        &project_dir,
-                        &entry,
-                        svc,
-                    )
-                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                    run_before_start_jobs(theme, parsed, &roots, &project_dir, &entry, svc)
+                        .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
                 },
             ) {
                 Ok(started) => started,
@@ -544,7 +575,10 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             for index in started {
-                theme.ok(&format!("service `{}` is up", plan.dev_services[index].name));
+                theme.ok(&format!(
+                    "service `{}` is up",
+                    plan.dev_services[index].name
+                ));
             }
             0
         }
@@ -557,7 +591,11 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
                 Ok(order) => order,
                 Err(error) => {
-                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    theme.error(
+                        "service dependency graph is invalid",
+                        &error,
+                        "remove dependency cycles and unknown dependencies.",
+                    );
                     return 2;
                 }
             };
@@ -578,15 +616,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_jobs(
-                        theme,
-                        parsed,
-                        &roots,
-                        &project_dir,
-                        &entry,
-                        svc,
-                    )
-                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                    run_before_start_jobs(theme, parsed, &roots, &project_dir, &entry, svc)
+                        .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
                 },
             ) {
                 Ok(restarted) => restarted,
@@ -600,7 +631,10 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             for index in restarted {
-                theme.ok(&format!("service `{}` restarted", plan.dev_services[index].name));
+                theme.ok(&format!(
+                    "service `{}` restarted",
+                    plan.dev_services[index].name
+                ));
             }
             0
         }
@@ -617,11 +651,18 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             if let Err(error) = Services::down_ordered(&project_dir, &plan.dev_services, &order) {
-                theme.error("couldn't stop services", &error, "inspect the service logs and state.");
+                theme.error(
+                    "couldn't stop services",
+                    &error,
+                    "inspect the service logs and state.",
+                );
                 return 2;
             }
             for index in order.iter().rev() {
-                theme.ok(&format!("service `{}` is down", plan.dev_services[*index].name));
+                theme.ok(&format!(
+                    "service `{}` is down",
+                    plan.dev_services[*index].name
+                ));
             }
             0
         }
@@ -636,16 +677,13 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                 let records = targets
                     .iter()
                     .map(|svc| {
-                        let (health, healthy) = match Services::health_one_with_env(
-                            &project_dir,
-                            Some(&env),
-                            svc,
-                        ) {
-                            Services::Health::Disabled => ("disabled", true),
-                            Services::Health::NotRunning => ("not-running", false),
-                            Services::Health::Unhealthy => ("unhealthy", false),
-                            Services::Health::Healthy => ("healthy", true),
-                        };
+                        let (health, healthy) =
+                            match Services::health_one_with_env(&project_dir, Some(&env), svc) {
+                                Services::Health::Disabled => ("disabled", true),
+                                Services::Health::NotRunning => ("not-running", false),
+                                Services::Health::Unhealthy => ("unhealthy", false),
+                                Services::Health::Healthy => ("healthy", true),
+                            };
                         all_healthy &= healthy;
                         let lifecycle = Services::lifecycle_json(&project_dir, &svc.name)
                             .unwrap_or_else(|| "null".to_string());
@@ -661,16 +699,13 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             let mut all_healthy = true;
             for svc in &targets {
-                let (label, healthy) = match Services::health_one_with_env(
-                    &project_dir,
-                    Some(&env),
-                    svc,
-                ) {
-                    Services::Health::Disabled => ("disabled", true),
-                    Services::Health::NotRunning => ("not running", false),
-                    Services::Health::Unhealthy => ("unhealthy", false),
-                    Services::Health::Healthy => ("healthy", true),
-                };
+                let (label, healthy) =
+                    match Services::health_one_with_env(&project_dir, Some(&env), svc) {
+                        Services::Health::Disabled => ("disabled", true),
+                        Services::Health::NotRunning => ("not running", false),
+                        Services::Health::Unhealthy => ("unhealthy", false),
+                        Services::Health::Healthy => ("healthy", true),
+                    };
                 all_healthy &= healthy;
                 if healthy {
                     theme.ok(&format!("service `{}`: {label}", svc.name));
@@ -693,7 +728,11 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
                 Ok(order) => order,
                 Err(error) => {
-                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    theme.error(
+                        "service dependency graph is invalid",
+                        &error,
+                        "remove dependency cycles and unknown dependencies.",
+                    );
                     return 2;
                 }
             };
@@ -726,7 +765,11 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             let order = match selected_service_order(&plan.dev_services, name.as_deref()) {
                 Ok(order) => order,
                 Err(error) => {
-                    theme.error("service dependency graph is invalid", &error, "remove dependency cycles and unknown dependencies.");
+                    theme.error(
+                        "service dependency graph is invalid",
+                        &error,
+                        "remove dependency cycles and unknown dependencies.",
+                    );
                     return 2;
                 }
             };
@@ -747,15 +790,8 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
                         );
                         return Err(format!("service `{}` has an unsupported field", svc.name));
                     }
-                    run_before_start_jobs(
-                        theme,
-                        parsed,
-                        &roots,
-                        &project_dir,
-                        &entry,
-                        svc,
-                    )
-                    .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
+                    run_before_start_jobs(theme, parsed, &roots, &project_dir, &entry, svc)
+                        .map_err(|_| format!("before_start task for service `{}` failed", svc.name))
                 },
             ) {
                 Ok(changed) => changed,
@@ -770,9 +806,15 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
             };
             for index in order {
                 if changed.contains(&index) {
-                    theme.ok(&format!("service `{}` restarted after a watched-file change", plan.dev_services[index].name));
+                    theme.ok(&format!(
+                        "service `{}` restarted after a watched-file change",
+                        plan.dev_services[index].name
+                    ));
                 } else if !plan.dev_services[index].watch.is_empty() {
-                    theme.detail(&format!("service `{}` watch baseline is current", plan.dev_services[index].name));
+                    theme.detail(&format!(
+                        "service `{}` watch baseline is current",
+                        plan.dev_services[index].name
+                    ));
                 }
             }
             0
@@ -809,7 +851,11 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    let Some(service) = plan.dev_services.iter().find(|service| service.name == *name) else {
+    let Some(service) = plan
+        .dev_services
+        .iter()
+        .find(|service| service.name == *name)
+    else {
         theme.error(
             &format!("no dev service named `{name}`"),
             "the ServiceProbe budget names a service absent from this project's env.jet.",
@@ -854,7 +900,7 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
             theme.error(
                 &format!("couldn't measure service `{name}`"),
                 &message,
-            "check the service run, shutdown, and readiness declarations.",
+                "check the service run, shutdown, and readiness declarations.",
             );
             return 2;
         }
@@ -1039,20 +1085,18 @@ pub(super) fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             }
         }
-        v if v == Syntax::SECRETS_VERB_LIST => {
-            match Secrets::list(&project_dir) {
-                Ok(names) => {
-                    for name in names {
-                        println!("{name}");
-                    }
-                    0
+        v if v == Syntax::SECRETS_VERB_LIST => match Secrets::list(&project_dir) {
+            Ok(names) => {
+                for name in names {
+                    println!("{name}");
                 }
-                Err(msg) => {
-                    theme.error("couldn't list secrets", &msg, "");
-                    2
-                }
+                0
             }
-        }
+            Err(msg) => {
+                theme.error("couldn't list secrets", &msg, "");
+                2
+            }
+        },
         v if v == Syntax::SECRETS_VERB_IMPORT => {
             let source = parsed
                 .positional
@@ -1149,11 +1193,7 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
         return entry;
     }
     if let Some(package) = &package {
-        let named = PathBuf::from(format!(
-            "{}.{}",
-            package.facts.name,
-            Syntax::FILE_EXT
-        ));
+        let named = PathBuf::from(format!("{}.{}", package.facts.name, Syntax::FILE_EXT));
         if let Some(entry) = checked_project_entry(&resolver, &named) {
             return entry;
         }
@@ -1161,10 +1201,7 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
     resolver.root().join(Syntax::DEFAULT_ENTRY_FILE)
 }
 
-fn checked_project_entry(
-    resolver: &AuthorityResolver,
-    relative: &Path,
-) -> Option<PathBuf> {
+fn checked_project_entry(resolver: &AuthorityResolver, relative: &Path) -> Option<PathBuf> {
     match resolver.checked_file(relative) {
         Ok(file) => {
             if let Err(error) = resolver.revalidate_file(&file) {
@@ -1179,7 +1216,12 @@ fn checked_project_entry(
 
 fn report_entry_authority_error(diagnostic: crate::Diagnostics::Diagnostic) -> ! {
     let theme = Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto);
-    theme.error_coded(&diagnostic.code, &diagnostic.what, &diagnostic.why, &diagnostic.fix);
+    theme.error_coded(
+        &diagnostic.code,
+        &diagnostic.what,
+        &diagnostic.why,
+        &diagnostic.fix,
+    );
     std::process::exit(jet_foundation::ExitCodes::USER_ERROR);
 }
 
@@ -1244,10 +1286,7 @@ pub(super) fn project_job_declared(file: &Path, job: &str) -> Option<bool> {
 /// D-TASK-META1: return the checked static metadata for one job. A parse
 /// failure is intentionally treated as absence here; the compiler invocation
 /// below remains the source of the complete diagnostic.
-pub(super) fn project_job_metadata(
-    file: &Path,
-    job: &str,
-) -> Option<crate::AST::JobMetadata> {
+pub(super) fn project_job_metadata(file: &Path, job: &str) -> Option<crate::AST::JobMetadata> {
     let src = std::fs::read_to_string(file).ok()?;
     let (toks, diags) = crate::Lexer::lex(&src);
     if !diags.is_empty() {
@@ -1281,7 +1320,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
                 && v == Syntax::CONFIG_SANDBOX_VERB_REQUIRE =>
         {
             match RuntimePolicy::write_sandbox_policy(RuntimePolicy::SandboxPolicy::Require) {
-                Ok(path) => theme.status(&format!("sandbox fallback refused: {}", path.display())),
+                Ok(path) => theme.status(&format!("sandbox required: {}", path.display())),
                 Err(e) => {
                     theme.error(
                         "couldn't write sandbox policy",
@@ -1298,7 +1337,10 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
                 && v == Syntax::CONFIG_SANDBOX_VERB_ALLOW =>
         {
             match RuntimePolicy::write_sandbox_policy(RuntimePolicy::SandboxPolicy::AllowFallback) {
-                Ok(path) => theme.status(&format!("sandbox fallback allowed: {}", path.display())),
+                Ok(path) => theme.status(&format!(
+                    "sandbox fallback allowed for non-executable actions: {}",
+                    path.display()
+                )),
                 Err(e) => {
                     theme.error(
                         "couldn't write sandbox policy",
@@ -1324,6 +1366,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
                 "sandbox: {:?} via {} (policy: {policy_label})",
                 status.level, status.mechanism
             ));
+            theme.detail(&format!("enforced policy: {}", status.policy));
             theme.detail(&status.reason);
             0
         }

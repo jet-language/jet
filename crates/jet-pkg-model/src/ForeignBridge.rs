@@ -87,6 +87,10 @@ pub fn scalar_bridge_identity(
     functions: &[ScalarBridgeFunction],
 ) -> Result<String, String> {
     validate_scalar_bridge(abi, descriptor, functions)?;
+    let expected_abi = format!("{}{lib}", descriptor.language.bridge_prefix());
+    if abi != expected_abi {
+        return Err("foreign bridge ABI name does not match its descriptor language".into());
+    }
     scalar_bridge_identity_with_descriptor(
         descriptor.language.root(),
         lib,
@@ -253,9 +257,7 @@ pub fn compile_scalar_sidecar(
     functions: &[ScalarBridgeFunction],
 ) -> Result<PathBuf, String> {
     validate_scalar_bridge(abi, descriptor, functions)?;
-    let lib = abi
-        .strip_prefix(descriptor.language.bridge_prefix())
-        .unwrap_or(abi);
+    let lib = scalar_bridge_library(abi, descriptor)?;
     let identity =
         scalar_bridge_identity(descriptor, lib, abi, runtime, source, worker, functions)?;
     compile_scalar_sidecar_with_identity(
@@ -277,9 +279,7 @@ pub fn compile_scalar_sidecar_with_identity(
     functions: &[ScalarBridgeFunction],
 ) -> Result<PathBuf, String> {
     validate_scalar_bridge(abi, descriptor, functions)?;
-    let lib = abi
-        .strip_prefix(descriptor.language.bridge_prefix())
-        .unwrap_or(abi);
+    let lib = scalar_bridge_library(abi, descriptor)?;
     let expected_identity =
         scalar_bridge_identity(descriptor, lib, abi, runtime, source, worker, functions)?;
     if expected_identity != identity {
@@ -684,9 +684,7 @@ fn validate_scalar_bridge(
     descriptor: BinderDescriptor,
     functions: &[ScalarBridgeFunction],
 ) -> Result<(), String> {
-    if !is_identifier(abi) {
-        return Err(format!("invalid scalar bridge ABI name `{abi}`"));
-    }
+    scalar_bridge_library(abi, descriptor)?;
     if descriptor.contract != ForeignAbiContract::MESSAGE {
         return Err(format!(
             "foreign binder `{}` does not expose the checked adapter contract",
@@ -733,6 +731,19 @@ fn validate_scalar_bridge(
         }
     }
     Ok(())
+}
+
+fn scalar_bridge_library<'a>(
+    abi: &'a str,
+    descriptor: BinderDescriptor,
+) -> Result<&'a str, String> {
+    let prefix = descriptor.language.bridge_prefix();
+    let Some(lib) = abi.strip_prefix(prefix).filter(|lib| is_identifier(lib)) else {
+        return Err(format!(
+            "foreign bridge ABI name `{abi}` does not match `{prefix}<library>`"
+        ));
+    };
+    Ok(lib)
 }
 
 fn is_identifier(value: &str) -> bool {
@@ -893,6 +904,29 @@ mod tests {
         }];
         let error = render_scalar_jet("jet_py_bad", descriptor, &functions).unwrap_err();
         assert!(error.contains("outside the checked sidecar ABI"));
+    }
+
+    #[test]
+    fn descriptor_language_owns_scalar_bridge_abi_prefix() {
+        let descriptor = *crate::AST::binder_descriptor(ForeignLanguage::Py).unwrap();
+        let functions = [ScalarBridgeFunction {
+            name: "probe".into(),
+            params: vec![ForeignScalar::Int],
+            result: ForeignScalar::Int,
+        }];
+        let error = render_scalar_jet("jet_js_probe", descriptor, &functions).unwrap_err();
+        assert!(error.contains("does not match `jet_py_<library>`"));
+        let error = scalar_bridge_identity(
+            descriptor,
+            "other",
+            "jet_py_probe",
+            "python3",
+            Path::new("missing.py"),
+            Path::new("missing_worker.py"),
+            &functions,
+        )
+        .unwrap_err();
+        assert!(error.contains("does not match its descriptor language"));
     }
 
     #[test]

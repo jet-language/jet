@@ -14,8 +14,9 @@ Epoch 4 exits when Jetpack has functional Nix package-manager support,
 native Nix-package interoperability without an installed `nix` binary, and the
 best compatible features from leading language and build package managers.
 Per `D-JPK-EPOCHBOUNDARY1=B`, Epoch 4 proves the 20 functional lanes below and
-reports the actual sandbox class. Epoch 8 card #398 alone owns hostile
-Linux/macOS/Windows confinement and the full Nix-replacement claim.
+reports the actual sandbox class. Card #398 owns hostile Linux/macOS/Windows
+confinement; its native Linux, macOS, and Windows slices now supply enforced
+child boundaries.
 
 The product may claim functional package-manager support only when all Epoch
 4 acceptance lanes below pass against live stores, registries, caches,
@@ -79,13 +80,16 @@ JP0 stop-line now enforces three truth boundaries:
   queries the original Nix output's full `nix-store -qR` closure, copies every
   member into generation-owned paths, and rewrites absolute store symlinks
   before lease drop; no `/proc/self/fd`, lease path, or source-store dependency
-  enters the durable generation. Sandbox
-  sandbox detection stays fallback until a child actually enters a jail.
+  enters the durable generation. Linux executable recipe actions now enter the
+  Bubblewrap child boundary and report its filesystem, process, network,
+  environment, device, and resource policy. macOS executable recipe actions use
+  the native Seatbelt boundary described below. Windows executable recipe
+  actions use the same shared native child seam with an AppContainer, ACL
+  projection, and Job Object receipt.
 
 Production blockers after that stop-line:
 
-- recipes still execute as ordinary host processes; every platform reports
-  fallback/unsandboxed until JP3 supplies an enforced jail;
+- unsupported platforms report fallback and refuse executable recipe actions;
 - the native binary-cache slice provides signed NAR/narinfo publication,
   ordered host-owned mirror lookup, verified substitution, and resumable
   local/file transfer; cache repair remains a separate closure operation;
@@ -142,7 +146,7 @@ These are integrity and isolation defects. They precede ecosystem breadth.
 | Verify/repair | verify, quarantine/repair through substituters | cache hit skips integrity proof; no repair | verify every trust boundary and repair/fallback |
 | Substitution | ordered caches, miss builds locally | envelope only | native read/write cache plus NAR adapter |
 | Cache trust | signed store metadata and trusted keys | empty cache signature slot; author TOFU | threshold metadata, builder provenance, rotation/revocation |
-| Sandbox | enforced filesystem/process/network isolation | policy/status only; ordinary child execution | real Linux/macOS/Windows isolation backends |
+| Sandbox | enforced filesystem/process/network isolation | Linux Bubblewrap, macOS Seatbelt, and Windows AppContainer child isolation with actual policy receipts | hostile Linux/macOS/Windows isolation backends |
 | Remote builds | heterogeneous builders and distributed scheduling | host-bound capability model, deterministic scheduler, authenticated CAS exchange | verified remote action execution and failover |
 | Flakes/locks | transitive inputs, follows, registries, selective update | native semantic locks; shallow foreign bridge | no-Nix flake evaluator/import and one semantic lock |
 | Profiles | atomic per-user generations and rollback | project envs only | source-backed named package profiles |
@@ -289,10 +293,25 @@ live acceptance, and documentation. Work order is binding.
 
 - Linux namespaces, private proc/dev, read-only closure, writable scratch/output,
   network only for fixed-output fetch actions, no-new-privileges.
-- macOS native sandbox profile plus filesystem/network/process restrictions.
-- Windows restricted token, Job Object, ACL projection, and network denial.
+- The native Linux slice runs executable Jetpack recipe actions through the same
+  Bubblewrap substrate as hermetic BuildPlan actions. It clears the environment,
+  denies ambient network, exposes the private source copy read-only, binds only
+  the private output copy, promotes it after success, and records the backend
+  policy in build provenance.
+- macOS native Seatbelt profile (`sandbox-exec`) plus source/output,
+  environment, network, device, and declared-process restrictions; the actual
+  backend and policy receipt are recorded, and executable actions fail before
+  launch when Seatbelt is unavailable.
+- Windows AppContainer token with no default capabilities, per-run source/output/tool
+  ACL projection, Job Object kill-on-close plus process/memory limits, cleared
+  environment, and network denial unless a declared fetch capability is active.
 - Hostile corpus covers path/symlink escape, host reads, sibling writes,
   undeclared executables, process/ptrace/device access, network, and daemon leak.
+  The single local corpus is `tests/fixtures/build_sandbox/hostile-corpus.tsv`;
+  the build sandbox, hermetic executor, and agent-workload ingress consume its
+  rows. The ambient #769 workload harness validates the rows only; #770's
+  enforcing agent executor must use this same file before it can publish a
+  confinement claim.
 
 ### E4-JP4 — closure DB, roots, leases, GC, verify, repair
 

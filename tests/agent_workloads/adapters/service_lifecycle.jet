@@ -1,0 +1,67 @@
+use core.files as fs
+use core.process as process
+use core.sys as env
+
+fn service_run(jetpack: String, project: String, home: String, root: String, state: String, path: String, args: [String], timeout_ms: String) ProcessResult -> {
+    command := [String]{~jetpack}
+    loop arg in args -> command.push(arg)
+    return process.cmd(command)
+        .cwd(project)
+        .env("HOME", home)
+        .env("JETPACK_ROOT", root)
+        .env("JETPACK_FAKE_SYSTEMD_STATE", state)
+        .env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", timeout_ms)
+        .env("PATH", path)
+        .timeout(Duration.seconds(10) ?? panic("duration"))
+        .run() ?? panic("jetpack command failed to launch")
+}
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: service_lifecycle INPUT_ROOT")
+    input :: args.get(1) ?? panic("missing input root")
+    case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
+    jetpack :: env.get("JET_CORPUS_JETPACK") ?? panic("missing jetpack binary")
+    host_path :: env.get("PATH") ?? panic("missing PATH")
+    fs.copy_dir(input, "service-project") ?? panic("cannot copy service fixture")
+    project :: fs.absolute("service-project") ?? panic("cannot resolve service project")
+    home :: fs.absolute("service-home") ?? panic("cannot resolve service home")
+    root :: fs.absolute("service-root") ?? panic("cannot resolve service root")
+    state :: "{project}/systemd-state"
+    path :: "{project}/bin:{host_path}"
+    process.cmd(["mkdir", "-p", "{home}", "{root}"]).run() ?? panic("cannot create service roots")
+    process.cmd(["chmod", "+x", "{project}/bin/systemd-run", "{project}/bin/systemctl"]).run() ?? panic("cannot prepare service authority")
+    if case_name == "service-lifecycle-readiness-timeout" {
+        failed :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "up", "timeout", "--no-color"], "200")
+        if failed.success || (!failed.output.contains("E1261") && !failed.errors.contains("E1261")) -> panic("readiness timeout did not fail with E1261")
+        lifecycle :: fs.read("{project}/.jet/services/timeout/lifecycle") ?? panic("failed service lost lifecycle")
+        if !lifecycle.contains("phase=failed") || !lifecycle.contains("recovery=startup-failed") -> panic("failed service lost lifecycle receipt")
+        if fs.exists("{project}/.jet/services/timeout/pid") -> panic("failed service retained pid")
+        child_file :: "{project}/.jet/services/timeout/data/child.pid"
+        if fs.exists(child_file) {
+            child :: (fs.read(child_file) ?? "").trim()
+            probe :: process.cmd(["sh", "-c", "test ! -r /proc/$1/stat || [ \"$(sed 's/.*) //' /proc/$1/stat | cut -d' ' -f1)\" = Z ]", "probe", child]).run() ?? panic("cannot inspect descendant")
+            if !probe.success -> panic("failed service retained descendant")
+        }
+        if !fs.exists("{project}/.jet/services/timeout/supervisor.error") -> panic("failed service lost supervisor receipt")
+        print("service=failed\nerror=E1261\nlimit=bounded\ndescendants=contained\nreceipt=startup-failed")
+    } else {
+        up :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "up", "fixture", "--no-color"], "5000")
+        if !up.success -> panic("service up failed")
+        health :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "health", "fixture", "--json", "--no-color"], "5000")
+        if !health.success || !health.output.contains("healthy") || !health.output.contains("linux-systemd-user") || !health.output.contains("delegated-cgroup") -> panic("service health receipt drifted")
+        waited :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "wait", "fixture", "--no-color"], "5000")
+        if !waited.success || !waited.errors.contains("service `fixture` is ready") -> panic("service wait drifted")
+        logs :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "logs", "fixture", "--no-color"], "5000")
+        if !logs.success || !logs.output.contains("service-started") -> panic("service logs drifted")
+        down :: service_run("{jetpack}", "{project}", "{home}", "{root}", "{state}", "{path}", ["services", "down", "fixture", "--no-color"], "5000")
+        if !down.success -> panic("service down failed")
+        lifecycle :: fs.read("{project}/.jet/services/fixture/lifecycle") ?? panic("stopped service lost lifecycle")
+        if !lifecycle.contains("phase=stopped") || !lifecycle.contains("recovery=down") -> panic("service stop receipt drifted")
+        if fs.exists("{project}/.jet/services/fixture/pid") -> panic("stopped service retained pid")
+        print("service=ready\nauthority=linux-systemd-user\ncontainment=delegated-cgroup\nreceipt=health-lifecycle\ncleanup=ok")
+    }
+    fs.remove_all("service-project") ?? panic("service project cleanup failed")
+    fs.remove_all("service-home") ?? panic("service home cleanup failed")
+    fs.remove_all("service-root") ?? panic("service root cleanup failed")
+}

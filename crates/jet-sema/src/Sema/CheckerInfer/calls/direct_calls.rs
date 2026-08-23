@@ -214,6 +214,29 @@ impl<'a> Checker<'a> {
             let callee_ty = match &callee.expr {
                 Expr::Ident(name, span) => self.funcs.get(name).cloned().map(|sig| {
                     self.record_current_function_reference(name, *span);
+                    if let Some((idx, (convention, _))) = sig
+                        .params
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (convention, _))| *convention != AccessConvention::Read)
+                    {
+                        let capability = match convention {
+                            AccessConvention::Write => "the write-access marker `&`",
+                            AccessConvention::Move => "the move marker `^`",
+                            AccessConvention::Read => unreachable!(),
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{name}` cannot be used as a function value"),
+                            format!(
+                                "parameter {} requires {capability}, but `fn(T)` function values take every parameter with plain read access",
+                                idx + 1
+                            ),
+                            "call this function directly; function values cannot erase write or ownership requirements"
+                                .to_string(),
+                            Some(*span),
+                        ));
+                    }
                     func_sig_to_fn_type(&sig)
                 }),
                 _ => self.infer(&mut callee.expr),
@@ -1313,38 +1336,15 @@ impl<'a> Checker<'a> {
                 self.record_edge(call.name.clone(), call.name_span);
             }
     
-            // D-FFI-CAP1/E0702: a raw foreign capability is legal in the
-            // signature, but safe callers must cross an audited boundary.
-            // Preserve E3103 for ordinary `#Unsafe fn` and C out-pointer
-            // contracts, which have no capability sigil.
-            if sig.is_unsafe && !self.in_unsafe {
-                if sig.is_extern {
-                    if let Some(capability) = crate::Sema::FFI::ffi_capability(&sig) {
-                        self.diags.push(crate::Sema::FFI::ffi_capability_error(
-                            &call.name,
-                            capability,
-                            call.name_span,
-                        ));
-                    } else {
-                        self.diags.push(Diagnostic::error(
-                            "E3103",
-                            format!("`{}` is an `#Unsafe` function", call.name),
-                            "its contract can't be checked by the compiler, so the caller must vouch for it"
-                                .to_string(),
-                            format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
-                            Some(call.name_span),
-                        ));
-                    }
-                } else {
-                    self.diags.push(Diagnostic::error(
-                        "E3103",
-                        format!("`{}` is an `#Unsafe` function", call.name),
-                        "its contract can't be checked by the compiler, so the caller must vouch for it"
-                            .to_string(),
-                        format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
-                        Some(call.name_span),
-                    ));
-                }
+            // D-FFI-CAP1/E0702: use the shared safe/#Unsafe gate for direct
+            // calls and qualified/module calls alike.
+            if let Some(diagnostic) = crate::Sema::FFI::foreign_call_boundary_error(
+                &sig,
+                &call.name,
+                self.in_unsafe,
+                call.name_span,
+            ) {
+                self.diags.push(diagnostic);
             }
     
             // D-APILABEL1=A: one binder resolves labels, zones, reordering, and

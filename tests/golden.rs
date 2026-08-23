@@ -62,6 +62,23 @@ fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
         && stderr.contains("undefined symbol")
 }
 
+fn assert_compute_vulkan_webgpu_output(stdout: &str) {
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "unexpected output from tooling/compute_vulkan_webgpu: {stdout:?}"
+    );
+    assert!(
+        matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
+        "Vulkan must report its real availability: {stdout:?}"
+    );
+    assert_eq!(
+        lines[1], "webgpu:rejected",
+        "native WebGPU must fail closed: {stdout:?}"
+    );
+}
+
 fn assert_front_end(entry: &GoldenEntry, src: &str) {
     let diagnostics = jet::check_with_path(entry.path.to_str().expect("example path is utf8"));
     assert!(
@@ -661,7 +678,13 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 "missing examples/features/expected/{stem}.out; run with JET_UPDATE_GOLDEN=1 and a scoped JET_GOLDEN_FILTER to create it"
             );
             let expected = fs::read_to_string(&out_path).unwrap();
-            if actual != expected {
+            if stem == "tooling/compute_vulkan_webgpu" {
+                // Vulkan availability is host-dependent: the shell may expose
+                // the loader while the machine still has no usable device.
+                // Validate the portable contract instead of pinning one host's
+                // acceptance bit in a cross-host golden.
+                assert_compute_vulkan_webgpu_output(actual);
+            } else if actual != expected {
                 panic!(
                     "output mismatch for example {stem}:\n{}",
                     unified_diff(
@@ -735,10 +758,13 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_ada" => ("ada", "geodesy", "geodesy.ads"),
         "lowlevel/polyglot_fortran" => ("fortran", "matrix", "matrix.f90"),
         "lowlevel/polyglot_tcl" => ("tcl", "eda", "eda.tcl"),
+        "lowlevel/polyglot_dart" => ("dart", "callbacks", "callbacks.dart"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
     let src = fs::read_to_string(&entry.path).unwrap();
-    assert_front_end(entry, &src);
+    if language != "dart" {
+        assert_front_end(entry, &src);
+    }
     if !env.have_rustc || !env.have_cargo {
         eprintln!(
             "note: front end checked; skipping examples/features/{} golden (need provisioned compiler toolchain)",
@@ -759,6 +785,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "pascal" => "fpc",
         "ada" => "gnatmake",
         "tcl" => "tclsh",
+        "dart" => "dart",
         _ => unreachable!("binder language has no provisioned tool"),
     };
     let have_tool = Command::new(tool)
@@ -792,26 +819,51 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     if language == "ada" {
         fs::copy(source_dir.join("geodesy.adb"), dir.join("geodesy.adb")).unwrap();
     }
+    if language == "dart" {
+        fs::copy(source_dir.join("host.dart"), dir.join("host.dart")).unwrap();
+    }
 
-    let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["inspect", "bind", language, foreign_source, "--pkg", package])
-        .current_dir(&dir)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
+    let mut bind = Command::new(env!("CARGO_BIN_EXE_jet"));
+    bind.current_dir(&dir).env("NO_COLOR", "1");
+    bind.args(["inspect", "bind", language, foreign_source]);
+    if language == "dart" {
+        bind.args(["--jet", "main.jet"]);
+    }
+    let bind = bind.args(["--pkg", package]).output().unwrap();
     assert!(
         bind.status.success(),
         "{} binder example failed:\n{}",
         language,
         String::from_utf8_lossy(&bind.stderr)
     );
+    if language == "dart" {
+        let check = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["check", "main.jet"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(
+            check.status.success(),
+            "Dart generated binding failed its front end:\n{}",
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
 
-    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "main.jet"])
-        .current_dir(&dir)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
+    let run = if language == "dart" {
+        Command::new("dart")
+            .args(["run", "host.dart"])
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    } else {
+        Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", "main.jet"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
     assert!(
         run.status.success(),
         "{} binder example failed at runtime:\nstdout: {}\nstderr: {}",

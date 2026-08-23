@@ -5729,7 +5729,9 @@ requires an explicit seed. A `VjpRun` also destructures positionally as
 policy is F32Strict + Reproducible. Fast math, reassociation, and nondeterministic
 reductions require named recorded policies. Typed capability negotiation fails
 before launch. Every tier backend differentially conforms to the CPU oracle;
-dev and AOT use the same backend, policy, and cache identity.
+dev and AOT use the same backend, policy, and cache identity. The registered
+native providers are CPU, Metal, CUDA, and Vulkan; WebGPU is the browser-owned
+provider and native hosts fail closed when no browser provider is present.
 
 **D-COMPUTE-RAWBOUNDARY1=A — provider-issued opaque raw-kernel contract**
 *(ratified 2026-08-03)*: a raw-device contract is minted only by a trusted

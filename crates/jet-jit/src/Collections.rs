@@ -3577,6 +3577,16 @@ fn authority_rights(rt: &crate::JitRuntime, authority: i64) -> BTreeSet<String> 
         .unwrap_or_default()
 }
 
+/// D-AGENT-EXEC1: marshal the one authority carrier into the shared process
+/// Prelude. The process host never interprets rights or creates a second
+/// policy; it only serializes the existing record.
+pub(crate) fn authority_wire(rt: &crate::JitRuntime, authority: i64) -> String {
+    authority_rights(rt, authority)
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn authority_record(rt: &mut crate::JitRuntime, rights: BTreeSet<String>) -> i64 {
     let ids = rights
         .iter()

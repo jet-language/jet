@@ -23,12 +23,12 @@ fn javascript_sidecar_binds_runs_and_rejects_dynamic_types() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("ops.d.ts"),
-        "export function add(left: bigint, right: bigint): bigint;\nexport function fail(value: bigint): bigint;\n",
+        "export function add(left: bigint, right: bigint): bigint;\nexport function fail(value: bigint): bigint;\nexport function wrong_type(value: bigint): bigint;\n",
     )
     .unwrap();
     fs::write(
         root.join("ops.mjs"),
-        "export function add(left, right) { return left + right; }\nexport function fail(value) { throw new Error('secret foreign detail'); }\n",
+        "export function add(left, right) { return left + right; }\nexport function fail(value) { throw new Error('secret foreign detail'); }\nexport function wrong_type(value) { return Number(value); }\n",
     )
     .unwrap();
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -63,7 +63,7 @@ fn javascript_sidecar_binds_runs_and_rejects_dynamic_types() {
 
     fs::write(
         root.join("main.jet"),
-        "use js.ops as ops\nfn run() -[FFI, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.fail(7) ?? 99)\n}\n",
+        "use js.ops as ops\nfn run() -[FFI, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.fail(7) ?? 99)\n    print(ops.wrong_type(7) ?? 123)\n}\n",
     )
     .unwrap();
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -77,7 +77,7 @@ fn javascript_sidecar_binds_runs_and_rejects_dynamic_types() {
         "JavaScript sidecar run failed: {}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n99\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n99\n123\n");
 
     fs::write(
         root.join("bad.d.ts"),

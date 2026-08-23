@@ -120,8 +120,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} config trust add <pattern>     pre-authorize matching project paths
   {bin} config trust list              show trusted hashes and patterns
   {bin} config trust remove <pattern>  drop a trusted pattern
-  {bin} config sandbox require         refuse unsandboxed build fallback
-  {bin} config sandbox allow           allow fallback with L0205 warning
+  {bin} config sandbox require         refuse local fallback when native sandbox is unavailable
+  {bin} config sandbox allow           allow trusted substitution before local refusal
 
 {refs}
   fastfetch@nixpkgs                    a package from nixpkgs

@@ -27,7 +27,7 @@ completed = subprocess.run(
     timeout=5,
     check=False,
 )
-if completed.returncode != 1:
+if completed.returncode not in (0, 1):
     raise SystemExit(f"git diff exit {completed.returncode}: {completed.stderr.strip()}")
 
 counts = {"A": 0, "D": 0, "M": 0}
@@ -47,5 +47,6 @@ for line in completed.stdout.splitlines():
     counts[status] += 1
     rows.append(f"{path}|{kinds[status]}")
 
-print(*sorted(rows), sep="\n")
+if rows:
+    print(*sorted(rows), sep="\n")
 print(f"summary|added={counts['A']}|modified={counts['M']}|deleted={counts['D']}")

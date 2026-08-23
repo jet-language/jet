@@ -74,7 +74,7 @@ impl Scalar {
             Self::Int => "Int",
             Self::Float => "Float",
             Self::Bool => "Bool",
-            Self::Callback => "fn(Int) =[]=> Int",
+            Self::Callback => "fn(Int) Int -[]>",
         }
     }
 
@@ -325,6 +325,7 @@ fn binding_identity(
 ) -> String {
     let mut identity = IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("binder_schema", SCHEMA.as_bytes());
+    identity.field("descriptor", cpp_descriptor_stamp().as_bytes());
     identity.field("header", header.as_os_str().as_encoded_bytes());
     identity.field("header_bytes", header_bytes);
     identity.field("ast", ast);
@@ -854,8 +855,9 @@ fn render_provenance(
     archiver_version: &[u8],
 ) -> String {
     let mut value = format!(
-        "schema={SCHEMA}\nidentity_schema={}\nidentity={digest}\nsha256={digest}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
+        "schema={SCHEMA}\nidentity_schema={}\nidentity={digest}\nsha256={digest}\ndescriptor={}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
         crate::ForeignBridge::IDENTITY_SCHEMA,
+        cpp_descriptor_stamp(),
         header.display(),
         options.target,
         options.clang.display(),
@@ -893,15 +895,16 @@ fn render_provenance(
 
 fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
+    let descriptor = cpp_descriptor_stamp();
     let mut out = format!(
-        "#Extern module c.{abi} {{\n    fn take_error() => Int = \"{abi}_take_error\"\n"
+        "// jet-ffi-descriptor={descriptor}\n#Extern module c.{abi} {{\n    fn take_error() Int = \"{abi}_take_error\"\n"
     );
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!("    fn {name}_new("));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") => Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
+            ") Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
         ));
         for method in &class.methods {
             out.push_str(&format!("    fn {name}_{}(handle: Int", method.jet_name));
@@ -910,7 +913,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") => {} = \"{abi}_{name}_{}\"\n",
+                ") {} = \"{abi}_{name}_{}\"\n",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -920,12 +923,12 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("    fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") => {} = \"{abi}_{}\"\n",
+            ") {} = \"{abi}_{}\"\n",
             function.result.jet(),
             function.jet_name
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) => CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) CppError -[]> {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
@@ -934,7 +937,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         ));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") => {} CppError! {{\n    value :: abi.{name}_new(",
+            ") {} CppError! -[FFI.Cpp]> {{\n    value :: abi.{name}_new(",
             class.name
         ));
         jet_args(&mut out, &class.ctor);
@@ -952,7 +955,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") => {} CppError! {{\n        result_value :: abi.{name}_{}(self.value",
+                ") {} CppError! -[FFI.Cpp]> {{\n        result_value :: abi.{name}_{}(self.value",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -965,13 +968,13 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         if !class.methods.is_empty() {
             out.push_str("}\n\n");
         }
-        out.push_str(&format!("pub fn close_{name}(value: ^{}) {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
+        out.push_str(&format!("pub fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
     for function in &surface.functions {
         out.push_str(&format!("pub fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") => {} CppError! {{\n    result_value :: abi.{}(",
+            ") {} CppError! -[FFI.Cpp]> {{\n    result_value :: abi.{}(",
             function.result.jet(),
             function.jet_name
         ));
@@ -979,6 +982,12 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(cpp_error(code)) }\n    return Ok(result_value)\n}\n\n");
     }
     out
+}
+
+fn cpp_descriptor_stamp() -> String {
+    crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Cpp)
+        .expect("C++ binder descriptor is not registered")
+        .stamp()
 }
 
 fn jet_params(out: &mut String, params: &[Param]) {
@@ -1175,4 +1184,52 @@ pub(crate) fn snake(value: &str) -> String {
         out.push(ch.to_ascii_lowercase());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(name: &str) -> PathBuf {
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .map(|dir| dir.join(name))
+            .find(|path| path.is_file())
+            .and_then(|path| std::fs::canonicalize(path).ok())
+            .unwrap_or_else(|| panic!("{name} is required for the C++ binder test"))
+    }
+
+    #[test]
+    fn bind_emits_canonical_descriptor_effect_and_provenance() {
+        let root = std::env::temp_dir().join(format!("jet_cpp_bind_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let header = root.join("math.hpp");
+        std::fs::write(
+            &header,
+            "#pragma once\n#include <cstdint>\ninline int64_t add(int64_t value) { return value + 1; }\n",
+        )
+        .unwrap();
+        let options = BindOptions {
+            lib: "math".into(),
+            target: std::env::var("JET_BUILD_TARGET").unwrap(),
+            clang: tool("clang++"),
+            archiver: tool("ar"),
+            include_dirs: vec![root.clone()],
+            library_dirs: vec![],
+            libraries: vec![],
+            namespaces: vec![],
+            templates: vec![],
+        };
+        let cache = root.join(".jet/bindings/cpp");
+        let result = bind(&header, &cache, &options).unwrap();
+        assert!(result.archive.is_file());
+        assert!(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
+        assert!(result.source.contains("fn add(value: Int) Int ="));
+        assert!(result.source.contains("Int CppError! -[FFI.Cpp]>"));
+        assert!(!result.source.contains("=>"));
+        assert!(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

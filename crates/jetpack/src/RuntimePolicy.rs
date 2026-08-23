@@ -2,8 +2,8 @@
 //!
 //! Jetpack is a user-owned, one-shot process: no resident daemon, no root
 //! requirement, cross-process coordination through lock files, and honest
-//! sandbox fallback reporting. The only privileged future path is transient
-//! `jetpack os switch` / jetos activation.
+//! native child-sandbox reporting. The only privileged future path is
+//! transient `jetpack os switch` / jetos activation.
 
 use super::Output::Theme;
 use super::JSON;
@@ -30,6 +30,25 @@ mod lock_platform;
 #[cfg(not(any(unix, windows)))]
 #[path = "RuntimePolicy/Lock/unsupported.rs"]
 mod lock_platform;
+
+pub(crate) fn sandbox_backend_name() -> &'static str {
+    #[cfg(windows)]
+    {
+        "windows-appcontainer"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "macos-seatbelt"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux-bwrap"
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        "unsandboxed-fallback"
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerbPolicy {
@@ -234,6 +253,7 @@ pub enum SandboxLevel {
 pub struct SandboxStatus {
     pub level: SandboxLevel,
     pub mechanism: String,
+    pub policy: String,
     pub reason: String,
 }
 
@@ -274,7 +294,8 @@ pub fn cache_policy_fingerprint(_offline: bool) -> String {
         SandboxPolicy::AllowFallback => "sandbox=fallback",
         SandboxPolicy::Require => "sandbox=require",
     };
-    crate::SHA256::sha256_hex(format!("jp0-policy-v1\n{sandbox}\n").as_bytes())
+    let backend = sandbox_backend_name();
+    crate::SHA256::sha256_hex(format!("jp0-policy-v3\n{sandbox}\nbackend={backend}\n").as_bytes())
 }
 
 pub fn detect_sandbox() -> SandboxStatus {
@@ -283,6 +304,7 @@ pub fn detect_sandbox() -> SandboxStatus {
             return SandboxStatus {
                 level: SandboxLevel::Fallback,
                 mechanism: "fake-userns-available".to_string(),
+                policy: "not-enforced".to_string(),
                 reason: concat!(
                     "test override reports sandbox support, but the build child ",
                     "has not entered a jail"
@@ -294,6 +316,7 @@ pub fn detect_sandbox() -> SandboxStatus {
             return SandboxStatus {
                 level: SandboxLevel::Fallback,
                 mechanism: "unsandboxed".to_string(),
+                policy: "not-enforced".to_string(),
                 reason: "test override reports no sandbox support".to_string(),
             };
         }
@@ -302,42 +325,46 @@ pub fn detect_sandbox() -> SandboxStatus {
 
     #[cfg(target_os = "linux")]
     {
-        let userns = fs::read_to_string("/proc/sys/kernel/unprivileged_userns_clone")
-            .map(|s| s.trim() != "0")
-            .unwrap_or(true);
-        if userns {
-            return SandboxStatus {
-                level: SandboxLevel::Fallback,
-                mechanism: "linux-userns-available".to_string(),
-                reason: concat!(
-                    "unprivileged user namespaces are available, but the build ",
-                    "child has not entered a Jetpack jail"
-                )
-                .to_string(),
-            };
-        }
+        let native = jet_comptime::Comptime::Build::native_sandbox_status();
         return SandboxStatus {
-            level: SandboxLevel::Fallback,
-            mechanism: "unsandboxed".to_string(),
-            reason: "this kernel disables unprivileged user namespaces".to_string(),
+            level: if native.available {
+                SandboxLevel::Strong
+            } else {
+                SandboxLevel::Fallback
+            },
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
         };
     }
 
     #[cfg(target_os = "macos")]
     {
+        let native = jet_comptime::Comptime::Build::native_sandbox_status();
         SandboxStatus {
-            level: SandboxLevel::Fallback,
-            mechanism: "unsandboxed".to_string(),
-            reason: "macOS has no Jetpack-native unprivileged build sandbox yet".to_string(),
+            level: if native.available {
+                SandboxLevel::Strong
+            } else {
+                SandboxLevel::Fallback
+            },
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
         }
     }
 
     #[cfg(target_os = "windows")]
     {
+        let native = jet_comptime::Comptime::Build::native_sandbox_status();
         SandboxStatus {
-            level: SandboxLevel::Fallback,
-            mechanism: "unsandboxed".to_string(),
-            reason: "Windows has no Jetpack-native unprivileged build sandbox yet".to_string(),
+            level: if native.available {
+                SandboxLevel::Strong
+            } else {
+                SandboxLevel::Fallback
+            },
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
         }
     }
 
@@ -346,6 +373,7 @@ pub fn detect_sandbox() -> SandboxStatus {
         SandboxStatus {
             level: SandboxLevel::Fallback,
             mechanism: "unsandboxed".to_string(),
+            policy: "not-enforced".to_string(),
             reason: "this platform has no Jetpack-native unprivileged build sandbox yet"
                 .to_string(),
         }
@@ -366,22 +394,17 @@ pub fn enforce_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32> {
                     "E1275",
                     "build sandboxing is required but unavailable",
                     &status.reason,
-                    "run `jetpack config sandbox allow` to permit fallback, or enable unprivileged sandbox support on this machine.",
+                    "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
                 );
             }
             Err(2)
         }
         SandboxPolicy::AllowFallback => {
-            if json {
-                eprintln!("{}", sandbox_json("L0205", "warning", &status));
-            } else {
-                theme.warning_coded(
-                    "L0205",
-                    "build sandboxing unavailable; adapter builds will run unsandboxed",
-                    &status.reason,
-                    "run `jetpack config sandbox require` to refuse fallback.",
-                );
-            }
+            // The action boundary owns the decision. Non-executing reuse and
+            // trusted substitution may proceed; an executable action reports
+            // E1275 from its provider/backend before launch. A preflight
+            // warning here would be advisory noise and could imply a fallback
+            // that the production path never performs.
             Ok(())
         }
     }
@@ -397,16 +420,17 @@ fn sandbox_json(code: &str, severity: &str, status: &SandboxStatus) -> String {
             if code == "E1275" {
                 "build sandboxing is required but unavailable"
             } else {
-                "build sandboxing unavailable; adapter builds will run unsandboxed"
+                "build sandboxing unavailable; local executable actions will be refused after substitution/remote resolution"
             },
         ),
         ("why", &status.reason),
+        ("policy", &status.policy),
         (
             "fix",
             if code == "E1275" {
-                "run `jetpack config sandbox allow` to permit fallback, or enable unprivileged sandbox support on this machine"
+                "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry"
             } else {
-                "run `jetpack config sandbox require` to refuse fallback"
+                "provide a trusted substitute or approved remote builder, or enable the native sandbox"
             },
         ),
         ("mechanism", &status.mechanism),
@@ -621,7 +645,10 @@ mod tests {
         assert_eq!(lock_state(&path).unwrap(), LockState::Held);
         drop(guard);
         assert_eq!(lock_state(&path).unwrap(), LockState::Idle);
-        assert!(path.exists(), "persistent lock inode must never be unlinked");
+        assert!(
+            path.exists(),
+            "persistent lock inode must never be unlinked"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -708,7 +735,10 @@ mod tests {
             "lockfileex_runtime_serializes_and_pins_file_identity",
             "reparse_points_fail_closed_when_creation_is_permitted",
         ] {
-            assert!(source.contains(required), "missing Windows lock law: {required}");
+            assert!(
+                source.contains(required),
+                "missing Windows lock law: {required}"
+            );
         }
         assert!(!source.contains("const FILE_SHARE_DELETE"));
 
@@ -740,10 +770,33 @@ mod tests {
     }
 
     #[test]
-    fn capability_detection_never_claims_an_entered_sandbox() {
+    fn capability_detection_reports_only_a_verified_backend() {
         let status = detect_sandbox();
-        assert_eq!(status.level, SandboxLevel::Fallback);
-        assert_ne!(status.mechanism, "linux-userns");
-        assert!(status.reason.contains("not entered"));
+        match status.level {
+            SandboxLevel::Strong => {
+                assert!(status.policy.contains("filesystem="));
+                #[cfg(target_os = "linux")]
+                {
+                    assert_eq!(status.mechanism, "linux-bwrap");
+                    assert!(status.policy.contains("process=private-pid"));
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    assert_eq!(status.mechanism, "macos-seatbelt");
+                    assert!(status.policy.contains("network=denied"));
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    assert_eq!(status.mechanism, "windows-appcontainer");
+                    assert!(status.policy.contains("appcontainer"));
+                    assert!(status.policy.contains("job-kill-on-close"));
+                }
+            }
+            SandboxLevel::Fallback => {
+                assert_eq!(status.policy, "not-enforced");
+                assert_ne!(status.mechanism, "linux-userns");
+                assert!(!status.reason.is_empty());
+            }
+        }
     }
 }

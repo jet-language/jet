@@ -1179,6 +1179,15 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[false],
     ),
+    // D-AGENT-EXEC1: the workspace constructor returns the same ordinary
+    // Abilities carrier used by every authority boundary.
+    CoreCallRecord::new(
+        "core.process",
+        "workspace",
+        "jet_std_process_workspace",
+        true,
+        &[],
+    ),
     // D-AUTHORITY-NAME1=A: the explicit authority form uses the typed emitter
     // and host adapter below; do not let the one-argument row erase its value.
     CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]),

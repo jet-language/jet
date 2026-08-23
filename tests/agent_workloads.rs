@@ -10,12 +10,29 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
+const DOMAIN_CONTRACT_HEADER: &str =
+    "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring";
 const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
+const DOMAIN_SCORING: &str =
+    "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
+const SANDBOX_HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
 const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
     (
         "repository-marker-scan",
         "repository-search-and-edit",
         "success",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "repository-marker-scan-empty",
+        "repository-search-and-edit",
+        "hostile-empty",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "repository-semantic-inspection",
+        "repository-search-and-edit",
+        "semantic-index",
         "exit=0;stdout=exact",
     ),
     (
@@ -28,6 +45,12 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "git-diff-review",
         "build-test-debug-and-git",
         "mixed-change",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "git-diff-empty",
+        "build-test-debug-and-git",
+        "hostile-empty-diff",
         "exit=0;stdout=exact",
     ),
     (
@@ -55,6 +78,42 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "exit=0;stdout=exact",
     ),
     (
+        "structured-data-transform",
+        "structured-data",
+        "json-normalize",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "structured-data-hostile",
+        "structured-data",
+        "malformed-json",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "database-access",
+        "databases",
+        "parameterized-query",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "database-hostile",
+        "databases",
+        "invalid-row",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "http-api",
+        "http-apis",
+        "loopback-json-post",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "http-hostile",
+        "http-apis",
+        "rejected-payload",
+        "exit=0;stdout=exact",
+    ),
+    (
         "process-batch-success",
         "long-running-and-interactive-commands",
         "success",
@@ -72,12 +131,170 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "timeout-cancellation-cleanup",
         "exit=0;stdout=exact",
     ),
+    (
+        "browser-automation-preflight",
+        "browser-and-desktop-work",
+        "profile-timeout-hostile",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "desktop-interaction-focus",
+        "browser-and-desktop-work",
+        "keyboard-focus-hostile",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "document-markdown-inspection",
+        "document-and-media-work",
+        "malformed-document",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "media-asset-inventory",
+        "document-and-media-work",
+        "unsupported-media-hostile",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "mcp-environment-readonly",
+        "mcp-tools-and-hooks",
+        "readonly-resource",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "mcp-environment-denied",
+        "mcp-tools-and-hooks",
+        "hostile-denied-resource",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "interactive-terminal-dialogue",
+        "interactive-terminals",
+        "pty-dialogue",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "interactive-terminal-closed",
+        "interactive-terminals",
+        "hostile-closed-session",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "service-lifecycle-roundtrip",
+        "service-lifecycle",
+        "up-health-wait-logs-down",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "service-lifecycle-readiness-timeout",
+        "service-lifecycle",
+        "hostile-readiness-timeout",
+        "exit=0;stdout=exact",
+    ),
 ];
 const ADAPTERS: &[(&str, &str)] = &[
     ("jet", "jet"),
     ("bash", "bash"),
     ("python", "py"),
     ("node", "mjs"),
+];
+const EXPECTED_DOMAIN_CONTRACT: &[(&str, &str, &str, &str)] = &[
+    (
+        "structured-data-transform",
+        "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "structured-data-hostile",
+        "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "database-access",
+        "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "database-hostile",
+        "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "http-api",
+        "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "http-hostile",
+        "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "browser-automation-preflight",
+        "jet=Core:web.browser,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "desktop-interaction-focus",
+        "jet=Core:ui,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "document-markdown-inspection",
+        "jet=Core:files,process;bash=find,awk;python=stdlib-pathlib;node=stdlib-fs-path",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "media-asset-inventory",
+        "jet=Core:files,net.mime,process;bash=find,wc;python=stdlib-pathlib;node=stdlib-fs-path",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "mcp-environment-readonly",
+        "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "mcp-environment-denied",
+        "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "interactive-terminal-dialogue",
+        "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "interactive-terminal-closed",
+        "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "service-lifecycle-roundtrip",
+        "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "service-lifecycle-readiness-timeout",
+        "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable",
+        "hostile",
+    ),
 ];
 
 #[derive(Debug)]
@@ -94,6 +311,15 @@ struct Task {
     evidence: String,
     tower_card: String,
     loss_cards: String,
+}
+
+#[derive(Debug)]
+struct DomainContract {
+    task_id: String,
+    allowed_dependencies: String,
+    machine_spec: String,
+    variant: String,
+    scoring: String,
 }
 
 #[derive(Debug)]
@@ -138,21 +364,69 @@ fn corpus_root() -> PathBuf {
 }
 
 fn adapter_stem(task_id: &str) -> &'static str {
-    if task_id == "repository-marker-scan" {
+    if task_id == "repository-marker-scan" || task_id == "repository-marker-scan-empty" {
         "repository_marker_scan"
+    } else if task_id == "repository-semantic-inspection" {
+        "repository_semantic_inspection"
     } else if task_id == "repository-semantic-edit" {
         "repository_semantic_edit"
-    } else if task_id == "git-diff-review" {
+    } else if task_id == "git-diff-review" || task_id == "git-diff-empty" {
         "git_diff_review"
     } else if task_id == "build-test-failure-recovery" {
         "build_test_recovery"
     } else if task_id.starts_with("incident-report-") {
         "incident_report"
+    } else if task_id.starts_with("structured-data-") {
+        "structured_data"
+    } else if task_id.starts_with("database-") {
+        "database_access"
+    } else if task_id.starts_with("http-") {
+        "http_api"
     } else if task_id.starts_with("process-batch-") {
         "process_batch"
+    } else if task_id.starts_with("mcp-environment-") {
+        "mcp_resource"
+    } else if task_id.starts_with("interactive-terminal-") {
+        "interactive_terminal"
+    } else if task_id.starts_with("service-lifecycle-") {
+        "service_lifecycle"
+    } else if task_id == "browser-automation-preflight" {
+        "browser_automation_preflight"
+    } else if task_id == "desktop-interaction-focus" {
+        "desktop_interaction_focus"
+    } else if task_id == "document-markdown-inspection" {
+        "document_markdown_inspection"
+    } else if task_id == "media-asset-inventory" {
+        "media_asset_inventory"
     } else {
         panic!("task has no adapter source: {task_id}")
     }
+}
+
+fn read_domain_contract() -> Vec<DomainContract> {
+    let contract = fs::read_to_string(corpus_root().join("domain_contract.tsv")).unwrap();
+    let mut lines = contract.lines();
+    assert_eq!(
+        lines.next(),
+        Some(DOMAIN_CONTRACT_HEADER),
+        "agent workload domain contract schema drifted"
+    );
+    lines
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 6, "bad domain contract row: {line}");
+            assert_eq!(fields[0], "1", "unsupported domain contract version: {line}");
+            assert_eq!(fields[5], DOMAIN_SCORING, "domain scoring drifted: {line}");
+            DomainContract {
+                task_id: fields[1].into(),
+                allowed_dependencies: fields[2].into(),
+                machine_spec: fields[3].into(),
+                variant: fields[4].into(),
+                scoring: fields[5].into(),
+            }
+        })
+        .collect()
 }
 
 fn read_tasks() -> Vec<Task> {
@@ -241,6 +515,7 @@ fn adapter_command(
     jet_cli: &Path,
     input: &Path,
     scratch: &Path,
+    task_id: &str,
 ) -> Command {
     let mut command = match adapter {
         "jet" => {
@@ -268,6 +543,8 @@ fn adapter_command(
     command
         .arg(input)
         .env("JET_CORPUS_JET", jet_cli)
+        .env("JET_CORPUS_JETPACK", common::jetpack_bin())
+        .env("JET_CORPUS_TASK", task_id)
         .current_dir(scratch);
     command
 }
@@ -432,6 +709,16 @@ fn scratch_output_violations(
 
 #[test]
 fn manifest_is_complete_frozen_and_non_vacuous() {
+    let hostile_cases = SANDBOX_HOSTILE_CORPUS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.split('\t').collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    assert_eq!(hostile_cases.len(), 7);
+    for row in &hostile_cases {
+        assert_eq!(row.len(), 4, "malformed shared sandbox hostile corpus row");
+        assert_eq!(row[3], "blocked-or-unsupported");
+    }
     let tasks = read_tasks();
     let actual = tasks
         .iter()
@@ -447,7 +734,11 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
     assert_eq!(actual, EXPECTED_TASKS, "task removed, added, or reclassified");
 
     let mut ids = BTreeSet::new();
-    for task in tasks {
+    let task_ids = tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<BTreeSet<_>>();
+    for task in &tasks {
         assert!(ids.insert(task.id.clone()), "duplicate task ID {}", task.id);
         assert_eq!(
             task.authority,
@@ -466,6 +757,24 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
         assert_eq!(task.loss_cards, "default-run=#688;wall-time=#666");
         assert!(corpus_root().join(&task.input).exists());
         assert!(corpus_root().join(&task.expected).is_file());
+        if matches!(
+            task.id.as_str(),
+            "browser-automation-preflight"
+                | "desktop-interaction-focus"
+                | "document-markdown-inspection"
+                | "media-asset-inventory"
+                | "mcp-environment-denied"
+                | "interactive-terminal-closed"
+                | "service-lifecycle-readiness-timeout"
+        ) {
+            let expected = fs::read_to_string(corpus_root().join(&task.expected)).unwrap();
+            let hostile = if task.id == "desktop-interaction-focus" {
+                expected.lines().any(|line| line == "event|Empty|observed")
+            } else {
+                expected.lines().any(|line| line.starts_with("reject|"))
+            };
+            assert!(hostile, "target task {} lost its hostile variant", task.id);
+        }
         let stem = adapter_stem(&task.id);
         for (_, extension) in ADAPTERS {
             let source = format!("{stem}.{extension}");
@@ -476,9 +785,34 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
         }
     }
 
+    let contracts = read_domain_contract();
+    let actual_contract = contracts
+        .iter()
+        .map(|contract| {
+            (
+                contract.task_id.as_str(),
+                contract.allowed_dependencies.as_str(),
+                contract.machine_spec.as_str(),
+                contract.variant.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual_contract, EXPECTED_DOMAIN_CONTRACT,
+        "domain contract changed without a frozen task review"
+    );
+    for contract in contracts {
+        assert!(
+            task_ids.contains(contract.task_id.as_str()),
+            "domain contract names unknown task {}",
+            contract.task_id
+        );
+        assert_eq!(contract.scoring, DOMAIN_SCORING);
+    }
+
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 35, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 63, "all inputs and declared outputs must be frozen");
 }
 
 #[test]
@@ -678,6 +1012,7 @@ fn equivalent_adapters_complete_declared_tasks() {
                     &jet_cli,
                     &input,
                     &scratch.path,
+                    &task.id,
                 ),
                 adapter,
                 PROCESS_DEADLINE,
@@ -689,6 +1024,7 @@ fn equivalent_adapters_complete_declared_tasks() {
                     &jet_cli,
                     &input,
                     &scratch.path,
+                    &task.id,
                 ),
                 adapter,
                 PROCESS_DEADLINE,

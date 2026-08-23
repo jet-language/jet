@@ -458,6 +458,33 @@ pub(crate) fn ffi_capability_error(name: &str, capability: &str, span: Span) -> 
     )
 }
 
+/// D-FFI-CAP1: every call path uses the same safe/#Unsafe boundary rule. Keep
+/// the ordinary `#Unsafe` diagnostic for contracts without an explicit
+/// capability, and use E0702 when a raw foreign signature names `&` or `^`.
+pub(crate) fn foreign_call_boundary_error(
+    sig: &FuncSig,
+    name: &str,
+    in_unsafe: bool,
+    span: Span,
+) -> Option<Diagnostic> {
+    if !sig.is_unsafe || in_unsafe {
+        return None;
+    }
+    if sig.is_extern {
+        if let Some(capability) = ffi_capability(sig) {
+            return Some(ffi_capability_error(name, capability, span));
+        }
+    }
+    Some(Diagnostic::error(
+        "E3103",
+        format!("`{name}` is an `#Unsafe` function"),
+        "its contract can't be checked by the compiler, so the caller must vouch for it"
+            .to_string(),
+        format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+        Some(span),
+    ))
+}
+
 /// Return the first explicit capability in a foreign signature. The signature
 /// retains declaration order, so this is stable even when a later descriptor
 /// grows more capability metadata.

@@ -1,0 +1,32 @@
+use core.process as process
+use core.sys as env
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: repository_semantic_inspection INPUT_ROOT")
+    root :: args.get(1) ?? panic("missing input root")
+    jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
+    source := "{root}/project/examples/main.jet"
+    result :: process.cmd([String]{~jet, "inspect", "semindex", source})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(Duration.seconds(30) ?? panic("bad timeout"))
+        .run() ?? panic("semantic inspection could not run")
+    if result.timed_out || result.code != 0 -> panic("semantic inspection failed: {result.errors}")
+    lines :: result.output.split("\n").to_list()
+    definitions_line :: lines.get(1) ?? panic("missing definitions")
+    references_line :: lines.get(2) ?? panic("missing references")
+    calls_line :: lines.get(3) ?? panic("missing call edges")
+    definitions_fields :: definitions_line.split(":").to_list()
+    references_fields :: references_line.split(":").to_list()
+    calls_fields :: calls_line.split(":").to_list()
+    definitions_raw :: definitions_fields.get(1) ?? panic("missing definitions value")
+    references_raw :: references_fields.get(1) ?? panic("missing references value")
+    calls_raw :: calls_fields.get(1) ?? panic("missing call edges value")
+    definitions :: Int.parse(definitions_raw.trim()) ?? panic("bad definitions value")
+    references :: Int.parse(references_raw.trim()) ?? panic("bad references value")
+    calls :: Int.parse(calls_raw.trim()) ?? panic("bad call edges value")
+    print("definitions={definitions}")
+    print("references={references}")
+    print("calls={calls}")
+}

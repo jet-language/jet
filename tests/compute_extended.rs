@@ -6,7 +6,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, jit_run_traced,
+    assert_example_cli_tiers_agree_with, assert_tiers_agree, build_and_run, jit_run_traced,
     run_default_multi,
 };
 
@@ -91,7 +91,7 @@ fn autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss() {
     let pure = r#"
 use core.compute as compute
 
-fn loss(value: Tensor) Tensor {
+fn loss(value: Tensor) Tensor -> {
     return compute.mul(value, value) ?? panic("loss")
 }
 
@@ -105,7 +105,7 @@ fn run() {
     let impure = r#"
 use core.compute as compute
 
-fn loss(value: Tensor) Tensor {
+fn loss(value: Tensor) Tensor -> {
     print("side effect")
     return compute.mul(value, value) ?? panic("loss")
 }
@@ -132,7 +132,7 @@ fn f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle() {
         r#"
 use core.compute as compute
 
-fn tiled_loss(left: Tensor, right: Tensor) Tensor {
+fn tiled_loss(left: Tensor, right: Tensor) Tensor -> {
     return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
 }
 
@@ -350,14 +350,11 @@ use core.compute as compute
 fn run() {
     vulkan :: compute.device_vulkan()
     webgpu :: compute.device_webgpu()
-    print(compute.device(compute.on_device(
-        compute.full([1], 1.0) ?? panic("tensor"),
-        vulkan,
-    ) ?? panic("vulkan")))
-    print(compute.device(compute.on_device(
-        compute.full([1], 1.0) ?? panic("tensor"),
-        webgpu,
-    ) ?? panic("webgpu")))
+    tensor :: compute.full([1], 1.0) ?? panic("tensor")
+    vulkan_tensor :: compute.on_device(tensor, vulkan)
+    webgpu_tensor :: compute.on_device(tensor, webgpu)
+    print(compute.device(vulkan_tensor ?? panic("vulkan")))
+    print(compute.device(webgpu_tensor ?? panic("webgpu")))
 }
 "#,
     )
@@ -366,8 +363,13 @@ fn run() {
 
 #[test]
 fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu() {
-    assert_example_cli_tiers_agree(
-        "tooling/compute_vulkan_webgpu",
-        "vulkan:accepted\nwebgpu:rejected\n",
-    );
+    assert_example_cli_tiers_agree_with("tooling/compute_vulkan_webgpu", |stdout| {
+        let lines: Vec<_> = stdout.lines().collect();
+        assert_eq!(lines.len(), 2, "unexpected accelerator example output: {stdout:?}");
+        assert!(
+            matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
+            "Vulkan must report its real availability: {stdout:?}"
+        );
+        assert_eq!(lines[1], "webgpu:rejected");
+    });
 }

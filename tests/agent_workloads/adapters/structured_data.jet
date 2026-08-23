@@ -1,0 +1,61 @@
+use core.encoding.json as json
+use core.files as fs
+use core.process as process
+
+#Codable
+struct Event {
+    service: String
+    duration_ms: Int
+}
+
+#Codable
+struct Batch {
+    events: [Event]
+}
+
+#Codable
+struct Summary {
+    service: String
+    count: Int
+    total_ms: Int
+}
+
+#Codable
+struct Report {
+    total_events: Int
+    summaries: [Summary]
+}
+
+fn summarize(batch: Batch) Report -> {
+    services := [String]{}
+    loop event in batch.events {
+        if !services.contains(event.service) -> services.push(~event.service)
+    }
+    services.sort()
+    summaries := [Summary]{}
+    loop service in services {
+        count := 0
+        total_ms := 0
+        loop event in batch.events {
+            if event.service == service {
+                count += 1
+                total_ms += event.duration_ms
+            }
+        }
+        summaries.push(Summary{service: service, count: count, total_ms: total_ms})
+    }
+    return Report{total_events: batch.events.len(), summaries: summaries}
+}
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: structured_data INPUT_FILE")
+    input :: args.get(1) ?? panic("missing input file")
+    raw :: fs.read(input) ?? panic("cannot read input")
+    decoded :: json.decode<Batch>(raw)
+    if decoded == {
+        .Ok(batch) -> print(json.to_string(summarize(batch)))
+        .Err(_) -> print("invalid-json")
+        else -> print("invalid-json")
+    }
+}

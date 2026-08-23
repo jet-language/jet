@@ -179,7 +179,7 @@ pub(super) fn compose_env(
     flags: &Flags,
     plan: &RunPlan,
 ) -> Result<Env, i32> {
-    RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
+    enforce_required_sandbox_policy(theme, flags.json)?;
     if let Err(error) = validate_integration_facts(plan) {
         theme.error_coded(
             "E1335",
@@ -920,10 +920,9 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
     let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
-    if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
+    if let Err(code) = enforce_required_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
-
     // D-WORKSPACE1=B: if a workspace declaration is present, build selected
     // members via the first-party core provider (no Nix required).
     if let Some(checked) = workspace_source.as_ref() {
@@ -1081,6 +1080,15 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             cached,
             substituted
         ));
+        let sandbox = RuntimePolicy::detect_sandbox();
+        let outcome = if built > 0 {
+            format!("enforced via {} ({})", sandbox.mechanism, sandbox.policy)
+        } else if substituted > 0 {
+            format!("trusted substitution ({})", sandbox.reason)
+        } else {
+            "verified cache only".to_string()
+        };
+        theme.detail(&format!("build sandbox outcome: {outcome}"));
         auto_clean_after_success(theme, &roots);
         0
     } else {
@@ -1134,7 +1142,7 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);
-    if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
+    if let Err(code) = enforce_required_sandbox_policy(theme, parsed.flags.json) {
         return code;
     }
     if let Some(checked) = workspace_source.as_ref() {
@@ -1178,5 +1186,16 @@ pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
         code
     } else {
         1
+    }
+}
+
+fn enforce_required_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32> {
+    if matches!(
+        RuntimePolicy::read_sandbox_policy(),
+        RuntimePolicy::SandboxPolicy::Require
+    ) {
+        RuntimePolicy::enforce_sandbox_policy(theme, json)
+    } else {
+        Ok(())
     }
 }

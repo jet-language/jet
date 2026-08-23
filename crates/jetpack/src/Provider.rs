@@ -206,13 +206,18 @@ pub(crate) fn adapter_action_identity(
     table: &SourceTable,
 ) -> String {
     if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
-        recipe.build_identity_for_source_with_dependencies(
+        let identity = recipe.build_identity_for_source_with_dependencies(
             &plan.name,
             &plan.source,
             source_digest,
             platform,
             &adapter_identity_inputs(plan, table),
-        )
+        );
+        // The cache identity records the required policy, not this machine's
+        // current capability. A missing local backend must still be able to
+        // select a trusted substitute produced under a native backend; the
+        // actual backend is recorded separately in the producer receipt.
+        format!("{identity}\nsandbox=native-required")
     } else {
         recipe.build_identity(&plan.name, source_digest, platform)
     }
@@ -1035,6 +1040,8 @@ pub enum ProviderError {
     Adapter(String),
     /// E1273: a recipe-backed package failed while running a logged build step.
     BuildDebug(String),
+    /// E1275: a local executable action has no enforceable native sandbox.
+    SandboxUnavailable(String),
     /// E1271: a source channel cannot be resolved or is unlocked in a context
     /// that may not resolve it.
     Channel(String),
@@ -1058,6 +1065,7 @@ impl ProviderError {
             ProviderError::ForeignProjection(_) => Some("E1256"),
             ProviderError::Channel(_) => Some("E1271"),
             ProviderError::BuildDebug(_) => Some("E1273"),
+            ProviderError::SandboxUnavailable(_) => Some("E1275"),
             ProviderError::Offline(_) => Some("E1276"),
             ProviderError::Cran(_) => None,
             ProviderError::LuaRocks(_) => None,
@@ -1942,38 +1950,47 @@ pub(crate) fn realize_adapter(
         &recipe_hash,
         &source_hash,
     );
-    if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
-        if attempt.steps.is_empty() {
-            attempt.push_step(super::BuildDebug::StepLog {
-                index: 0,
-                total: 0,
-                name: "recipe validation".into(),
-                command: d.what.clone(),
-                cwd: staged.to_string_lossy().into_owned(),
-                status: "failed".into(),
-                stdout: String::new(),
-                stderr: format!("{}: {}\n", d.code, d.why),
-            });
+    let run_report = match Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
+        Ok(report) => report,
+        Err(d) => {
+            if attempt.steps.is_empty() {
+                attempt.push_step(super::BuildDebug::StepLog {
+                    index: 0,
+                    total: 0,
+                    name: "recipe validation".into(),
+                    command: d.what.clone(),
+                    cwd: staged.to_string_lossy().into_owned(),
+                    status: "failed".into(),
+                    stdout: String::new(),
+                    stderr: format!("{}: {}\n", d.code, d.why),
+                });
+            }
+            attempt.mark_failed();
+            let scratch_error = attempt
+                .preserve_scratch(ctx.store_dir, &staged, &out_dir)
+                .err()
+                .map(|error| format!("; preserved scratch unavailable: {error}"))
+                .unwrap_or_default();
+            let _ = attempt.persist(ctx.store_dir);
+            if d.code == "E1275" {
+                return Err(ProviderError::SandboxUnavailable(format!(
+                    "adapter `{}` refused before its executable action launched: {}",
+                    plan.name, d.why
+                )));
+            }
+            let message = format!(
+                "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}{}",
+                plan.name,
+                attempt.failed_step,
+                attempt.steps.len(),
+                d.what,
+                plan.name,
+                attempt.scratch_dir,
+                scratch_error
+            );
+            return Err(ProviderError::BuildDebug(message));
         }
-        attempt.mark_failed();
-        let scratch_error = attempt
-            .preserve_scratch(ctx.store_dir, &staged, &out_dir)
-            .err()
-            .map(|error| format!("; preserved scratch unavailable: {error}"))
-            .unwrap_or_default();
-        let _ = attempt.persist(ctx.store_dir);
-        let message = format!(
-            "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}{}",
-            plan.name,
-            attempt.failed_step,
-            attempt.steps.len(),
-            d.what,
-            plan.name,
-            attempt.scratch_dir,
-            scratch_error
-        );
-        return Err(ProviderError::BuildDebug(message));
-    }
+    };
     let _ = attempt.persist(ctx.store_dir);
     super::Store::seal_local_output(&out_dir).map_err(|error| {
         ProviderError::Adapter(format!("could not seal adapter output: {error}"))
@@ -1993,6 +2010,8 @@ pub(crate) fn realize_adapter(
     let declared_dependencies = adapter_dependency_refs(plan).join(",");
     let declared_capabilities = recipe.declared_capabilities().join(",");
     let declared_authority = table.trust_lines().join("\n");
+    let sandbox_class = run_report.sandbox_class.clone();
+    let sandbox_policy = run_report.sandbox_policy.clone();
     let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
         .map_err(|d| ProviderError::Adapter(d.what))?
         .replay_record()
@@ -2007,6 +2026,11 @@ pub(crate) fn realize_adapter(
         "adapter.build.authority".to_string(),
         declared_authority.clone(),
     );
+    replay_facts.insert("adapter.build.sandbox".to_string(), sandbox_class.clone());
+    replay_facts.insert(
+        "adapter.build.sandbox_policy".to_string(),
+        sandbox_policy.clone(),
+    );
     let replay = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
         .map_err(ProviderError::Adapter)?;
     let producer = super::Store::ProducerRecord::new(
@@ -2015,11 +2039,13 @@ pub(crate) fn realize_adapter(
         &source_fingerprint,
         replay,
         format!(
-            "declared-tools={}\nbuild-identity={build_identity}\ncapabilities={}\ndependencies={}\nauthority={}",
+            "declared-tools={}\nbuild-identity={build_identity}\ncapabilities={}\ndependencies={}\nauthority={}\nsandbox={}\nsandbox-policy={}",
             declared_dependencies,
             declared_capabilities,
             declared_dependencies,
             declared_authority,
+            sandbox_class,
+            sandbox_policy,
         ),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
         BTreeMap::from([
@@ -2030,6 +2056,8 @@ pub(crate) fn realize_adapter(
                 "build.dependencies".into(),
                 declared_dependencies,
             ),
+            ("build.sandbox".into(), sandbox_class),
+            ("build.sandbox_policy".into(), sandbox_policy),
         ]),
     )
     .map_err(ProviderError::Adapter)?;

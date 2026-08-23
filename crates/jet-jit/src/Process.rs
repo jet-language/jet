@@ -42,6 +42,27 @@ fn alloc_process_result(out: &process_prelude::ProcessResult) -> i64 {
     })
 }
 
+fn alloc_process_plan(plan: &process_prelude::ProcessPlan) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        // Field order: executable identity, argv, policy digest, backend.
+        let record = rt.heap.alloc_record(4);
+        let executable = rt.heap.alloc_string(plan.executable_identity.clone());
+        let _ = rt.heap.record_set_string(record, 0, executable);
+        let argv_values = plan
+            .argv
+            .iter()
+            .map(|word| rt.heap.alloc_string(word.clone()))
+            .collect::<Vec<_>>();
+        let argv = rt.heap.alloc_int_list(argv_values);
+        let _ = rt.heap.record_set_int(record, 1, argv);
+        let digest = rt.heap.alloc_string(plan.policy_digest.clone());
+        let _ = rt.heap.record_set_string(record, 2, digest);
+        let backend = rt.heap.alloc_string(plan.backend.clone());
+        let _ = rt.heap.record_set_string(record, 3, backend);
+        record
+    })
+}
+
 fn outcome_to_result(out: process_prelude::ProcessResult) -> i64 {
     result_ok(alloc_process_result(&out) as u64)
 }
@@ -183,7 +204,15 @@ fn jet_jit_process_run(cmd_list: i64) -> i64 {
 }
 
 fn jet_jit_process_run_with_authority(cmd_list: i64, _authority: i64) -> i64 {
-    jet_jit_process_run(cmd_list)
+    let spec = process_prelude::spec_new(clone_string_list(cmd_list));
+    let authority_wire = Concurrency::with_runtime_mut(|rt| {
+        crate::Collections::authority_wire(rt, _authority)
+    });
+    let spec = process_prelude::spec_under_wire(spec, &authority_wire);
+    match process_prelude::spec_run(&spec) {
+        Ok(result) => outcome_to_result(result),
+        Err(error) => process_io_error_result(error),
+    }
 }
 
 fn jet_jit_process_pipeline(spec_list: i64) -> i64 {
@@ -248,6 +277,25 @@ fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
     };
     match process_prelude::spec_run_checked(&spec) {
         Ok(result) => outcome_to_result(result),
+        Err(error) => process_io_error_result(error),
+    }
+}
+
+fn jet_jit_process_spec_under(spec: i64, authority: i64) -> i64 {
+    let authority_wire = Concurrency::with_runtime_mut(|rt| {
+        crate::Collections::authority_wire(rt, authority)
+    });
+    update_spec(spec, |spec| {
+        process_prelude::spec_under_wire(spec, &authority_wire)
+    })
+}
+
+fn jet_jit_process_spec_plan(spec: i64) -> i64 {
+    let Some(spec) = clone_spec(spec) else {
+        return invalid_process_spec();
+    };
+    match process_prelude::spec_plan(&spec) {
+        Ok(plan) => result_ok(alloc_process_plan(&plan) as u64),
         Err(error) => process_io_error_result(error),
     }
 }
@@ -537,6 +585,8 @@ host_fns! {
     spec_terminal: "jet_jit_process_spec_terminal" => jet_jit_process_spec_terminal: sig_unary;
     spec_terminal_with_policy: "jet_jit_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
     spec_abilities: "jet_jit_process_spec_abilities" => jet_jit_process_spec_abilities: sig_unary;
+    spec_under: "jet_jit_process_spec_under" => jet_jit_process_spec_under: sig_binary;
+    spec_plan: "jet_jit_process_spec_plan" => jet_jit_process_spec_plan: sig_unary;
     spec_run: "jet_jit_process_spec_run" => jet_jit_process_spec_run: sig_unary;
     spec_run_checked: "jet_jit_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
     spec_spawn: "jet_jit_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;

@@ -1,0 +1,29 @@
+use core.files as fs
+use core.process as process
+use core.ui as ui
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: desktop_interaction_focus INPUT_FILE")
+    input :: args.get(1) ?? panic("missing input file")
+    text :: fs.read(input) ?? panic("cannot read input")
+    backend :: ui.tui_backend()
+    save :: ui.button("Save")
+    cancel :: ui.button("Cancel")
+    backend.set_focus_group([save, cancel])
+    line_number := 0
+    loop line in text.split("\n") {
+        line_number += 1
+        if line_number != 1 && line != "" {
+            if line == "Tab" {
+                backend.on_event(ui.key_event(line))
+                print("focus|{backend.focused_label()}")
+            } else {
+                label :: "{line}"
+                key :: if line == "Empty" -> "" else -> line
+                backend.on_event(ui.key_event(key))
+                print("event|{label}|observed")
+            }
+        }
+    }
+}

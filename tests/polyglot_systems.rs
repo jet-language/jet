@@ -121,8 +121,12 @@ int64_t apply(int64_t (*callback)(int64_t), int64_t input) {
     assert!(result.provenance.contains(&format!("clang={}", clang.display())));
     assert!(result.provenance.contains("namespace=acme"));
     assert!(result.provenance.contains("library=counter_impl"));
+    assert!(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
     assert!(!result.bound.iter().any(|name| name.contains("decoy")));
     assert!(result.source.contains("pub fn apply(callback:"));
+    assert!(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
+    assert!(result.source.contains("-[FFI.Cpp]>"));
+    assert!(!result.source.contains("=>"));
 
     let changed_target = jet::CppBind::cache_identity_for_test(&header, &options, "other-target");
     let selected_target = jet::CppBind::cache_identity_for_test(&header, &options, target);

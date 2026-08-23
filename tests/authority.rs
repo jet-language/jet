@@ -110,6 +110,26 @@ fn run() {
 }
 
 #[test]
+fn authority_plan_refuses_before_spawn_on_all_hosted_tiers() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["sh", "-c", "printf spawned"]).under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("spawned")
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    let output = jet::compile(source).expect("authority plan API should compile");
+    assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
+    assert!(output.rust.contains("jet_process_spec_plan"), "{}", output.rust);
+    tir_support::assert_tiers_agree("authority_plan_refusal", source, "refused\n");
+}
+
+#[test]
 fn authority_example_runs_on_all_hosted_tiers() {
     tir_support::assert_example_cli_tiers_agree("types/authority", "abilities\n");
 }

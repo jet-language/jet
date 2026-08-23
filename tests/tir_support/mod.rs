@@ -200,6 +200,15 @@ pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
 /// Run an executable example through the three hosted lenses named by I9:
 /// release/AOT, default `jet run`, and forced TIR interpretation.
 pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
+    assert_example_cli_tiers_agree_with(stem, |actual| {
+        assert_eq!(actual, expected_stdout);
+    });
+}
+
+pub fn assert_example_cli_tiers_agree_with<F>(stem: &str, check_stdout: F)
+where
+    F: Fn(&str),
+{
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let source = root.join("examples/features").join(format!("{stem}.jet"));
     assert!(
@@ -238,11 +247,7 @@ pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
         );
         let _ = fs::remove_dir_all(&cache);
         assert_eq!(result.0, 0, "{mode} run failed for {stem}:\n{}", result.2);
-        assert_eq!(
-            result.1, expected_stdout,
-            "{mode} output disagreed for {stem}:\n{}",
-            result.2
-        );
+        check_stdout(&result.1);
         if let Some((baseline_mode, baseline_code, baseline_stdout)) = &baseline {
             assert_eq!(
                 result.0, *baseline_code,

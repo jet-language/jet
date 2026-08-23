@@ -13,6 +13,11 @@
 //!   a path outside it escapes confinement (`E1237`);
 //! - **build tools** are realized `Pkg` deps, never host `/usr/bin` — an `exec`
 //!   naming a tool that is not a realized dep is refused (`E1238`);
+//! - **executable actions** run through the shared native child sandbox used by
+//!   hermetic BuildPlan actions. Linux uses Bubblewrap, macOS uses Seatbelt,
+//!   and Windows uses AppContainer; each gets a private source/output boundary,
+//!   cleared environment, denied ambient network, and backend-owned policy
+//!   receipt; unavailable enforcement is `E1275`;
 //! - every `fetch`/`exec` records an **effect entry** so the build's provenance
 //!   is a diff in `.jet/lock`;
 //! - a **locked fetch** caches by content hash and is offline-satisfiable on a
@@ -78,6 +83,12 @@ pub struct RunReport {
     /// Fingerprint of the canonical finite action graph that admitted this
     /// run. A successful report never comes from the raw recipe loop alone.
     pub plan_fingerprint: String,
+    /// Actual child backend used by executable recipe steps, or
+    /// `non-executing` when the recipe needed no child process.
+    pub sandbox_class: String,
+    /// Backend-owned filesystem/process/network/environment/device/resource
+    /// policy receipt.
+    pub sandbox_policy: String,
 }
 
 impl RunReport {
@@ -86,6 +97,23 @@ impl RunReport {
             self.effects.push(e.to_string());
             self.effects.sort();
         }
+    }
+
+    fn record_sandbox(&mut self, class: &str, policy: &str) {
+        if self.sandbox_class == "non-executing" {
+            self.sandbox_class = class.to_string();
+            self.sandbox_policy = policy.to_string();
+        }
+        debug_assert_eq!(self.sandbox_class, class);
+        debug_assert_eq!(self.sandbox_policy, policy);
+    }
+}
+
+fn run_report() -> RunReport {
+    RunReport {
+        sandbox_class: "non-executing".to_string(),
+        sandbox_policy: "no child launched".to_string(),
+        ..RunReport::default()
     }
 }
 
@@ -1016,7 +1044,7 @@ pub fn run_logged(
         fetch_cache: ctx.fetch_cache,
         offline: ctx.offline,
     };
-    let mut report = RunReport::default();
+    let mut report = run_report();
     let total = recipe.steps.len();
     let result = (|| {
         std::fs::create_dir_all(staged_ctx.output_root)
@@ -1078,7 +1106,7 @@ fn run_steps(
 ) -> Result<RunReport, Diagnostic> {
     std::fs::create_dir_all(ctx.output_root)
         .map_err(|error| recipe_io_error("could not create staged recipe output", error))?;
-    let mut report = RunReport::default();
+    let mut report = run_report();
     for step_index in order {
         let step = recipe
             .steps
@@ -1221,7 +1249,7 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
         if metadata.is_dir() {
             copy_tree(&from, &to)?;
-        } else {
+        } else if metadata.is_file() {
             std::fs::copy(&from, &to)?;
             #[cfg(unix)]
             {
@@ -1229,6 +1257,11 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
                 let mode = std::fs::metadata(&from)?.permissions().mode();
                 std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
             }
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("recipe tree contains special file `{}`", from.display()),
+            ));
         }
     }
     Ok(())
@@ -1483,21 +1516,14 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-/// Construct the only environment a recipe tool may observe. Build hooks do
-/// not inherit the caller's credentials, proxy settings, locale, or other
-/// host state. The action graph declares the two deterministic policy values;
-/// `JET_BUILD_OUTPUT` is the private staging channel used by the recipe ABI.
-fn build_command(exe: &Path, args: &[String], ctx: &BuildContext) -> std::process::Command {
-    let mut command = std::process::Command::new(exe);
-    command
-        .env_clear()
-        .stdin(std::process::Stdio::null())
-        .args(args)
-        .current_dir(ctx.source_dir)
-        .env("JET_BUILD_OUTPUT", ctx.output_root)
-        .env("SOURCE_DATE_EPOCH", "0")
-        .env("JET_PROFILE", "default");
-    command
+/// Construct the only environment a recipe tool may observe. The native
+/// backend clears the inherited environment and maps `JET_BUILD_OUTPUT` to the
+/// private output mount; this map carries only declared deterministic values.
+fn build_env() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+        ("JET_PROFILE".to_string(), "default".to_string()),
+    ])
 }
 
 /// A realized tool is an exact filesystem artifact. Relative names are
@@ -1521,23 +1547,8 @@ fn do_exec(
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
     let exe = realized_tool(&ctx.tools, tool)?;
-    // Confine writes: run in the staged tree; the install root is the only
-    // sanctioned output surface. A hostile tool can still misbehave — the
-    // OS-level sandbox is D-JPK-NODAEMON1's unprivileged jail (U28); this
-    // seam enforces the *structural* contract.
-    let status = build_command(exe, args, ctx).status().map_err(|e| {
-        Diagnostic::error(
-            "E1238",
-            format!("build tool `{tool}` failed to run"),
-            format!(
-                "the realized tool at {} could not be executed: {e}",
-                exe.display()
-            ),
-            "make sure the tool dependency realized correctly.".to_string(),
-            None,
-        )
-    })?;
-    if !status.success() {
+    let result = run_recipe_tool(exe, args, ctx)?;
+    if !result.output.status.success() {
         return Err(Diagnostic::error(
             "E1238",
             format!("build tool `{tool}` exited with an error"),
@@ -1546,6 +1557,7 @@ fn do_exec(
             None,
         ));
     }
+    report.record_sandbox(&result.mechanism, &result.policy);
     report.add_effect(&format!("exec:{tool}"));
     Ok(())
 }
@@ -1557,19 +1569,8 @@ fn do_exec_logged(
     report: &mut RunReport,
 ) -> Result<(), Diagnostic> {
     let exe = realized_tool(&ctx.tools, tool)?;
-    let out = build_command(exe, args, ctx).output().map_err(|e| {
-        Diagnostic::error(
-            "E1238",
-            format!("build tool `{tool}` failed to run"),
-            format!(
-                "the realized tool at {} could not be executed: {e}",
-                exe.display()
-            ),
-            "make sure the tool dependency realized correctly.".to_string(),
-            None,
-        )
-    })?;
-    if !out.status.success() {
+    let result = run_recipe_tool(exe, args, ctx)?;
+    if !result.output.status.success() {
         return Err(Diagnostic::error(
             "E1238",
             format!("build tool `{tool}` exited with an error"),
@@ -1578,8 +1579,113 @@ fn do_exec_logged(
             None,
         ));
     }
+    report.record_sandbox(&result.mechanism, &result.policy);
     report.add_effect(&format!("exec:{tool}"));
     Ok(())
+}
+
+/// Run an untrusted recipe against private copies of source and output. The
+/// native backend must not bind the caller's staged output directly: a child
+/// can create a symlink there and turn a later output write into a host write.
+fn run_recipe_tool(
+    exe: &Path,
+    args: &[String],
+    ctx: &BuildContext,
+) -> Result<jet_comptime::Comptime::Build::NativeSandboxOutput, Diagnostic> {
+    let parent = ctx.output_root.parent().unwrap_or_else(|| Path::new("."));
+    let name = ctx
+        .output_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output");
+    let sandbox = parent.join(format!(
+        ".{name}.jet-sandbox-{}-{}",
+        std::process::id(),
+        STAGED_PLAN_ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    remove_path(&sandbox);
+    let source = sandbox.join("source");
+    let output = sandbox.join("output");
+    std::fs::create_dir_all(&source)
+        .map_err(|error| sandbox_copy_error("could not create the private recipe source", error))?;
+    std::fs::create_dir_all(&output)
+        .map_err(|error| sandbox_copy_error("could not create the private recipe output", error))?;
+    if let Err(error) = copy_tree(ctx.source_dir, &source) {
+        remove_path(&sandbox);
+        return Err(sandbox_copy_error(
+            "could not snapshot the recipe source for the sandbox",
+            error,
+        ));
+    }
+    if let Err(error) = copy_tree(ctx.output_root, &output) {
+        remove_path(&sandbox);
+        return Err(sandbox_copy_error(
+            "could not snapshot the recipe output for the sandbox",
+            error,
+        ));
+    }
+
+    let result = jet_comptime::Comptime::Build::run_native_sandboxed(
+        exe,
+        args,
+        &source,
+        Some(&output),
+        &build_env(),
+        false,
+    )
+    .map_err(native_sandbox_diagnostic);
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            remove_path(&sandbox);
+            return Err(error);
+        }
+    };
+    if result.output.status.success() {
+        if let Err(error) = replace_recipe_output(&output, ctx.output_root) {
+            remove_path(&sandbox);
+            return Err(sandbox_copy_error(
+                "the sandbox produced an unsafe recipe output",
+                error,
+            ));
+        }
+    }
+    remove_path(&sandbox);
+    Ok(result)
+}
+
+fn replace_recipe_output(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(to)? {
+        remove_path(&entry?.path());
+    }
+    copy_tree(from, to)
+}
+
+fn sandbox_copy_error(what: &str, error: std::io::Error) -> Diagnostic {
+    Diagnostic::error(
+        "E1237",
+        what.to_string(),
+        format!("the sandbox boundary rejected a source or output tree: {error}"),
+        "remove symlinks and special files from the recipe source and output, then retry."
+            .to_string(),
+        None,
+    )
+}
+
+fn native_sandbox_diagnostic(
+    error: jet_comptime::Comptime::Build::NativeSandboxError,
+) -> Diagnostic {
+    let detail = match error {
+        jet_comptime::Comptime::Build::NativeSandboxError::Unsupported(detail)
+        | jet_comptime::Comptime::Build::NativeSandboxError::Io(detail) => detail,
+    };
+    Diagnostic::error(
+        "E1275",
+        "build sandboxing is required but unavailable".to_string(),
+        detail,
+        "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.".to_string(),
+        None,
+    )
 }
 
 fn step_log(

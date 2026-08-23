@@ -84,10 +84,16 @@ mod supported {
 
     fn canonical_owner(path: &Path) -> io::Result<PathBuf> {
         let lock_dir = path.parent().ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidInput, "jetpack lock path has no directory")
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                "jetpack lock path has no directory",
+            )
         })?;
         let root = lock_dir.parent().ok_or_else(|| {
-            io::Error::new(ErrorKind::InvalidInput, "jetpack lock path has no managed root")
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                "jetpack lock path has no managed root",
+            )
         })?;
         fs::canonicalize(root)
     }

@@ -1,0 +1,51 @@
+use core.process as process
+use core.sys as env
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: interactive_terminal INPUT_ROOT")
+    root :: args.get(1) ?? panic("missing input root")
+    case_name :: env.get("JET_CORPUS_TASK") ?? panic("missing task identity")
+    if case_name == "interactive-terminal-closed" {
+        run_closed(root)
+    } else {
+        run_dialogue(root)
+    }
+}
+
+fn run_dialogue(root: String) {
+    jet :: process.cmd(["sh", "-c", "printf 'Ada\\nblue\\n' | sh terminal_session.sh"])
+        .cwd(root)
+        .terminal(TerminalPolicy{
+            size: TerminalSize{cols: 100, rows: 30},
+            mode: .Cooked
+        })
+    if !jet.abilities().has("terminal") -> panic("terminal capability missing")
+    child :: jet.spawn() ?? panic("terminal spawn failed")
+    session :: child.terminal ?? panic("terminal session missing")
+    session.resize(TerminalSize{cols: 120, rows: 40}) ?? panic("terminal resize failed")
+    if child.wait() == {
+        .Ok(result) -> {
+            if !result.success -> panic("terminal child failed")
+            if !result.output.contains("Name: ") || !result.output.contains("Hello Ada") || !result.output.contains("Choice blue") {
+                panic("terminal dialogue markers missing")
+            }
+        }
+        .Err(error) -> panic("terminal wait failed {error}")
+    }
+    print("terminal=pty\nresize=ok\nprompt=ok\nreply=ok")
+}
+
+fn run_closed(root: String) {
+    duration :: Duration.seconds(5) ?? panic("duration")
+    result :: process.cmd(["sh", "terminal_closed.sh"])
+        .cwd(root)
+        .terminal(TerminalPolicy{
+            size: TerminalSize{cols: 100, rows: 30},
+            mode: .Cooked
+        })
+        .timeout(duration)
+        .run() ?? panic("closed terminal failed to launch")
+    if !result.success || !result.output.contains("closed") -> panic("closed terminal did not return")
+    print("terminal=pty\nclosed=ok\nexit=0")
+}

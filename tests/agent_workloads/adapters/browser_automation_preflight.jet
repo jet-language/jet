@@ -1,0 +1,51 @@
+use core.files as fs
+use core.process as process
+use core.web.browser as browser
+
+fn run() {
+    args :: process.argv()
+    if args.len() != 2 -> panic("usage: browser_automation_preflight INPUT_FILE")
+    input :: args.get(1) ?? panic("missing input file")
+    text :: fs.read(input) ?? panic("cannot read input")
+    line_number := 0
+    loop line in text.split("\n") {
+        line_number += 1
+        if line_number != 1 && line != "" {
+            fields :: line.split("\t").to_list()
+            if fields.len() != 2 -> panic("bad browser row {line_number}")
+            op :: fields.get(0) ?? panic("missing operation")
+            value :: fields.get(1) ?? panic("missing value")
+            if op == "profile" {
+                if browser.profile(value) == .Ok(_) {
+                    print("profile|{value}|accepted")
+                } else {
+                    print("profile|{value}|rejected")
+                }
+            } else if op == "timeout" {
+                if value == "500" {
+                    if browser.timeout(500) == .Ok(_) {
+                        print("timeout|{value}|accepted")
+                    } else {
+                        print("timeout|{value}|rejected")
+                    }
+                } else {
+                    if browser.timeout(0) == .Ok(_) {
+                        print("timeout|{value}|accepted")
+                    } else {
+                        print("timeout|{value}|rejected")
+                    }
+                }
+            } else if op == "connect" {
+                profile :: browser.profile("bidi-2025.5") ?? panic("profile setup failed")
+                timeout :: browser.timeout(10) ?? panic("timeout setup failed")
+                if browser.connect_profile(value, profile, timeout) == .Ok(_) {
+                    print("connect|{value}|accepted")
+                } else {
+                    print("connect|{value}|rejected")
+                }
+            } else {
+                panic("unknown browser operation {op}")
+            }
+        }
+    }
+}

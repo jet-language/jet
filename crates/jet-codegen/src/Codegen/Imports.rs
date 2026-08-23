@@ -1792,6 +1792,7 @@ pub(crate) fn emit_program_items(
     emit_synthetic_display_trait(out, include_runtime_owned_traits);
     emit_synthetic_operator_traits(out, include_runtime_owned_traits);
     emit_synthetic_close_trait(out);
+    emit_synthetic_foreign_close_impls(cx, items, out);
     emit_synthetic_close_builtin_impls(cx, items, out);
     let (hi, hj, hk, hm) = program_iter_index_usage(items);
     emit_synthetic_iter_index_traits(out, hi, hj, hk, hm);

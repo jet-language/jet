@@ -14,4 +14,7 @@ for file in root.rglob("*"):
     if count:
         rows.append(f"/{file.relative_to(root).as_posix()}|{count}")
 
-print(*sorted(rows), sep="\n")
+if rows:
+    print(*sorted(rows), sep="\n")
+else:
+    print("no-matches")

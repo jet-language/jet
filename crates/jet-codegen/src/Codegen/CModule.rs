@@ -35,7 +35,7 @@ const INT_RANGE_MESSAGE: &str = "a default Int value does not fit in the C i64 r
 /// that fallback fires for a type local to the CURRENT module (no prefix
 /// needed there). Detect which case this is by whether the resolved name
 /// already carries the prefix.
-fn qualify_named_rust_type(cx: &Cx, ty: &Type) -> String {
+pub(crate) fn qualify_named_rust_type(cx: &Cx, ty: &Type) -> String {
     let base = cx.rust_type(ty);
     if !cx.root_prefix.is_empty() && !base.starts_with(cx.root_prefix.as_str()) {
         format!("{}{}", cx.root_prefix, base)

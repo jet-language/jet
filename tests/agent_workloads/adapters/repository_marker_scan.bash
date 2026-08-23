@@ -22,6 +22,11 @@ for file in "$root"/**/*; do
   fi
 done
 
+if ((${#rows[@]} == 0)); then
+  printf '%s\n' 'no-matches'
+  exit 0
+fi
+
 for ((i = 0; i < ${#rows[@]}; i += 1)); do
   for ((j = i + 1; j < ${#rows[@]}; j += 1)); do
     if [[ ${rows[j]} < ${rows[i]} ]]; then

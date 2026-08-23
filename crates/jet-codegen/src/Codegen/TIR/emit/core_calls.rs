@@ -3313,6 +3313,9 @@ pub(crate) fn emit_tir_core_call(
             cx.root_prefix,
             arg(0)
         ),
+        ("core.process", "workspace") => {
+            format!("{}jet_std_process_workspace()", cx.root_prefix)
+        }
         ("core.process", "run") if args.len() == 2 => {
             format!(
                 "{}jet_std_process_run_with_authority(&({}), &({}))",

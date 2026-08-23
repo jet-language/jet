@@ -25,4 +25,5 @@ for (const file of files) {
     rows.push(`/${relative(root, file).split(sep).join("/")}|${count}`);
   }
 }
-console.log(rows.sort().join("\n"));
+if (rows.length) console.log(rows.sort().join("\n"));
+else console.log("no-matches");

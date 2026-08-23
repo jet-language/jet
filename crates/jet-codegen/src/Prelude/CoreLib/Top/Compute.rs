@@ -3450,16 +3450,16 @@ mod jet_compute_vulkan {
         if output_len == 0 {
             return Ok(Vec::new());
         }
-        if inputs.len() > 6 {
+        if inputs.len() > 5 {
             return Err(JetComputeError::InvalidShape(
-                "Vulkan kernels accept at most six input buffers".to_string(),
+                "Vulkan kernels accept at most five input buffers".to_string(),
             ));
         }
         let api = Api::load()?;
         let context = Context::new(api)?;
         let dummy = [0.0_f32];
-        let mut input_buffers = Vec::with_capacity(6);
-        for index in 0..6 {
+        let mut input_buffers = Vec::with_capacity(5);
+        for index in 0..5 {
             let values = inputs.get(index).copied().unwrap_or(&dummy);
             input_buffers.push(Buffer::f32(
                 &context,
@@ -3487,9 +3487,9 @@ mod jet_compute_vulkan {
             input_buffers[0].descriptor(),
             input_buffers[1].descriptor(),
             output.descriptor(),
+            input_buffers[2].descriptor(),
             input_buffers[3].descriptor(),
             input_buffers[4].descriptor(),
-            input_buffers[5].descriptor(),
             params_buffer.descriptor(),
         ];
         let set_layouts = [context.descriptor_layout];
@@ -3639,8 +3639,14 @@ mod jet_compute_vulkan {
         output.read_f32(output_len)
     }
 
+    pub fn probe() -> Result<(), JetComputeError> {
+        Api::load()
+            .and_then(Context::new)
+            .map(|context| drop(context))
+    }
+
     pub fn available() -> bool {
-        Api::load().and_then(Context::new).is_ok()
+        probe().is_ok()
     }
 
     pub fn copy(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
@@ -3866,7 +3872,12 @@ mod jet_compute_vulkan {
         ))
     }
 
-    pub fn available() -> bool { false }
+    pub fn probe() -> Result<(), JetComputeError> {
+        unavailable()
+    }
+    pub fn available() -> bool {
+        false
+    }
     pub fn copy(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
     pub fn binary(_: u32, _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
     pub fn unary(_: u32, _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }

@@ -1,6 +1,4 @@
-use core.term as io
 use core.process as process
-use core.time as time
 
 fn run() {
     args :: process.argv()
@@ -25,7 +23,7 @@ fn run() {
         .output_limit(1048576)
         .run() ?? panic("cannot run git diff")
     if result.timed_out -> panic("git diff timed out")
-    if result.code != 1 -> panic("git diff exit {result.code}: {result.errors.trim()}")
+    if result.code != 0 && result.code != 1 -> panic("git diff exit {result.code}: {result.errors.trim()}")
 
     output :: ~result.output
     added := 0

@@ -712,6 +712,15 @@ pub(crate) mod process_prelude {
             pub output_limit: Option<i64>,
             pub detached: bool,
             pub terminal: Option<TerminalPolicy>,
+            pub policy_wire: Option<String>,
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct ProcessPlan {
+            pub executable_identity: String,
+            pub argv: Vec<String>,
+            pub policy_digest: String,
+            pub backend: String,
         }
 
         #[derive(Clone, Debug)]
@@ -759,13 +768,14 @@ pub(crate) mod process_prelude {
         jet_codegen::scheduler::jet_scheduler_park_ms(wait_kind, millis);
     }
 
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSpec.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
 
     pub(crate) use jet_std::{
-        Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessReader, ProcessResult,
-        ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
+        Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
+        ProcessResult, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
         TerminalSession, TerminalSize,
     };
 
@@ -826,6 +836,14 @@ pub(crate) mod process_prelude {
 
     pub(crate) fn spec_abilities(spec: &ProcessSpec) -> std::collections::HashSet<String> {
         jet_process_spec_abilities(spec)
+    }
+
+    pub(crate) fn spec_under_wire(spec: ProcessSpec, authority_wire: &String) -> ProcessSpec {
+        jet_process_spec_under_wire(spec, authority_wire)
+    }
+
+    pub(crate) fn spec_plan(spec: &ProcessSpec) -> Result<ProcessPlan, IOError> {
+        jet_process_spec_plan(spec)
     }
 
     pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
@@ -901,6 +919,27 @@ fn process_spec_field<'a>(recv: &'a CtValue, wanted: &str) -> Option<&'a CtValue
     (type_name == "ProcessSpec")
         .then(|| fields.iter().find_map(|(name, value)| (name == wanted).then_some(value)))
         .flatten()
+}
+
+fn process_authority_wire(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("ProcessSpec.under authority", span));
+    };
+    if type_name != "Abilities" {
+        return Err(unsupported("ProcessSpec.under authority", span));
+    }
+    let Some((_, CtValue::List(rights))) = fields.iter().find(|(name, _)| name == "rights") else {
+        return Err(unsupported("ProcessSpec.under authority", span));
+    };
+    let mut wire = Vec::with_capacity(rights.len());
+    for right in rights {
+        let CtValue::Str(right) = right else {
+            return Err(unsupported("ProcessSpec.under authority", span));
+        };
+        wire.push(right.clone());
+    }
+    wire.sort();
+    Ok(wire.join("\n"))
 }
 
 fn process_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
@@ -1182,6 +1221,13 @@ fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude
     )?
     .map(|value| process_terminal_policy(&value, "ProcessSpec.terminal", span))
     .transpose()?;
+    spec.policy_wire = process_optional(
+        process_spec_field(recv, "policy"),
+        "ProcessSpec.policy",
+        span,
+    )?
+    .map(|value| process_string(&value, "ProcessSpec.policy", span))
+    .transpose()?;
     Ok(spec)
 }
 
@@ -1246,6 +1292,28 @@ fn process_spec_value(spec: &process_prelude::ProcessSpec) -> CtValue {
                     Type::Named("TerminalPolicy".to_string()),
                 ),
             ),
+            (
+                "policy".to_string(),
+                optional(spec.policy_wire.clone().map(CtValue::Str), Type::String),
+            ),
+        ],
+    }
+}
+
+fn process_plan_value(plan: process_prelude::ProcessPlan) -> CtValue {
+    CtValue::Struct {
+        type_name: "ProcessPlan".to_string(),
+        fields: vec![
+            (
+                "executable_identity".to_string(),
+                CtValue::Str(plan.executable_identity),
+            ),
+            (
+                "argv".to_string(),
+                CtValue::List(plan.argv.into_iter().map(CtValue::Str).collect()),
+            ),
+            ("policy_digest".to_string(), CtValue::Str(plan.policy_digest)),
+            ("backend".to_string(), CtValue::Str(plan.backend)),
         ],
     }
 }
@@ -1346,6 +1414,15 @@ fn process_result_outcome(
     }
 }
 
+fn process_plan_outcome(
+    result: Result<process_prelude::ProcessPlan, process_prelude::IOError>,
+) -> CtValue {
+    match result {
+        Ok(plan) => CtValue::Present(Box::new(process_plan_value(plan))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    }
+}
+
 fn process_unit_outcome(result: Result<(), process_prelude::IOError>) -> CtValue {
     match result {
         Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
@@ -1426,6 +1503,8 @@ fn ambient_process_handle(
             | "detached"
             | "terminal"
             | "abilities"
+            | "under"
+            | "plan"
             | "run"
             | "run_checked"
             | "spawn"
@@ -1478,9 +1557,17 @@ fn ambient_process_handle(
                 }
                 _ => Err(unsupported("ProcessSpec.terminal arguments", span)),
             },
+            "under" => {
+                let authority = args
+                    .first()
+                    .ok_or_else(|| unsupported("ProcessSpec.under authority", span))?;
+                let wire = process_authority_wire(authority, span)?;
+                Ok(process_spec_value(&process_prelude::spec_under_wire(spec, &wire)))
+            }
             "abilities" => Ok(process_set_value(
                 process_prelude::spec_abilities(&spec).into_iter().collect(),
             )),
+            "plan" => Ok(process_plan_outcome(process_prelude::spec_plan(&spec))),
             "run" => Ok(process_result_outcome(process_prelude::spec_run(&spec))),
             "run_checked" => Ok(process_result_outcome(process_prelude::spec_run_checked(&spec))),
             "spawn" => match process_prelude::spec_spawn(&spec) {
@@ -3646,6 +3733,15 @@ pub fn ambient_core_call(
             };
             Some(Ok(value))
         }
+        ("core.process", "workspace") => {
+            Some(Ok(CtValue::Struct {
+                type_name: "Abilities".to_string(),
+                fields: vec![(
+                    "rights".to_string(),
+                    CtValue::List(vec![CtValue::Str("FS.Read".to_string())]),
+                )],
+            }))
+        }
         ("core.process", "run") => {
             let Some(CtValue::List(items)) = args.first() else {
                 return Some(Err(unsupported("core.process.run arguments", span)));
@@ -3660,9 +3756,15 @@ pub fn ambient_core_call(
                 };
                 words.push(word.clone());
             }
-            Some(Ok(process_result_outcome(process_prelude::spec_run(
-                &process_prelude::spec_new(words),
-            ))))
+            let mut spec = process_prelude::spec_new(words);
+            if let Some(authority) = args.get(1) {
+                let wire = match process_authority_wire(authority, span) {
+                    Ok(wire) => wire,
+                    Err(error) => return Some(Err(error)),
+                };
+                spec = process_prelude::spec_under_wire(spec, &wire);
+            }
+            Some(Ok(process_result_outcome(process_prelude::spec_run(&spec))))
         }
         ("core.process", "cmd") => {
             let Some(CtValue::List(items)) = args.into_iter().next() else {
