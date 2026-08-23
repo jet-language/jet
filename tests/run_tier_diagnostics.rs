@@ -351,3 +351,66 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
         "AOT text drifted from the UI snapshot"
     );
 }
+
+#[test]
+fn programmable_build_check_matches_aot_interpreter_dev_and_web() {
+    let scratch = common::Scratch::new("programmable-build-tier-parity");
+    let file = scratch.join("main.jet");
+    let source = r#"
+struct Entity { id: Int }
+
+fn build(b: BuildContext) BuildPlan ! -> {
+    types :: b.program.types()
+    b.error(types[0].span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+    return b.plan()
+}
+
+fn run() {}
+"#;
+    fs::write(&file, source).unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let shape = |diags: &[jet::Diagnostics::Diagnostic]| {
+        diags
+            .iter()
+            .map(|diag| {
+                (
+                    diag.code.clone(),
+                    diag.what.clone(),
+                    diag.why.clone(),
+                    diag.fix.clone(),
+                    diag.span,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let aot = jet::compile_programmable_build(&path, &[])
+        .expect_err("programmable build check must reject this source");
+    let expected = shape(&aot);
+    assert_eq!(expected.len(), 1);
+    assert_eq!(expected[0].0, "ORG01");
+
+    let interpreter = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("interpreter must reject the programmable build check: {other:?}"),
+    };
+    let jit = match jet::Interpreter::run_jit_once_with_args(&path, &[]) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("Cranelift run must reject the programmable build check: {other:?}"),
+    };
+    let dev = match jet::Interpreter::dev_iteration(&path, false, false) {
+        RunOutcome::Problems(diags) => diags,
+        other => panic!("dev must reject the programmable build check: {other:?}"),
+    };
+    let web = jet::compile_web_with_gates(&path, jet::Policy::GateSet::default())
+        .expect_err("web checking must reject the programmable build check");
+
+    for (tier, diags) in [
+        ("Cranelift run", jit),
+        ("interpreter", interpreter),
+        ("dev", dev),
+        ("web", web),
+    ] {
+        assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+    }
+}

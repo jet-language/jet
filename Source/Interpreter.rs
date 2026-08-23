@@ -540,6 +540,14 @@ fn checked_bundle_with_entry(
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CheckedBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
+        if let Some(Err(diags)) = crate::check_programmable_build_for_tier(
+            file,
+            gates,
+            profile,
+            setting_overrides,
+        ) {
+            return Err(diags);
+        }
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {

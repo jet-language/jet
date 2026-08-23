@@ -619,6 +619,57 @@ pub fn prepare_programmable_build_front_end(
     with_compiler_stack(move || Driver::prepare_build_front_end(inputs))
 }
 
+fn file_selects_programmable_build(file: &str) -> bool {
+    let source = match std::fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(_) => return false,
+    };
+    let project_root = std::path::Path::new(file)
+        .parent()
+        .and_then(Loader::find_manifest_root);
+    Driver::selects_build_entry(&source, project_root.as_deref())
+}
+
+/// Run the selected build entry's compile-time checks for tiered run/dev
+/// paths. `execute: false` still evaluates `fn build` and returns its
+/// diagnostics, but never adds build actions or generated sources to runtime.
+pub(crate) fn check_programmable_build_for_tier(
+    file: &str,
+    gates: Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Option<Result<(), Vec<Diagnostic>>> {
+    if !file_selects_programmable_build(file) {
+        return None;
+    }
+    Some(with_compiler_stack(|| {
+        let grants = resolve_build_grants(file, &[])?
+            .iter()
+            .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
+            .collect();
+        Driver::compile_bundle_path_build(
+            file,
+            Driver::BuildRunOptions {
+                grants,
+                policy: production_build_policy(),
+                execute: false,
+                gates,
+                inspect_only: false,
+                emit_generated: false,
+                locked: false,
+                freestanding: false,
+                web_target: false,
+                plugin_target: false,
+                cross_target: None,
+                profile: profile.to_string(),
+                setting_overrides: setting_overrides.clone(),
+                remote: None,
+            },
+        )
+        .map(|_| ())
+    }))
+}
+
 fn compile_programmable_build_opts_inner(
     file: &str,
     grants: &[String],
@@ -1588,11 +1639,11 @@ fn compile_bundle_path_opts_with_settings(
 
 /// Like `compile_with_path` but for `jet build --target=web` (D-WEBBACKEND1 M2).
 pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, Policy::GateSet::default(), true, None)
+    compile_web_with_gates(file, Policy::GateSet::default())
 }
 
 pub fn compile_web_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, true, None)
+    compile_web_with_gates_and_settings(file, gates, &BTreeMap::new())
 }
 
 pub fn compile_web_with_gates_and_settings(
@@ -1600,15 +1651,32 @@ pub fn compile_web_with_gates_and_settings(
     gates: Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_with_settings(
-        file,
-        Sema::CompileMode::Run,
-        false,
-        gates,
-        true,
-        None,
-        setting_overrides,
-    )
+    if file_selects_programmable_build(file) {
+        compile_programmable_build_opts_with_builder_and_profile_and_settings(
+            file,
+            &[],
+            false,
+            gates,
+            false,
+            true,
+            false,
+            None,
+            None,
+            "dev",
+            setting_overrides,
+            None,
+        )
+    } else {
+        compile_bundle_path_opts_with_settings(
+            file,
+            Sema::CompileMode::Run,
+            false,
+            gates,
+            true,
+            None,
+            setting_overrides,
+        )
+    }
 }
 
 pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
