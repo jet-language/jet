@@ -775,6 +775,35 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
             }
         }
+        // D-ENC-CBOR1: the raw comptime fragment is lowered before sema can
+        // attach `resolved_ret` to these polymorphic calls. Preserve the same
+        // public result carriers that `infer_core_call` writes so a nested
+        // `json.parse -> cbor.to_bytes -> cbor.parse` chain never collapses to
+        // the defensive `Unit` fallback.
+        ("core.encoding.cbor", "parse") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("DataTree".to_string())),
+                err: Box::new(Type::Named("CBORError".to_string())),
+            }
+        }
+        ("core.encoding.cbor", "to_bytes" | "to_bytes_canonical") => {
+            return Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                }))),
+                err: Box::new(Type::Named("CBORError".to_string())),
+            }
+        }
+        // The dynamic JSON family is also marked polymorphic in sema, so its
+        // fixed table is intentionally unavailable to this pre-sema fallback.
+        ("core.encoding.json", "parse" | "decode") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("DataTree".to_string())),
+                err: Box::new(Type::Named("JSONError".to_string())),
+            }
+        }
+        ("core.encoding.json", "to_string" | "to_string_pretty") => return Type::String,
         // D-TYPE2-UNCERT1=A: internal canonical measurement constructor route.
         ("core.units", "from") => {
             return Type::Apply {

@@ -2178,9 +2178,13 @@ impl<'a> Checker<'a> {
                     return self.infer(e);
                 }
                 if matches!(expected, Some(Type::Float32)) {
+                    *raw = None;
                     *is_f32 = true;
                     Some(Type::Float32)
                 } else {
+                    if matches!(expected, Some(Type::Float)) {
+                        *raw = None;
+                    }
                     Some(Type::Float)
                 }
             }

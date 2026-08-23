@@ -802,6 +802,12 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
         let rust = if type_name == "EmailError" { "Error" } else { type_name };
         return (format!("{root}jet_email::{rust}"), true);
     }
+    // D-PENDING1=B: `Loadable` is a Prelude carrier, not a generated Jet enum.
+    // Keep enum literals and match patterns on the same Rust type as core-call
+    // emission and `Cx::rust_type`.
+    if type_name == "Loadable" {
+        return at_root("JetLoadable");
+    }
     if type_name == "AuthError" {
         return at_root("JetAuthError");
     }
@@ -854,6 +860,16 @@ pub(crate) fn tir_enum_variant_rust_name(variant: &str, raw: bool) -> String {
 /// FOREIGN (imported) enum → `{root}{mod}::__jet_<T>::__jet_<V>`, a local enum →
 /// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
 pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+    if type_name == "Loadable" {
+        let root = cx.root_prefix.as_str();
+        let path = match variant {
+            "Idle" | "Loading" => format!("{root}JetLoadable::<(), ()>"),
+            "Loaded" => format!("{root}JetLoadable::<_, ()>"),
+            "Failed" => format!("{root}JetLoadable::<(), _>"),
+            _ => format!("{root}JetLoadable"),
+        };
+        return format!("{path}::{}", tir_enum_variant_rust_name(variant, true));
+    }
     let (path, raw) = tir_enum_rust_path(cx, type_name);
     format!("{path}::{}", tir_enum_variant_rust_name(variant, raw))
 }

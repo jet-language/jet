@@ -1,6 +1,6 @@
 # Registry tiers
 
-Status: current for D-REGCURATE1=C, owner ratified 2026-08-12.
+Status: current for D-REGCURATE1=C and D-1913-LIVENESS1=C, owner ratified.
 
 ## Plan of record
 
@@ -84,18 +84,18 @@ An exact confusable match or a reserved suffix blocks publish. Edit distance 1
 blocks publish. Edit distance 2 emits `L2608` and allows the publish. A blocked
 name emits `E2608`. `--force` does not bypass this name policy.
 
-### Owner threshold call
+### Owner-ratified policy (D-1912-NAME1=A)
 
-The implementation currently stores `warn=2` and `block=1` in
-`Source/Publish/NamePolicy.rs`:
+The same rule applies to both registry tiers. Curated core and machine-gated
+community use it at publish time.
 
-- `block=1`: edit distance 0 or 1 blocks.
-- `warn=2`: edit distance 2 warns and allows publish.
+- `block=1`: block a candidate at edit distance 1 from an existing name.
+- `warn=2`: warn at edit distance 2 and allow the publish.
+- Block confusable and homoglyph matches.
+- Block names ending in `-fixed`, `-patched`, or `-bin`.
+- `--force` does not bypass this policy.
 
-These values are implementation candidates, not registry law. No
-owner-ratified threshold decision is recorded in this checkout. The owner must
-ratify both values, or replace them, before #1912 closes. The ratified decision
-must update this section and the constants together.
+These thresholds and rules are owner-ratified by D-1912-NAME1=A.
 
 ## Maintainer liveness and takeover (#1913)
 
@@ -110,9 +110,23 @@ exit criteria:
    the index;
 4. verify the new maintainer's signature over the release content hash;
 5. test both refused and accepted takeover paths;
-6. raise the exact takeover rule for owner ratification.
+6. record the owner-ratified liveness and takeover rules.
 
-### Provisional mechanical rule
+### Owner-ratified liveness rule
+
+`D-1913-LIVENESS1=C` is owner-ratified with a rights-first policy and no forced
+reclaim:
+
+- A package is marked **dormant after 365 days** without a signed release or a
+  response.
+- **Three contact attempts** are required, and **90 days notice** is required.
+- **Three independent registry maintainers** may approve a **voluntary transfer
+  only**.
+- The registry must **never reclaim a package against an active maintainer
+  objection**.
+- When a transfer fails, a new maintainer **must publish under a new name**.
+
+### Enforced takeover gate
 
 An index entry with a non-empty `public_key` different from the package's first
 pinned key is a takeover. The new key must sign `content_hash`, and
@@ -120,16 +134,8 @@ pinned key is a takeover. The new key must sign `content_hash`, and
 receipt. The rule applies on publish and on fetch. The old warning-only key
 rotation path is retired.
 
-### Owner calls
-
-The mechanical rule above is not owner-ratified in this checkout. The owner
-must ratify or replace:
-
-- whether every changed package key is a takeover, including emergency key
-  recovery;
-- whether the existing core review receipt is the right review evidence for a
-  takeover, or whether takeover receipts need a separate format and explicit
-  old/new key binding.
+The takeover gate is separate from dormant-package transfer. It does not permit
+forced reclaim or override an active maintainer objection.
 
 ## User surfaces
 

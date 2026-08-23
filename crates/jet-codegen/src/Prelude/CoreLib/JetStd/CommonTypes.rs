@@ -2305,6 +2305,12 @@
         }
     }
 
+    impl super::JetDisplay for JetFraction {
+        fn jet_display(&self) -> String {
+            self.to_string_rep()
+        }
+    }
+
     // D-DECIMAL1: exact base-10 decimal (scaled integer + scale).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct JetDecimal {
@@ -2487,6 +2493,12 @@
 
     impl super::JetShow for JetDecimal {
         fn jet_show(&self) -> String {
+            self.to_string_rep()
+        }
+    }
+
+    impl super::JetDisplay for JetDecimal {
+        fn jet_display(&self) -> String {
             self.to_string_rep()
         }
     }

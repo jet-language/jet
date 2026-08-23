@@ -5727,6 +5727,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 }
                             }
                         }
+                        if matches!(elem.as_ref(), Type::Float | Type::Float32) {
+                            if let TExprKind::ListLit(elems) = &mut t.kind {
+                                for el in elems.iter_mut() {
+                                    retag_numeric_width(el, elem);
+                                }
+                            }
+                        }
                     }
                     t
                 })
@@ -5758,6 +5765,34 @@ fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
     while let Some(expr) = work.pop() {
         expr.ty = head.clone();
         if !matches!(head, Type::Float | Type::Float32) {
+            continue;
+        }
+        // The raw-fragment path deliberately lowers an untyped decimal token
+        // through `Decimal.from_str`. A scalar `Float{ ... }` or `Float32{ ... }`
+        // supplies the missing context only here, after the body has been
+        // lowered, so convert that carrier back to the machine-float literal
+        // before evaluation or AOT emission.
+        let raw_float = match &expr.kind {
+            TExprKind::PreciseBuiltin {
+                type_name,
+                func,
+                args,
+            } if type_name == Syntax::TYPE_DECIMAL && func == "from_str" => {
+                match args.as_slice() {
+                    [TExpr {
+                        kind: TExprKind::StrLit(parts),
+                        ..
+                    }] => match parts.as_slice() {
+                        [TStrPart::Lit(raw)] => raw.replace('_', "").parse::<f64>().ok(),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some(value) = raw_float {
+            expr.kind = TExprKind::FloatLit(value);
             continue;
         }
         match &mut expr.kind {

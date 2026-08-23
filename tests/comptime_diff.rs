@@ -33,12 +33,12 @@ const CASES: &[&str] = &[
     "6 ^ 3",
     "1000000 * 1000000",
     // Float rounding + S21 "always a decimal" display
-    "3.0 / 2.0",
-    "10.0 / 4.0",
-    "1.0 / 3.0",
-    "5.0",
-    "2.0 * 2.0",
-    "0.1 + 0.2",
+    "Float{3.0} / Float{2.0}",
+    "Float{10.0} / Float{4.0}",
+    "Float{1.0} / Float{3.0}",
+    "Float{5.0}",
+    "Float{2.0} * Float{2.0}",
+    "Float{0.1} + Float{0.2}",
     // Bool / comparison
     "3 < 5 && 2 == 2",
     "10 >= 10 || false",
@@ -98,15 +98,15 @@ const CASES: &[&str] = &[
 ];
 
 const F32_VALUE_FLOW: &str = r#"
-fn pass_f32(value: F32) F32 {
+fn pass_f32(value: F32) F32 -> {
     return value
 }
 
-fn apply_f32(transform: fn(F32) F32, value: F32) F32 {
+fn apply_f32(transform: fn(F32) F32, value: F32) F32 -> {
     return transform(value)
 }
 
-fn f32_value_flow() String {
+fn f32_value_flow() String -> {
     literal :: F32{ 16777217.0 }
     one :: F32{ 1.0 }
     two :: F32{ 2.0 }
@@ -184,22 +184,22 @@ const MODULE_CASES: &[&str] = &[
     // by every builtin struct type, not specific to `core.data` — see
     // `UrlLite.rs`'s note) — covered instead by
     // `tests/repl.rs::repl_core_data_dispatch`.
-    "use core.data as data\n@comptime_value :: data.sum([1.0, 2.0, 3.5]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.mean([1.0, 2.0, 3.0, 4.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.median([5.0, 1.0, 3.0, 2.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25) ?? panic(\"data\")\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 1.0, 2.0, 3.5 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 1.0, 2.0, 3.0, 4.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.median([Float]{ 5.0, 1.0, 3.0, 2.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.stddev([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n\nfn run() {\n    r :: data.quantile([Float]{ 1.0, 2.0, 3.0, 4.0, 5.0 }, Float{0.25}) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 1.0, 2.0, 3.0, 4.0 }, 2) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([Float]{ 3.0, -1.0, 5.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     // #1657: catastrophic cancellation. A naive left-to-right sum answers
     // 0.0 here and the compensated kernel answers 1.0, so a second
     // implementation on either tier fails these three cases.
-    "use core.data as data\n@comptime_value :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.variance([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\n@comptime_value :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n@comptime_value :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([Float]{ 10000000000000000.0, 1.0, -10000000000000000.0 }, 3) ?? panic(\"data\")\n    print(\"{@comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
@@ -334,13 +334,13 @@ fn stream_generator_break_matches_comptime_and_runtime() {
         35_000,
         "Stream generator early break",
         r#"
-fn stop_after_two() Stream<Int> {
+fn stop_after_two() Stream<Int> -> {
     yield 1
     yield 2
     yield 3
 }
 
-fn first() [Int] {
+fn first() [Int] -> {
     return loop value in stop_after_two() -> {
         if value == 2 { break }
         value
@@ -375,7 +375,7 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
     }
     let src = r#"use core.archive.gzip as gzip
 
-fn codec_probe() String {
+fn codec_probe() String -> {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
     gz :: gzip.decompress(gzip.compress(bytes)) ?? [U8]{}
     golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
@@ -484,7 +484,7 @@ fn comptime_generic_alias_matches_runtime() {
     }
     let src = r#"alias Answer<T> :: T
 
-fn answer() Answer<Int> {
+fn answer() Answer<Int> -> {
     return 42
 }
 
@@ -835,7 +835,7 @@ fn data_empty_input_error_matches_comptime_and_runtime() {
         let src = format!(
             r#"use core.data as data
 
-fn show(result: Float DataError!) String {{
+fn show(result: Float DataError!) String -> {{
     if result == {{
         .Ok(value) -> return "ok {{value}}"
         .Err(e) -> return "{{e.operation}}|{{e.reason}}"
@@ -843,7 +843,7 @@ fn show(result: Float DataError!) String {{
     return "unreachable"
 }}
 
-fn empty() [Float] {{
+fn empty() [Float] -> {{
     return []
 }}
 
@@ -868,7 +868,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) String {
+fn show(result: DataTree XMLError!) String -> {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -927,13 +927,13 @@ use core.encoding.hex as hex
 struct Packet { id: Int, payload: [U8] }
 
 @expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-@expected_floats :: hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+@expected_floats :: hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
 @expected_nan :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
 @expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
 
 fn run() {
     actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-    actual_floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+    actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
     actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
     actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
     if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
@@ -955,11 +955,11 @@ fn cbor_options_and_hostile_errors_match_comptime_and_aot() {
     }
     let src = r#"use core.encoding.cbor as cbor
 
-fn safe() cbor.CBOROptions {
+fn safe() cbor.CBOROptions -> {
     return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
 }
 
-fn show(bytes: [U8]) String {
+fn show(bytes: [U8]) String -> {
     if cbor.parse(bytes, safe()) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -967,35 +967,35 @@ fn show(bytes: [U8]) String {
     return "unreachable"
 }
 
-fn show_strict(bytes: [U8]) String {
+fn show_strict(bytes: [U8]) String -> {
     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_depth(bytes: [U8]) String {
+fn show_depth(bytes: [U8]) String -> {
     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_items(bytes: [U8]) String {
+fn show_items(bytes: [U8]) String -> {
     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_bytes(bytes: [U8]) String {
+fn show_bytes(bytes: [U8]) String -> {
     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_alloc(bytes: [U8]) String {
+fn show_alloc(bytes: [U8]) String -> {
     if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -1003,7 +1003,7 @@ fn show_alloc(bytes: [U8]) String {
     return "unreachable"
 }
 
-fn show_ints(bytes: [U8]) String {
+fn show_ints(bytes: [U8]) String -> {
     if cbor.decode<[Int]>(bytes, safe()) == {
         .Ok(_) -> return "ok"
         .Err(e) -> return "{e[0].path}|{e[0].reason}"
@@ -1048,7 +1048,7 @@ fn run() {
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
-fn build() [Int] {
+fn build() [Int] -> {
     xs := [Int]{}
     loop i in 1..5, 2 {
         if i == 3 { next }

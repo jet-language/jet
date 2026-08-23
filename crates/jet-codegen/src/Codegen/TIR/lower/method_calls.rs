@@ -2835,7 +2835,7 @@ fn lower_method_call_impl(
                             if module == "core.term" && method == "progress" {
                                 progress_return_ty(&targs)
                             } else {
-                                unit_type()
+                                core_call_return_ty(&module, method)
                             }
                         })
                     } else if module == "core.event"
