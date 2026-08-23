@@ -11,6 +11,12 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+#[cfg(target_os = "windows")]
+use jet::Comptime::Build::{
+    execute_build_plan, ActionSpec, BuildCapability, BuildContext as HermeticBuildContext,
+    TargetSpec,
+};
+
 const HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
 
 static SANDBOX_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -362,6 +368,140 @@ fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
     assert_eq!(
         std::fs::read_to_string(out.join("ok")).unwrap().trim(),
         "ok"
+    );
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn native_windows_appcontainer_hermetic_build_allows_declared_output() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("windows-hermetic-success");
+    let marker = base.join("host-marker");
+    let command = format!(
+        "echo escaped>\"{}\" || echo blocked>status & if exist \"{}\" (exit /b 70) else echo ok>status",
+        marker.display(),
+        marker.display()
+    );
+
+    let mut context = HermeticBuildContext::new();
+    let action = context
+        .action(
+            "windows-hermetic-success",
+            ActionSpec::uncached_phony([
+                windows_command_interpreter().to_string_lossy().into_owned(),
+                "/C".to_string(),
+                command,
+            ])
+            .with_outputs(["status"])
+            .with_cap(BuildCapability::Exec),
+        )
+        .expect("hermetic Windows action should register");
+    let target = context
+        .add_executable(
+            "windows-hermetic-success",
+            TargetSpec::new().with_action(action),
+        )
+        .expect("hermetic Windows target should register");
+    let plan = context
+        .plan_with_default(target)
+        .expect("hermetic Windows plan should validate");
+    let grants = [BuildCapability::Exec].into_iter().collect();
+
+    let result = execute_build_plan(&plan, &base, &grants)
+        .expect("AppContainer hermetic build should complete");
+    assert_eq!(result.report.metrics.actions_total, 1);
+    assert_eq!(result.report.metrics.failed_actions, 0);
+    assert_eq!(
+        std::fs::read_to_string(base.join("status")).unwrap().trim(),
+        "ok"
+    );
+    assert!(!marker.exists(), "hermetic build wrote outside its output");
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn native_windows_appcontainer_hermetic_build_rejects_host_write() {
+    let _sandbox_guard = sandbox_test_lock();
+    assert_eq!(
+        jetpack::RuntimePolicy::detect_sandbox().level,
+        jetpack::RuntimePolicy::SandboxLevel::Strong,
+        "Windows hermetic test requires the native AppContainer backend"
+    );
+    let base = scratch("windows-hermetic-failure");
+    let marker = base.join("host-marker");
+    let mut context = HermeticBuildContext::new();
+    let action = context
+        .action(
+            "windows-hermetic-failure",
+            ActionSpec::uncached_phony([
+                windows_command_interpreter().to_string_lossy().into_owned(),
+                "/C".to_string(),
+                format!("echo escaped>\"{}\" && exit /b 70", marker.display()),
+            ])
+            .with_cap(BuildCapability::Exec),
+        )
+        .expect("hermetic Windows action should register");
+    let target = context
+        .add_executable(
+            "windows-hermetic-failure",
+            TargetSpec::new().with_action(action),
+        )
+        .expect("hermetic Windows target should register");
+    let plan = context
+        .plan_with_default(target)
+        .expect("hermetic Windows plan should validate");
+    let grants = [BuildCapability::Exec].into_iter().collect();
+
+    let result = execute_build_plan(&plan, &base, &grants);
+    assert!(result.is_err(), "host write must fail the hermetic action");
+    assert!(!marker.exists(), "hermetic build wrote outside its output");
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn native_windows_appcontainer_rejects_reparse_parent_before_launch() {
+    let _sandbox_guard = sandbox_test_lock();
+    use std::os::windows::fs::symlink_dir;
+
+    assert_eq!(
+        jetpack::RuntimePolicy::detect_sandbox().level,
+        jetpack::RuntimePolicy::SandboxLevel::Strong,
+        "Windows reparse-point test requires the native AppContainer backend"
+    );
+    let base = scratch("windows-reparse-parent");
+    let real = base.join("real");
+    let linked = base.join("linked");
+    let source = real.join("source");
+    let output = real.join("output");
+    let marker = base.join("launched");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&output).unwrap();
+    symlink_dir(&real, &linked).expect("Windows reparse-point test needs a directory link");
+
+    let command = format!(
+        "echo launched>\"{}\" & if exist \"{}\" (exit /b 70) else exit /b 0",
+        marker.display(),
+        marker.display()
+    );
+    let result = jet::Comptime::Build::run_native_sandboxed(
+        &windows_command_interpreter(),
+        &["/C".to_string(), command],
+        &linked.join("source"),
+        Some(&linked.join("output")),
+        &BTreeMap::new(),
+        false,
+    );
+
+    assert!(
+        result.is_err(),
+        "a reparse-point parent must be rejected before launch: {result:?}"
+    );
+    assert!(
+        !marker.exists(),
+        "reparse-point rejection launched the tool"
     );
     std::fs::remove_dir_all(&base).ok();
 }

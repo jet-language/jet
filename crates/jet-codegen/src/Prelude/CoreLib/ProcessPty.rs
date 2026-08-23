@@ -94,6 +94,7 @@ mod unix {
     const VTIME: usize = 5;
     const VMIN: usize = 6;
     const EIO: i32 = 5;
+    const ESRCH: i32 = 3;
 
     #[link(name = "c")]
     extern "C" {
@@ -294,6 +295,12 @@ mod unix {
         // shell and its descendants under one kill/terminate/interrupt action.
         // SAFETY: `kill` receives a valid negative process-group id and signal.
         if unsafe { kill(-pid, signal) } != 0 {
+            // The child may have exited after wait observed it and before the
+            // final group sweep. ESRCH means the requested tree is already
+            // gone, so cleanup has succeeded.
+            if io::Error::last_os_error().raw_os_error() == Some(ESRCH) {
+                return Ok(());
+            }
             return Err(last_os_error("kill process group"));
         }
         Ok(())

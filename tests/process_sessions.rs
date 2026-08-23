@@ -110,18 +110,36 @@ fn run() {{
     interrupt.interrupt() ?? panic("interrupt failed")
     interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
     print(interrupt_result.success)
+    if interrupt.stdin.write("late") == {{
+        .Ok(_) -> panic("interrupt cleanup left stdin open")
+        .Err(error) -> {{
+            if error == {{ .Closed(_) -> {{}} else -> panic("interrupt cleanup was not typed") }}
+        }}
+    }}
 
     terminate :: process.cmd(["{fixture}", "tree", "{terminate}"]).terminal().spawn() ?? panic("terminate spawn failed")
     time.sleep(100ms)
     terminate.terminate() ?? panic("terminate failed")
     terminate_result :: terminate.wait() ?? panic("terminate wait failed")
     print(terminate_result.success)
+    if terminate.stdin.write("late") == {{
+        .Ok(_) -> panic("terminate cleanup left stdin open")
+        .Err(error) -> {{
+            if error == {{ .Closed(_) -> {{}} else -> panic("terminate cleanup was not typed") }}
+        }}
+    }}
 
     kill :: process.cmd(["{fixture}", "tree", "{kill}"]).terminal().spawn() ?? panic("kill spawn failed")
     time.sleep(100ms)
     kill.kill() ?? panic("kill failed")
     kill_result :: kill.wait() ?? panic("kill wait failed")
     print(kill_result.success)
+    if kill.stdin.write("late") == {{
+        .Ok(_) -> panic("kill cleanup left stdin open")
+        .Err(error) -> {{
+            if error == {{ .Closed(_) -> {{}} else -> panic("kill cleanup was not typed") }}
+        }}
+    }}
 
     timeout :: Duration.milliseconds(100) ?? panic("duration failed")
     timed :: process.cmd(["{fixture}", "tree", "{timeout}"]).terminal().timeout(timeout).run() ?? panic("timeout failed")

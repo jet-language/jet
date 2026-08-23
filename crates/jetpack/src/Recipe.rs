@@ -2049,6 +2049,62 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn native_recipe_path_succeeds_or_refuses_before_launch() {
+        let base = scratch("native-sandbox");
+        let src = base.join("src");
+        let out = base.join("out");
+        let cache = base.join("cache");
+        let marker = base.join("host-marker");
+        std::fs::create_dir_all(&src).unwrap();
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("sh"))
+        .find(|candidate| candidate.is_file())
+        .expect("a shell is required for the native recipe path");
+        let marker = marker.to_string_lossy().replace('\'', "'\\''");
+        let mut tools = HashMap::new();
+        tools.insert("sh".to_string(), shell);
+        let ctx = BuildContext {
+            source_dir: &src,
+            output_root: &out,
+            tools,
+            fetch_cache: &cache,
+            offline: false,
+        };
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::Exec {
+                tool: "sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    format!(
+                        "printf ok > \"$JET_BUILD_OUTPUT/ok\"; printf escaped > '{marker}' || :"
+                    ),
+                ],
+            }],
+        };
+        let result = run(&recipe, &ctx, None);
+        let status = jet_comptime::Comptime::Build::native_sandbox_status();
+        if status.available {
+            let report = result.expect("native recipe sandbox should run");
+            assert_eq!(
+                report.sandbox_class,
+                if cfg!(target_os = "linux") {
+                    "linux-bwrap"
+                } else {
+                    "macos-seatbelt"
+                }
+            );
+            assert_eq!(std::fs::read_to_string(out.join("ok")).unwrap(), "ok");
+        } else {
+            assert_eq!(result.unwrap_err().code, "E1275");
+        }
+        assert!(!base.join("host-marker").exists());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
     #[test]
     fn locked_fetch_roundtrips() {
         // A locked file:// fetch caches by hash, records provenance, and is

@@ -786,6 +786,11 @@ fn run() {{
     let compiled = compile_temp("process_terminal_conpty_text.jet", &src);
     assert!(compiled.rust.contains("CreatePseudoConsole"));
     assert!(compiled.rust.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE"));
+    assert!(compiled.rust.contains("let native = jet_process_pty::spawn("));
+    assert!(compiled.rust.contains("jet_process_pty::resize_console("));
+    assert!(compiled.rust.contains("jet_std::ProcessHandle::Native"));
+    assert!(compiled.rust.contains("TerminateJobObject"));
+    assert!(compiled.rust.contains("ClosePseudoConsole"));
 }
 
 #[cfg(unix)]

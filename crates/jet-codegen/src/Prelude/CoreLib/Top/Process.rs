@@ -327,6 +327,7 @@ fn jet_process_child_from_inner(
     let process_group = process_group || job.is_some();
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(
             child.stdin.take().map(jet_std::ProcessStdin::Pipe),
         )),
@@ -676,6 +677,7 @@ fn jet_process_terminal_spawn(
     })?;
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
             jet_std::ProcessStdin::Terminal(stdin),
         ))),
@@ -747,6 +749,7 @@ fn jet_process_terminal_spawn(
     let control = std::rc::Rc::new(jet_std::ConPtyControl::new(native.console));
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
             jet_std::ProcessStdin::Terminal(native.input),
         ))),
@@ -1411,6 +1414,22 @@ fn jet_process_tree_signal(
     jet_process_inner_kill(inner)
 }
 
+fn jet_process_cleanup_io_error(error: std::io::Error) -> jet_std::IOError {
+    jet_std::IOError::other(
+        jet_std::IOOperation::Close,
+        Some("process".to_string()),
+        error,
+    )
+}
+
+fn jet_process_record_cleanup_error(child: &jet_std::ProcessChild, error: jet_std::IOError) {
+    if let Ok(mut slot) = child.cleanup_error.try_borrow_mut() {
+        if slot.is_none() {
+            *slot = Some(error);
+        }
+    }
+}
+
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
     child
         .inner
@@ -1422,6 +1441,9 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
 fn jet_process_child_wait(
     child: &jet_std::ProcessChild,
 ) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
+    if let Some(error) = child.cleanup_error.borrow().clone() {
+        return Err(error);
+    }
     if let Some(result) = child.wait_result.borrow().clone() {
         return Ok(result);
     }
@@ -1494,10 +1516,19 @@ fn jet_process_child_wait(
         // deadlines wake the wait exactly like channel, timer, and I/O waits.
         jet_scheduler_park_ms("process wait", 10);
     };
-    if child.process_group {
+    let cleanup_error = if child.process_group {
         if let Some(inner) = child.inner.borrow_mut().as_mut() {
-            let _ = jet_process_tree_signal(inner, true, jet_process_signal_kill());
+            jet_process_tree_signal(inner, true, jet_process_signal_kill())
+                .err()
+                .map(jet_process_cleanup_io_error)
+        } else {
+            None
         }
+    } else {
+        None
+    };
+    if let Some(error) = cleanup_error.as_ref() {
+        jet_process_record_cleanup_error(child, error.clone());
     }
     let pid = child
         .inner
@@ -1515,6 +1546,9 @@ fn jet_process_child_wait(
         session.control.close();
     }
     let (output, errors, output_exceeded) = jet_process_collect_output(drains)?;
+    if let Some(error) = cleanup_error {
+        return Err(error);
+    }
     if output_exceeded {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -1730,23 +1764,39 @@ fn jet_process_child_signal(
     Ok(())
 }
 
-fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) {
+fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     if child.detached
         || child
             .wait_result
             .try_borrow()
             .map_or(false, |result| result.is_some())
     {
-        return;
+        return Ok(());
     }
-    let Ok(mut slot) = child.inner.try_borrow_mut() else {
-        return;
-    };
+    let mut slot = child.inner.try_borrow_mut().map_err(|_| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Close,
+            Some("process".to_string()),
+            "process child cleanup is already in progress",
+        )
+    })?;
     let Some(inner) = slot.as_mut() else {
-        return;
+        return Ok(());
     };
-    let _ = jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill());
-    let _ = jet_process_inner_wait(inner);
+    let signal_error =
+        jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
+            .err()
+            .map(jet_process_cleanup_io_error);
+    let wait_error = jet_process_inner_wait(inner)
+        .err()
+        .map(jet_process_cleanup_io_error);
+    if let Some(error) = signal_error {
+        Err(error)
+    } else if let Some(error) = wait_error {
+        Err(error)
+    } else {
+        Ok(())
+    }
 }
 
 struct JetProcessWaitCleanup<'a> {
@@ -1755,14 +1805,18 @@ struct JetProcessWaitCleanup<'a> {
 
 impl Drop for JetProcessWaitCleanup<'_> {
     fn drop(&mut self) {
-        jet_process_reap_unfinished(self.child);
+        if let Err(error) = jet_process_reap_unfinished(self.child) {
+            jet_process_record_cleanup_error(self.child, error);
+        }
     }
 }
 
 impl Drop for jet_std::ProcessChild {
     fn drop(&mut self) {
         if std::rc::Rc::strong_count(&self.inner) == 1 {
-            jet_process_reap_unfinished(self);
+            if let Err(error) = jet_process_reap_unfinished(self) {
+                jet_process_record_cleanup_error(self, error);
+            }
         }
     }
 }

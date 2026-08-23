@@ -504,6 +504,10 @@
     pub struct ProcessChild {
         pub inner: std::rc::Rc<std::cell::RefCell<Option<ProcessHandle>>>,
         pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessReceipt>>>,
+        // Cancellation/drop cleanup runs outside the caller's result path.
+        // Retain a native cleanup failure so a later wait reports the typed
+        // process error instead of silently losing it.
+        pub cleanup_error: std::rc::Rc<std::cell::RefCell<Option<IOError>>>,
         pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,

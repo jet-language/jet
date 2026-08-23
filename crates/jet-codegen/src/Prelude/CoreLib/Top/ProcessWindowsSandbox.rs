@@ -1378,7 +1378,40 @@ mod jet_process_windows_sandbox {
         WindowsSandboxError::Io(error.to_string())
     }
 
+    fn reject_reparse_components(path: &Path, kind: &str) -> Result<(), WindowsSandboxError> {
+        let mut current = path;
+        loop {
+            let metadata = fs::symlink_metadata(current).map_err(|error| {
+                io_error(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("sandbox {kind} `{}`: {error}", current.display()),
+                ))
+            })?;
+            if metadata.file_type().is_symlink()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                return Err(io_error(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "sandbox {kind} `{}` contains a symlink or reparse point at `{}`",
+                        path.display(),
+                        current.display()
+                    ),
+                )));
+            }
+            let Some(parent) = current.parent() else {
+                break;
+            };
+            if parent == current || parent.as_os_str().is_empty() {
+                break;
+            }
+            current = parent;
+        }
+        Ok(())
+    }
+
     fn real_directory(path: &Path) -> Result<PathBuf, WindowsSandboxError> {
+        reject_reparse_components(path, "directory")?;
         let metadata = fs::symlink_metadata(path).map_err(|error| {
             io_error(io::Error::new(
                 io::ErrorKind::Other,
@@ -1402,6 +1435,7 @@ mod jet_process_windows_sandbox {
                 format!("sandbox directory `{}`: {error}", path.display()),
             ))
         })?;
+        reject_reparse_components(&canonical, "directory")?;
         let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
             io_error(io::Error::new(
                 io::ErrorKind::Other,
@@ -1420,6 +1454,7 @@ mod jet_process_windows_sandbox {
     }
 
     fn real_executable(path: &Path) -> Result<PathBuf, WindowsSandboxError> {
+        reject_reparse_components(path, "executable")?;
         let metadata = fs::symlink_metadata(path).map_err(|error| {
             io_error(io::Error::new(
                 io::ErrorKind::Other,
@@ -1443,6 +1478,7 @@ mod jet_process_windows_sandbox {
                 format!("sandbox executable `{}`: {error}", path.display()),
             ))
         })?;
+        reject_reparse_components(&canonical, "executable")?;
         let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
             io_error(io::Error::new(
                 io::ErrorKind::Other,

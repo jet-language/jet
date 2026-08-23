@@ -391,6 +391,8 @@ fn run() {
         .Err(_) -> print("vulkan:unavailable")
         .Ok(left) -> {
             right :: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
+            if !compute.placement(left).contains("backend=vulkan") -> panic("Vulkan receipt")
+            print("receipt:vulkan")
             added :: compute.add(left, right) ?? panic("add")
             print("add:{compute.to_list(added)}")
             reduced :: compute.sum_axis(right, 1) ?? panic("sum")
@@ -407,6 +409,8 @@ fn run() {
             stream :: compute.stream_new_on(compute.device_vulkan()) ?? panic("stream")
             compute.stream_sync(stream) ?? panic("sync")
             cpu :: compute.transfer(left, compute.device_cpu()) ?? panic("transfer")
+            if !compute.transfer_show(cpu).contains("from=Vulkan") -> panic("transfer receipt")
+            print("receipt:transfer")
             print("transfer:{compute.to_list(cpu)}")
         }
     }
@@ -421,5 +425,10 @@ fn run() {
         }
         return;
     }
-    assert_tiers_agree("compute_vulkan_operations", source, &stdout);
+    let expected = "receipt:vulkan\nadd:[5.0, 5.0, 5.0, 5.0]\nsum:[6.0, 6.0]\nmse:[1.0]\ngrad:[-0.5, -0.5, -0.5, -0.5]:[0.5, 0.5, 0.5, 0.5]\njvp:[1.0]:[0.0]\nreceipt:transfer\ntransfer:[2.0, 2.0, 2.0, 2.0]\n";
+    assert_eq!(
+        stdout, expected,
+        "Vulkan result drifted from the CPU oracle"
+    );
+    assert_tiers_agree("compute_vulkan_operations", source, expected);
 }

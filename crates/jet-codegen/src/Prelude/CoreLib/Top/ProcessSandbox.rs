@@ -6,18 +6,11 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-#[cfg(target_os = "macos")]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-#[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(target_os = "macos")]
 const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
-
-#[cfg(target_os = "macos")]
-static PROFILE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -140,29 +133,15 @@ pub fn status() -> Status {
                 reason: format!("native macOS backend `{MACOS_SANDBOX_EXEC}` is unavailable"),
             };
         }
-        let profile = match write_profile(probe_profile()) {
-            Ok(path) => path,
-            Err(error) => {
-                return Status {
-                    available: false,
-                    mechanism: "macos-seatbelt-unavailable".to_string(),
-                    policy: "not-enforced".to_string(),
-                    reason: format!(
-                        "native macOS backend profile could not be prepared: {error:?}"
-                    ),
-                };
-            }
-        };
         let result = Command::new(MACOS_SANDBOX_EXEC)
-            .arg("-f")
-            .arg(&profile)
+            .arg("-p")
+            .arg(probe_profile())
             .arg("/usr/bin/true")
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        let _ = fs::remove_file(profile);
         return match result {
             Ok(status) if status.success() => Status {
                 available: true,
@@ -268,9 +247,9 @@ where
             )?;
             let mut command = Command::new(MACOS_SANDBOX_EXEC);
             command
-                // Keep the profile alive in argv. A file passed with `-f`
-                // could be deleted after `spawn()` returns but before
-                // sandbox-exec has parsed it, creating a launch race.
+                // Pass the profile inline. A temporary `-f` profile could be
+                // replaced after `spawn()` returns but before Seatbelt reads
+                // it, creating a launch race.
                 .arg("-p")
                 .arg(&profile)
                 .arg(&executable)
@@ -593,25 +572,4 @@ fn sbpl_path(path: &Path) -> Result<String, Error> {
         }
     }
     Ok(escaped)
-}
-
-#[cfg(target_os = "macos")]
-fn write_profile(profile: &str) -> Result<PathBuf, Error> {
-    let path = std::env::temp_dir().join(format!(
-        "jet-native-sandbox-{}-{}.sb",
-        std::process::id(),
-        PROFILE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| Error::Io(format!("could not create sandbox profile: {error}")))?;
-    if let Err(error) = file.write_all(profile.as_bytes()) {
-        let _ = fs::remove_file(&path);
-        return Err(Error::Io(format!(
-            "could not write sandbox profile: {error}"
-        )));
-    }
-    Ok(path)
 }
