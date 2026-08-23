@@ -120,13 +120,14 @@
     try {
       editorState = JSON.parse(localStorage.getItem(projectStateKey(doc)) || "null") || editorState;
     } catch (_) {
-      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false, tourStep: 0 };
+      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false, tourStep: 0 };
     }
     editorState.bookmarks ||= [];
     editorState.favorites ||= [];
     editorState.actionUse ||= {};
     editorState.rerouteKnots ||= [];
     editorState.nodePositions ||= {};
+    editorState.graphViews ||= {};
     editorState.commentBoxes ||= [];
     editorState.stagedNodes ||= [];
     editorState.stagedWires ||= [];
@@ -738,6 +739,17 @@
     return editorState.nodePositions[graph.graph_id];
   }
 
+  function rememberGraphView(graph) {
+    if (!graph || !latestDoc) return;
+    editorState.graphViews ||= {};
+    editorState.graphViews[graph.graph_id] = {
+      x: view.x,
+      y: view.y,
+      zoom: view.zoom,
+      revision: latestDoc.revision
+    };
+  }
+
   function hasSavedNodePositions(graph) {
     const store = graph && editorState.nodePositions && editorState.nodePositions[graph.graph_id];
     return !!store && Object.keys(store).length > 0;
@@ -759,6 +771,7 @@
     for (const node of graph.nodes || []) {
       if (freezeCurrentLayout || selectedNodeIds.has(node.node_id)) rememberNodePosition(graph, node);
     }
+    rememberGraphView(graph);
     saveEditorState();
   }
 
@@ -978,8 +991,10 @@
         const doc = result.json || {};
         runHud.textContent = doc.success ? item.title + " passed" : item.title + " failed";
         details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "success" : "failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
-        if (doc.action_id === "canvas.command:check") acceptDiagnosticsPayload(doc, "Check");
-        if (!doc.success) setCanvasState("error", item.title + " failed", "Jet source was not changed. Read the receipt, fix the source if needed, then retry.", [
+        const hasDiagnostics = doc.action_id === "canvas.command:check"
+          ? acceptDiagnosticsPayload(doc, "Check")
+          : false;
+        if (!doc.success && !hasDiagnostics) setCanvasState("error", item.title + " failed", "Jet source was not changed. Read the receipt, fix the source if needed, then retry.", [
           { label: "Open source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => renderCommandAuthority(item) }
         ]);
@@ -1026,7 +1041,7 @@
       : null;
     renderCommandAuthority(current || fallback);
     if (typeof loadCanvasActions === "function") {
-      const actions = loadCanvasActions();
+      const actions = loadCanvasActions({ skipRedraw: true });
       if (actions && typeof actions.catch === "function") actions.catch(() => {});
     }
   }

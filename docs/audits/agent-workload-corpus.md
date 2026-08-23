@@ -182,7 +182,7 @@ Count repair rounds as edits after the initial candidate. Count the initial cand
 
 ### Current evidence and limit
 
-The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2088`). The targeted corpus tests pass for the frozen manifest, interpreter receipt, and Jet-loss ownership. No completed 29-row agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
+The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2097`). The targeted corpus tests pass for the frozen manifest, interpreter receipt, and Jet-loss ownership. No completed 29-row agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
 
 ### Reproduction check
 

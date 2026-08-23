@@ -1583,7 +1583,7 @@ export const scenarios = {
     await clickElement(ctx, `document.getElementById("execute-command-authority")`, "tour run command");
     await ctx.waitFor(async () => await ctx.driver.evaluate("document.getElementById('run-hud').textContent.includes('passed')"), "tour run receipt", 15000);
     const receipt = await ctx.driver.evaluate("document.getElementById('details').textContent");
-    if (!receipt.includes("stdout") || !receipt.includes("26")) throw new Error(`tour run output missing: ${receipt}`);
+    if (!receipt.includes("stdout") || !receipt.includes("25")) throw new Error(`tour run output missing: ${receipt}`);
 
     await clickElement(ctx, `document.getElementById("tour-next")`, "tour undo step");
     await clickElement(ctx, `document.getElementById("tour-action")`, "tour undo action");
@@ -1817,11 +1817,13 @@ export const scenarios = {
 
   "selection-marquee-modifiers-local-move": async (ctx) => {
     await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
     await ctx.switchGraph("summarize");
-    const sourceBefore = await ctx.source();
+    await sleep(160);
     let state = await ctx.state();
     const nodes = Object.values(state.nodeBounds || {});
-    const total = nodes.find((node) => node.title === "total");
+    const total = nodes.find((node) => node.title === "total" && node.kind === "binding")
+      || nodes.find((node) => node.title === "total");
     const square = nodes.find((node) => node.title === "square");
     if (!total || !square) throw new Error(`selection fixture nodes missing: ${JSON.stringify(nodes.map((node) => node.title))}`);
     const rect = await ctx.canvasRect();
@@ -1849,15 +1851,20 @@ export const scenarios = {
       const canvas = document.getElementById("jet-canvas-view");
       const r = canvas.getBoundingClientRect();
       const bounds = window.__jetCanvasNodeBounds || {};
+      const pinBoxes = Object.values((window.__jetCanvasTest && window.__jetCanvasTest.pinPoints) || {})
+        .map((pin) => ({ x: pin.canvas_x - 12, y: pin.canvas_y - 12, w: 24, h: 24 }));
       const candidates = [
         { x: Math.max(2, ${maxX} + 24), y: Math.max(2, ${maxY} + 24) },
+        { x: Math.max(2, ${maxX} + 80), y: Math.max(2, ${maxY} + 80) },
         { x: Math.max(2, ${minX} - 24), y: Math.max(2, ${minY} - 24) },
         { x: r.width - 4, y: r.height - 4 },
         { x: 4, y: 4 },
       ];
       const inside = (point, box) => point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
       return candidates.find((point) => point.x > 1 && point.y > 1 && point.x < r.width - 1 && point.y < r.height - 1
-        && !Object.values(bounds).some((box) => inside(point, box))) || null;
+        && point.x > ${maxX} && point.y > ${maxY}
+        && !Object.values(bounds).some((box) => inside(point, box))
+        && !pinBoxes.some((pin) => inside(point, pin))) || null;
     })()`);
     if (!blank) throw new Error("could not find a blank canvas point for marquee");
     await canvasModifiedDrag(
@@ -1871,6 +1878,7 @@ export const scenarios = {
       throw new Error(`marquee did not select both nodes: ${JSON.stringify(state.selectedNodeIds)}`);
     }
 
+    const sourceBefore = await ctx.source();
     const selectedBeforeMove = Object.fromEntries([total, square].map((node) => [node.node_id, { x: node.x, y: node.y }]));
     const move = { x: 41, y: 27 };
     await canvasModifiedDrag(ctx, center(total), { x: center(total).x + move.x, y: center(total).y + move.y });
@@ -1917,7 +1925,11 @@ export const scenarios = {
     await ctx.driver.evaluate("window.__jetCanvasTest.copySelection()");
     await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasClipboard === 'source'"), "source clipboard");
     await ctx.driver.evaluate("window.__jetCanvasTest.pasteSelection()");
-    await ctx.waitFor(async () => (await ctx.source()).includes("total_copy :="), "renamed source paste");
+    await ctx.waitFor(async () => {
+      const current = await ctx.state();
+      return (await ctx.source()).includes("total_copy :=")
+        && current.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy");
+    }, "renamed source paste");
     state = await ctx.state();
     if (!state.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy")) {
       throw new Error(`source paste did not expose rename chip: ${JSON.stringify(state.pasteRenameChips)}`);
@@ -1931,7 +1943,9 @@ export const scenarios = {
     if (!(await ctx.source()).includes("total_copy :=")) throw new Error("redo did not restore pasted source clone");
 
     state = await ctx.state();
-    const currentTotal = state.nodeBounds[total.node_id];
+    const currentTotal = Object.values(state.nodeBounds || {}).find((node) => node.title === "total" && node.kind === "binding")
+      || Object.values(state.nodeBounds || {}).find((node) => node.title === "total");
+    if (!currentTotal) throw new Error("reloaded source clone lost total binding node");
     await ctx.driver.press("Escape");
     await sleep(80);
     await ctx.driver.click(center(currentTotal).x, center(currentTotal).y);
@@ -2125,10 +2139,11 @@ fn parse(raw: String) Int ParseError! -> {
 
 fn write_int(value: &Int) {}
 
-fn run() ParseError! {
+fn run() {
     source := 4
     text :: "text"
     call_target :: 0
+    seed :: twice(2)
     bad :: 0
     other :: 1
     use_callback(helper)
@@ -2139,7 +2154,6 @@ fn run() ParseError! {
     print(bad)
     print(other)
     print(parsed)
-    return Ok(())
 }
 
 fn other_graph() {
@@ -3048,8 +3062,69 @@ fn run() {
     await ctx.expectSourceContains("if score > 10");
   },
 
+  "project-rename-preview-commit": async (ctx) => {
+    await ctx.openCanvas();
+    const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    const root = project.project_root;
+    await writeFile(join(root, "package.jet"), "name: \"canvas_project_rename\"\nversion: \"0.1.0\"\n");
+    await writeFile(join(root, "main.jet"), `pub fn helper() Int -> {
+    return 1
+}
+
+fn run() {
+    print(helper())
+}
+`);
+    await writeFile(join(root, "other.jet"), `use "./main" as main
+
+fn use_helper() Int -> {
+    return main.helper()
+}
+`);
+    await ctx.openCanvas();
+    const doc = await ctx.graph();
+    const source = await ctx.source();
+    const projectNow = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    const preview = await ctx.query({
+      schema_version: 1,
+      op: "preview_rename",
+      source_id: "main.jet",
+      revision: doc.revision,
+      project_revision: projectNow.project_revision,
+      symbol: "helper",
+      to: "compute"
+    });
+    if (!preview.ok || preview.op !== "preview_rename" || !preview.diff || preview.diff.files.length !== 2
+      || !preview.results.some((result) => result.source_id === "other.jet")
+      || !preview.diff.text.includes("+pub fn compute()")) {
+      throw new Error(`project rename preview incomplete: ${JSON.stringify(preview)}`);
+    }
+    if (await ctx.source() !== source) throw new Error("project rename preview wrote source");
+    const request = {
+      schema_version: 1,
+      op: "rename_binding",
+      preview: false,
+      source_id: "main.jet",
+      project_revision: preview.project_revision,
+      files: preview.diff.files.map((file) => ({ path: file.path, revision: file.revision })),
+      from: "helper",
+      to: "compute"
+    };
+    const committed = await ctx.driver.evaluate(`fetch("/canvas/project/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(request))} }).then((r) => r.json().then((json) => ({ ok: r.ok, json })))`);
+    if (!committed.ok || committed.json.writes !== "source_transaction" || !committed.json.changed) {
+      throw new Error(`project rename commit failed: ${JSON.stringify(committed)}`);
+    }
+    await ctx.openCanvas();
+    if (!(await ctx.source()).includes("compute()")) throw new Error("project rename did not update entry source");
+    const other = await ctx.driver.evaluate(`fetch("/canvas/graph?source_id=other.jet", { cache: "no-store" }).then((r) => r.json())`);
+    if (!other.ok || !other.source_text.includes("compute()")) throw new Error("project rename did not update reference source");
+    const stale = await ctx.driver.evaluate(`fetch("/canvas/project/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(request))} }).then((r) => r.json().then((json) => ({ ok: r.ok, json })))`);
+    if (stale.ok || stale.json.kind !== "conflict") throw new Error(`stale project rename was accepted: ${JSON.stringify(stale)}`);
+  },
+
   "details-scalar-enum-reference-editors": async (ctx) => {
     await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
     await ctx.replaceSource(`enum Mode {
     Fast
     Slow
@@ -3072,9 +3147,10 @@ fn needs_int(value: Int) {}
 fn run() {
     edit(Mode.Fast)
 }
-`);
+    `);
     await ctx.openCanvas();
     await ctx.switchGraph("edit");
+    await clickElement(ctx, `document.getElementById("dock-details")`, "open Inspector");
 
     const selectVariable = async (name) => {
       const selected = await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable(${JSON.stringify(name)})`);
@@ -3134,11 +3210,12 @@ fn run() {
       const root = document.getElementById("details");
       return {
         fields: root && root.querySelectorAll("[data-details-field]").length,
+        applyButtons: root && root.querySelectorAll("[data-field-apply]").length,
         unsafeHandlers: root && root.querySelectorAll("[onclick], [onchange], [onerror], [onload]").length,
         state: window.__jetCanvasDetailsState && window.__jetCanvasDetailsState.phase
       };
     })()`);
-    if (!descriptorSurface || descriptorSurface.unsafeHandlers !== 0 || descriptorSurface.fields < 1) {
+    if (!descriptorSurface || descriptorSurface.unsafeHandlers !== 0 || descriptorSurface.fields < 1 || descriptorSurface.applyButtons !== 1) {
       throw new Error(`Details did not use safe descriptor rows: ${JSON.stringify(descriptorSurface)}`);
     }
 
@@ -3247,6 +3324,164 @@ fn run() {
       throw new Error(`Details refusal state was not preserved: ${JSON.stringify(refusalState)}`);
     }
     await assertSourceUnchangedAfterReload(ctx, beforeInvalid, "incomplete scalar edit");
+  },
+
+  "details-collection-nested-editors": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn edit() {
+    matrix :: [[1, 2], [3, 4]]
+    lookup :: ["first": 7, "second": 8]
+    print(matrix[0][0])
+}
+
+fn run() {
+    edit()
+}
+`);
+    await ctx.openCanvas();
+    await ctx.switchGraph("edit");
+
+    const exposeDetails = async () => {
+      await ctx.driver.evaluate(`(() => {
+        const drawer = document.getElementById("right-drawer");
+        if (!drawer) return false;
+        drawer.classList.add("is-drawer-open");
+        drawer.style.display = "block";
+        drawer.style.position = "fixed";
+        drawer.style.right = "0";
+        drawer.style.top = "0";
+        drawer.style.bottom = "0";
+        drawer.style.width = "326px";
+        drawer.style.zIndex = "40";
+        document.getElementById("dock-details")?.classList.add("is-active");
+        return true;
+      })()`);
+    };
+
+    const selectVariable = async (name) => {
+      const selected = await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable(${JSON.stringify(name)})`);
+      if (selected === false) throw new Error(`collection variable selection helper refused ${name}`);
+      await ctx.waitFor(async () => (await ctx.state()).selectedVariableName === name, `${name} collection selected`);
+      await exposeDetails();
+      await ctx.waitFor(async () => await ctx.driver.evaluate(`document.querySelectorAll('[data-details-input][data-details-nested="true"]').length > 0`), `${name} nested Details controls`);
+    };
+
+    const setNested = async (path, value) => {
+      const result = await ctx.driver.evaluate(`(() => {
+        const input = document.querySelector('[data-details-input][data-details-path="${path}"]');
+        if (!input) return { ok: false };
+        input.focus();
+        input.value = ${JSON.stringify(value)};
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return { ok: true, kind: input.dataset.detailKind, type: input.dataset.detailType };
+      })()`);
+      if (!result.ok) throw new Error(`nested Details control missing: ${path}`);
+      return result;
+    };
+
+    await selectVariable("lookup");
+    const mapSurface = await ctx.driver.evaluate(`(() => {
+      const controls = [...document.querySelectorAll('#details [data-details-input]')];
+      const applyButtons = [...document.querySelectorAll('#details [data-field-apply]')];
+      const apply = document.querySelector('#details [data-field-apply]');
+      return {
+        paths: controls.map((input) => input.dataset.detailsPath || ""),
+        nested: controls.filter((input) => input.dataset.detailsNested === "true").length,
+        apply: !!apply,
+        dead: controls.some((input) => !input.closest('[data-details-field]')
+          || !input.dataset.detailsApplyOp
+          || !applyButtons.some((button) => button.dataset.fieldApply === input.dataset.detailsApplyOp))
+      };
+    })()`);
+    if (!mapSurface || mapSurface.nested < 4 || !mapSurface.apply || mapSurface.dead
+      || !mapSurface.paths.includes("value[0].value") || !mapSurface.paths.includes("value[1].value")) {
+      throw new Error(`map Details surface is incomplete or dead: ${JSON.stringify(mapSurface)}`);
+    }
+    const beforeMap = await ctx.source();
+    await setNested("value[0].value", "10");
+    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "map nested apply");
+    await ctx.waitFor(async () => (await ctx.source()).includes('lookup :: ["first": 10, "second": 8]'), "map nested apply");
+    const afterMap = await ctx.source();
+    const undoneMap = await ctx.undo();
+    if (undoneMap !== beforeMap) throw new Error("collection map undo did not restore exact source");
+    const redoneMap = await ctx.redo();
+    if (redoneMap !== afterMap) throw new Error("collection map redo did not restore exact source");
+
+    await selectVariable("matrix");
+    const beforeEscape = await ctx.source();
+    await setNested("value[0][0]", "9");
+    await setNested("value[1][1]", "8");
+    await ctx.driver.press("Escape");
+    await ctx.waitFor(async () => {
+      const state = await ctx.driver.evaluate("window.__jetCanvasDetailsState || null");
+      return state && state.phase === "clean";
+    }, "nested Escape refusal");
+    if (await ctx.source() !== beforeEscape) throw new Error("nested Escape wrote source");
+    const escaped = await ctx.driver.evaluate(`({
+      first: document.querySelector('[data-details-path="value[0][0]"]').value,
+      last: document.querySelector('[data-details-path="value[1][1]"]').value
+    })`);
+    if (escaped.first !== "1" || escaped.last !== "4") throw new Error(`nested Escape did not restore all fields: ${JSON.stringify(escaped)}`);
+
+    await setNested("value[0][1]", "11");
+    await ctx.driver.evaluate(`document.getElementById("toolbar-search").focus()`);
+    await ctx.waitFor(async () => (await ctx.source()).includes("matrix :: [[1, 11], [3, 4]]"), "nested blur apply");
+    const beforeMatrixApply = await ctx.source();
+    await selectVariable("matrix");
+    await setNested("value[1][0]", "12");
+    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "matrix nested apply");
+    await ctx.waitFor(async () => (await ctx.source()).includes("matrix :: [[1, 11], [12, 4]]"), "nested matrix apply");
+    const afterMatrixApply = await ctx.source();
+    const undoneMatrix = await ctx.undo();
+    if (undoneMatrix !== beforeMatrixApply) throw new Error("nested matrix undo did not restore exact source");
+    const redoneMatrix = await ctx.redo();
+    if (redoneMatrix !== afterMatrixApply) throw new Error("nested matrix redo did not restore exact source");
+
+    await ctx.openCanvas();
+    await ctx.switchGraph("edit");
+    await selectVariable("matrix");
+    const reloaded = await ctx.driver.evaluate(`document.querySelector('[data-details-path="value[1][0]"]').value`);
+    if (reloaded !== "12") throw new Error(`nested collection value did not reload: ${reloaded}`);
+
+    const beforeInvalid = await ctx.source();
+    await setNested("value[0][0]", "not-an-int");
+    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "nested validation refusal");
+    await ctx.waitFor(async () => {
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      return result && result.ok === false;
+    }, "nested validation refusal");
+    const invalidState = await ctx.driver.evaluate("window.__jetCanvasDetailsState || null");
+    if (!invalidState || invalidState.phase !== "refused" || !invalidState.reason) {
+      throw new Error(`nested validation refusal was not visible: ${JSON.stringify(invalidState)}`);
+    }
+    if (await ctx.source() !== beforeInvalid) throw new Error("invalid nested edit changed source bytes");
+
+    const doc = await ctx.graph();
+    const graph = graphByTitle(doc, "edit");
+    const lookup = (graph.inline_exprs || []).find((expr) => String(expr.source || "").includes('"first": 10'));
+    if (!lookup) throw new Error("lookup source anchor missing for stale nested refusal");
+    await setNested("value[0][0]", "13");
+    const external = await ctx.transaction({
+      schema_version: 1,
+      op: "edit_inline_expr",
+      revision: doc.revision,
+      inline_expr_id: lookup.inline_expr_id,
+      new_expr: '["first": 11, "second": 8]'
+    });
+    if (!external.ok) throw new Error(`stale setup transaction failed: ${JSON.stringify(external.json)}`);
+    const beforeStaleApply = await ctx.source();
+    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "stale nested refusal");
+    await ctx.waitFor(async () => {
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      return result && result.ok === false;
+    }, "stale nested refusal");
+    const staleState = await ctx.driver.evaluate("window.__jetCanvasDetailsState || null");
+    if (!staleState || staleState.phase !== "refused" || staleState.event !== "transaction-refused") {
+      throw new Error(`stale nested refusal was not visible: ${JSON.stringify(staleState)}`);
+    }
+    if (await ctx.source() !== beforeStaleApply || !(await ctx.source()).includes('lookup :: ["first": 11, "second": 8]')) {
+      throw new Error("stale nested edit changed source beyond the external committed edit");
+    }
   },
 
   "traits-panel-authoring": async (ctx) => {

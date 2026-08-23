@@ -50,6 +50,16 @@ unavailable. The historical candidate counts and unvalidated status above remain
 unchanged; this note records the current source disposition for the package-trust
 slice and does not replace independent security validation.
 
+The `process-pipeline-limits-ignored` candidate is addressed in the current
+tree. The shared `core.process` Prelude pipeline now enforces each stage's
+captured output budget, polls live stage deadlines, terminates the pipeline on
+overflow or timeout, and joins every drain worker before returning. The
+production-path checks are `core_process_pipeline_honors_stage_timeout`,
+`core_process_live_stream_does_not_block_on_sibling_output`, and
+`core_process_limits_kill_descendants_and_stop_output_early`. The historical
+candidate record below remains unchanged; this note records its current source
+disposition and does not replace independent security validation.
+
 ## tower-control-plane
 
 ### Tower authorization, CSRF, and document containment

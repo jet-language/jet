@@ -358,12 +358,6 @@ pub(super) fn apply_inline_edit(
     inline_id: &str,
     new_expr: &str,
 ) -> Result<String, String> {
-    if new_expr.contains('\n') || new_expr.contains('\r') {
-        return Err(edit_error(
-            "bad_request",
-            "Canvas inline expression must stay on one line",
-        ));
-    }
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
         return Err(edit_error(
@@ -1554,14 +1548,21 @@ pub(super) fn apply_append_multi_input(
             "Canvas multi-input node no longer exists",
         ));
     };
-    let (span, count) = match target {
-        MultiInputTarget::List { span, count, .. } => (span, count),
+    let (span, item_spans) = match target {
+        MultiInputTarget::List { span, item_spans } => (span, item_spans),
     };
-    let insert = src
+    let list_source = src
         .get(span.start..span.end)
-        .and_then(|chunk| chunk.rfind(']').map(|idx| span.start + idx))
         .ok_or_else(|| edit_error("bad_request", "Canvas multi-input source span is stale"))?;
-    let prefix = if count == 0 { "" } else { ", " };
+    let insert = if let Some(item) = item_spans.last() {
+        item.end
+    } else {
+        list_source
+            .rfind(']')
+            .map(|idx| span.start + idx)
+            .ok_or_else(|| edit_error("bad_request", "Canvas multi-input source span is stale"))?
+    };
+    let prefix = if item_spans.is_empty() { "" } else { ", " };
     let changed = FixEngine::apply_edits(
         src,
         &[edit(
@@ -1990,7 +1991,6 @@ fn find_pattern_span_in_children(
 enum MultiInputTarget {
     List {
         span: SourceSpan,
-        count: usize,
         item_spans: Vec<SourceSpan>,
     },
 }
@@ -2154,7 +2154,6 @@ fn find_multi_input_in_expr(
         Expr::ListLit(items, span) if same_span((*span).into(), node_span) => {
             *out = Some(MultiInputTarget::List {
                 span: (*span).into(),
-                count: items.len(),
                 item_spans: items.iter().map(|item| item.span().into()).collect(),
             });
         }

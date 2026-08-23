@@ -94,14 +94,14 @@
   let debugSessionInfo = null;
   let debugRequestGeneration = 0;
   let debugState = { breakpoints: [], watches: [], staleBreakpoints: [] };
-  let searchState = { results: [], spans: [], active: -1, diff: null, impact: null, stale: false };
+  let searchState = { results: [], spans: [], active: -1, diff: null, impact: null, renamePlan: null, stale: false };
   let diagnosticsState = { baseRevision: null, diagnosticRevision: null, entries: [], dismissed: new Set() };
   let scm = null;
   let proofDoc = null;
   const UNDO_DEPTH = 50;
   let undoStack = [];
   let redoStack = [];
-  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
+  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
   let clipboardState = null;
   let wireStyle = "bezier";
   let runState = { running: false, last: "idle" };

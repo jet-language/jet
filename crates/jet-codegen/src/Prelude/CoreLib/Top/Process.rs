@@ -1435,6 +1435,7 @@ fn jet_process_spec_pipeline(
         }
     }
     let mut children: Vec<std::process::Child> = Vec::new();
+    let mut stage_started = Vec::with_capacity(specs.len());
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
     for (index, (spec, launch_plan)) in specs.iter().zip(launch_plans.iter()).enumerate() {
         let is_last = index + 1 == specs.len();
@@ -1524,63 +1525,102 @@ fn jet_process_spec_pipeline(
         };
         prev_stdout = child.stdout.take();
         children.push(child);
+        stage_started.push(std::time::Instant::now());
     }
-    let pipeline_limit = specs
+    let stage_budgets = specs
         .iter()
-        .filter_map(|spec| spec.output_limit)
-        .map(|limit| limit.max(0) as usize)
-        .min();
-    let pipeline_budget =
-        pipeline_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+        .map(|spec| {
+            spec.output_limit
+                .map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)))
+        })
+        .collect::<Vec<_>>();
     let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let final_limit = specs
+        .last()
+        .and_then(|spec| spec.output_limit)
+        .map(|limit| limit.max(0) as usize);
     let output_drain = prev_stdout.take().and_then(|stdout| {
         jet_process_drain_reader(
             Some(std::io::BufReader::new(stdout)),
-            pipeline_limit,
-            pipeline_budget.clone(),
+            final_limit,
+            stage_budgets.last().cloned().flatten(),
             pipeline_limit_hit.clone(),
         )
     });
     let stderr_drains = children
         .iter_mut()
-        .map(|child| {
+        .enumerate()
+        .map(|(index, child)| {
             jet_process_drain_reader(
                 child.stderr.take().map(std::io::BufReader::new),
-                pipeline_limit,
-                pipeline_budget.clone(),
+                specs[index].output_limit.map(|limit| limit.max(0) as usize),
+                stage_budgets[index].clone(),
                 pipeline_limit_hit.clone(),
             )
         })
         .collect::<Vec<_>>();
     let mut code = 0;
     let mut success = true;
-    for index in 0..children.len() {
+    let mut timed_out = false;
+    let mut output_limit_exceeded = false;
+    let mut stage_finished = vec![false; children.len()];
+    'stages: for index in 0..children.len() {
+        if stage_finished[index] {
+            continue;
+        }
         let status = loop {
             if pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
                 jet_process_pipeline_cleanup(&mut children);
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Read,
-                    None,
-                    "process output exceeded output_limit",
-                ));
+                output_limit_exceeded = true;
+                break None;
             }
-            if let Some(status) = children[index].try_wait().map_err(|error| {
-                jet_std::IOError::other(
-                    jet_std::IOOperation::Close,
-                    Some("pipeline process".to_string()),
-                    error,
-                )
-            })? {
-                break status;
+            let mut current_status = None;
+            for stage in 0..children.len() {
+                if stage_finished[stage] {
+                    continue;
+                }
+                if let Some(status) = children[stage].try_wait().map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("pipeline process".to_string()),
+                        error,
+                    )
+                })? {
+                    stage_finished[stage] = true;
+                    #[cfg(unix)]
+                    let _ = jet_process_pty::signal_group(
+                        children[stage].id(),
+                        jet_process_signal_kill(),
+                    );
+                    if !status.success() {
+                        success = false;
+                        code = status.code().unwrap_or(-1) as i64;
+                    }
+                    if stage == index {
+                        current_status = Some(status);
+                    }
+                }
+            }
+            if current_status.is_some() {
+                break current_status;
+            }
+            if specs.iter().enumerate().any(|(stage, spec)| {
+                !stage_finished[stage]
+                    && spec.timeout_ms.is_some_and(|timeout| {
+                        stage_started[stage].elapsed()
+                            >= std::time::Duration::from_millis(timeout.max(0) as u64)
+                    })
+            }) {
+                jet_process_pipeline_cleanup(&mut children);
+                timed_out = true;
+                success = false;
+                break None;
             }
             jet_scheduler_park_ms("process wait", 10);
         };
-        #[cfg(unix)]
-        let _ = jet_process_pty::signal_group(children[index].id(), jet_process_signal_kill());
-        if !status.success() {
-            success = false;
-            code = status.code().unwrap_or(-1) as i64;
-        }
+        let Some(_status) = status else {
+            break 'stages;
+        };
     }
     let output = jet_process_finish_output_drain(output_drain, "pipeline stdout")?;
     let mut output_exceeded = output.exceeded;
@@ -1590,7 +1630,7 @@ fn jet_process_spec_pipeline(
         output_exceeded |= result.exceeded;
         errors.push_str(&result.text);
     }
-    if output_exceeded {
+    if output_exceeded || output_limit_exceeded {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
             None,
@@ -1612,7 +1652,7 @@ fn jet_process_spec_pipeline(
         code,
         success,
         Err(JetAbsent),
-        false,
+        timed_out,
         output_text,
         errors,
         Some(&secret_values),

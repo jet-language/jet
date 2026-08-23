@@ -191,11 +191,23 @@
       showToast("Edit refused: " + inlinePlan.label, { isError: true });
       return Promise.resolve(refusal);
     }
-    const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
+    const projectRename = ["rename_binding", "rename_function"].includes(body.op)
+      && latestProject
+      && latestProject.project_revision;
     const beforeSource = latestDoc && latestDoc.source_text;
     const request = Object.assign({}, body);
     const sourceId = currentCanvasSourceId();
     if (!request.source_id && sourceId) request.source_id = sourceId;
+    let txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
+    if (projectRename) {
+      const plannedFiles = searchState.renamePlan && searchState.renamePlan.files;
+      const files = Array.isArray(plannedFiles) && plannedFiles.length
+        ? plannedFiles
+        : (latestProject.files || []).filter((file) => file.kind === "source");
+      request.project_revision = latestProject.project_revision;
+      request.files = files.map((file) => ({ path: file.path, revision: file.revision }));
+      txUrl = (window.__JET_CANVAS_BASE__ || "/canvas") + "/project/transaction";
+    }
     setSaveState("saving", "draft");
     window.__jetCanvasLastTx = request;
     window.__jetCanvasLastTxResult = null;
@@ -226,6 +238,26 @@
           renderSearchResults();
           showToast("Canvas action preview validated");
           return { ok: true, json: result.json };
+        }
+        if (result.json.protocol === "jet.canvas.project.edit") {
+          window.__jetCanvasLastTxResult = result.json;
+          searchState.results = [];
+          searchState.spans = [];
+          searchState.active = -1;
+          searchState.impact = null;
+          searchState.renamePlan = null;
+          searchState.stale = true;
+          searchState.diff = result.json.diff ? { text: result.json.diff } : null;
+          renderSearchResults();
+          if (result.json.changed) clearSourceDraft();
+          setSaveState(result.json.changed ? "project saved" : "project unchanged");
+          showToast(result.json.changed ? "Project updated" : "No project change");
+          return loadProject()
+            .then(() => loadGraph(sourceId))
+            .then(() => {
+              window.__jetCanvasLastTxResult = result.json;
+              return { ok: true, json: result.json };
+            });
         }
         if (result.json.changed && beforeSource && result.json.source_text) {
           recordUndoEntry(body, beforeSource, result.json.source_text);
@@ -376,6 +408,7 @@
           searchState.active = -1;
           searchState.diff = null;
           searchState.impact = null;
+          searchState.renamePlan = null;
           searchState.truncated = false;
           searchState.resultLimit = 0;
           searchState.stale = false;
@@ -414,7 +447,7 @@
         loadProofRail();
         loadCanvasActions({ skipRedraw: firstLoad });
         applySourceHash();
-        if (firstLoad) fitGraph();
+        if (firstLoad) fitGraph(true);
       })
       .catch((e) => {
         const offline = navigator.onLine === false;

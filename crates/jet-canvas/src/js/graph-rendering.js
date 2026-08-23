@@ -149,10 +149,19 @@
     return bounds;
   }
 
-  function fitGraph() {
+  function fitGraph(preserveSavedView = false) {
     if (document.getElementById("execute-command-authority")) return;
     const graph = latestDoc ? currentGraph(latestDoc) : null;
     if (!graph) return;
+    const savedView = preserveSavedView && editorState.graphViews && editorState.graphViews[graph.graph_id];
+    if (savedView && savedView.revision === latestDoc.revision
+      && Number.isFinite(savedView.x) && Number.isFinite(savedView.y) && Number.isFinite(savedView.zoom) && savedView.zoom > 0) {
+      view.x = savedView.x;
+      view.y = savedView.y;
+      view.zoom = savedView.zoom;
+      drawGraph(latestDoc);
+      return;
+    }
     const b = graphBounds(graph);
     const size = cssSize();
     const compact = compactCanvasMode();
@@ -540,7 +549,7 @@
 
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
-    const layout = measureNodeLayout(graph, node);
+    const layout = size;
     const w = size.w * view.zoom, h = size.h * view.zoom;
     const x = sx(nodeX(node)), y = sy(nodeY(node));
     if (view.zoom < .38) {

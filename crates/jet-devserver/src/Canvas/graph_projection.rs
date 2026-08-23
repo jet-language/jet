@@ -959,7 +959,7 @@ fn project_stmt_block(
 
 /// Vertical spacing before the next sibling statement. The default slot
 /// (130px) has room for a couple of data-provider rows below a binding; a
-/// list/fan-out initializer with more items renders taller than that, so
+/// list initializer with more items renders taller than that, so
 /// widen the gap or its node body collides with the next statement's own
 /// data-provider node (multi-input node body height grows with item count,
 /// e.g. after `append_multi_input`).
@@ -1801,13 +1801,28 @@ fn connect_expr_to_input_with_span(
         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         wire_ident_refs(g, expr, input_pin);
     } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
-        if matches!(expr, Expr::EnumLit { .. })
+        if details_composite_expr(expr)
+            || matches!(expr, Expr::EnumLit { .. })
             || matches!(expr, Expr::MethodCall { method, .. } if starts_uppercase(method))
         {
             add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         }
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     }
+}
+
+fn details_composite_expr(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::ListLit(_, _)
+            | Expr::MapLit(_, _)
+            | Expr::StructLit { .. }
+            | Expr::TypedLit { .. }
+            | Expr::TupleLit(_, _, _)
+            | Expr::Present(_, _)
+            | Expr::Ok(_, _)
+            | Expr::Err(_, _)
+    )
 }
 
 fn data_provider_y(y: i32, ordinal: usize) -> i32 {

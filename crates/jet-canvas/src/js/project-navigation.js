@@ -1168,7 +1168,11 @@
         syncDebugActive();
         if (debugOverlay && debugOverlay.active_graph_id) selectedGraphId = debugOverlay.active_graph_id;
         if (debugOverlay && debugOverlay.active_node_id) selectedNodeId = debugOverlay.active_node_id;
-        showToast("Debug " + ((debugOverlay && debugOverlay.debug_overlay) || "updated"));
+        const limits = debugOverlay && debugOverlay.limits;
+        const limited = limits && Object.keys(limits).some((key) => limits[key] === true);
+        showToast(limited
+          ? "Debug values truncated; source is current"
+          : "Debug " + ((debugOverlay && debugOverlay.debug_overlay) || "updated"));
         drawGraph(latestDoc);
       })
       .catch(() => {
@@ -1185,6 +1189,7 @@
   function stopDebug() {
     const id = debugSessionId;
     const doc = latestDoc;
+    const tier = debugSessionInfo && debugSessionInfo.tier;
     const requestedSourceId = currentCanvasSourceId();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
     debugRequestGeneration++;
@@ -1196,7 +1201,13 @@
     if (id && doc) {
       const body = { schema_version: 1, revision: doc.revision, session_id: id, stop: true };
       if (requestedSourceId) body.source_id = requestedSourceId;
-      fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+      if (tier) body.tier = tier;
+      fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+        .then((response) => response.json().then((json) => ({ ok: response.ok, json })))
+        .then((result) => {
+          if (!result.ok) showToast((result.json && result.json.message) || "Debug stop rejected", { isError: true });
+        })
+        .catch(() => showToast("Debug session disconnected; source was kept", { isError: true }));
     }
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);

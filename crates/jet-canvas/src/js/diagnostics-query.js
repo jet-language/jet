@@ -105,11 +105,31 @@
   }
 
   function activeDiagnostics() {
-    return diagnosticsState.entries.filter((entry) => !diagnosticsState.dismissed.has(entry.id));
+    const revision = latestDoc && latestDoc.revision;
+    return diagnosticsState.entries.filter((entry) =>
+      !diagnosticsState.dismissed.has(entry.id)
+      && (!revision || !entry.baseRevision || entry.baseRevision === revision)
+    );
   }
 
   function acceptDiagnosticsPayload(payload, source) {
     if (!payload) return false;
+    const currentSourceId = currentCanvasSourceId();
+    const payloadSourceId = payload.source_id || null;
+    const currentRevision = latestDoc && latestDoc.revision;
+    const payloadRevision = payload.revision || payload.base_revision || null;
+    if (
+      (currentRevision && payloadRevision && currentRevision !== payloadRevision)
+      || (currentSourceId && payloadSourceId && currentSourceId !== payloadSourceId)
+    ) {
+      setCanvasState("stale", "Diagnostic result is stale", "Canvas kept the current source and previous diagnostics. Check the current source again.", [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Retry", primary: true, run: () => checkCurrentSource() }
+      ]);
+      setSaveState("source unchanged", "error");
+      showToast("Diagnostic result is stale; current source was kept", { isError: true });
+      return true;
+    }
     const raw = Array.isArray(payload.diagnostics) ? payload.diagnostics : [];
     const isCheck = payload.protocol === "jet.canvas.command_receipt" && payload.action_id === "canvas.command:check";
     if (!raw.length && !isCheck) return false;
@@ -457,6 +477,7 @@
       .then((result) => {
         if (!result.ok) {
           searchState.stale = true;
+          searchState.renamePlan = null;
           renderSearchResults();
           const stale = result.json && ["conflict", "stale"].includes(result.json.kind);
           const message = result.json && result.json.message || "Canvas query rejected";
@@ -482,6 +503,7 @@
           || (queryProjectRevision && result.json.project_revision !== queryProjectRevision)
         )) {
           searchState.stale = true;
+          searchState.renamePlan = null;
           renderSearchResults();
           setCanvasState("stale", "Search results are stale", "The source or project changed while Canvas searched. Previous results stay visible; search again for the current revision.", [
             { label: "Show source", run: openSourceRecovery },
@@ -496,6 +518,11 @@
         syncSearchSpans();
         searchState.active = searchState.results.length ? 0 : -1;
         searchState.diff = result.json.diff || null;
+        searchState.renamePlan = result.json.op === "preview_rename"
+          && result.json.diff
+          && Array.isArray(result.json.diff.files)
+          ? result.json.diff
+          : null;
         searchState.impact = result.json.impact || null;
         searchState.truncated = result.json.truncated === true;
         searchState.resultLimit = result.json.result_limit || 0;
@@ -543,8 +570,11 @@
       ? `<div class="tag">Search results are stale; reload the current source and search again.</div>`
       : "";
     const diff = searchState.diff && searchState.diff.text ? `<div class="inline-row"><b>Preview diff</b><code>${escapeHtml(searchState.diff.text)}</code></div>` : "";
+    const renameFiles = searchState.renamePlan && Array.isArray(searchState.renamePlan.files)
+      ? `<div class="tag">Rename preview covers ${searchState.renamePlan.files.length} source file${searchState.renamePlan.files.length === 1 ? "" : "s"}; Apply commits them as one project transaction.</div>`
+      : "";
     const impact = searchState.impact && searchState.impact.found ? `<div class="pin-row"><b>Impact</b><br><span class="tag">${(searchState.impact.references || []).length} refs / ${(searchState.impact.call_sites || []).length} calls</span></div>` : "";
-    searchResults.innerHTML = stale + (rows || diff || impact || limit ? limit + rows + diff + impact : "<div class=\"tag\">no matches</div>");
+    searchResults.innerHTML = stale + (rows || diff || renameFiles || impact || limit ? limit + rows + renameFiles + diff + impact : "<div class=\"tag\">no matches</div>");
     searchResults.querySelectorAll("[data-search-hit]").forEach((button) => {
       button.addEventListener("click", () => {
         const index = Number(button.getAttribute("data-search-hit"));
@@ -556,13 +586,40 @@
     });
   }
 
+  function projectPathKey(path) {
+    return String(path || "").replace(/\\/g, "/").replace(/^\.\/+/, "");
+  }
+
+  function sourceControlFile(doc, sourceId) {
+    const wanted = projectPathKey(sourceId || (latestDoc && latestDoc.source_id));
+    if (!wanted) return null;
+    return (doc && doc.files || []).find((file) => projectPathKey(file.path) === wanted) || null;
+  }
+
+  function sourceControlRevision(doc, sourceId) {
+    const file = sourceControlFile(doc, sourceId);
+    return file ? file.revision : (sourceId ? null : (doc && doc.revision));
+  }
+
   function loadSourceControl() {
     const requestedSourceId = currentCanvasSourceId();
+    const requestedRevision = latestDoc && latestDoc.revision;
     const requestedProjectRevision = latestProject && latestProject.project_revision;
     return fetch(sourceControlUrl, { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
-        if (currentCanvasSourceId() !== requestedSourceId || (latestProject && latestProject.project_revision !== requestedProjectRevision)) {
+        const sourceRevision = sourceControlRevision(doc, requestedSourceId);
+        const stale = currentCanvasSourceId() !== requestedSourceId
+          || (latestProject && latestProject.project_revision !== requestedProjectRevision)
+          || (requestedRevision && sourceRevision !== requestedRevision);
+        if (stale) {
+          scm = null;
+          scmState.textContent = "git stale";
+          scmState.style.color = "#f8c76a";
+          setCanvasState("stale", "Source control is stale", "The source changed while Canvas read Git state. The current source stays visible; reload source control.", [
+            { label: "Open source", run: openSourceRecovery },
+            { label: "Retry", primary: true, run: loadSourceControl }
+          ]);
           return null;
         }
         scm = doc;
@@ -624,8 +681,11 @@
   function showSourceDiff() {
     const render = (doc) => {
       if (!doc) return;
-      const fileDiff = (doc.files || []).filter((file) => file.dirty).map((file) => file.diff || file.status || file.path).join("\n");
-      const diff = doc.diff || fileDiff || (doc.dirty ? doc.status : "clean");
+      const file = sourceControlFile(doc, currentCanvasSourceId());
+      const fileDiff = file && file.dirty ? (file.diff || file.status || file.path) : "";
+      const diff = file
+        ? (fileDiff || "clean")
+        : (doc.diff || (doc.dirty ? doc.status : "clean"));
       searchState.results = [];
       searchState.spans = [];
       searchState.active = -1;
@@ -633,10 +693,15 @@
       searchState.stale = false;
       searchState.diff = { text: diff || "clean" };
       renderSearchResults();
-      showToast(doc.dirty ? "Source diff loaded" : "Source clean");
+      showToast(file ? (file.dirty ? "Source diff loaded" : "Source clean") : (doc.dirty ? "Source diff loaded" : "Source clean"));
     };
-    if (scm) render(scm);
-    else loadSourceControl().then(render);
+    const currentRevision = latestDoc && latestDoc.revision;
+    if (scm && (!currentRevision || sourceControlRevision(scm, currentCanvasSourceId()) === currentRevision)) {
+      render(scm);
+    } else {
+      scm = null;
+      loadSourceControl().then(render);
+    }
   }
 
   function selectQueryResult(result, fitView) {
@@ -678,7 +743,7 @@
   function runCanvasSearch() {
     const query = canvasSearch.value.trim();
     if (!query) {
-      searchState = { results: [], spans: [], active: -1, diff: null, impact: null, truncated: false, resultLimit: 0, stale: false };
+      searchState = { results: [], spans: [], active: -1, diff: null, impact: null, renamePlan: null, truncated: false, resultLimit: 0, stale: false };
       renderSearchResults();
       if (latestDoc) drawGraph(latestDoc);
       return;

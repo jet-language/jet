@@ -223,6 +223,51 @@ fn run() {{
 
 #[cfg(unix)]
 #[test]
+fn core_process_pipeline_honors_stage_timeout() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_pipeline_timeout_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let slow = dir.join("slow.sh");
+    write_executable(&slow, "#!/bin/sh\nsleep 1\n");
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    result :: process.pipeline([
+        process.cmd(["{slow}"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("pipeline failed")
+    print(result.timed_out)
+}}
+"#,
+        slow = jet_string_path(&slow),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_pipeline_timeout", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "true\n");
+
+    let started = std::time::Instant::now();
+    let rerun = Command::new(dir.join("process_pipeline_timeout"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(800),
+        "pipeline ignored stage timeout: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(rerun.status.code(), Some(0));
+    assert_eq!(rerun.stdout, b"true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
 fn core_process_live_stream_does_not_block_on_sibling_output() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_process_live_backpressure_{}",

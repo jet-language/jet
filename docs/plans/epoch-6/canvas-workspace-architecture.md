@@ -213,10 +213,12 @@ Ratified 2026-07-08:
   docs, and the web dev route.
 - Added `jet.canvas.project.edit` and `/canvas/project/transaction` for
   previewed project source transactions.
-- First project transaction op: `add_dependency`, editing `package.jet` through the
-  existing manifest helper, validating the Jetpack manifest parser before write,
-  checking `project_revision` plus touched-file revisions, and returning
-  authority/audit/diff payloads. Preview mode writes nothing.
+- Project transactions include package/config edits and semantic project rename:
+  `rename_binding`/`rename_function` select one semindex definition anchor,
+  preview every resolved reference across the projected source files, and apply
+  the complete checked source overlay through one rollback-capable transaction.
+  Every request checks `project_revision` plus touched-file revisions; preview
+  mode writes nothing and exposes the exact per-file envelope for apply.
 - Canvas UI now fetches `/canvas/project` and renders a source-backed Project
   rail with entry, packages, deps, targets, source-truth file count, and state
   policy. No Canvas project asset or semantic sidecar.
@@ -387,7 +389,10 @@ Replace the per-selection `innerHTML` in `inspector-connections.js` with a
 field-descriptor list: `{label, value, editable, apply_op}`. Node/variable/
 function detail views each supply a descriptor array; one renderer turns it into
 rows + an Apply button. Every field is either live (`apply_op` set) or absent —
-no dead controls, which is exactly #377's exit criterion.
+no dead controls, which is exactly #377's exit criterion. Composite values keep
+one source-backed inline anchor. Details derives item/key/value and named
+member paths from the expression, validates each leaf before the existing
+transaction, and preserves the original source on refusal or stale revision.
 
 ### Migration steps (no big-bang rewrite — the postmortem warns against a 5th)
 

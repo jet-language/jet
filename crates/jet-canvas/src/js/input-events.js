@@ -337,6 +337,7 @@
       saveEditorState();
       showToast(drag.mode === "comment-resize" ? "Comment resized" : "Comment moved");
     }
+    let pinTransactionStarted = false;
     if (drag && drag.mode === "pin") {
       const rect = canvas.getBoundingClientRect();
       const target = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top) || hoverPin;
@@ -349,7 +350,9 @@
         return;
       }
       if (!moved && pendingPin && target) {
+        const previousTransaction = window.__jetCanvasLastTx;
         const done = completeConnection(pendingPin, target, graph);
+        pinTransactionStarted = window.__jetCanvasLastTx !== previousTransaction;
         setPendingPin(done || pendingPin.pin_id === target.pin_id ? null : pendingPin);
       } else if (!moved && target && target.pin_id === drag.pin.pin_id) {
         if (pendingPin && pendingPin.pin_id === target.pin_id) {
@@ -361,7 +364,9 @@
         }
       } else if (target) {
         setPendingPin(null);
+        const previousTransaction = window.__jetCanvasLastTx;
         completeConnection(drag.pin, target, graph);
+        pinTransactionStarted = window.__jetCanvasLastTx !== previousTransaction;
       } else {
         setPendingPin(null);
         openPinMenu(drag.pin, ev.clientX, ev.clientY, { x: wx(ev.clientX - rect.left), y: wy(ev.clientY - rect.top) });
@@ -372,7 +377,10 @@
     drag = null;
     // A click already drew the selected node in mousedown. Avoid a second
     // full large-graph repaint when no node position changed.
-    if (latestDoc && (mouseupMode !== "node" || mouseupMoved)) drawGraph(latestDoc);
+    const pinAccepted = mouseupMode === "pin"
+      && window.__jetCanvasLastConnectionPlan
+      && window.__jetCanvasLastConnectionPlan.ok;
+    if (latestDoc && (mouseupMode !== "node" || mouseupMoved) && !pinTransactionStarted && !pinAccepted) drawGraph(latestDoc);
   });
 
   canvas.addEventListener("contextmenu", function (ev) {

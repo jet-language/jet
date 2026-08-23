@@ -722,12 +722,11 @@ fn canvas_projects_switch_arm_outputs_with_source_provenance() {
     }
 }
 
-fn run() {
-    print(choose(1))
-}
+fn run() { print(choose(1)) }
 "#,
     );
     let source = fs::read_to_string(&path).unwrap();
+    assert_eq!(jet::format_source(&source).unwrap(), source);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("switch multi-exec graph");
     let choose = graph_object_for_title(&graph, "choose");
     let pins = json_top_level_objects(json_array_field(choose, "pins"));
@@ -768,7 +767,6 @@ fn run() {
         !source.contains("=>"),
         "retired arrow spelling leaked: {source}"
     );
-    assert_eq!(jet::Formatter::format_source(&source).unwrap(), source);
 }
 
 #[test]
@@ -1434,7 +1432,7 @@ fn run() {
 }
 
 fn demo() Int -> {
-    xs :: [1, 2, 3]
+    xs :: [1, 2, 3,]
     return xs[0] + to_int(1)
 }
 
@@ -2107,6 +2105,84 @@ fn canvas_project_search_and_references_share_project_revision() {
     let stale = jet::Canvas::query_json_for_entry(&entry, &search).expect_err("stale project query");
     assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
     assert!(fs::read_to_string(&other).unwrap().contains("return 3"));
+}
+
+#[test]
+fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
+    let dir = temp_dir("project_rename");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"project_rename\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(
+        &entry,
+        "pub fn helper() Int -> {\n    return 1\n}\n\nfn run() {\n    print(helper())\n}\n",
+    )
+    .unwrap();
+    let other = dir.join("other.jet");
+    fs::write(
+        &other,
+        "use \"./main\" as main\n\nfn use_helper() Int -> {\n    return main.helper()\n}\n",
+    )
+    .unwrap();
+    let unrelated = dir.join("unrelated.jet");
+    fs::write(
+        &unrelated,
+        "fn helper() Int -> {\n    return 99\n}\n\nfn local() Int -> {\n    return helper()\n}\n",
+    )
+    .unwrap();
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    let project_revision = json_field(&project, "project_revision");
+    let main_before = fs::read_to_string(&entry).unwrap();
+    let other_before = fs::read_to_string(&other).unwrap();
+    let unrelated_before = fs::read_to_string(&unrelated).unwrap();
+    let main_revision = jet::Canvas::source_revision(&main_before);
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"preview_rename\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\",\"to\":\"compute\"}}",
+        main_revision, project_revision
+    );
+
+    let preview = jet::Canvas::query_json_for_entry(&entry, &request)
+        .expect("project rename preview");
+    for field in [
+        "\"op\":\"preview_rename\"",
+        "\"project_revision\":\"sha256-",
+        "\"source_id\":\"main.jet\"",
+        "\"source_id\":\"other.jet\"",
+        "\"source_id\":\"unrelated.jet\"",
+        "\"files\"",
+        "-pub fn helper()",
+        "+pub fn compute()",
+    ] {
+        assert!(preview.contains(field), "rename preview missing {field}: {preview}");
+    }
+    assert_eq!(fs::read_to_string(&entry).unwrap(), main_before);
+    assert_eq!(fs::read_to_string(&other).unwrap(), other_before);
+    assert_eq!(fs::read_to_string(&unrelated).unwrap(), unrelated_before);
+
+    let touched = format!(
+        "[{{\"path\":\"main.jet\",\"revision\":\"{}\"}},{{\"path\":\"other.jet\",\"revision\":\"{}\"}}]",
+        main_revision,
+        jet::Canvas::source_revision(&other_before)
+    );
+    let apply = format!(
+        "{{\"schema_version\":1,\"op\":\"rename_binding\",\"preview\":false,\"project_revision\":\"{}\",\"files\":{},\"source_id\":\"main.jet\",\"from\":\"helper\",\"to\":\"compute\"}}",
+        project_revision, touched
+    );
+    let committed = jet::Canvas::apply_project_transaction_json(&entry, &apply)
+        .expect("project rename commit");
+    assert!(committed.contains("\"writes\":\"source_transaction\""), "{committed}");
+    assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
+    assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
+
+    let stale = jet::Canvas::apply_project_transaction_json(&entry, &apply)
+        .expect_err("old project rename must be rejected");
+    assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
+    assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
+    assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
 }
 
 #[test]
@@ -2805,6 +2881,82 @@ fn run() {
     assert_eq!(fs::read_to_string(&path).unwrap(), after_reference);
     assert!(after_reference.contains("fn edit()"), "scope/provenance lost: {after_reference}");
     assert!(after_reference.contains("print(alias)"), "reference consumers lost: {after_reference}");
+}
+
+#[test]
+fn canvas_details_collection_values_keep_inline_provenance_and_refuse_bad_nested_source() {
+    let path = write_fixture(
+        "details_collection_editor",
+        r#"fn edit() {
+    matrix :: [[1, 2], [3, 4]]
+    settings :: Point{x: 4, y: [5, 6]}
+    lookup :: ["first": 7, "second": 8]
+    print(matrix[0][0])
+}
+
+struct Point {
+    x: Int
+    y: [Int]
+}
+
+fn run() {
+    edit()
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("collection Details graph");
+    let edit_graph = graph_object_for_title(&graph, "edit");
+    for source in [
+        "[[1, 2], [3, 4]]",
+        "Point{x: 4, y: [5, 6]}",
+        "[\"first\": 7, \"second\": 8]",
+    ] {
+        let encoded = source.replace('\\', "\\\\").replace('"', "\\\"");
+        assert!(
+            edit_graph.contains(&format!("\"source\":\"{encoded}\"")),
+            "collection value lacks one source-backed Details anchor: {source}\n{edit_graph}"
+        );
+    }
+
+    let before = fs::read_to_string(&path).unwrap();
+    let matrix_id = field_before(edit_graph, "\"source\":\"[[1, 2], [3, 4]]\"", "inline_expr_id");
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"[[1, 2], [9, 4]]\"}}",
+        jet::Canvas::source_revision(&before),
+        matrix_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit).expect("nested collection edit");
+    let changed = fs::read_to_string(&path).unwrap();
+    assert!(changed.contains("matrix :: [[1, 2], [9, 4]]"), "{changed}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject nested collection");
+    let matrix_id = field_before(
+        graph_object_for_title(&graph, "edit"),
+        "\"source\":\"[[1, 2], [9, 4]]\"",
+        "inline_expr_id",
+    );
+    let before_invalid = fs::read_to_string(&path).unwrap();
+    let invalid = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"[[1, 2], [true, 4]]\"}}",
+        jet::Canvas::source_revision(&before_invalid),
+        matrix_id
+    );
+    let error = jet::Canvas::apply_transaction_json(&path, &invalid).expect_err("bad nested type");
+    assert!(error.contains("Error [") || error.contains("diagnostic"), "{error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"sha256-stale\",\"inline_expr_id\":\"{}\",\"new_expr\":\"[[1, 2], [8, 4]]\"}}",
+        matrix_id
+    );
+    let stale_error = jet::Canvas::apply_transaction_json(&path, &stale).expect_err("stale nested edit");
+    assert!(stale_error.contains("conflict"), "{stale_error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
+    assert_eq!(
+        jet::Formatter::format_source(&before_invalid).unwrap(),
+        before_invalid,
+        "nested collection edit must reload in canonical Jet spelling"
+    );
 }
 
 #[test]
@@ -4283,6 +4435,8 @@ fn canvas_details_are_descriptor_driven_and_dom_safe() {
 
     assert!(inspector.contains("function renderFieldDescriptors"), "{inspector}");
     assert!(inspector.contains("function validatedFieldDescriptors"), "{inspector}");
+    assert!(inspector.contains("const operationCache = new WeakMap()"), "descriptor operations must be normalized once per render: {inspector}");
+    assert!(inspector.contains("operationCache.has(operation)"), "descriptor operations must share one live control group: {inspector}");
     assert!(inspector.contains("function appendSafeDescriptorAttributes"), "{inspector}");
     assert!(inspector.contains("function detailsEditorSelectionIsCurrent"), "{inspector}");
     assert!(inspector.contains("if (state.phase === \"applying\") return false"), "{inspector}");

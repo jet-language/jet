@@ -10,7 +10,7 @@ use jet_semindex::SourceSpan;
 use super::debug_source_git::{
     canonical_path, debug_diagnostics_error, debug_error, debug_ok, debug_stop_ok, git_output,
     git_relative_path, git_root, line_from_anchor, required_debug_string, untracked_diff,
-    DebugSessions, DebugTier,
+    validate_debug_breakpoint_anchors, DebugSessions, DebugTier,
 };
 use super::edit_actions::{
     apply_add_pattern_arm, apply_append_multi_input, apply_break_link,
@@ -35,13 +35,13 @@ use super::project_scan::{
 use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
     apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
-    apply_project_remove_dependency, clean_project_rel_path, diagnostic_json, rel_path,
-    required_project_touched_files, validate_touched_project_files,
+    apply_project_remove_dependency, apply_project_rename, clean_project_rel_path, diagnostic_json,
+    rel_path, required_project_touched_files, validate_touched_project_files,
 };
 use super::query_actions::{
     canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
-    canvas_preview_rename, canvas_project_find, canvas_project_references, canvas_references,
-    canvas_source_to_graph,
+    canvas_preview_rename, canvas_project_find, canvas_project_preview_rename,
+    canvas_project_references, canvas_references, canvas_source_to_graph,
 };
 use super::validation_json::{
     json_bool_field, json_str, json_string_array, json_string_field, json_usize_array,
@@ -432,7 +432,14 @@ fn project_json_for_entry_inner(path: &Path) -> String {
 
 /// Apply one versioned package/workspace transaction and write source-truth files.
 pub fn apply_project_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| apply_project_transaction_json_inner(path, request))
+}
+
+fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<String, String> {
     let ctx = project_context_for_entry(path);
+    if let Some(diagnostic) = ctx.authority_diagnostic.as_ref() {
+        return Err(project_edit_error("stale", &diagnostic.what));
+    }
     let schema = json_usize_field(request, "schema_version").unwrap_or(0);
     if schema != PROJECT_SCHEMA_VERSION as usize {
         return Err(project_edit_error(
@@ -458,6 +465,7 @@ pub fn apply_project_transaction_json(path: &Path, request: &str) -> Result<Stri
         "create_package" => apply_project_create_package(&ctx, request, &touched),
         "add_workspace_member" => apply_project_add_workspace_member(&ctx, request, &touched),
         "add_env_service" => apply_project_add_env_service(&ctx, request, &touched),
+        "rename_binding" | "rename_function" => apply_project_rename(&ctx, request, &touched),
         _ => Err(project_edit_error(
             "unsupported",
             "unknown Canvas project transaction operation",
@@ -553,6 +561,27 @@ pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, Strin
             &path,
             &src,
             &required_query_string(request, "symbol")?,
+            expected_project_revision.as_deref(),
+        );
+    }
+    if op.as_deref() == Some("preview_rename") && expected_project_revision.is_some() {
+        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let revision = required_query_string(request, "revision")?;
+        if revision != source_revision(&src) {
+            return Err(query_error(
+                "conflict",
+                "source changed since this Canvas graph was drawn",
+            ));
+        }
+        let symbol = required_query_string(request, "symbol")?;
+        let to = required_query_string(request, "to")?;
+        validate_query_ident(&to)?;
+        return canvas_project_preview_rename(
+            entry,
+            &path,
+            &src,
+            &symbol,
+            &to,
             expected_project_revision.as_deref(),
         );
     }
@@ -1231,12 +1260,7 @@ pub fn debug_session_json_for_entry_with_sessions(
     let source_id = json_string_field(request, "source_id");
     let path = match resolve_entry_source_path(entry, source_id.as_deref()) {
         Ok(path) => path,
-        Err(error) => {
-            if let Some(id) = json_string_field(request, "session_id") {
-                sessions.stop(&id);
-            }
-            return Err(error);
-        }
+        Err(error) => return Err(error),
     };
     debug_session_json_for_file_with_sessions(&path, request, sessions)
 }
@@ -1256,7 +1280,7 @@ pub fn debug_session_json_for_file_with_sessions(
         Ok(src) => src,
         Err(error) => {
             if let Some(id) = json_string_field(request, "session_id") {
-                sessions.stop(&id);
+                sessions.discard(&id);
             }
             return Err(debug_error("io", &error.to_string()));
         }
@@ -1273,12 +1297,8 @@ pub fn debug_session_json_for_file_with_sessions(
     let requested_tier = DebugTier::parse(json_string_field(request, "tier").as_deref())?;
     if json_bool_field(request, "stop").unwrap_or(false) {
         let id = required_debug_string(request, "session_id")?;
-        let tier = sessions.stop(&id).ok_or_else(|| {
-            debug_error(
-                "session",
-                "debug session is no longer live; nothing to stop",
-            )
-        })?;
+        let current_revision = source_revision(&src);
+        let tier = sessions.stop(path, &revision, &current_revision, &id, requested_tier)?;
         let source_id = json_string_field(request, "source_id").unwrap_or_else(|| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -1288,7 +1308,7 @@ pub fn debug_session_json_for_file_with_sessions(
     }
     if revision != source_revision(&src) {
         if let Some(id) = session_id.as_deref() {
-            sessions.stop(id);
+            sessions.discard(id);
         }
         return Err(debug_error(
             "conflict",
@@ -1298,7 +1318,9 @@ pub fn debug_session_json_for_file_with_sessions(
 
     let mut breakpoint_lines = json_usize_array(request, "breakpoints");
     let mut stale_breakpoints = Vec::new();
-    for anchor in json_string_array(request, "breakpoint_spans") {
+    let breakpoint_anchors = json_string_array(request, "breakpoint_spans");
+    validate_debug_breakpoint_anchors(&breakpoint_anchors)?;
+    for anchor in breakpoint_anchors {
         if let Some(line) = line_from_anchor(&src, &anchor) {
             breakpoint_lines.push(line);
         } else {
@@ -1333,7 +1355,7 @@ pub fn debug_session_json_for_file_with_sessions(
         .map_err(|error| debug_error("io", &format!("couldn't re-read debug source: {error}")))?;
     if current_src != src {
         if execution.status == jet_debug::SessionStatus::Running {
-            sessions.stop(&execution.id);
+            sessions.discard(&execution.id);
         }
         return Err(debug_error(
             "conflict",

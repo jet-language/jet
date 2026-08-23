@@ -1614,8 +1614,11 @@ process mechanism. On Unix, ordinary and terminal-backed argv children use a
 private process group; timeout, cancellation, explicit signals, and output
 limit exhaustion terminate that group. Captured stdout and stderr share the
 declared output limit, and an output-limit failure closes before waiting for
-unbounded child output. Detached execution is the explicit opt-out from
-automatic child cleanup.
+unbounded child output. Pipeline stages apply their own timeout and captured
+output limit; the earliest live stage deadline terminates the full pipeline and
+returns a receipt with `timed_out: true`, while output overflow fails after all
+pipeline children and drain workers are cleaned up. Detached execution is the
+explicit opt-out from automatic child cleanup.
 
 `ProcessChild` exposes `id()`, `wait()`, `exited()`, `kill()`, `terminate()`,
 `interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and

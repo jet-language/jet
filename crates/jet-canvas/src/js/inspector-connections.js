@@ -49,9 +49,19 @@
   }
 
   function validatedFieldDescriptors(descriptors) {
+    const operationCache = new WeakMap();
+    const normalizeOperation = (operation) => {
+      if (!operation || (typeof operation !== "object" && typeof operation !== "function")) {
+        return descriptorOperation(operation);
+      }
+      if (operationCache.has(operation)) return operationCache.get(operation);
+      const normalized = descriptorOperation(operation);
+      if (normalized) operationCache.set(operation, normalized);
+      return normalized;
+    };
     return (Array.isArray(descriptors) ? descriptors : []).map((field, index) => {
       if (!field || typeof field.label !== "string" || !Object.prototype.hasOwnProperty.call(field, "value")) return null;
-      const apply_op = descriptorOperation(field.apply_op);
+      const apply_op = normalizeOperation(field.apply_op);
       return Object.assign({}, field, {
         key: String(field.key || field.id || field.label || index),
         apply_op,
@@ -86,6 +96,7 @@
       selection: state.selectionKey,
       revision: state.revision,
       dirty: state.controls.filter((record) => detailEditorSource(record.field, record.control) !== record.initial).map((record) => record.field.key),
+      reason: state.reason || "",
       event: event || "render"
     };
   }
@@ -93,10 +104,20 @@
   function setDetailsEditorPhase(state, phase, event) {
     if (!state || state !== detailsEditorState) return;
     state.phase = phase;
+    if (phase === "clean" || phase === "dirty") state.reason = "";
     for (const group of state.groups) {
       for (const button of group.buttons) button.disabled = phase === "applying";
     }
     publishDetailsEditorState(state, event);
+  }
+
+  function refuseDetailsEdit(state, event, message, code = "details_validation") {
+    const reason = String(message || "Details edit was refused");
+    if (state && state === detailsEditorState) state.reason = reason;
+    window.__jetCanvasLastTxResult = { ok: false, changed: false, code, message: reason };
+    setDetailsEditorPhase(state, "refused", event);
+    showToast(reason, { isError: true });
+    return false;
   }
 
   function detailsEditorIsCurrent(state) {
@@ -156,40 +177,45 @@
       return false;
     }
     if (latestDoc && state.revision && latestDoc.revision !== state.revision) {
-      setDetailsEditorPhase(state, "refused", "stale-revision");
-      showToast("Details edit is stale; current source was kept", { isError: true });
-      return false;
+      return refuseDetailsEdit(state, "stale-revision", "Details edit is stale; current source was kept", "conflict");
     }
     const values = {};
-    for (const field of group.fields) {
-      const record = state.controls.find((candidate) => candidate.field === field);
-      values[field.key] = record ? detailEditorSource(field, record.control) : field.value;
+    try {
+      for (const field of group.fields) {
+        const record = state.controls.find((candidate) => candidate.field === field);
+        const source = record ? detailEditorSource(field, record.control) : field.value;
+        if (typeof field.validate === "function") field.validate(source, values, field);
+        values[field.key] = source;
+      }
+    } catch (error) {
+      return refuseDetailsEdit(state, "validation-error", error && error.message || String(error));
     }
     setDetailsEditorPhase(state, "applying", event || "apply");
     let result;
     try {
       result = invokeFieldOperation(group.operation, values, group.fields, state);
     } catch (error) {
-      setDetailsEditorPhase(state, "refused", "validation-error");
-      showToast(String(error), { isError: true });
-      return false;
+      return refuseDetailsEdit(state, "validation-error", error && error.message || String(error));
     }
     if (!result || typeof result.then !== "function") {
-      if (result && result.ok === false) setDetailsEditorPhase(state, "refused", "validation-error");
-      else setDetailsEditorPhase(state, "clean", event || "apply");
+      if (!result) return refuseDetailsEdit(state, "missing-operation", "Details edit has no live source operation", "no_live_operation");
+      if (result.ok === false) return refuseDetailsEdit(state, "validation-error", result.message || "Details edit was refused");
+      setDetailsEditorPhase(state, "clean", event || "apply");
       return true;
     }
     Promise.resolve(result).then((outcome) => {
       if (!outcome || outcome.ok === false) {
-        if (state === detailsEditorState) setDetailsEditorPhase(state, "refused", "transaction-refused");
-        else if (detailsEditorSelectionIsCurrent(state.selectionKey)) setDetailsEditorPhase(detailsEditorState, "refused", "transaction-refused");
+        const current = state === detailsEditorState ? state : detailsEditorSelectionIsCurrent(state.selectionKey) ? detailsEditorState : null;
+        if (current) {
+          current.reason = outcome && outcome.json && (outcome.json.message || outcome.json.reason) || "Details edit was refused";
+          setDetailsEditorPhase(current, "refused", "transaction-refused");
+        }
       } else if (state === detailsEditorState) {
         setDetailsEditorPhase(state, "clean", event || "apply");
       }
     }).catch((error) => {
-      if (state === detailsEditorState) setDetailsEditorPhase(state, "refused", "transaction-error");
-      else if (detailsEditorSelectionIsCurrent(state.selectionKey)) setDetailsEditorPhase(detailsEditorState, "refused", "transaction-error");
-      showToast(String(error), { isError: true });
+      const current = state === detailsEditorState ? state : detailsEditorSelectionIsCurrent(state.selectionKey) ? detailsEditorState : null;
+      refuseDetailsEdit(current, "transaction-error", error && error.message || String(error), "transaction_error");
     });
     return true;
   }
@@ -224,6 +250,7 @@
       control.setAttribute("data-details-input", field.key);
       control.setAttribute("data-detail-kind", field.kind || "expression");
       control.setAttribute("data-detail-type", field.type || "Value");
+      if (field.apply_op) control.setAttribute("data-details-apply-op", field.apply_op.id || "field-operation");
       if (field.inlineId) control.setAttribute("data-inline-id", field.inlineId);
       if (field.sourceSpan && Number.isFinite(field.sourceSpan.start) && Number.isFinite(field.sourceSpan.end)) {
         control.setAttribute("data-detail-source-start", field.sourceSpan.start);
@@ -244,7 +271,12 @@
       control.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          setDetailEditorValue(field, control, field.inputValue !== undefined ? field.inputValue : field.value);
+          event.stopPropagation();
+          for (const record of state.controls) {
+            if (group.fields.includes(record.field)) {
+              setDetailEditorValue(record.field, record.control, record.field.inputValue !== undefined ? record.field.inputValue : record.field.value);
+            }
+          }
           const stillDirty = state.controls.some((record) => detailEditorSource(record.field, record.control) !== record.initial);
           setDetailsEditorPhase(state, stillDirty ? "dirty" : "clean", "escape");
         } else if (event.key === "Enter" && !(field.multiline && event.shiftKey)) {
@@ -301,6 +333,10 @@
     const row = document.createElement("label");
     row.className = field.className || "details-field";
     row.setAttribute("data-details-field", field.key);
+    if (Number.isFinite(field.depth) && field.depth > 0) {
+      row.setAttribute("data-details-depth", String(field.depth));
+      row.style.paddingInlineStart = `${field.depth * 14}px`;
+    }
     appendText(row, "span", "", field.label);
     appendFieldControl(row, field, state, group);
     if (field.help) appendText(row, "small", "", field.help);
@@ -523,6 +559,323 @@
     return source;
   }
 
+  function trimSourceRange(source, start, end) {
+    while (start < end && /\s/.test(source[start])) start += 1;
+    while (end > start && /\s/.test(source[end - 1])) end -= 1;
+    return { start, end };
+  }
+
+  function skipQuotedSource(source, start, end) {
+    const quote = source[start];
+    const triple = quote === '"' && source.slice(start, start + 3) === '"""';
+    let index = start + (triple ? 3 : 1);
+    while (index < end) {
+      if (source[index] === "\\") {
+        index += 2;
+        continue;
+      }
+      if (triple ? source.slice(index, index + 3) === '"""' : source[index] === quote) return index + (triple ? 3 : 1);
+      index += 1;
+    }
+    return end;
+  }
+
+  function matchingSourceDelimiter(source, start, end) {
+    const closeFor = { "[": "]", "(": ")", "{": "}" };
+    const opens = Object.keys(closeFor);
+    const closes = new Set(Object.values(closeFor));
+    const stack = [];
+    for (let index = start; index < end; index += 1) {
+      const char = source[index];
+      if (char === '"' || char === "'") {
+        index = skipQuotedSource(source, index, end) - 1;
+        continue;
+      }
+      if (opens.includes(char)) stack.push(closeFor[char]);
+      else if (closes.has(char) && stack.pop() !== char) return -1;
+      if (!stack.length) return index;
+    }
+    return -1;
+  }
+
+  function topLevelSourceRanges(source, start, end) {
+    const ranges = [];
+    let cursor = start;
+    let depth = 0;
+    for (let index = start; index < end; index += 1) {
+      const char = source[index];
+      if (char === '"' || char === "'") {
+        index = skipQuotedSource(source, index, end) - 1;
+        continue;
+      }
+      if (char === "[" || char === "(" || char === "{") depth += 1;
+      else if (char === "]" || char === ")" || char === "}") depth = Math.max(0, depth - 1);
+      else if (char === "," && depth === 0) {
+        const range = trimSourceRange(source, cursor, index);
+        if (range.start < range.end) ranges.push(range);
+        cursor = index + 1;
+      }
+    }
+    const finalRange = trimSourceRange(source, cursor, end);
+    if (finalRange.start < finalRange.end) ranges.push(finalRange);
+    return ranges;
+  }
+
+  function topLevelSourceColon(source, start, end) {
+    let depth = 0;
+    for (let index = start; index < end; index += 1) {
+      const char = source[index];
+      if (char === '"' || char === "'") {
+        index = skipQuotedSource(source, index, end) - 1;
+        continue;
+      }
+      if (char === "[" || char === "(" || char === "{") depth += 1;
+      else if (char === "]" || char === ")" || char === "}") depth = Math.max(0, depth - 1);
+      else if (char === ":" && depth === 0) return index;
+    }
+    return -1;
+  }
+
+  function topLevelSourceBrace(source, start, end) {
+    let depth = 0;
+    for (let index = start; index < end; index += 1) {
+      const char = source[index];
+      if (char === '"' || char === "'") {
+        index = skipQuotedSource(source, index, end) - 1;
+        continue;
+      }
+      if (char === "[" || char === "(") depth += 1;
+      else if (char === "]" || char === ")") depth = Math.max(0, depth - 1);
+      else if (char === "{" && depth === 0) return index;
+    }
+    return -1;
+  }
+
+  function topLevelSourceParen(source, start, end) {
+    let depth = 0;
+    for (let index = start; index < end; index += 1) {
+      const char = source[index];
+      if (char === '"' || char === "'") {
+        index = skipQuotedSource(source, index, end) - 1;
+        continue;
+      }
+      if (char === "[" || char === "{") depth += 1;
+      else if (char === "]" || char === "}") depth = Math.max(0, depth - 1);
+      else if (char === "(" && depth === 0) return index;
+    }
+    return -1;
+  }
+
+  function nestedLiteralType(source) {
+    const text = String(source || "").trim();
+    if (/^"(?:[^"\\]|\\.)*"$/.test(text)) return "String";
+    if (/^'(?:[^'\\]|\\.)'$/.test(text)) return "Char";
+    if (/^(?:true|false)$/.test(text)) return "Bool";
+    if (/^[+-]?\d+$/.test(text)) return "Int";
+    if (/^[+-]?(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return "Float";
+    return "";
+  }
+
+  function nestedTypePart(type, index, mapValue) {
+    const text = String(type || "").trim().replace(/\?$/, "");
+    const match = text.match(/^\[(.*)\]$/);
+    if (!match) return "";
+    const body = match[1];
+    const colon = topLevelSourceColon(body, 0, body.length);
+    if (colon >= 0) return body.slice(mapValue ? colon + 1 : 0, mapValue ? body.length : colon).trim();
+    return index === undefined ? body.trim() : body.trim();
+  }
+
+  function nestedValueType(source, expectedType) {
+    const expected = String(expectedType || "").trim();
+    if (expected && expected !== "Value" && expected !== "unknown") return expected;
+    return nestedLiteralType(source) || "Value";
+  }
+
+  function parseNestedValueNode(source, start, end, expectedType, graph, path, label, depth) {
+    const range = trimSourceRange(source, start, end);
+    const text = source.slice(range.start, range.end);
+    const node = {
+      start: range.start,
+      end: range.end,
+      source: text,
+      path,
+      label,
+      depth,
+      type: nestedValueType(text, expectedType),
+      children: []
+    };
+    if (!text) return node;
+
+    let bodyStart = -1;
+    let bodyEnd = -1;
+    let containerKind = "";
+    const first = source[range.start];
+    const matching = first === "[" || first === "(" || first === "{" ? matchingSourceDelimiter(source, range.start, range.end) : -1;
+    if (matching === range.end - 1) {
+      if (first === "[") {
+        containerKind = "list";
+        bodyStart = range.start + 1;
+        bodyEnd = matching;
+      } else if (first === "(") {
+        containerKind = "tuple";
+        bodyStart = range.start + 1;
+        bodyEnd = matching;
+      }
+    } else {
+      const brace = topLevelSourceBrace(source, range.start, range.end);
+      if (brace >= 0 && matchingSourceDelimiter(source, brace, range.end) === range.end - 1) {
+        const head = source.slice(range.start, brace).trim();
+        containerKind = head.startsWith("[") ? "list" : "struct";
+        bodyStart = brace + 1;
+        bodyEnd = range.end - 1;
+      } else {
+        const paren = topLevelSourceParen(source, range.start, range.end);
+        if (paren >= 0 && matchingSourceDelimiter(source, paren, range.end) === range.end - 1) {
+          containerKind = "call";
+          bodyStart = paren + 1;
+          bodyEnd = range.end - 1;
+        }
+      }
+    }
+    if (!containerKind) return node;
+
+    const entries = topLevelSourceRanges(source, bodyStart, bodyEnd);
+    if (containerKind === "list" && entries.some((entry) => topLevelSourceColon(source, entry.start, entry.end) >= 0)) containerKind = "map";
+    node.kind = containerKind;
+    for (const [index, entry] of entries.entries()) {
+      const colon = topLevelSourceColon(source, entry.start, entry.end);
+      if (containerKind === "list" && colon < 0) {
+        const childPath = `${path}[${index}]`;
+        const childType = nestedTypePart(expectedType, index, false);
+        node.children.push(parseNestedValueNode(source, entry.start, entry.end, childType, graph, childPath, `${label}[${index}]`, depth + 1));
+        continue;
+      }
+      if (containerKind === "map" && colon >= 0) {
+        const keyPath = `${path}[${index}].key`;
+        const valuePath = `${path}[${index}].value`;
+        const keyType = nestedTypePart(expectedType, index, false);
+        const valueType = nestedTypePart(expectedType, index, true);
+        node.children.push(parseNestedValueNode(source, entry.start, colon, keyType, graph, keyPath, `${label}[${index}] key`, depth + 1));
+        node.children.push(parseNestedValueNode(source, colon + 1, entry.end, valueType, graph, valuePath, `${label}[${index}] value`, depth + 1));
+        continue;
+      }
+      if (colon >= 0) {
+        const fieldName = source.slice(entry.start, colon).trim() || String(index + 1);
+        const childPath = `${path}.${fieldName}`;
+        node.children.push(parseNestedValueNode(source, colon + 1, entry.end, "", graph, childPath, `${label}.${fieldName}`, depth + 1));
+      } else {
+        const childPath = `${path}.${index + 1}`;
+        node.children.push(parseNestedValueNode(source, entry.start, entry.end, "", graph, childPath, `${label}.${index + 1}`, depth + 1));
+      }
+    }
+    return node;
+  }
+
+  function nestedValueLeaves(node, leaves = []) {
+    if (!node.children || !node.children.length) {
+      if (node.source) leaves.push(node);
+      return leaves;
+    }
+    for (const child of node.children) nestedValueLeaves(child, leaves);
+    return leaves;
+  }
+
+  function nestedNumericSource(source, floating) {
+    const text = String(source || "").trim();
+    if (floating) return /^[+-]?(?:\d[\d_]*\.\d[\d_]*|\d[\d_]*\.|\.\d[\d_]*|\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?$/.test(text);
+    return /^[+-]?(?:\d[\d_]*|0[xX][0-9A-Fa-f_]+|0[bB][01_]+|0[oO][0-7_]+)$/.test(text);
+  }
+
+  function validateNestedField(source, field) {
+    const text = String(source || "").trim();
+    if (!text) throw new Error(`${field.label}: value is required`);
+    const type = String(field.type || "").replace(/\?$/, "");
+    if (field.kind === "enum" && field.options && !field.options.some((option) => !option.disabled && option.source === text)) {
+      throw new Error(`${field.label}: choose a valid ${type} value`);
+    }
+    if (field.kind === "reference" && !/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(text)) {
+      throw new Error(`${field.label}: reference must be a name`);
+    }
+    if (type === "Bool" && !/^(?:true|false)$/.test(text)) throw new Error(`${field.label}: expected true or false`);
+    if (["Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"].includes(type) && !nestedNumericSource(text, false)) {
+      throw new Error(`${field.label}: expected an integer`);
+    }
+    if (["Float", "F32", "F64", "Decimal"].includes(type) && !nestedNumericSource(text, true)) {
+      throw new Error(`${field.label}: expected a number`);
+    }
+    if (type === "String") {
+      try {
+        if (typeof JSON.parse(text) !== "string") throw new Error("not a string");
+      } catch (_) {
+        throw new Error(`${field.label}: expected a quoted string`);
+      }
+    }
+    if (type === "Char" && !/^'(?:[^'\\]|\\.)'$/.test(text)) throw new Error(`${field.label}: expected one quoted character`);
+  }
+
+  function nestedCharSource(value) {
+    const text = String(value || "");
+    if (/^'(?:[^'\\]|\\.)'$/.test(text.trim())) return text.trim();
+    if ([...text].length === 1) return `'${text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+    return text.trim();
+  }
+
+  function replaceNestedValueSources(source, leaves, values) {
+    let result = String(source || "");
+    const edits = leaves.map((leaf) => ({
+      start: leaf.start,
+      end: leaf.end,
+      source: String(values[leaf.path] === undefined ? leaf.source : values[leaf.path]).trim()
+    })).sort((a, b) => b.start - a.start);
+    for (const edit of edits) {
+      if (!edit.source) throw new Error("Nested value edit requires a value");
+      result = result.slice(0, edit.start) + edit.source + result.slice(edit.end);
+    }
+    return result;
+  }
+
+  function structuredValueFields(graph, variable, expr, inlineId, applyOp) {
+    const source = String(expr ? expr.source : variable.defaultSource || "");
+    const valueKey = inlineId ? "inline-value" : "value";
+    const rootLabel = inlineId ? "Expression" : "Default value";
+    const root = parseNestedValueNode(source, 0, source.length, variable.type, graph, valueKey, rootLabel, 0);
+    const leaves = nestedValueLeaves(root);
+    if (!root.children.length || !leaves.length) return null;
+    const baseEditable = Boolean(inlineId || variable.source === "input" || expr) && !!applyOp;
+    const operation = applyOp ? Object.assign({}, applyOp, {
+      run: (values, fields, context) => applyOp.run(Object.assign({}, values, {
+        [valueKey]: replaceNestedValueSources(source, leaves, values)
+      }), fields, context)
+    }) : null;
+    const sourceSpan = expr && expr.source_span;
+    return leaves.map((leaf) => {
+      const type = nestedValueType(leaf.source, leaf.type);
+      const kind = detailEditorKind(type, leaf.source, graph);
+      const field = {
+        key: leaf.path,
+        label: leaf.label,
+        inlineId: inlineId || "",
+        type,
+        kind,
+        source: leaf.source,
+        value: detailFieldValue({ type, kind, source: leaf.source }),
+        inputValue: detailFieldValue({ type, kind, source: leaf.source }),
+        options: kind === "enum" ? enumOptions(type, leaf.source) : kind === "reference" ? referenceOptions(graph, variable, leaf.source) : [],
+        editable: baseEditable,
+        apply_op: operation,
+        depth: leaf.depth,
+        validate: (candidate) => validateNestedField(candidate, field),
+        dataAttributes: { "data-details-nested": "true", "data-details-path": leaf.path }
+      };
+      if (type === "Char") field.toSource = nestedCharSource;
+      if (sourceSpan && Number.isFinite(sourceSpan.start) && Number.isFinite(sourceSpan.end)) {
+        field.sourceSpan = { start: sourceSpan.start + leaf.start, end: sourceSpan.start + leaf.end };
+      }
+      return field;
+    });
+  }
+
   function detailExpressionFromElement(element) {
     if (!element) return "";
     if (element.type === "checkbox") return element.checked ? "true" : "false";
@@ -566,9 +919,15 @@
       options: kind === "enum" ? enumOptions(variable.type, source) : kind === "reference" ? referenceOptions(graph, variable, source) : [],
       applyWhenClean: kind === "enum" && !source.trim(),
       editable: Boolean(inlineId || variable.source === "input" || expr) && !!applyOp,
+      multiline: variable.type === "String",
       apply_op: applyOp || null,
       placeholder: variable.source === "input" && !source ? "optional" : ""
     };
+  }
+
+  function valueDetailFields(graph, variable, expr, inlineId, applyOp) {
+    return structuredValueFields(graph, variable, expr, inlineId, applyOp)
+      || [valueDetailField(graph, variable, expr, inlineId, applyOp)];
   }
 
   function metadataDetailsHtml(meta) {
@@ -621,7 +980,7 @@
     return [
       { key: "name", id: "variable-name-input", label: "Name", kind: "expression", type: "Identifier", source: variable.name, value: variable.name, editable: isParam || variable.source === "local", apply_op: isParam ? signatureOp : variable.source === "local" ? localOp : null },
       { key: "type", id: "variable-type-input", label: "Type", kind: "expression", type: "Type", source: variable.type, value: variable.type, editable: isParam, apply_op: isParam ? signatureOp : null },
-      valueDetailField(graph, variable, initExpr, null, isParam ? signatureOp : localOp)
+      ...valueDetailFields(graph, variable, initExpr, null, isParam ? signatureOp : localOp)
     ];
   }
 
@@ -877,7 +1236,7 @@
   function inlineDetailField(graph, expr, applyOp) {
     const type = inlinePinType(graph, expr);
     const pseudo = { name: expr.role, type, source: "local", defaultSource: expr.source };
-    return valueDetailField(graph, pseudo, expr, expr.inline_expr_id, applyOp);
+    return valueDetailFields(graph, pseudo, expr, expr.inline_expr_id, applyOp);
   }
 
   function appendFunctionPanel(parent, graph, node, fnMeta, state) {
@@ -992,7 +1351,7 @@
       })
     };
     const fieldHost = document.createElement("div");
-    renderFieldDescriptors(fieldHost, [inlineDetailField(graph, expr, operation)], { state, fieldsClass: "edit-grid", actionsClass: "edit-grid" });
+    renderFieldDescriptors(fieldHost, inlineDetailField(graph, expr, operation), { state, fieldsClass: "edit-grid", actionsClass: "edit-grid" });
     row.appendChild(fieldHost);
     const actions = document.createElement("div");
     actions.className = "edit-grid";

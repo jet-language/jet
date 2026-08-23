@@ -12,7 +12,10 @@ use super::graph_helpers::{
 };
 use super::graph_json::node_catalog;
 use super::project_scan::{env_project_json, project_context_for_entry, project_file};
-use super::project_transactions::rel_path;
+use super::project_transactions::{
+    module_belongs_to, normalize_and_format_project_changes, prepare_project_rename,
+    project_revision_after_changes, rel_path, validate_project_rename_overlay,
+};
 use super::schema_api::{
     ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, Projection, source_revision,
 };
@@ -403,6 +406,120 @@ pub(super) fn canvas_project_references(
     })
 }
 
+pub(super) fn canvas_project_preview_rename(
+    entry: &Path,
+    selected_path: &Path,
+    selected_src: &str,
+    symbol: &str,
+    to: &str,
+    expected_project_revision: Option<&str>,
+) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| {
+        let context = open_project_query_context(
+            entry,
+            selected_path,
+            selected_src,
+            expected_project_revision,
+        )?;
+        let project = project_context_for_entry(entry);
+        if project.project_revision != context.project_revision {
+            return Err(query_error(
+                "conflict",
+                "project changed while Canvas was preparing its rename",
+            ));
+        }
+        let projection = project_file(selected_path)
+            .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?;
+        let mut plan = prepare_project_rename(&project, selected_path, symbol, to, None)
+            .map_err(|error| query_error(error.kind, &error.message))?;
+        normalize_and_format_project_changes(&project, &mut plan.changes)
+            .map_err(|error| query_error("check", &error))?;
+        validate_project_rename_overlay(&project, &plan.changes)
+            .map_err(|error| query_error("check", &error))?;
+
+        let mut results = Vec::new();
+        let mut seen = HashSet::new();
+        for site in &plan.sites {
+            let Some(source) = context
+                .sources
+                .iter()
+                .find(|source| source.source_id == site.rel)
+            else {
+                return Err(query_error(
+                    "stale",
+                    "Canvas rename site is not in the projected project",
+                ));
+            };
+            let node = (source.path == selected_path)
+                .then(|| node_for_span(&projection, site.span))
+                .flatten();
+            let key = format!("{}|{}|{}", site.rel, site.span.start, site.span.end);
+            if !seen.insert(key) {
+                continue;
+            }
+            let mut result = query_result_json(
+                &site.kind,
+                &site.title,
+                &site.symbol,
+                &site.module_path,
+                site.span,
+                node.as_ref(),
+                &source.source,
+            );
+            result.pop();
+            result.push_str(&format!(
+                ",\"source_id\":{},\"revision\":{}}}",
+                json_str(&source.source_id),
+                json_str(&source.revision),
+            ));
+            results.push(result);
+        }
+        let (results, truncated) = bounded_project_results(results);
+        let files = plan
+            .changes
+            .iter()
+            .map(|change| {
+                format!(
+                    "{{\"path\":{},\"revision\":{},\"after_revision\":{},\"changed\":{}}}",
+                    json_str(&change.rel),
+                    json_str(&source_revision(&change.before)),
+                    json_str(&source_revision(&change.after)),
+                    if change.before != change.after { "true" } else { "false" },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let diff_text = plan
+            .changes
+            .iter()
+            .map(|change| format!("diff -- {}\n{}", change.rel, simple_diff(&change.before, &change.after)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let after_project_revision = project_revision_after_changes(&project, &plan.changes);
+        let selected_after_revision = plan
+            .changes
+            .iter()
+            .find(|change| change.rel == context.selected_source_id)
+            .map(|change| source_revision(&change.after));
+        Ok(project_query_ok(
+            "preview_rename",
+            &context,
+            &results,
+            truncated,
+            &format!(
+                "\"impact\":null,\"diff\":{{\"changed\":true,\"text\":{},\"after_revision\":{},\"after_project_revision\":{},\"files\":[{}]}}",
+                json_str(&diff_text),
+                selected_after_revision
+                    .as_deref()
+                    .map(json_str)
+                    .unwrap_or_else(|| "null".to_string()),
+                json_str(&after_project_revision),
+                files,
+            ),
+        ))
+    })
+}
+
 fn open_project_query_context(
     entry: &Path,
     selected_path: &Path,
@@ -476,15 +593,6 @@ fn open_project_query_context(
         selected_source: selected_src.to_string(),
         sources,
     })
-}
-
-fn module_belongs_to(project_root: &Path, source_path: &Path, module_path: &str) -> bool {
-    let source_id = rel_path(project_root, source_path);
-    let source_id = source_id.trim_start_matches("./");
-    let module_path = module_path.replace('\\', "/");
-    module_path == source_id
-        || module_path == source_path.to_string_lossy().replace('\\', "/")
-        || module_path.ends_with(&format!("/{source_id}"))
 }
 
 fn reference_targets<'a>(

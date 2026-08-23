@@ -867,6 +867,29 @@ fn semindex_references() {
 }
 
 #[test]
+fn semindex_rename_sites_keep_definition_identity_in_json() {
+    let path = temp_fixture(
+        "rename_anchor_identity.jet",
+        "fn helper() Int -> { return 1 }\nfn run() { print(helper()) }\n",
+    );
+    let index = open(&path).expect("rename anchor index");
+    let definition = index
+        .definitions()
+        .iter()
+        .find(|definition| definition.name == "helper")
+        .expect("helper definition");
+    let reference = index
+        .references()
+        .iter()
+        .find(|reference| reference.name == "helper")
+        .expect("helper reference");
+    let target = reference.target.as_ref().expect("resolved helper target");
+    assert_eq!(target.def_span, definition.def_span);
+    assert_eq!(target.semantic_identity.as_deref(), Some(definition.identity.as_str()));
+    assert!(index.to_json().contains("\"semantic_identity\":"));
+}
+
+#[test]
 fn semindex_indexes_generated_fenced_range_names() {
     let path = temp_fixture(
         "fenced_range_names.jet",

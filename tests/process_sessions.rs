@@ -121,6 +121,36 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn pipeline_stage_timeout_matches_all_execution_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_session_pipeline_timeout_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let slow = dir.join("slow.sh");
+    write_executable(&slow, "#!/bin/sh\nsleep 1\n");
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    result :: process.pipeline([
+        process.cmd(["{slow}"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("pipeline failed")
+    print(result.timed_out)
+}}
+"#,
+        slow = jet_string_path(&slow),
+    );
+    tir_support::assert_tiers_agree("process_pipeline_stage_timeout", &src, "true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop() {

@@ -163,6 +163,95 @@ fn canvas_debug_session_replays_one_source_bound_session() {
 }
 
 #[test]
+fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
+    let file = fixture("canvas_stop_binding", LOOPS);
+    let path = Path::new(&file);
+    let source = std::fs::read_to_string(path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let sessions = jet::Canvas::DebugSessions::default();
+    let first_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}",
+        revision
+    );
+    let first =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &first_request, &sessions)
+            .expect("Canvas should start a stoppable session");
+    let marker = "\"id\":\"canvas-debug-";
+    let start = first.find(marker).expect("live response session id") + 6;
+    let end = first[start..]
+        .find('"')
+        .map(|offset| start + offset)
+        .expect("live response session id terminator");
+    let session_id = &first[start..end];
+
+    let wrong_tier = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
+        revision, session_id
+    );
+    let error =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &wrong_tier, &sessions)
+            .expect_err("Canvas must not stop a session through another tier");
+    assert!(error.contains("\"kind\":\"conflict\""), "{error}");
+
+    let other_file = fixture("canvas_stop_other_source", LOOPS);
+    let other_revision =
+        jet::Canvas::source_revision(&std::fs::read_to_string(&other_file).unwrap());
+    let wrong_source = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        other_revision, session_id
+    );
+    let error = jet::Canvas::debug_session_json_for_file_with_sessions(
+        Path::new(&other_file),
+        &wrong_source,
+        &sessions,
+    )
+    .expect_err("Canvas must not stop a session through another source");
+    assert!(error.contains("\"kind\":\"conflict\""), "{error}");
+
+    let next_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        revision, session_id
+    );
+    jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
+        .expect("a mismatched stop must leave the live session intact");
+
+    let stale_stop = format!(
+        "{{\"schema_version\":1,\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        session_id
+    );
+    let error =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &stale_stop, &sessions)
+            .expect_err("Canvas must reject a stale stop request");
+    assert!(error.contains("\"kind\":\"conflict\""), "{error}");
+
+    let ended = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        revision, session_id
+    );
+    let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(path, &ended, &sessions)
+        .expect("a stale stop request must leave the current session intact");
+    assert!(stopped.contains("\"state\":\"stopped\""), "{stopped}");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
+fn canvas_debug_rejects_unbounded_breakpoint_spans_before_execution() {
+    let file = fixture("canvas_breakpoint_limit", LOOPS);
+    let path = Path::new(&file);
+    let source = std::fs::read_to_string(path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let anchors = (0..129).map(|_| "\"0:1\"").collect::<Vec<_>>().join(",");
+    let request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"breakpoint_spans\":[{}],\"commands\":[\"s\"]}}",
+        revision, anchors
+    );
+    let error = jet::Canvas::debug_session_json_for_file(path, &request)
+        .expect_err("Canvas must bound breakpoint span input");
+    assert!(error.contains("\"kind\":\"limit\""), "{error}");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
 fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
     let file = fixture("canvas_native_protocol", LOOPS);
     let path = Path::new(&file);

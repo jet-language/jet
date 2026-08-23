@@ -1,9 +1,12 @@
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_driver::FixEngine;
+use jet_semindex::{DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef};
 
-use super::graph_helpers::{project_edit_error, project_edit_ok, simple_diff};
+use super::graph_helpers::{edit, project_edit_error, project_edit_ok, simple_diff};
 use super::project_scan::{
     project_context_for_entry, project_revision_from_files, ProjectChange, ProjectContext,
     ProjectFileRec, TouchedProjectFile,
@@ -16,6 +19,42 @@ use super::validation_json::{
     json_array_body, json_bool_field, json_object_bodies, json_str, json_string_array,
     json_string_field, json_usize_field, required_project_string, validate_ident_for_project,
 };
+
+pub(super) struct ProjectRenameSite {
+    pub(super) rel: String,
+    pub(super) kind: String,
+    pub(super) title: String,
+    pub(super) symbol: String,
+    pub(super) module_path: String,
+    pub(super) span: SourceSpan,
+}
+
+pub(super) struct ProjectRenamePlan {
+    pub(super) changes: Vec<ProjectChange>,
+    pub(super) sites: Vec<ProjectRenameSite>,
+}
+
+struct ProjectRenameSource {
+    path: PathBuf,
+    source_id: String,
+    source: String,
+    index: jet_semindex::SemIndex,
+}
+
+#[derive(Debug)]
+pub(super) struct ProjectRenameError {
+    pub(super) kind: &'static str,
+    pub(super) message: String,
+}
+
+impl ProjectRenameError {
+    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
 
 pub(super) fn required_project_touched_files(
     request: &str,
@@ -68,6 +107,290 @@ pub(super) fn validate_touched_project_files(
         }
     }
     Ok(())
+}
+
+/// Build one semantic rename plan for both the read-only preview and the
+/// project transaction. The selected definition anchor, not a matching name,
+/// owns the edit set; this keeps same-spelled symbols in separate modules out
+/// of one another's rename.
+pub(super) fn prepare_project_rename(
+    ctx: &ProjectContext,
+    selected_path: &Path,
+    from: &str,
+    to: &str,
+    touched: Option<&[TouchedProjectFile]>,
+) -> Result<ProjectRenamePlan, ProjectRenameError> {
+    if let Some(diagnostic) = ctx.authority_diagnostic.as_ref() {
+        return Err(ProjectRenameError::new("stale", diagnostic.what.clone()));
+    }
+    let sources = project_rename_sources(ctx)?;
+    let selected = sources
+        .iter()
+        .find(|source| source.path == selected_path)
+        .ok_or_else(|| {
+            ProjectRenameError::new(
+                "not_found",
+                "Canvas rename source is not in the projected project",
+            )
+        })?;
+    let anchor = selected_rename_anchor(ctx, selected, from)?;
+    let mut sites = Vec::new();
+    let mut edits_by_source = BTreeMap::<String, Vec<(SourceSpan, String, String, String)>>::new();
+    let mut seen = HashSet::new();
+
+    for source in &sources {
+        for definition in source.index.definitions() {
+            if definition.name != from
+                || !module_belongs_to(&ctx.project_root, &source.path, &definition.module_path)
+                || !definition_matches_anchor(definition, &anchor)
+            {
+                continue;
+            }
+            add_project_rename_site(
+                &mut sites,
+                &mut edits_by_source,
+                &mut seen,
+                source,
+                "definition",
+                &definition.name,
+                &definition.module_path,
+                definition.def_span,
+                to,
+            );
+        }
+        for reference in source.index.references() {
+            if reference.name != from
+                || !module_belongs_to(&ctx.project_root, &source.path, &reference.module_path)
+                || !reference_matches_anchor(reference, &anchor)
+            {
+                continue;
+            }
+            add_project_rename_site(
+                &mut sites,
+                &mut edits_by_source,
+                &mut seen,
+                source,
+                "reference",
+                &reference.name,
+                &reference.module_path,
+                reference.span,
+                to,
+            );
+        }
+    }
+
+    if sites.is_empty() {
+        return Err(ProjectRenameError::new(
+            "not_found",
+            "Canvas rename found no semantic definition or reference sites",
+        ));
+    }
+
+    let mut changes = Vec::new();
+    for (source_id, edits) in edits_by_source {
+        let source = sources
+            .iter()
+            .find(|source| source.source_id == source_id)
+            .expect("rename edit source came from project source set");
+        let text_edits = edits
+            .iter()
+            .map(|(span, _, _, _)| edit(*span, to))
+            .collect::<Vec<_>>();
+        let after = FixEngine::apply_edits(&source.source, &text_edits).map_err(|_| {
+            ProjectRenameError::new("overlap", "Canvas project rename edits overlapped")
+        })?;
+        changes.push(ProjectChange {
+            path: source.path.clone(),
+            rel: source.source_id.clone(),
+            before: source.source.clone(),
+            after,
+            existed: true,
+        });
+    }
+    changes.sort_by(|left, right| left.rel.cmp(&right.rel));
+
+    if let Some(touched) = touched {
+        for change in &changes {
+            require_touched_revision(touched, &change.rel, &source_revision(&change.before))
+                .map_err(|error| ProjectRenameError::new("bad_request", error))?;
+        }
+    }
+
+    Ok(ProjectRenamePlan { changes, sites })
+}
+
+pub(super) fn apply_project_rename(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let selected_rel = json_string_field(request, "source_id")
+        .map(|path| clean_project_rel_path(&path))
+        .transpose()?
+        .unwrap_or_else(|| rel_path(&ctx.project_root, &ctx.entry_path));
+    if !ctx
+        .files
+        .iter()
+        .any(|file| file.kind == "source" && file.path == selected_rel)
+    {
+        return Err(project_edit_error(
+            "not_found",
+            "Canvas rename source is not in the projected project",
+        ));
+    }
+    let from = required_project_string(request, "from")?;
+    let to = required_project_string(request, "to")?;
+    validate_ident_for_project(&from)?;
+    validate_ident_for_project(&to)?;
+    let selected_path = ctx.project_root.join(&selected_rel);
+    let plan = prepare_project_rename(ctx, &selected_path, &from, &to, Some(touched))
+        .map_err(|error| project_edit_error(error.kind, &error.message))?;
+    let op = json_string_field(request, "op").unwrap_or_else(|| "rename_binding".to_string());
+    finish_project_changes(ctx, request, &op, plan.changes)
+}
+
+fn project_rename_sources(ctx: &ProjectContext) -> Result<Vec<ProjectRenameSource>, ProjectRenameError> {
+    let mut sources = Vec::new();
+    for file in ctx.files.iter().filter(|file| file.kind == "source") {
+        let path = ctx.project_root.join(&file.path);
+        if !ctx.parts.should_index(&path) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).map_err(|error| {
+            ProjectRenameError::new(
+                "stale",
+                format!("Canvas project source moved or unreadable: {error}"),
+            )
+        })?;
+        let revision = source_revision(&source);
+        if revision != file.revision {
+            return Err(ProjectRenameError::new(
+                "conflict",
+                "project source changed while Canvas was preparing its rename",
+            ));
+        }
+        let index = jet_semindex::open(&path).map_err(|error| {
+            ProjectRenameError::new("check", format!("Canvas rename index failed: {error}"))
+        })?;
+        sources.push(ProjectRenameSource {
+            path,
+            source_id: file.path.trim_start_matches("./").to_string(),
+            source,
+            index,
+        });
+    }
+    Ok(sources)
+}
+
+fn selected_rename_anchor(
+    ctx: &ProjectContext,
+    selected: &ProjectRenameSource,
+    from: &str,
+) -> Result<DefinitionAnchor, ProjectRenameError> {
+    let definitions = selected
+        .index
+        .definitions()
+        .iter()
+        .filter(|definition| {
+            definition.name == from
+                && module_belongs_to(&ctx.project_root, &selected.path, &definition.module_path)
+        })
+        .collect::<Vec<_>>();
+    if definitions.len() == 1 {
+        return Ok(DefinitionAnchor {
+            module_path: definitions[0].module_path.clone(),
+            kind: String::new(),
+            def_span: definitions[0].def_span,
+            semantic_identity: Some(definitions[0].identity.clone()),
+        });
+    }
+    if definitions.len() > 1 {
+        return Err(ProjectRenameError::new(
+            "ambiguous",
+            "Canvas rename needs one selected definition anchor",
+        ));
+    }
+
+    let mut targets = selected
+        .index
+        .references()
+        .iter()
+        .filter(|reference| reference.name == from)
+        .filter_map(|reference| reference.target.clone())
+        .filter(|target| {
+            ctx.files.iter().any(|file| {
+                file.kind == "source"
+                    && module_belongs_to(
+                        &ctx.project_root,
+                        &ctx.project_root.join(&file.path),
+                        &target.module_path,
+                    )
+            })
+        })
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    match targets.as_slice() {
+        [target] => Ok(target.clone()),
+        [] => Err(ProjectRenameError::new(
+            "not_found",
+            "Canvas rename found no selected semantic definition",
+        )),
+        _ => Err(ProjectRenameError::new(
+            "ambiguous",
+            "Canvas rename needs one selected semantic definition",
+        )),
+    }
+}
+
+fn add_project_rename_site(
+    sites: &mut Vec<ProjectRenameSite>,
+    edits_by_source: &mut BTreeMap<String, Vec<(SourceSpan, String, String, String)>>,
+    seen: &mut HashSet<(String, usize, usize)>,
+    source: &ProjectRenameSource,
+    kind: &str,
+    title: &str,
+    module_path: &str,
+    span: SourceSpan,
+    to: &str,
+) {
+    if !seen.insert((source.source_id.clone(), span.start, span.end)) {
+        return;
+    }
+    sites.push(ProjectRenameSite {
+        rel: source.source_id.clone(),
+        kind: kind.to_string(),
+        title: title.to_string(),
+        symbol: title.to_string(),
+        module_path: module_path.to_string(),
+        span,
+    });
+    edits_by_source.entry(source.source_id.clone()).or_default().push((
+        span,
+        kind.to_string(),
+        title.to_string(),
+        to.to_string(),
+    ));
+}
+
+fn definition_matches_anchor(definition: &SymbolDef, anchor: &DefinitionAnchor) -> bool {
+    definition.module_path == anchor.module_path
+        && definition.def_span == anchor.def_span
+        && anchor
+            .semantic_identity
+            .as_deref()
+            .is_none_or(|identity| identity == definition.identity)
+}
+
+fn reference_matches_anchor(reference: &SymbolRef, anchor: &DefinitionAnchor) -> bool {
+    let Some(target) = reference.target.as_ref() else {
+        return false;
+    };
+    target.def_span == anchor.def_span
+        && match (&target.semantic_identity, &anchor.semantic_identity) {
+            (Some(left), Some(right)) => left == right,
+            _ => target.module_path == anchor.module_path,
+        }
 }
 
 pub(super) fn apply_project_add_dependency(
@@ -848,7 +1171,14 @@ fn finish_project_changes(
     op: &str,
     mut changes: Vec<ProjectChange>,
 ) -> Result<String, String> {
-    normalize_and_validate_project_changes(ctx, &mut changes)?;
+    if matches!(op, "rename_binding" | "rename_function") {
+        normalize_and_format_project_changes(ctx, &mut changes)?;
+    } else {
+        normalize_and_validate_project_changes(ctx, &mut changes)?;
+    }
+    if matches!(op, "rename_binding" | "rename_function") {
+        validate_project_rename_overlay(ctx, &changes)?;
+    }
     let preview =
         json_bool_field(request, "preview").unwrap_or(false) || op.starts_with("preview_");
     let changed = changes.iter().any(|c| c.before != c.after);
@@ -858,7 +1188,7 @@ fn finish_project_changes(
         .collect::<Vec<_>>()
         .join("\n");
     if !preview {
-        write_project_changes_with_rollback(&changes)?;
+        write_project_changes_with_rollback(ctx, &changes)?;
     }
     let touched_files = changes
         .iter()
@@ -874,20 +1204,7 @@ fn finish_project_changes(
         .collect::<Vec<_>>()
         .join(",");
     let next_project_revision = if preview {
-        let mut files = ctx.files.clone();
-        for change in &changes {
-            if let Some(file) = files.iter_mut().find(|f| f.path == change.rel) {
-                file.revision = source_revision(&change.after);
-            } else {
-                files.push(ProjectFileRec {
-                    path: change.rel.clone(),
-                    revision: source_revision(&change.after),
-                    kind: project_file_kind_for_rel(&change.rel).to_string(),
-                });
-            }
-        }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        project_revision_from_files(&files)
+        project_revision_after_changes(ctx, &changes)
     } else {
         project_context_for_entry(&ctx.entry_path).project_revision
     };
@@ -902,9 +1219,24 @@ fn finish_project_changes(
     ))
 }
 
-fn normalize_and_validate_project_changes(
+pub(super) fn normalize_and_validate_project_changes(
     ctx: &ProjectContext,
     changes: &mut [ProjectChange],
+) -> Result<(), String> {
+    normalize_and_validate_project_changes_inner(ctx, changes, true)
+}
+
+pub(super) fn normalize_and_format_project_changes(
+    ctx: &ProjectContext,
+    changes: &mut [ProjectChange],
+) -> Result<(), String> {
+    normalize_and_validate_project_changes_inner(ctx, changes, false)
+}
+
+fn normalize_and_validate_project_changes_inner(
+    ctx: &ProjectContext,
+    changes: &mut [ProjectChange],
+    check_source: bool,
 ) -> Result<(), String> {
     for change in changes {
         if change.before == change.after {
@@ -946,7 +1278,9 @@ fn normalize_and_validate_project_changes(
                         ),
                     )
                 })?;
-            validate_project_jet_overlay(&change.path, &change.after)?;
+            if check_source {
+                validate_project_jet_overlay(&change.path, &change.after)?;
+            }
         } else {
             return Err(project_edit_error(
                 "bad_request",
@@ -955,6 +1289,19 @@ fn normalize_and_validate_project_changes(
         }
     }
     Ok(())
+}
+
+pub(super) fn validate_project_rename_overlay(
+    ctx: &ProjectContext,
+    changes: &[ProjectChange],
+) -> Result<(), String> {
+    let overlays = changes
+        .iter()
+        .map(|change| (change.path.as_path(), change.after.as_str()))
+        .collect::<Vec<_>>();
+    jet_semindex::open_with_overlays(&ctx.entry_path, &overlays)
+        .map(|_| ())
+        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))
 }
 
 fn validate_project_jet_overlay(path: &Path, src: &str) -> Result<(), String> {
@@ -978,8 +1325,17 @@ fn validate_project_jet_overlay(path: &Path, src: &str) -> Result<(), String> {
     ))
 }
 
-fn write_project_changes_with_rollback(changes: &[ProjectChange]) -> Result<(), String> {
+fn write_project_changes_with_rollback(
+    ctx: &ProjectContext,
+    changes: &[ProjectChange],
+) -> Result<(), String> {
     with_source_transaction(|| {
+        let current = project_context_for_entry(&ctx.entry_path);
+        if current.authority_diagnostic.is_some()
+            || current.project_revision != ctx.project_revision
+        {
+            return Err(SourceWriteError::Conflict);
+        }
         let mut written = Vec::new();
         for change in changes {
             if change.before == change.after {
@@ -1016,6 +1372,26 @@ fn write_project_changes_with_rollback(changes: &[ProjectChange]) -> Result<(), 
         ),
         SourceWriteError::Io(error) => project_edit_error("io", &error.to_string()),
     })
+}
+
+pub(super) fn project_revision_after_changes(
+    ctx: &ProjectContext,
+    changes: &[ProjectChange],
+) -> String {
+    let mut files = ctx.files.clone();
+    for change in changes {
+        if let Some(file) = files.iter_mut().find(|file| file.path == change.rel) {
+            file.revision = source_revision(&change.after);
+        } else {
+            files.push(ProjectFileRec {
+                path: change.rel.clone(),
+                revision: source_revision(&change.after),
+                kind: project_file_kind_for_rel(&change.rel).to_string(),
+            });
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    project_revision_from_files(&files)
 }
 
 fn rollback_project_writes(written: &[ProjectWriteBackup]) {
@@ -1063,6 +1439,15 @@ pub(super) fn diagnostic_json(d: &Diagnostic) -> String {
         json_str(&d.why),
         json_str(&d.fix)
     )
+}
+
+pub(super) fn module_belongs_to(project_root: &Path, source_path: &Path, module_path: &str) -> bool {
+    let source_id = rel_path(project_root, source_path);
+    let source_id = source_id.trim_start_matches("./");
+    let module_path = module_path.replace('\\', "/");
+    module_path == source_id
+        || module_path == source_path.to_string_lossy().replace('\\', "/")
+        || module_path.ends_with(&format!("/{source_id}"))
 }
 
 pub(super) fn rel_path(root: &Path, path: &Path) -> String {

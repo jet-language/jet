@@ -220,6 +220,12 @@ opens a pattern editor writing through the existing source transaction.
   selected function shows name, signature, effects list, markers
   (test/bench), visibility, and read-only `#Meta` category/tunable facts;
   selected nodes show their pins/values through the same descriptor path.
+  Collection and nested values use the same source-backed editor: lists and
+  maps expose item/key/value paths, while tuples and structs expose named
+  member paths. Applying a child replaces only that value in the original
+  expression; the checked transaction owns formatting, revision refusal, and
+  undo. Empty, ill-typed, ambiguous, or stale input stays in the editor with
+  a visible reason and writes zero source bytes.
   No control is shown unless it has a live source transaction. Invalid,
   incomplete, and stale edits keep the original source and surface the normal
   Canvas diagnostic. NO raw kind strings, no "flow", no protocol jargon

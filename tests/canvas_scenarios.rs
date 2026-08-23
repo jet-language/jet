@@ -568,8 +568,18 @@ fn rename_variable_sidebar() {
 }
 
 #[test]
+fn project_rename_preview_commit() {
+    run_canvas_scenario("project-rename-preview-commit");
+}
+
+#[test]
 fn details_scalar_enum_reference_editors() {
     run_canvas_scenario("details-scalar-enum-reference-editors");
+}
+
+#[test]
+fn details_collection_nested_editors() {
+    run_canvas_scenario("details-collection-nested-editors");
 }
 
 #[test]

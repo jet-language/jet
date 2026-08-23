@@ -80,6 +80,7 @@ Current transactions:
 | `create_package` | `package_path`, `name`, `target`, optional `entry` | Creates a package directory with `package.jet` and an entry `.jet` file, then validates the manifest parser and generated entry syntax before write. New files must appear in `files` with revision `missing`. |
 | `add_workspace_member` | `workspace`, `member_path` | Creates or edits `workspace.jet` to include a package directory, then validates the workspace evaluator before write. Existing explicit member lists are edited in source; `find("./dir")` workspaces no-op when the member path is already covered. |
 | `add_env_service` | `env`, `name`, optional `enable`, `port`, `run` (string array), `ready`, typed `shutdown`, `data_dir` | Creates or edits `env.jet` to include a dev service, then validates Jetpack module evaluation before write. |
+| `rename_binding` / `rename_function` | `source_id`, `from`, `to` | Renames the selected semantic definition and every resolved project reference through one checked multi-file source transaction. The touched `files` envelope must include every changed source. |
 
 Successful response:
 
@@ -95,7 +96,10 @@ Failure response:
 
 A stale `project_revision` or touched-file `revision` fails before any write.
 Preview mode and rejected transactions leave source untouched. Apply mode writes
-only after the changed Package file parses through Jetpack's manifest parser.
+only after the changed source overlay passes the Jet front end and the changed
+Package file parses through Jetpack's manifest parser. Project rename commits
+recheck the whole project revision while holding the shared source transaction
+seam, then publish every changed file with rollback if a later publish fails.
 The publish step compares each expected source snapshot again, atomically
 replaces each changed file from a synced temporary, and uses the same source
 transaction seam for rollback when a later file cannot be published. A conflict
@@ -152,7 +156,7 @@ Each graph contains source-backed records:
 | `pins` | Typed input/output pins derived from front-end facts. |
 | `wires` | Data/control/fallible/effect/proof/debug rails. |
 | `regions` | Source-backed regions/comments. V2 comment boxes are local editor view state unless explicitly converted to shared source hints. |
-| `inline_exprs` | Editable Jet expression source rendered inline. |
+| `inline_exprs` | Editable Jet expression source rendered inline. Composite values keep one source-backed expression anchor; Details may edit validated list/map items or nested tuple/struct members by rebuilding that expression before the existing `edit_inline_expr` transaction. |
 | `rails` | Visual rail classes present in this graph: control, data, fallible, async, effect, proof, debug. |
 
 The editor shell reads existing v1 fields; no schema bump is needed for the
@@ -176,8 +180,8 @@ Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`, optional
 `effect_grant_need`, and `source_span`. Pattern-match branch and dispatch arm
 exec pins use `role:"arm"` plus `pattern_source` so Canvas can render one
 labeled output row per source arm; editable arms also carry
-`pattern_source_span`. List-literal and fan-out item pins carry narrow
-`source_span`, `append_op:"remove_multi_input_element"`, and `element_index`.
+`pattern_source_span`. List-literal item pins carry narrow `source_span`,
+`append_op:"remove_multi_input_element"`, and `element_index`.
 A v1 pin span is anchored to its owning source node when the compiler does not
 yet expose a narrower pin-specific span.
 
@@ -254,7 +258,7 @@ Request fields:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"]}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false}}}
 ```
 
 The first request creates a live source-level session. A later request sends
@@ -265,6 +269,12 @@ session has no active source or graph IDs, so Canvas never pulses without a
 live session. The response includes `tier` so a compiled run can project its
 native lldb/DAP session through the same protocol while `jet dev` projects its
 executing tier's own session.
+
+Stop requests are checked against the live session's source path, revision, and
+tier before the session is removed. A mismatched tier or source is refused; a
+stale request returns a conflict and keeps a newer live session. A session
+whose own revision is stale is invalidated. The overlay's `limits` field flags
+truncation of large locals, watch values, call stacks, or traces.
 
 `native-lldb` compiles the current source with the debugger line map, then
 uses the native lldb adapter with the same bounded replay history. If the
@@ -312,7 +322,7 @@ Current transactions:
 | `remove_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end` | Deletes one pattern arm and its body. Removing the last remaining arm is refused in plain language before source would become invalid. |
 | `toggle_switch_state` | `graph_id`, `node_start`, `node_end` | Removes an existing `#Off`/`#DebugOnly` marker or adds `#Off` to a checked statement, then formats, checks, and reprojects. State-contained nodes are refused without changing source. |
 | `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
-| `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
+| `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list element, including the adjacent separator, then formats, checks, and reprojects. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked stubs for required members. Default-body members are not regenerated; traits with associated types are refused until their choices exist in source. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
@@ -394,7 +404,7 @@ the project document already shown by the client.
 | `project_search` | `query` | Finds matching graph nodes, definitions, references, and source text across the projected source files. |
 | `references` | `symbol` | Returns project-wide definition/reference sites plus impact facts. |
 | `source_to_graph` | `start`, `end` | Maps a source byte span to matching graph nodes/inline expressions. |
-| `preview_rename` | `symbol`, `to` | Returns the exact text diff for a rename without writing source. |
+| `preview_rename` | `symbol`, `to`, optional `project_revision` | Without `project_revision`, returns the single-file diff. With a current `project_revision`, resolves the selected definition through semindex, returns every definition/reference site across the projected source files, and returns a per-file diff envelope for the matching atomic project transaction. |
 | `actions` / `palette_entries` | none | Returns source-backed `project_functions` metadata and one authoritative, ranked Canvas action list derived from checked semindex facts. The browser menu consumes the action list once. |
 | `core_catalog` / `corelib_catalog` | optional `query` | Returns read-only `core.*` modules and members from the canonical Core library reference. |
 
@@ -406,8 +416,10 @@ Successful response:
 
 A stale `revision` or `project_revision` fails with `kind:"conflict"` before
 any query result is used. Project responses include `result_limit` and
-`truncated`; the server keeps at most 200 results and the client discloses when
-it must narrow the search.
+`truncated`; the server keeps at most 200 result sites and the client discloses
+when it must narrow the search. A project rename preview has
+`diff.files:[{"path","revision","after_revision","changed"}]`; those
+before revisions are the exact touched-file envelope for the apply request.
 
 ## Canvas Actions V1
 

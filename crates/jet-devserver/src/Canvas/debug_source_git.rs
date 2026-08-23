@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +21,9 @@ const MAX_DEBUG_COMMAND_BYTES: usize = 256;
 const MAX_DEBUG_TRACE_LINES: usize = 128;
 const MAX_DEBUG_CALL_STACK: usize = 32;
 const MAX_DEBUG_TRACE_BYTES: usize = 32 * 1024;
+const MAX_DEBUG_LOCAL_VALUES: usize = 64;
+const MAX_DEBUG_VALUE_BYTES: usize = 4 * 1024;
+const MAX_DEBUG_CALL_STACK_BYTES: usize = 16 * 1024;
 
 /// The only debugger engines a Canvas session may claim. The wire names are
 /// deliberately explicit: a client must never mistake a native compiled run
@@ -267,11 +270,62 @@ impl DebugSessions {
         })
     }
 
-    pub(crate) fn stop(&self, id: &str) -> Option<DebugTier> {
+    pub(crate) fn discard(&self, id: &str) -> Option<DebugTier> {
         self.sessions
             .lock()
             .ok()
             .and_then(|mut sessions| sessions.remove(id).map(|session| session.tier))
+    }
+
+    pub(crate) fn stop(
+        &self,
+        path: &Path,
+        revision: &str,
+        current_revision: &str,
+        id: &str,
+        tier: DebugTier,
+    ) -> Result<DebugTier, String> {
+        let path = canonical_path(path);
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        let Some(session) = sessions.get(id) else {
+            return Err(debug_error(
+                "session",
+                "debug session is no longer live; nothing to stop",
+            ));
+        };
+        if session.path != path || session.tier != tier {
+            return Err(debug_error(
+                "conflict",
+                "debug stop does not match the live session source or tier",
+            ));
+        }
+        if revision != current_revision {
+            if session.revision != revision {
+                return Err(debug_error(
+                    "conflict",
+                    "debug stop request is stale; the live session was kept",
+                ));
+            }
+            sessions.remove(id);
+            return Err(debug_error(
+                "conflict",
+                "debug session is stale for the current source revision",
+            ));
+        }
+        if session.revision != revision {
+            sessions.remove(id);
+            return Err(debug_error(
+                "conflict",
+                "debug session is stale for the current source revision",
+            ));
+        }
+        sessions
+            .remove(id)
+            .map(|session| session.tier)
+            .ok_or_else(|| debug_error("session", "debug session disappeared"))
     }
 }
 
@@ -315,6 +369,20 @@ fn validate_debug_limits(
                 "Canvas debug watches must be one source-level name",
             ));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_debug_breakpoint_anchors(anchors: &[String]) -> Result<(), String> {
+    if anchors.len() > MAX_DEBUG_BREAKPOINTS
+        || anchors
+            .iter()
+            .any(|anchor| anchor.len() > MAX_DEBUG_COMMAND_BYTES)
+    {
+        return Err(debug_error(
+            "limit",
+            "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each",
+        ));
     }
     Ok(())
 }
@@ -479,8 +547,12 @@ pub(super) fn debug_ok(
         jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => "finished",
     };
     let revision = source_revision(src);
+    let (locals, locals_truncated) = locals_json(transcript);
+    let (watch_values, watches_truncated) = watches_json(transcript, watches);
+    let (call_stack, call_stack_truncated) = call_stack_json(transcript);
+    let (trace, trace_truncated) = trace_json(transcript);
     format!(
-        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":{{\"debug_overlay\":{},\"source_id\":{},\"revision\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":{{\"debug_overlay\":{},\"source_id\":{},\"revision\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}],\"limits\":{{\"locals_truncated\":{},\"watches_truncated\":{},\"call_stack_truncated\":{},\"trace_truncated\":{}}}}}}}",
         DEBUG_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&revision),
@@ -500,10 +572,14 @@ pub(super) fn debug_ok(
         json_str(&active_node),
         json_str(&active_wire),
         breakpoint_json(src, breakpoint_lines, stale_breakpoints),
-        locals_json(transcript),
-        watches_json(transcript, watches),
-        call_stack_json(transcript),
-        trace_json(transcript)
+        locals,
+        watch_values,
+        call_stack,
+        trace,
+        if locals_truncated { "true" } else { "false" },
+        if watches_truncated { "true" } else { "false" },
+        if call_stack_truncated { "true" } else { "false" },
+        if trace_truncated { "true" } else { "false" }
     )
 }
 
@@ -537,15 +613,18 @@ pub(super) fn debug_stop_ok(
 }
 
 fn bounded_message(message: &str) -> String {
-    const MAX_MESSAGE_BYTES: usize = 16 * 1024;
-    if message.len() <= MAX_MESSAGE_BYTES {
-        return message.to_string();
+    bounded_text(message, 16 * 1024).0
+}
+
+fn bounded_text(text: &str, max_bytes: usize) -> (String, bool) {
+    if text.len() <= max_bytes {
+        return (text.to_string(), false);
     }
-    let mut end = MAX_MESSAGE_BYTES.saturating_sub(" [truncated]".len());
-    while end > 0 && !message.is_char_boundary(end) {
+    let mut end = max_bytes.saturating_sub(" [truncated]".len());
+    while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{} [truncated]", &message[..end])
+    (format!("{} [truncated]", &text[..end]), true)
 }
 
 pub(super) fn debug_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
@@ -708,19 +787,20 @@ fn breakpoint_json(src: &str, lines: &[usize], stale_anchors: &[String]) -> Stri
     entries.join(",")
 }
 
-fn locals_json(transcript: &str) -> String {
+fn locals_json(transcript: &str) -> (String, bool) {
     let Some(line) = transcript
         .lines()
         .rev()
         .find(|line| line.starts_with("locals:"))
     else {
-        return String::new();
+        return (String::new(), false);
     };
     parse_assignments(line.trim_start_matches("locals:").trim())
 }
 
-fn watches_json(transcript: &str, watches: &[String]) -> String {
-    watches
+fn watches_json(transcript: &str, watches: &[String]) -> (String, bool) {
+    let mut truncated = false;
+    let values = watches
         .iter()
         .filter_map(|watch| {
             let prefix = format!("{watch} = ");
@@ -729,62 +809,98 @@ fn watches_json(transcript: &str, watches: &[String]) -> String {
                 .rev()
                 .find_map(|line| line.strip_prefix(&prefix))
                 .map(|value| {
+                    let (value, value_truncated) = bounded_text(value, MAX_DEBUG_VALUE_BYTES);
+                    truncated |= value_truncated;
                     format!(
                         "{{\"name\":{},\"value\":{},\"state\":\"ok\"}}",
                         json_str(watch),
-                        json_str(value)
+                        json_str(&value)
                     )
                 })
         })
         .collect::<Vec<_>>()
-        .join(",")
+        .join(",");
+    (values, truncated)
 }
 
-fn parse_assignments(text: &str) -> String {
+fn parse_assignments(text: &str) -> (String, bool) {
     if text == "(none)" || text.is_empty() {
-        return String::new();
+        return (String::new(), false);
     }
-    text.split("   ")
-        .take(64)
-        .filter_map(|part| {
+    let mut truncated = false;
+    let values = text
+        .split("   ")
+        .enumerate()
+        .filter_map(|(index, part)| {
+            if index >= MAX_DEBUG_LOCAL_VALUES {
+                truncated = true;
+                return None;
+            }
             let (name, value) = part.split_once(" = ")?;
+            let (value, value_truncated) = bounded_text(value.trim(), MAX_DEBUG_VALUE_BYTES);
+            truncated |= value_truncated;
             Some(format!(
                 "{{\"name\":{},\"value\":{}}}",
                 json_str(name.trim()),
-                json_str(value.trim())
+                json_str(&value)
             ))
         })
         .collect::<Vec<_>>()
-        .join(",")
+        .join(",");
+    (values, truncated)
 }
 
-fn call_stack_json(transcript: &str) -> String {
-    transcript
+fn call_stack_json(transcript: &str) -> (String, bool) {
+    let mut entries = Vec::new();
+    let mut bytes = 0;
+    let mut truncated = false;
+    let mut lines = VecDeque::with_capacity(MAX_DEBUG_CALL_STACK);
+    for line in transcript
         .lines()
         .filter(|line| line.starts_with('#') && line.contains(" at "))
-        .rev()
-        .take(MAX_DEBUG_CALL_STACK)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(json_str)
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn trace_json(transcript: &str) -> String {
-    let mut entries = Vec::new();
-    let mut bytes = 0usize;
-    for line in transcript.lines().rev().take(MAX_DEBUG_TRACE_LINES) {
+    {
+        if lines.len() >= MAX_DEBUG_CALL_STACK {
+            lines.pop_front();
+            truncated = true;
+        }
+        lines.push_back(line);
+    }
+    for line in lines.iter().rev() {
+        if entries.len() >= MAX_DEBUG_CALL_STACK {
+            truncated = true;
+            break;
+        }
         let entry = json_str(line);
-        if bytes + entry.len() > MAX_DEBUG_TRACE_BYTES {
+        if bytes + entry.len() > MAX_DEBUG_CALL_STACK_BYTES {
+            truncated = true;
             break;
         }
         bytes += entry.len();
         entries.push(entry);
     }
     entries.reverse();
-    entries.join(",")
+    (entries.join(","), truncated)
+}
+
+fn trace_json(transcript: &str) -> (String, bool) {
+    let mut entries = Vec::new();
+    let mut bytes = 0usize;
+    let mut truncated = false;
+    for (index, line) in transcript.lines().rev().enumerate() {
+        if index >= MAX_DEBUG_TRACE_LINES {
+            truncated = true;
+            break;
+        }
+        let entry = json_str(line);
+        if bytes + entry.len() > MAX_DEBUG_TRACE_BYTES {
+            truncated = true;
+            break;
+        }
+        bytes += entry.len();
+        entries.push(entry);
+    }
+    entries.reverse();
+    (entries.join(","), truncated)
 }
 
 pub(super) fn canonical_path(path: &Path) -> PathBuf {
@@ -885,6 +1001,31 @@ mod tests {
         assert!(
             out.contains("\"active_wire_id\":\"fn:main.jet::run@3-6:wire:1\""),
             "{out}"
+        );
+    }
+
+    #[test]
+    fn overlay_marks_bounded_debug_values() {
+        let src = "fn run() {\n    print(\"ok\")\n}\n";
+        let huge = "x".repeat(MAX_DEBUG_VALUE_BYTES + 128);
+        let out = debug_ok(
+            src,
+            "{}",
+            &format!("locals: value = {huge}\nvalue = {huge}"),
+            jet_debug::SessionStatus::Finished,
+            "test-session",
+            DebugTier::Interpreter,
+            "main.jet",
+            &[],
+            &[],
+            &["value".to_string()],
+        );
+        assert!(out.contains("\"locals_truncated\":true"), "{out}");
+        assert!(out.contains("\"watches_truncated\":true"), "{out}");
+        assert!(
+            out.len() < 20 * 1024,
+            "debug overlay escaped its bound: {}",
+            out.len()
         );
     }
 }
