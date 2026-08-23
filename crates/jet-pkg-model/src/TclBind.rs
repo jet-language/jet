@@ -27,12 +27,12 @@ pub fn bind(source:&str,lib:&str,cache:&Path)->Result<BindResult,BindError>{
 }
 
 fn render_jet(lib:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"#Extern module c.{abi} {{
-    fn open() => Int = "{abi}_open"
-    fn eval(handle: Int, code: String) => String = "{abi}_eval"
-    fn eval_once(code: String) => String = "{abi}_eval_once"
-    fn eval_int(handle: Int, code: String) => Int = "{abi}_eval_int"
-    fn eval_float(handle: Int, code: String) => Float = "{abi}_eval_float"
-    fn take_error() => Int = "{abi}_take_error"
+    fn open() Int = "{abi}_open"
+    fn eval(handle: Int, code: String) String = "{abi}_eval"
+    fn eval_once(code: String) String = "{abi}_eval_once"
+    fn eval_int(handle: Int, code: String) Int = "{abi}_eval_int"
+    fn eval_float(handle: Int, code: String) Float = "{abi}_eval_float"
+    fn take_error() Int = "{abi}_take_error"
     fn close(handle: Int) = "{abi}_close"
 }}
 use c.{abi} as abi
@@ -40,33 +40,33 @@ use c.{abi} as abi
 pub struct Session {{ value: Int }}
 pub enum TclError {{ Eval }}
 
-pub fn open() => Session TclError! {{
+pub fn open() Session TclError! -> {{
     value :: abi.open()
-    if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
-    return Ok(Session.{{ value: value }})
+    if abi.take_error() != 0 -> return Err(TclError.Eval)
+    return Ok(Session{{ value: value }})
 }}
 
-pub fn eval(session: Session, code: String) => String TclError! {{
+pub fn eval(session: Session, code: String) String TclError! -> {{
     value :: abi.eval(session.value, code)
-    if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
+    if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_once(code: String) => String TclError! {{
+pub fn eval_once(code: String) String TclError! -> {{
     value :: abi.eval_once(code)
-    if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
+    if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_int(session: Session, code: String) => Int TclError! {{
+pub fn eval_int(session: Session, code: String) Int TclError! -> {{
     value :: abi.eval_int(session.value, code)
-    if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
+    if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_float(session: Session, code: String) => Float TclError! {{
+pub fn eval_float(session: Session, code: String) Float TclError! -> {{
     value :: abi.eval_float(session.value, code)
-    if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
+    if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
@@ -74,7 +74,7 @@ impl Session.Close {{
     fn close(^self) {{ abi.close(self.value) }}
 }}
 
-pub fn close(^session: Session) {{}}
+pub fn close(session: ^Session) {{}}
 "#)}
 
 fn render_c(lib:&str,seed:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"#include <tcl.h>
@@ -95,8 +95,8 @@ int64_t {abi}_take_error(void){{int64_t v=failed;failed=0;return v;}}
 int64_t {abi}_open(void){{failed=0;Tcl_Interp*i=fresh();if(!i)return 0;if(Tcl_EvalEx(i,seed,-1,TCL_EVAL_DIRECT)!=TCL_OK){{Tcl_ResetResult(i);Tcl_DeleteInterp(i);failed=1;return 0;}}pthread_mutex_lock(&lock);for(int n=0;n<64;n++)if(!slots[n].interp){{slots[n].interp=i;slots[n].owner=pthread_self();pthread_mutex_unlock(&lock);return n+1;}}pthread_mutex_unlock(&lock);Tcl_DeleteInterp(i);failed=1;return 0;}}
 const char* {abi}_eval(int64_t h,const char*code){{failed=0;Tcl_Interp*i=get(h);if(!i||!code)return "";if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK){{Tcl_ResetResult(i);failed=1;return "";}}return copy_result(i);}}
 const char* {abi}_eval_once(const char*code){{failed=0;Tcl_Interp*i=fresh();if(!i||!code)return "";const char*out="";if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK){{Tcl_ResetResult(i);failed=1;}}else out=copy_result(i);Tcl_DeleteInterp(i);return out;}}
-int64_t {abi}_eval_int(int64_t h,const char*code){{failed=0;Tcl_Interp*i=get(h);Tcl_WideInt v=0;if(!i||!code||Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetWideIntFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){{Tcl_ResetResult(i);failed=1;return 0;}}return (int64_t)v;}}
-double {abi}_eval_float(int64_t h,const char*code){{failed=0;Tcl_Interp*i=get(h);double v=0;if(!i||!code||Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetDoubleFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){{Tcl_ResetResult(i);failed=1;return 0;}}return v;}}
+int64_t {abi}_eval_int(int64_t h,const char*code){{failed=0;Tcl_Interp*i=get(h);Tcl_WideInt v=0;if(!i||!code){{failed=1;return 0;}}if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetWideIntFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){{Tcl_ResetResult(i);failed=1;return 0;}}return (int64_t)v;}}
+double {abi}_eval_float(int64_t h,const char*code){{failed=0;Tcl_Interp*i=get(h);double v=0;if(!i||!code){{failed=1;return 0;}}if(Tcl_EvalEx(i,code,-1,TCL_EVAL_DIRECT)!=TCL_OK||Tcl_GetDoubleFromObj(i,Tcl_GetObjResult(i),&v)!=TCL_OK){{Tcl_ResetResult(i);failed=1;return 0;}}return v;}}
 void {abi}_close(int64_t h){{failed=0;if(h<1||h>64)return;pthread_mutex_lock(&lock);Slot s=slots[h-1];if(!s.interp||!pthread_equal(s.owner,pthread_self())){{pthread_mutex_unlock(&lock);failed=1;return;}}slots[h-1].interp=0;pthread_mutex_unlock(&lock);Tcl_DeleteInterp(s.interp);}}
 "#,c_escape(seed))}
 

@@ -731,7 +731,10 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
         "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
         "lowlevel/polyglot_dotnet" => ("cs", "counter", "Counter.cs"),
+        "lowlevel/polyglot_pascal" => ("pascal", "counter", "Counter.pas"),
+        "lowlevel/polyglot_ada" => ("ada", "geodesy", "geodesy.ads"),
         "lowlevel/polyglot_fortran" => ("fortran", "matrix", "matrix.f90"),
+        "lowlevel/polyglot_tcl" => ("tcl", "eda", "eda.tcl"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
     let src = fs::read_to_string(&entry.path).unwrap();
@@ -753,6 +756,9 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "fortran" => "gfortran",
         "java" => "javac",
         "cs" => "dotnet",
+        "pascal" => "fpc",
+        "ada" => "gnatmake",
+        "tcl" => "tclsh",
         _ => unreachable!("binder language has no provisioned tool"),
     };
     let have_tool = Command::new(tool)
@@ -783,6 +789,9 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         dir.join(foreign_source),
     )
     .unwrap();
+    if language == "ada" {
+        fs::copy(source_dir.join("geodesy.adb"), dir.join("geodesy.adb")).unwrap();
+    }
 
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "bind", language, foreign_source, "--pkg", package])

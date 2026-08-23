@@ -4,7 +4,7 @@
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_foundation::AST::{CtFloat, CtValue, ProgramBundle, Type};
+use jet_foundation::AST::{AccessConvention, CtFloat, CtValue, ProgramBundle, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -237,6 +237,16 @@ fn load_cdylib(
         };
         let mut by_wrapper = HashMap::new();
         for entry in entries {
+            // D-FFI-CAP1: capability calls are native-boundary operations. The
+            // resident JIT can marshal only value-shaped `*_cabi` entries; it
+            // must not fabricate a by-value adapter for `&` or `^`.
+            if entry
+                .params
+                .iter()
+                .any(|(convention, _)| *convention != AccessConvention::Read)
+            {
+                continue;
+            }
             let Some(params) = entry
                 .params
                 .iter()

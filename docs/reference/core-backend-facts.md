@@ -16,7 +16,7 @@ template or engine-specific public fallback is part of the path.
 | `core.net` / `core.net.tls` | stream owned | `Net` | `NetError` | may block | Linux proven; macOS/Windows E9 | reachable Core runtime + audited host ABI |
 | `core.http.*` | request/response owned | `Net` | `HTTPError` | may block | native | reachable Core runtime + audited network ABI |
 | `core.data` | table/series owned | pure / bridge | `DataError` | sync | all | reachable Core runtime + audited data ABI |
-| `core.compute` | `Tensor` owned | pure (CPU oracle) | `ComputeError` | sync | all | reachable Core runtime + CPU ABI; GPU E6 |
+| `core.compute` | `Tensor` owned | pure on CPU; `GPU` for explicit Metal placement | `ComputeError` | sync | all CPU; macOS/iOS Metal | shared Prelude CPU oracle + explicit F32 Metal MSL bridge |
 | `core.service` | typed tree, endpoint, and authority owned | `IO` for durable state/delivery; sync for live routing | `ServiceError` / typed receipt | bounded sync; durable log may block | all native + interpreter | one Services Prelude over the supervisor-group ABI; AOT, JIT, and ambient marshal only |
 | `core.archive` | bytes owned | pure | empty bytes / JSON `[]` on invalid input | sync | all native + interpreter | reachable ordinary-Jet package plus one dependency-free audited ABI kernel |
 

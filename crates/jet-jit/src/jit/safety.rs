@@ -113,7 +113,7 @@ fn resident_safe_compute_call(
         {
             args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        ("device_cpu" | "device_auto", []) => true,
+        ("device_cpu" | "device_auto" | "device_metal", []) => true,
         ("on_device", [tensor, device])
             if tensor.ty.is_compute_tensor_family() && jit_value_type(&device.ty) =>
         {
@@ -135,6 +135,9 @@ fn resident_safe_compute_call(
             args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         ("stream_new", []) => true,
+        ("stream_new_on", [device]) if jit_value_type(&device.ty) => {
+            resident_safe_expr(device, callees)
+        }
         ("stream_sync" | "stream_show", [stream]) if jit_value_type(&stream.ty) => {
             resident_safe_expr(stream, callees)
         }

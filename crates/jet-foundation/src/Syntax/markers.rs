@@ -86,6 +86,11 @@ pub const MARKER_ABI: &str = "ABI"; // D-CABI-PLATFORM1
 /// foreign binding registers on the enclosing transaction's rollback path.
 pub const MARKER_UNDO: &str = "Undo"; // D-BOUND-UNDO1
 
+/// D-FFI-CAP1=A: `#Close(close)` joins a returned foreign handle to the
+/// consuming `close(^handle)` protocol. The named foreign function is checked
+/// against the returned handle before the binding is registered.
+pub const MARKER_CLOSE: &str = "Close"; // D-FFI-CAP1
+
 /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
 /// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
 /// silences the default-on `float_money` lint). Deliberately lowercase: it

@@ -1,0 +1,14 @@
+// #1145: Metal is explicit and never widens an F64 Tensor or falls back.
+use core.compute as compute
+
+fn run() {
+    value :: compute.full([1, 1], 2.0) ?? panic("value")
+    request :: compute.on_device(value, compute.device_metal())
+    if request == {
+        .Ok(_) -> { print("metal:f64:accepted") }
+        .Err(_) -> { print("metal:f64:rejected") }
+    }
+    stream :: compute.stream_new_on(compute.device_cpu()) ?? panic("stream")
+    compute.stream_sync(stream) ?? panic("sync")
+    print("stream:cpu-ok")
+}

@@ -1888,6 +1888,147 @@ fn manifest_parse_dep_git_tag() {
 }
 
 #[test]
+fn manifest_parse_foreign_package_dep() {
+    let raw = manifest_with_deps(
+        "root",
+        "0.1.0",
+        "    plotly: js@\"plotly#version=2.35.0@npm\",",
+    );
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect("foreign package dep should parse");
+    assert!(matches!(
+        mf.dependencies.get("plotly"),
+        Some(jet::Manifest::DepSpec::Foreign {
+            language: jet::AST::ForeignLanguage::JS,
+            reference,
+        }) if reference == "plotly#version=2.35.0@npm"
+    ));
+}
+
+#[test]
+fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
+    let _guard = STORE_LOCK.lock().unwrap();
+    let project = Scratch::new("foreign_provider_project");
+    let failed_project = Scratch::new("foreign_provider_failure");
+    let fixtures = Scratch::new("foreign_provider_fixtures");
+    let store = Scratch::new("foreign_provider_store");
+    let artifact = fixtures.join(
+        "foreign/npm/plotly-plotly_version_2_35_0_npm/.jet/bindings/js/plotly.jet",
+    );
+    fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    fs::write(
+        &artifact,
+        "pub fn scatter() Int {\n    return 7\n}\n",
+    )
+    .unwrap();
+    let manifest_text = manifest_with_deps(
+        "consumer",
+        "0.1.0",
+        "    plotly: js@\"plotly#version=2.35.0@npm\",",
+    );
+    // Keep the provider fixture identity and the package declaration identical
+    // in both success and fail-closed cases.
+    for root in [&project.path, &failed_project.path] {
+        fs::write(root.join("package.jet"), &manifest_text).unwrap();
+    }
+    let main = project.join("main.jet");
+    fs::write(
+        &main,
+        "use js.plotly as plot\nfn run() {\n    print(plot.scatter())\n}\n",
+    )
+    .unwrap();
+    let manifest = jet::Manifest::parse(&project.join("package.jet"), &manifest_text).unwrap();
+
+    let old_root = std::env::var_os("JETPACK_ROOT");
+    let old_fixtures = std::env::var_os("JETPACK_FIXTURES");
+    std::env::set_var("JETPACK_ROOT", &store.path);
+    std::env::set_var("JETPACK_FIXTURES", &fixtures.path);
+    let fetched = jet::Fetch::fetch(
+        &project.path,
+        &manifest,
+        None,
+        &jet::Fetch::FetchOptions {
+            locked: false,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        },
+    );
+    let (lock, dep_dirs) = fetched.expect("foreign provider fetch should realize the package");
+    assert!(dep_dirs.get("plotly").is_some_and(|path| path.is_dir()));
+    assert!(jetpack::Foreign::project_binding_path(
+        &project.path,
+        jet::AST::ForeignLanguage::JS,
+        "plotly"
+    )
+    .is_file());
+    let foreign = lock
+        .packages
+        .iter()
+        .find(|package| package.name == "plotly")
+        .expect("foreign package must be in lock");
+    assert!(matches!(
+        &foreign.source,
+        jet::Lock::LockSource::Foreign {
+            language: jet::AST::ForeignLanguage::JS,
+            reference,
+            output,
+        } if reference == "plotly#version=2.35.0@npm" && !output.is_empty()
+    ));
+    assert!(foreign.envelope.as_ref().is_some_and(|envelope| !envelope.output_hash.is_empty()));
+    let lock_text = fs::read_to_string(project.join(".jet/lock")).unwrap();
+    let round_trip = jet::Lock::parse(&lock_text).expect("foreign lock should parse back");
+    assert_eq!(round_trip.packages, lock.packages);
+    let source = fs::read_to_string(&main).unwrap();
+    jet::compile_with_path(&source, &main.to_string_lossy())
+        .expect("compiler must consume the provider-projected binding");
+
+    let locked = jet::Fetch::fetch(
+        &project.path,
+        &manifest,
+        Some(&lock),
+        &jet::Fetch::FetchOptions {
+            locked: true,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        },
+    )
+    .expect("locked foreign provider round-trip should verify");
+    assert_eq!(locked.0.packages, lock.packages);
+
+    fs::remove_dir_all(fixtures.join("foreign/npm")).unwrap();
+    let failed_manifest = jet::Manifest::parse(
+        &failed_project.join("package.jet"),
+        &manifest_text,
+    )
+    .unwrap();
+    let failure = jet::Fetch::fetch(
+        &failed_project.path,
+        &failed_manifest,
+        None,
+        &jet::Fetch::FetchOptions {
+            locked: false,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        },
+    )
+    .expect_err("missing provider artifact must fail before foreign fetch succeeds");
+    assert!(failure.iter().any(|diagnostic| diagnostic.code == "E1256"));
+    assert!(!failed_project.join(".jet/lock").exists());
+
+    match old_root {
+        Some(value) => std::env::set_var("JETPACK_ROOT", value),
+        None => std::env::remove_var("JETPACK_ROOT"),
+    }
+    match old_fixtures {
+        Some(value) => std::env::set_var("JETPACK_FIXTURES", value),
+        None => std::env::remove_var("JETPACK_FIXTURES"),
+    }
+}
+
+#[test]
 fn manifest_parse_e1206_missing_required_field() {
     // No `name:` at all is a shape error (E1206, D-CONF-NAME1: bare `name`/
     // `version`, `version:` alone is optional).

@@ -2118,6 +2118,9 @@ pub(crate) fn run_bind(args: &[&String]) {
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::RUBY_MODULE_ROOT){run_ruby_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PHP_MODULE_ROOT){run_php_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::R_MODULE_ROOT){run_r_bind(&args[1..]);return;}
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PY_MODULE_ROOT){run_python_bind(&args[1..]);return;}
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::JS_MODULE_ROOT){run_javascript_bind(&args[1..]);return;}
+    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::OCTAVE_MODULE_ROOT){run_octave_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PWSH_MODULE_ROOT){run_powershell_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
     if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PASCAL_MODULE_ROOT){run_pascal_bind(&args[1..]);return;}
@@ -2590,7 +2593,7 @@ fn run_pascal_bind(args:&[&String]){
     if let Err(e)=std::fs::write(&out_path,&result.source){pascal_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){pascal_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} FreePascal export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
-fn pascal_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export scalar cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first method wrappers, then rerun `jet inspect bind pascal`.".to_string())}
+fn pascal_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`.".to_string())}
 
 /// D-FFI-DART1=A: Dart/Flutter owns the isolate. Generate and compile the
 /// dart_api_dl callback bridge plus a native Jet plugin loaded by `dart:ffi`.
@@ -2603,13 +2606,17 @@ fn run_dart_bind(args:&[&String]){
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});
     let source=std::fs::read_to_string(path).unwrap_or_else(|e|dart_bind_error(path,&format!("the Dart contract could not be read ({e})")));
     let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::DART_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let mut result=jet::DartBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){dart_bind_error(path,&format!("the generated cache could not be written ({e})"))}
-    let host=cache.join(format!("{lib}_host.dart"));if let Err(e)=std::fs::write(&host,&result.host_source){dart_bind_error(path,&format!("the Dart host wrapper could not be written ({e})"))}
-    let compute_source=std::fs::read_to_string(&compute).unwrap_or_else(|e|dart_bind_error(path,&format!("the Jet compute source could not be read ({e})")));result.provenance=jet::DartBind::bind_compute_provenance(&result.provenance,std::path::Path::new(&compute),&compute_source).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
-    let compiled=jet::compile_plugin(&compute).unwrap_or_else(|_|dart_bind_error(path,"the Jet compute source did not pass Jet front-end checks"));let plugin=compiled.plugin.as_ref().unwrap_or_else(||dart_bind_error(path,"the Jet compute source produced no plugin export artifact"));
-    let native=jet::DartBind::build_compute(&plugin.guest_rust,&result.host_rust,compiled.ffi.as_ref(),&compiled.clinks,&lib,cache).unwrap_or_else(|e|dart_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dart_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
+    let host=cache.join(format!("{lib}_host.dart"));let archive=cache.join(format!("libjet_dart_{lib}.a"));let provenance=cache.join(format!("{lib}.provenance"));let compute_artifact=cache.join(format!("{lib}_compute.rs"));
+    let clear_outputs=||{let _=std::fs::remove_file(&out_path);let _=std::fs::remove_file(&host);let _=std::fs::remove_file(&provenance);let _=std::fs::remove_file(&compute_artifact);for ext in ["so","dylib","dll"]{let _=std::fs::remove_file(cache.join(format!("libjet_dart_{lib}_compute.{ext}")));}};
+    clear_outputs();let _=std::fs::remove_file(&archive);
+    let cleanup=||{clear_outputs();let _=std::fs::remove_file(&archive);};
+    let mut result=jet::DartBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
+    if let Err(e)=std::fs::write(&out_path,&result.source){cleanup();dart_bind_error(path,&format!("the generated cache could not be written ({e})"))}
+    if let Err(e)=std::fs::write(&host,&result.host_source){cleanup();dart_bind_error(path,&format!("the Dart host wrapper could not be written ({e})"))}
+    let compute_source=std::fs::read_to_string(&compute).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&format!("the Jet compute source could not be read ({e})"))});result.provenance=jet::DartBind::bind_compute_provenance(&result.provenance,std::path::Path::new(&compute),&compute_source).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
+    let compiled=jet::compile_plugin(&compute).unwrap_or_else(|_|{cleanup();dart_bind_error(path,"the Jet compute source did not pass Jet front-end checks")});let plugin=compiled.plugin.as_ref().unwrap_or_else(||{cleanup();dart_bind_error(path,"the Jet compute source produced no plugin export artifact")});
+    let native=jet::DartBind::build_compute(&plugin.guest_rust,&result.host_rust,compiled.ffi.as_ref(),&compiled.clinks,&lib,cache).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
+    if let Err(e)=std::fs::write(&provenance,&result.provenance){cleanup();dart_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
     println!("bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},native.display(),path,out_path);
 }
 fn dart_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.".to_string())}
@@ -2677,6 +2684,45 @@ fn run_r_bind(args:&[&String]){
     println!("bound {} R function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn r_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`.".to_string())}
+
+/// D-FFI-PY1=A: statically discover top-level Python functions and generate a
+/// persistent supervised CPython sidecar with the common checked boundary.
+fn run_python_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind py <script.py> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
+    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind py` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|python_bind_error(path,&format!("the Python script could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PY_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PythonBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|python_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){python_bind_error(path,&format!("the generated cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){python_bind_error(path,&format!("the binding provenance could not be written ({e})")}
+    println!("bound {} persistent Python function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+}
+fn python_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment.".to_string())}
+
+/// D-FFI-JS1=A: bind a typed TypeScript declaration file to a target-selected
+/// native JavaScript module through the common checked scalar sidecar.
+fn run_javascript_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind js <module.d.ts> --runtime <module.js> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
+    let declaration=args[0].as_str();let mut runtime=None;let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--runtime"=>{runtime=args.get(i+1).map(|v|v.to_string());if runtime.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind js` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=declaration.rsplit('/').next().unwrap_or(declaration);base.strip_suffix(".d.ts").or_else(||base.rsplit_once('.').map(|v|v.0)).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(declaration).unwrap_or_else(|e|javascript_bind_error(declaration,&format!("the TypeScript declaration file could not be read ({e})")));
+    let Some(runtime)=runtime else {javascript_bind_error(declaration,"the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`")};let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::JS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::JavaScriptBind::bind(std::path::Path::new(declaration),&source,std::path::Path::new(&runtime),&lib,cache).unwrap_or_else(|e|javascript_bind_error(declaration,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){javascript_bind_error(declaration,&format!("the generated cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.d.ts")),&source){javascript_bind_error(declaration,&format!("the typed declaration cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){javascript_bind_error(declaration,&format!("the binding provenance could not be written ({e})")}
+    println!("bound {} JavaScript export{} from `{declaration}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+}
+fn javascript_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.".to_string())}
+
+/// D-FFI-OCTAVE1=A: parse one-input/one-output matrix functions without
+/// evaluating source, then generate a persistent checked Octave sidecar.
+fn run_octave_bind(args:&[&String]){
+    let usage=||eprintln!("usage: {} inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
+    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
+    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind octave` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
+    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|octave_bind_error(path,&format!("the Octave script could not be read ({e})")));
+    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::OCTAVE_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::OctaveBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|octave_bind_error(path,&e.to_string()));
+    if let Err(e)=std::fs::write(&out_path,&result.source){octave_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){octave_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
+    println!("bound {} Octave matrix function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+}
+fn octave_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment.".to_string())}
 
 /// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
 /// automation stubs. Non-Windows hosts reject before touching the input.

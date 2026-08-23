@@ -1,0 +1,10 @@
+// Run `jet inspect bind pascal Counter.pas --pkg counter`, then `jet run main.jet`.
+use pascal.counter as counter
+
+fn run() -[FFI.Pascal, IO]> {
+    print(counter.add_scalar(20, 22))
+    print(counter.add_float(1.25, 2.25))
+    handle :: counter.counter_new(40) ?? panic("Pascal constructor failed")
+    print(counter.counter_add(handle, 2) ?? -1)
+    counter.close(^handle)
+}

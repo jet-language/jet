@@ -3712,10 +3712,13 @@ from the portable `Driver` surface every backend goes through.
 D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
 ranked Tensor operation family. Tensor views retain the owner allocation and
 strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
-This slice registers one CPU backend. Its receipt records backend, version,
-profile, cache, and closed features. `Auto` selects that CPU backend,
-records the choice, and never fabricates an accelerator or changes precision.
-Experts can pin CPU explicitly.
+This slice registers the CPU oracle and an explicit Metal backend. Every receipt
+records backend, version, profile, cache, closed capabilities, and the policy
+that selected it. `Auto` remains the CPU choice for the default F64 profile.
+`device_metal` is explicit and accepts only `F32Strict+Reproducible`; it never
+silently falls back to CPU. Metal is available on macOS/iOS when the system
+device and runtime shader compiler are available. Other targets return a typed
+unsupported error.
 
 ```jet
 use core.compute as compute
@@ -3742,17 +3745,28 @@ fn run() {
 | `gradient` / `value_and_gradient` / `jvp` / `vjp` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` | scalar Tensor loss and precision-preserving differentiable SGD |
 | `serialize` / `deserialize` | checksummed Tensor model wire with profile receipt |
-| `matmul_f32_tile` / `profile_show` | CPU-SIMD profile vs oracle |
-| `stream_new` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
+| `matmul_f32_tile` / `profile_show` | CPU-SIMD or Metal F32 profile vs oracle |
+| `stream_new` / `stream_new_on` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
-| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` | placement receipts |
+| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` / `device_metal` | placement receipts |
 
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
-symbols (I9). No accelerator provider is registered in this slice. Requests
-that need one return typed `ComputeError::Unsupported`; no engine substitutes
-an accelerator.
+symbols (I9). Requests that need an unavailable or unsupported backend return
+typed `ComputeError::Device` / `ComputeError::Unsupported`; no engine
+substitutes an accelerator or changes the precision contract.
+
+Metal uses the same Prelude operation family and CPU-oracle contract. The
+production Metal kernels cover F32 transfers, elementwise add/mul/sub/div/
+maximum/minimum, unary negate/abs/exp/log/sqrt, matmul, ordered axis sums,
+MSE loss and JVP/VJP, and differentiable SGD. `stream_new_on(device_metal())`
+and `stream_sync` validate the same device availability used by launches.
+`det`, `inv`, `solve`, `fft`, sparse operations, and serialization are not
+Metal operations;
+they return `ComputeError::Unsupported` until a Metal kernel is ratified.
+Transfer receipts report the logical F32 byte count and never label an
+unavailable-device request as a CPU fallback.
 
 Tensor serialization is the canonical wire
 `shape=axis,...;data=value,...;profile=name;checksum=hex16`.
@@ -3805,13 +3819,14 @@ are checked, broadcast gradients reduce to the input shape, and scalar-loss
 requirements reject non-scalar outputs. Gradient receipts inherit the primal
 placement and profile.
 
-`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` publishes a stable backend,
-version, profile, cache identity, and closed feature list in placement
-receipts. General operations report their actual `F64Strict+Reproducible`
-profile by default and retain `F32Strict+Reproducible` when their inputs carry
-that explicit profile; the tiled path reports real F32 arithmetic and ordered
-reduction. The ratified production profile and provider features remain
-gated, and unsupported requests fail before launch.
+`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` and explicit `metal`
+backends publish stable backend, version, profile, cache identity, and closed
+feature lists in placement receipts. General operations report their actual
+`F64Strict+Reproducible` profile by default and retain
+`F32Strict+Reproducible` when their inputs carry that explicit profile; the
+tiled path reports real F32 arithmetic and ordered reduction on either the CPU
+or Metal path. Metal capability negotiation and unsupported-operation checks
+fail before launch; no host tier inserts a CPU fallback.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
 provider-issued opaque contract. The CPU module exposes no public contract
@@ -3986,6 +4001,7 @@ share that source-owned TIR path.
 | `examples/features/tooling/compute_tensor.jet` | `core.compute` Tensor / Vec / Matrix CPU oracle |
 | `examples/features/tooling/compute_ndarray.jet` | broadcast, fused elementwise ufuncs, transpose, and axis reduction |
 | `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
+| `examples/features/tooling/compute_metal.jet` | explicit Metal precision gate and device-scoped streams |
 | `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
 | `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |
 | `examples/features/tooling/compute_ml.jet` | inference, autodiff training, SGD, and checksummed model serialization |

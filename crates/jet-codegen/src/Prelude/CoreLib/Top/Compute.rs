@@ -1,6 +1,6 @@
 // ── D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D (#443) ─────────────
 // One Core compute family. `Tensor` owns ranked multidimensional storage on the
-// explicit CPU-oracle ability; views retain the backing allocation and its
+// selected CPU-oracle or explicit Metal ability; views retain the backing allocation and its
 // strides. Mutable access requires the sema-proved exclusive ViewMut path;
 // shared writes fail closed instead of copying or pretending to update an alias.
 // Explicit Tensor copies materialize logical values into fresh backing storage.
@@ -10,12 +10,16 @@
 pub enum JetComputeDevice {
     Auto,
     Cpu,
+    Metal,
 }
 
 const MAX_TENSOR_ELEMENTS: usize = 16 * 1024 * 1024;
 const CPU_ORACLE_BACKEND: &str = "cpu-oracle";
 const CPU_ORACLE_VERSION: &str = "builtin";
 const CPU_ORACLE_CACHE: &str = "none";
+const METAL_BACKEND: &str = "metal";
+const METAL_VERSION: &str = "system";
+const METAL_CACHE: &str = "runtime";
 const CPU_ORACLE_F64_PROFILE: &str = "F64Strict+Reproducible";
 const CPU_ORACLE_F32_PROFILE: &str = "F32Strict+Reproducible";
 const CPU_ORACLE_F64_CAPABILITIES: &[&str] = &[
@@ -35,11 +39,770 @@ const CPU_ORACLE_F32_CAPABILITIES: &[&str] = &[
     "blocked-matmul",
     "differential-oracle",
 ];
+const METAL_F32_CAPABILITIES: &[&str] = &[
+    "ranked-storage",
+    "strided-view",
+    "checked-bounds",
+    "f32-arithmetic",
+    "reproducible-reduction",
+    "elementwise",
+    "matmul",
+    "device-buffer",
+    "stream",
+    "differential-oracle",
+];
+
+// D-COMPUTE-BACKEND1=D / #1145: the Metal bridge is a Prelude-owned native
+// adapter. It stages canonical F32 values into shared Metal buffers, launches
+// checked kernels, and reads the result back into the Tensor owner. No host
+// engine selects a kernel or supplies a fallback policy.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod jet_compute_metal {
+    use super::JetComputeError;
+    use std::ffi::CString;
+
+    type Obj = usize;
+
+    const STATUS_COMPLETED: Obj = 4;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Size {
+        width: usize,
+        height: usize,
+        depth: usize,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Params {
+        count: u32,
+        rows: u32,
+        inner: u32,
+        cols: u32,
+        op: u32,
+        scalar: f32,
+    }
+
+    const SHADER: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+#pragma clang fp contract(off)
+
+struct JetParams {
+    uint count;
+    uint rows;
+    uint inner;
+    uint cols;
+    uint op;
+    float scalar;
+};
+
+kernel void jet_binary(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device float* out [[buffer(2)]],
+    constant JetParams& p [[buffer(3)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    float left = a[id];
+    float right = b[id];
+    switch (p.op) {
+        case 0: out[id] = left + right; break;
+        case 1: out[id] = left * right; break;
+        case 2: out[id] = left - right; break;
+        case 3: out[id] = left / right; break;
+        case 4: out[id] = max(left, right); break;
+        case 5: out[id] = min(left, right); break;
+        default: out[id] = 0.0f; break;
+    }
+}
+
+kernel void jet_unary(
+    device const float* a [[buffer(0)]],
+    device float* out [[buffer(1)]],
+    constant JetParams& p [[buffer(2)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    float value = a[id];
+    switch (p.op) {
+        case 0: out[id] = -value; break;
+        case 1: out[id] = abs(value); break;
+        case 2: out[id] = exp(value); break;
+        case 3: out[id] = log(value); break;
+        case 4: out[id] = sqrt(value); break;
+        default: out[id] = 0.0f; break;
+    }
+}
+
+kernel void jet_matmul(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device float* out [[buffer(2)]],
+    constant JetParams& p [[buffer(3)]],
+    uint id [[thread_position_in_grid]]) {
+    uint total = p.rows * p.cols;
+    if (id >= total) return;
+    uint row = id / p.cols;
+    uint col = id % p.cols;
+    float sum = 0.0f;
+    for (uint inner = 0; inner < p.inner; inner++) {
+        sum = sum + a[row * p.inner + inner] * b[inner * p.cols + col];
+    }
+    out[id] = sum;
+}
+
+kernel void jet_sum(
+    device const float* a [[buffer(0)]],
+    device float* out [[buffer(1)]],
+    constant JetParams& p [[buffer(2)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id != 0) return;
+    float sum = 0.0f;
+    for (uint index = 0; index < p.count; index++) sum = sum + a[index];
+    out[0] = sum;
+}
+
+kernel void jet_mse(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device float* out [[buffer(2)]],
+    constant JetParams& p [[buffer(3)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id != 0) return;
+    float sum = 0.0f;
+    for (uint index = 0; index < p.count; index++) {
+        float difference = a[index] - b[index];
+        sum = sum + difference * difference;
+    }
+    out[0] = sum / float(p.count);
+}
+
+kernel void jet_mse_grad(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device const float* cot [[buffer(2)]],
+    device float* out [[buffer(3)]],
+    constant JetParams& p [[buffer(4)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    float difference = p.op == 0 ? a[id] - b[id] : b[id] - a[id];
+    out[id] = difference * (2.0f / float(p.count)) * cot[0];
+}
+
+kernel void jet_mse_jvp(
+    device const float* a [[buffer(0)]],
+    device const float* b [[buffer(1)]],
+    device const float* at [[buffer(2)]],
+    device const float* bt [[buffer(3)]],
+    device float* out [[buffer(4)]],
+    constant JetParams& p [[buffer(5)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id != 0) return;
+    float sum = 0.0f;
+    for (uint index = 0; index < p.count; index++) {
+        sum = sum + 2.0f * (a[index] - b[index]) * (at[index] - bt[index]);
+    }
+    out[0] = sum / float(p.count);
+}
+
+kernel void jet_sgd(
+    device const float* parameter [[buffer(0)]],
+    device const float* gradient [[buffer(1)]],
+    device float* out [[buffer(2)]],
+    constant JetParams& p [[buffer(3)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    out[id] = parameter[id] - p.scalar * gradient[id];
+}
+
+kernel void jet_scale(
+    device const float* a [[buffer(0)]],
+    device float* out [[buffer(1)]],
+    constant JetParams& p [[buffer(2)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    out[id] = a[id] * p.scalar;
+}
+
+kernel void jet_copy(
+    device const float* a [[buffer(0)]],
+    device float* out [[buffer(1)]],
+    constant JetParams& p [[buffer(2)]],
+    uint id [[thread_position_in_grid]]) {
+    if (id >= p.count) return;
+    out[id] = a[id];
+}
+"#;
+
+// JET_VETTED_UNSAFE_BEGIN: jet_compute_metal
+#[link(name = "Metal", kind = "framework")]
+unsafe extern "C" {
+    fn MTLCreateSystemDefaultDevice() -> Obj;
+}
+
+#[link(name = "objc")]
+unsafe extern "C" {
+    fn objc_getClass(name: *const i8) -> Obj;
+    fn sel_registerName(name: *const i8) -> Obj;
+    fn objc_msgSend(receiver: Obj, selector: Obj, ...) -> Obj;
+}
+
+struct Object(Obj);
+
+impl Object {
+    fn new(value: Obj, label: &str) -> Result<Self, JetComputeError> {
+        if value == 0 {
+            return Err(JetComputeError::Device(format!(
+                "Metal {label} allocation or launch failed"
+            )));
+        }
+        Ok(Self(value))
+    }
+
+    fn raw(&self) -> Obj {
+        self.0
+    }
+}
+
+impl Drop for Object {
+    fn drop(&mut self) {
+        unsafe {
+            msg0(self.0, b"release\0");
+        }
+    }
+}
+
+unsafe fn selector(name: &[u8]) -> Obj {
+    unsafe { sel_registerName(name.as_ptr().cast()) }
+}
+
+unsafe fn msg0(receiver: Obj, name: &[u8]) -> Obj {
+    unsafe { objc_msgSend(receiver, selector(name)) }
+}
+
+unsafe fn msg1(receiver: Obj, name: &[u8], first: Obj) -> Obj {
+    unsafe { objc_msgSend(receiver, selector(name), first) }
+}
+
+unsafe fn msg2(receiver: Obj, name: &[u8], first: Obj, second: Obj) -> Obj {
+    unsafe { objc_msgSend(receiver, selector(name), first, second) }
+}
+
+unsafe fn msg3(receiver: Obj, name: &[u8], first: Obj, second: Obj, third: Obj) -> Obj {
+    unsafe { objc_msgSend(receiver, selector(name), first, second, third) }
+}
+
+unsafe fn msg_size2(receiver: Obj, name: &[u8], first: Size, second: Size) -> Obj {
+    unsafe { objc_msgSend(receiver, selector(name), first, second) }
+}
+
+fn string(value: &str) -> Result<Obj, JetComputeError> {
+    let value = CString::new(value).map_err(|_| {
+        JetComputeError::Unsupported("Metal source name contains a NUL byte".to_string())
+    })?;
+    unsafe {
+        let class = objc_getClass(b"NSString\0".as_ptr().cast());
+        if class == 0 {
+            return Err(JetComputeError::Device(
+                "Metal Objective-C NSString class is unavailable".to_string(),
+            ));
+        }
+        let result = msg1(class, b"stringWithUTF8String:\0", value.as_ptr() as Obj);
+        if result == 0 {
+            return Err(JetComputeError::Device(
+                "Metal could not create an Objective-C string".to_string(),
+            ));
+        }
+        Ok(result)
+    }
+}
+
+fn device() -> Result<Object, JetComputeError> {
+    unsafe { Object::new(MTLCreateSystemDefaultDevice(), "device") }
+}
+
+pub fn available() -> bool {
+    let Ok(device) = device() else {
+        return false;
+    };
+    drop(device);
+    true
+}
+
+fn object(value: Obj, label: &str) -> Result<Object, JetComputeError> {
+    Object::new(value, label)
+}
+
+fn u32_value(value: usize, label: &str) -> Result<u32, JetComputeError> {
+    u32::try_from(value).map_err(|_| {
+        JetComputeError::InvalidShape(format!("Metal {label} exceeds the u32 kernel limit"))
+    })
+}
+
+fn run(
+    function_name: &str,
+    inputs: &[&[f32]],
+    output_len: usize,
+    params: Params,
+    output_index: usize,
+    params_index: usize,
+) -> Result<Vec<f32>, JetComputeError> {
+    if output_len == 0 {
+        return Ok(Vec::new());
+    }
+    let device = device()?;
+    let source = string(SHADER)?;
+    let function_name = string(function_name)?;
+    let options_class = unsafe { objc_getClass(b"MTLCompileOptions\0".as_ptr().cast()) };
+    if options_class == 0 {
+        return Err(JetComputeError::Device(
+            "Metal compile options are unavailable".to_string(),
+        ));
+    }
+    let options = unsafe {
+        let allocated = msg0(options_class, b"alloc\0");
+        let initialized = msg0(allocated, b"init\0");
+        let options = object(initialized, "compile options")?;
+        msg1(options.raw(), b"setFastMathEnabled:\0", 0);
+        options
+    };
+    let mut compile_error = 0;
+    let library = unsafe {
+        object(
+            msg3(
+                device.raw(),
+                b"newLibraryWithSource:options:error:\0",
+                source,
+                options.raw(),
+                (&mut compile_error as *mut Obj) as Obj,
+            ),
+            "library",
+        )
+        .map_err(|_| {
+            JetComputeError::Unsupported(
+                "Metal shader compilation rejected the requested kernel".to_string(),
+            )
+        })?
+    };
+    let function = unsafe {
+        object(
+            msg1(
+                library.raw(),
+                b"newFunctionWithName:\0",
+                function_name,
+            ),
+            "kernel function",
+        )
+        .map_err(|_| {
+            JetComputeError::Unsupported(
+                "Metal shader does not contain the requested kernel".to_string(),
+            )
+        })?
+    };
+    let mut pipeline_error = 0;
+    let pipeline = unsafe {
+        object(
+            msg2(
+                device.raw(),
+                b"newComputePipelineStateWithFunction:error:\0",
+                function.raw(),
+                (&mut pipeline_error as *mut Obj) as Obj,
+            ),
+            "compute pipeline",
+        )
+        .map_err(|_| {
+            JetComputeError::Unsupported(
+                "Metal rejected the requested kernel pipeline".to_string(),
+            )
+        })?
+    };
+    let queue = unsafe {
+        object(msg0(device.raw(), b"newCommandQueue\0"), "command queue")?
+    };
+    let command = unsafe {
+        object(msg0(queue.raw(), b"commandBuffer\0"), "command buffer")?
+    };
+    let encoder = unsafe {
+        object(
+            msg0(command.raw(), b"computeCommandEncoder\0"),
+            "compute encoder",
+        )?
+    };
+    let mut input_buffers = Vec::with_capacity(inputs.len());
+    for values in inputs {
+        let bytes = values
+            .len()
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| JetComputeError::InvalidShape("Metal buffer size overflow".to_string()))?;
+        let buffer = unsafe {
+            object(
+                msg3(
+                    device.raw(),
+                    b"newBufferWithBytes:length:options:\0",
+                    values.as_ptr() as Obj,
+                    bytes,
+                    0,
+                ),
+                "input buffer",
+            )?
+        };
+        input_buffers.push(buffer);
+    }
+    let output_bytes = output_len
+        .checked_mul(std::mem::size_of::<f32>())
+        .ok_or_else(|| JetComputeError::InvalidShape("Metal output buffer size overflow".to_string()))?;
+    let output = unsafe {
+        object(
+            msg2(
+                device.raw(),
+                b"newBufferWithLength:options:\0",
+                output_bytes,
+                0,
+            ),
+            "output buffer",
+        )?
+    };
+    unsafe {
+        msg1(
+            encoder.raw(),
+            b"setComputePipelineState:\0",
+            pipeline.raw(),
+        );
+        for (index, buffer) in input_buffers.iter().enumerate() {
+            msg3(
+                encoder.raw(),
+                b"setBuffer:offset:atIndex:\0",
+                buffer.raw(),
+                0,
+                index,
+            );
+        }
+        msg3(
+            encoder.raw(),
+            b"setBuffer:offset:atIndex:\0",
+            output.raw(),
+            0,
+            output_index,
+        );
+        msg3(
+            encoder.raw(),
+            b"setBytes:length:atIndex:\0",
+            (&params as *const Params) as Obj,
+            std::mem::size_of::<Params>(),
+            params_index,
+        );
+        msg_size2(
+            encoder.raw(),
+            b"dispatchThreads:threadsPerThreadgroup:\0",
+            Size {
+                width: output_len,
+                height: 1,
+                depth: 1,
+            },
+            Size {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+        );
+        msg0(encoder.raw(), b"endEncoding\0");
+        msg0(command.raw(), b"commit\0");
+        msg0(command.raw(), b"waitUntilCompleted\0");
+        if msg0(command.raw(), b"status\0") != STATUS_COMPLETED {
+            return Err(JetComputeError::Device(
+                "Metal command buffer failed or device was lost".to_string(),
+            ));
+        }
+        let contents = msg0(output.raw(), b"contents\0");
+        if contents == 0 {
+            return Err(JetComputeError::Device(
+                "Metal output buffer has no CPU-readable contents".to_string(),
+            ));
+        }
+        let values = std::slice::from_raw_parts(contents as *const f32, output_len).to_vec();
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(JetComputeError::Arithmetic(
+                "Metal kernel produced a non-finite F32 value".to_string(),
+            ));
+        }
+        Ok(values)
+    }
+}
+
+pub fn copy(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+    let count = u32_value(values.len(), "copy count")?;
+    run(
+        "jet_copy",
+        &[values],
+        values.len(),
+        Params {
+            count,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar: 0.0,
+        },
+        1,
+        2,
+    )
+}
+
+pub fn binary(op: u32, left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+    if left.len() != right.len() {
+        return Err(JetComputeError::InvalidShape(
+            "Metal binary inputs have different lengths".to_string(),
+        ));
+    }
+    let count = u32_value(left.len(), "binary count")?;
+    run(
+        "jet_binary",
+        &[left, right],
+        left.len(),
+        Params {
+            count,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op,
+            scalar: 0.0,
+        },
+        2,
+        3,
+    )
+}
+
+pub fn unary(op: u32, values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+    let count = u32_value(values.len(), "unary count")?;
+    run(
+        "jet_unary",
+        &[values],
+        values.len(),
+        Params {
+            count,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op,
+            scalar: 0.0,
+        },
+        1,
+        2,
+    )
+}
+
+pub fn matmul(
+    left: &[f32],
+    right: &[f32],
+    rows: usize,
+    inner: usize,
+    cols: usize,
+) -> Result<Vec<f32>, JetComputeError> {
+    let count = rows
+        .checked_mul(cols)
+        .ok_or_else(|| JetComputeError::InvalidShape("Metal matmul output size overflow".to_string()))?;
+    let params = Params {
+        count: u32_value(count, "matmul output")?,
+        rows: u32_value(rows, "matmul rows")?,
+        inner: u32_value(inner, "matmul inner dimension")?,
+        cols: u32_value(cols, "matmul columns")?,
+        op: 0,
+        scalar: 0.0,
+    };
+    run("jet_matmul", &[left, right], count, params, 2, 3)
+}
+
+pub fn sum(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+    let count = u32_value(values.len(), "sum count")?;
+    run(
+        "jet_sum",
+        &[values],
+        1,
+        Params {
+            count,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar: 0.0,
+        },
+        1,
+        2,
+    )
+}
+
+pub fn mse(left: &[f32], right: &[f32]) -> Result<Vec<f32>, JetComputeError> {
+    if left.len() != right.len() || left.is_empty() {
+        return Err(JetComputeError::InvalidShape(
+            "Metal MSE inputs must have the same non-empty length".to_string(),
+        ));
+    }
+    run(
+        "jet_mse",
+        &[left, right],
+        1,
+        Params {
+            count: u32_value(left.len(), "MSE count")?,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar: 0.0,
+        },
+        2,
+        3,
+    )
+}
+
+pub fn mse_grad(
+    left: &[f32],
+    right: &[f32],
+    cot: &[f32],
+    positive: bool,
+) -> Result<Vec<f32>, JetComputeError> {
+    if left.len() != right.len() || left.is_empty() || cot.len() != 1 {
+        return Err(JetComputeError::InvalidShape(
+            "Metal MSE gradient inputs have incompatible lengths".to_string(),
+        ));
+    }
+    run(
+        "jet_mse_grad",
+        &[left, right, cot],
+        left.len(),
+        Params {
+            count: u32_value(left.len(), "MSE gradient count")?,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: u32::from(!positive),
+            scalar: 0.0,
+        },
+        3,
+        4,
+    )
+}
+
+pub fn mse_jvp(
+    left: &[f32],
+    right: &[f32],
+    left_tangent: &[f32],
+    right_tangent: &[f32],
+) -> Result<Vec<f32>, JetComputeError> {
+    if left.len() != right.len()
+        || left.len() != left_tangent.len()
+        || left.len() != right_tangent.len()
+        || left.is_empty()
+    {
+        return Err(JetComputeError::InvalidShape(
+            "Metal MSE JVP inputs have incompatible lengths".to_string(),
+        ));
+    }
+    run(
+        "jet_mse_jvp",
+        &[left, right, left_tangent, right_tangent],
+        1,
+        Params {
+            count: u32_value(left.len(), "MSE JVP count")?,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar: 0.0,
+        },
+        4,
+        5,
+    )
+}
+
+pub fn sgd(
+    parameter: &[f32],
+    gradient: &[f32],
+    learning_rate: f32,
+) -> Result<Vec<f32>, JetComputeError> {
+    if parameter.len() != gradient.len() {
+        return Err(JetComputeError::InvalidShape(
+            "Metal SGD inputs have different lengths".to_string(),
+        ));
+    }
+    run(
+        "jet_sgd",
+        &[parameter, gradient],
+        parameter.len(),
+        Params {
+            count: u32_value(parameter.len(), "SGD count")?,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar: learning_rate,
+        },
+        2,
+        3,
+    )
+}
+
+pub fn scale(values: &[f32], scalar: f32) -> Result<Vec<f32>, JetComputeError> {
+    run(
+        "jet_scale",
+        &[values],
+        values.len(),
+        Params {
+            count: u32_value(values.len(), "scale count")?,
+            rows: 0,
+            inner: 0,
+            cols: 0,
+            op: 0,
+            scalar,
+        },
+        1,
+        2,
+    )
+}
+}
+// JET_VETTED_UNSAFE_END: jet_compute_metal
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+mod jet_compute_metal {
+    use super::JetComputeError;
+
+    fn unavailable<T>() -> Result<T, JetComputeError> {
+        Err(JetComputeError::Unsupported(
+            "Metal backend is unavailable on this target".to_string(),
+        ))
+    }
+
+    pub fn available() -> bool {
+        false
+    }
+
+    pub fn copy(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn binary(_: u32, _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn unary(_: u32, _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn matmul(_: &[f32], _: &[f32], _: usize, _: usize, _: usize) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn sum(_: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn mse(_: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn mse_grad(_: &[f32], _: &[f32], _: &[f32], _: bool) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn mse_jvp(_: &[f32], _: &[f32], _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn sgd(_: &[f32], _: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn scale(_: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+}
 
 fn jet_compute_registered_abilities(profile: &str) -> Option<&'static [&'static str]> {
     match profile {
         CPU_ORACLE_F64_PROFILE => Some(CPU_ORACLE_F64_CAPABILITIES),
         CPU_ORACLE_F32_PROFILE => Some(CPU_ORACLE_F32_CAPABILITIES),
+        _ => None,
+    }
+}
+
+fn jet_compute_registered_backend_abilities(
+    backend: &str,
+    profile: &str,
+) -> Option<&'static [&'static str]> {
+    match backend {
+        CPU_ORACLE_BACKEND => jet_compute_registered_abilities(profile),
+        METAL_BACKEND if profile == CPU_ORACLE_F32_PROFILE => Some(METAL_F32_CAPABILITIES),
         _ => None,
     }
 }
@@ -953,6 +1716,7 @@ impl JetShow for JetComputeDevice {
         match self {
             JetComputeDevice::Auto => "Auto".to_string(),
             JetComputeDevice::Cpu => "CPU".to_string(),
+            JetComputeDevice::Metal => "Metal".to_string(),
         }
     }
 }
@@ -1186,21 +1950,35 @@ fn jet_compute_validate_placement(
             "a Tensor must record the concrete backend selected by Auto placement".to_string(),
         ));
     }
-    let Some(expected_abilities) = jet_compute_registered_abilities(&receipt.profile) else {
+    let Some(expected_abilities) =
+        jet_compute_registered_backend_abilities(&receipt.backend, &receipt.profile)
+    else {
         return Err(JetComputeError::Unsupported(format!(
-            "compute profile `{}` is not registered by a backend ability",
-            receipt.profile
+            "compute backend `{}` does not register profile `{}`",
+            receipt.backend, receipt.profile
         )));
     };
+    let registered = match receipt.selected {
+        JetComputeDevice::Cpu => {
+            receipt.backend == CPU_ORACLE_BACKEND
+                && receipt.version == CPU_ORACLE_VERSION
+                && receipt.cache == CPU_ORACLE_CACHE
+                && matches!(
+                    (receipt.requested, receipt.selected),
+                    (JetComputeDevice::Cpu, JetComputeDevice::Cpu)
+                        | (JetComputeDevice::Auto, JetComputeDevice::Cpu)
+                )
+        }
+        JetComputeDevice::Metal => {
+            receipt.backend == METAL_BACKEND
+                && receipt.version == METAL_VERSION
+                && receipt.cache == METAL_CACHE
+                && receipt.requested == JetComputeDevice::Metal
+        }
+        JetComputeDevice::Auto => false,
+    };
     if device != receipt.selected
-        || !matches!(
-            (receipt.requested, receipt.selected),
-            (JetComputeDevice::Cpu, JetComputeDevice::Cpu)
-                | (JetComputeDevice::Auto, JetComputeDevice::Cpu)
-        )
-        || receipt.backend != CPU_ORACLE_BACKEND
-        || receipt.version != CPU_ORACLE_VERSION
-        || receipt.cache != CPU_ORACLE_CACHE
+        || !registered
         || receipt.reason.is_empty()
         || receipt.reason.chars().any(char::is_control)
         || !jet_compute_abilities_match(&receipt.abilities, expected_abilities)
@@ -1265,31 +2043,81 @@ fn jet_compute_validate_tensor(tensor: &JetTensor) -> Result<(), JetComputeError
     Ok(())
 }
 
-fn jet_compute_place(
+fn jet_compute_place_with_profile(
     requested: JetComputeDevice,
+    profile: &str,
 ) -> Result<JetComputePlacementReceipt, JetComputeError> {
-    // Epoch 3 registers one CPU ability. Auto selects that ability and
-    // records the choice; it never fabricates an accelerator or silently
-    // changes precision. Experts can still pin CPU explicitly.
-    let abilities = CPU_ORACLE_F64_CAPABILITIES
+    let selected = match requested {
+        JetComputeDevice::Auto | JetComputeDevice::Cpu => JetComputeDevice::Cpu,
+        JetComputeDevice::Metal => {
+            if profile != CPU_ORACLE_F32_PROFILE {
+                return Err(JetComputeError::Unsupported(
+                    "Metal backend supports only F32Strict+Reproducible; create an F32 Tensor first"
+                        .to_string(),
+                ));
+            }
+            if !jet_compute_metal::available() {
+                return Err(JetComputeError::Device(
+                    "Metal device is unavailable; no CPU fallback was selected".to_string(),
+                ));
+            }
+            JetComputeDevice::Metal
+        }
+    };
+    let backend = if selected == JetComputeDevice::Metal {
+        METAL_BACKEND
+    } else {
+        CPU_ORACLE_BACKEND
+    };
+    let version = if selected == JetComputeDevice::Metal {
+        METAL_VERSION
+    } else {
+        CPU_ORACLE_VERSION
+    };
+    let cache = if selected == JetComputeDevice::Metal {
+        METAL_CACHE
+    } else {
+        CPU_ORACLE_CACHE
+    };
+    let profile = if selected == JetComputeDevice::Metal {
+        CPU_ORACLE_F32_PROFILE
+    } else {
+        profile
+    };
+    let abilities = jet_compute_registered_backend_abilities(backend, profile)
+        .ok_or_else(|| JetComputeError::Unsupported("compute profile is not registered".to_string()))?
         .iter()
         .map(|ability| (*ability).to_string())
         .collect();
-    let selected = JetComputeDevice::Cpu;
+    let ability = if selected == JetComputeDevice::Metal {
+        "metal.f32"
+    } else if profile == CPU_ORACLE_F32_PROFILE {
+        "cpu-oracle.f32"
+    } else {
+        "cpu-oracle.f64"
+    };
     Ok(JetComputePlacementReceipt {
         requested,
         selected,
-        backend: CPU_ORACLE_BACKEND.to_string(),
-        version: CPU_ORACLE_VERSION.to_string(),
-        profile: CPU_ORACLE_F64_PROFILE.to_string(),
-        cache: CPU_ORACLE_CACHE.to_string(),
+        backend: backend.to_string(),
+        version: version.to_string(),
+        profile: profile.to_string(),
+        cache: cache.to_string(),
         abilities,
         reason: if requested == JetComputeDevice::Auto {
-            "policy=auto; selected=cpu; ability=cpu-oracle.f64".to_string()
+            format!("policy=auto; selected=cpu; ability={ability}")
+        } else if selected == JetComputeDevice::Metal {
+            "policy=explicit; selected=metal; ability=metal.f32".to_string()
         } else {
-            "policy=explicit; selected=cpu; ability=cpu-oracle.f64".to_string()
+            format!("policy=explicit; selected=cpu; ability={ability}")
         },
     })
+}
+
+fn jet_compute_place(
+    requested: JetComputeDevice,
+) -> Result<JetComputePlacementReceipt, JetComputeError> {
+    jet_compute_place_with_profile(requested, CPU_ORACLE_F64_PROFILE)
 }
 
 fn jet_compute_inherit_placement(mut tensor: JetTensor, source: &JetTensor) -> JetTensor {
@@ -1308,6 +2136,89 @@ fn jet_compute_tensor_from_shape_like(
         jet_compute_tensor_from_shape(shape, fill, JetComputeDevice::Cpu)?,
         source,
     ))
+}
+
+fn jet_compute_metal_values(
+    tensor: &JetTensor,
+    context: &str,
+) -> Result<Vec<f32>, JetComputeError> {
+    if tensor.device != JetComputeDevice::Metal {
+        return Err(JetComputeError::Device(format!(
+            "{context} requires a Metal Tensor"
+        )));
+    }
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+        return Err(JetComputeError::Unsupported(format!(
+            "Metal {context} supports only F32Strict+Reproducible"
+        )));
+    }
+    if !jet_compute_metal::available() {
+        return Err(JetComputeError::Device(
+            "Metal device was lost before launch".to_string(),
+        ));
+    }
+    jet_compute_tensor_values(tensor)
+        .into_iter()
+        .map(|value| jet_compute_f32_value(value, context))
+        .collect()
+}
+
+fn jet_compute_metal_result_like(
+    source: &JetTensor,
+    shape: Vec<i64>,
+    values: Vec<f32>,
+) -> Result<JetTensor, JetComputeError> {
+    let expected = jet_compute_storage_len(&shape)?;
+    if values.len() != expected {
+        return Err(JetComputeError::InvalidShape(
+            "Metal kernel returned the wrong storage length".to_string(),
+        ));
+    }
+    let mut output = jet_compute_tensor_from_shape_like(source, shape.clone(), 0.0)?;
+    output.strides = jet_compute_row_major_strides(&shape)?;
+    output.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+    jet_compute_validate_tensor(&output)?;
+    Ok(output)
+}
+
+fn jet_compute_metal_binary_values(
+    op: &str,
+    left: &[f32],
+    right: &[f32],
+) -> Result<Vec<f32>, JetComputeError> {
+    let op = match op {
+        "add" => 0,
+        "mul" => 1,
+        "sub" => 2,
+        "div" => 3,
+        "maximum" => 4,
+        "minimum" => 5,
+        _ => {
+            return Err(JetComputeError::Unsupported(format!(
+                "unsupported Metal binary operation `{op}`"
+            )))
+        }
+    };
+    jet_compute_metal::binary(op, left, right)
+}
+
+fn jet_compute_metal_unary_values(
+    op: &str,
+    values: &[f32],
+) -> Result<Vec<f32>, JetComputeError> {
+    let op = match op {
+        "negate" => 0,
+        "abs" => 1,
+        "exp" => 2,
+        "log" => 3,
+        "sqrt" => 4,
+        _ => {
+            return Err(JetComputeError::Unsupported(format!(
+                "unsupported Metal unary operation `{op}`"
+            )))
+        }
+    };
+    jet_compute_metal::unary(op, values)
 }
 
 fn jet_compute_require_same_contract(
@@ -2018,6 +2929,23 @@ fn jet_compute_matmul(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetComp
             k, k2
         )));
     }
+    if a.device == JetComputeDevice::Metal {
+        let rows = usize::try_from(m)
+            .map_err(|_| JetComputeError::InvalidShape("Metal matmul rows are too large".to_string()))?;
+        let inner = usize::try_from(k)
+            .map_err(|_| JetComputeError::InvalidShape("Metal matmul inner dimension is too large".to_string()))?;
+        let cols = usize::try_from(n)
+            .map_err(|_| JetComputeError::InvalidShape("Metal matmul columns are too large".to_string()))?;
+        let left = jet_compute_metal_values(a, "matmul input")?;
+        let right = jet_compute_metal_values(b, "matmul input")?;
+        let data = jet_compute_metal::matmul(&left, &right, rows, inner, cols)?;
+        return jet_compute_record(
+            jet_compute_metal_result_like(a, vec![m, n], data)?,
+            &[a, b],
+            vec![a.clone(), b.clone()],
+            JetComputeTapeRule::Matmul,
+        );
+    }
     let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let mut out = jet_compute_tensor_from_shape_like(a, vec![m, n], 0.0)?;
     for i in 0..m {
@@ -2058,18 +2986,40 @@ fn jet_compute_device_auto() -> JetComputeDevice {
     JetComputeDevice::Auto
 }
 
+fn jet_compute_device_metal() -> JetComputeDevice {
+    JetComputeDevice::Metal
+}
+
+fn jet_compute_metal_upload(tensor: &JetTensor) -> Result<(), JetComputeError> {
+    if tensor.last_placement.profile != CPU_ORACLE_F32_PROFILE {
+        return Err(JetComputeError::Unsupported(
+            "Metal transfers support only F32Strict+Reproducible".to_string(),
+        ));
+    }
+    if !jet_compute_metal::available() {
+        return Err(JetComputeError::Device(
+            "Metal device was lost before transfer".to_string(),
+        ));
+    }
+    let values = jet_compute_tensor_values(tensor)
+        .into_iter()
+        .map(|value| jet_compute_f32_value(value, "Metal transfer"))
+        .collect::<Result<Vec<_>, _>>()?;
+    jet_compute_metal::copy(&values).map(|_| ())
+}
+
 fn jet_compute_on_device(
     tensor: &JetTensor,
     device: JetComputeDevice,
 ) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
-    let mut receipt = jet_compute_place(device)?;
-    if tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
-        receipt.profile = CPU_ORACLE_F32_PROFILE.to_string();
-        receipt.abilities = CPU_ORACLE_F32_CAPABILITIES
-            .iter()
-            .map(|ability| (*ability).to_string())
-            .collect();
+    let mut receipt = jet_compute_place_with_profile(device, &tensor.last_placement.profile)?;
+    if receipt.selected == JetComputeDevice::Metal {
+        jet_compute_metal_upload(tensor)?;
+    }
+    if receipt.selected == JetComputeDevice::Cpu
+        && tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE
+    {
         receipt.reason = if device == JetComputeDevice::Auto {
             "policy=auto; selected=cpu; ability=cpu-oracle.f32".to_string()
         } else {
@@ -2265,6 +3215,60 @@ fn jet_compute_sum_axis(tensor: &JetTensor, axis: i64) -> Result<JetTensor, JetC
     if out_shape.is_empty() {
         out_shape.push(1);
     }
+    if tensor.device == JetComputeDevice::Metal {
+        let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape.clone(), 0.0)?;
+        let axis_len = usize::try_from(tensor.shape[axis]).map_err(|_| {
+            JetComputeError::InvalidShape("Metal sum_axis extent is too large".to_string())
+        })?;
+        let out_n = usize::try_from(jet_compute_numel(&out_shape)?).map_err(|_| {
+            JetComputeError::InvalidShape("Metal sum_axis output is too large".to_string())
+        })?;
+        for flat in 0..out_n {
+            let mut rem = flat as i64;
+            let mut out_coords = vec![0i64; out_shape.len()];
+            for index in (0..out_shape.len()).rev() {
+                let dim = out_shape[index];
+                out_coords[index] = if dim == 0 { 0 } else { rem % dim };
+                rem = if dim == 0 { 0 } else { rem / dim };
+            }
+            let mut coords = vec![0i64; tensor.shape.len()];
+            let mut out_index = 0;
+            for index in 0..tensor.shape.len() {
+                if index != axis {
+                    coords[index] = out_coords[out_index];
+                    out_index += 1;
+                }
+            }
+            let mut values = Vec::with_capacity(axis_len);
+            for value in 0..axis_len {
+                coords[axis] = value as i64;
+                values.push(jet_compute_f32_value(
+                    jet_compute_get_raw(tensor, &coords)?,
+                    "Metal sum input",
+                )?);
+            }
+            let sum = if values.is_empty() {
+                0.0
+            } else {
+                jet_compute_metal::sum(&values)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        JetComputeError::Device("Metal sum returned no value".to_string())
+                    })?
+            };
+            jet_compute_set(&mut out, &out_coords, f64::from(sum))?;
+        }
+        return jet_compute_record(
+            out,
+            &[tensor],
+            vec![tensor.clone()],
+            JetComputeTapeRule::SumAxis {
+                axis,
+                source_shape: tensor.shape.clone(),
+            },
+        );
+    }
     let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let mut out = jet_compute_tensor_from_shape_like(tensor, out_shape.clone(), 0.0)?;
     let axis_len = tensor.shape[axis];
@@ -2322,6 +3326,26 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
         return Err(JetComputeError::Unsupported(format!(
             "unsupported unary compute operation `{op}`"
         )));
+    }
+    if tensor.device == JetComputeDevice::Metal {
+        let values = jet_compute_metal_values(tensor, "unary input")?;
+        if op == "log" && values.iter().any(|value| *value <= 0.0) {
+            return Err(JetComputeError::Arithmetic(
+                "log requires strictly positive values".to_string(),
+            ));
+        }
+        if op == "sqrt" && values.iter().any(|value| *value < 0.0) {
+            return Err(JetComputeError::Arithmetic(
+                "sqrt requires non-negative values".to_string(),
+            ));
+        }
+        let data = jet_compute_metal_unary_values(op, &values)?;
+        return jet_compute_record(
+            jet_compute_metal_result_like(tensor, tensor.shape.clone(), data)?,
+            &[tensor],
+            vec![tensor.clone()],
+            JetComputeTapeRule::Unary(op.to_string()),
+        );
     }
     let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let values = jet_compute_tensor_values(tensor);
@@ -2399,6 +3423,33 @@ fn jet_compute_binary(
         return Err(JetComputeError::Unsupported(format!(
             "unsupported binary compute operation `{op}`"
         )));
+    }
+    let rule = match op {
+        "add" => JetComputeTapeRule::Add,
+        "sub" => JetComputeTapeRule::Sub,
+        "mul" => JetComputeTapeRule::Mul,
+        "div" => JetComputeTapeRule::Div,
+        "maximum" => JetComputeTapeRule::Maximum,
+        "minimum" => JetComputeTapeRule::Minimum,
+        _ => unreachable!("validated binary operation"),
+    };
+    if a.device == JetComputeDevice::Metal {
+        let left = jet_compute_materialize_broadcast(a, &shape)?;
+        let right = jet_compute_materialize_broadcast(b, &shape)?;
+        let left_values = jet_compute_metal_values(&left, "binary input")?;
+        let right_values = jet_compute_metal_values(&right, "binary input")?;
+        if op == "div" && right_values.iter().any(|value| *value == 0.0) {
+            return Err(JetComputeError::Arithmetic(
+                "division by zero in compute operation".to_string(),
+            ));
+        }
+        let data = jet_compute_metal_binary_values(op, &left_values, &right_values)?;
+        return jet_compute_record(
+            jet_compute_metal_result_like(a, shape, data)?,
+            &[a, b],
+            vec![a.clone(), b.clone()],
+            rule,
+        );
     }
     // D-COMPUTE-FUSE1: broadcast indexing and the elementwise operation are
     // one eager Prelude loop. Do not materialize either broadcast operand;
@@ -2479,15 +3530,6 @@ fn jet_compute_binary(
     let mut output = jet_compute_tensor_from_shape_like(a, shape, 0.0)?;
     output.strides = strides;
     output.data = std::sync::Arc::new(data);
-    let rule = match op {
-        "add" => JetComputeTapeRule::Add,
-        "sub" => JetComputeTapeRule::Sub,
-        "mul" => JetComputeTapeRule::Mul,
-        "div" => JetComputeTapeRule::Div,
-        "maximum" => JetComputeTapeRule::Maximum,
-        "minimum" => JetComputeTapeRule::Minimum,
-        _ => unreachable!("validated binary operation"),
-    };
     jet_compute_record(output, &[a, b], vec![a.clone(), b.clone()], rule)
 }
 
@@ -2518,6 +3560,11 @@ fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
         ));
     }
     jet_compute_validate_tensor(tensor)?;
+    if tensor.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support det; transfer to CPU explicitly".to_string(),
+        ));
+    }
     let n = usize::try_from(tensor.shape[0]).map_err(|_| {
         JetComputeError::InvalidShape("det dimension is too large".to_string())
     })?;
@@ -2587,6 +3634,11 @@ fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
         ));
     }
     jet_compute_validate_tensor(tensor)?;
+    if tensor.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support inv; transfer to CPU explicitly".to_string(),
+        ));
+    }
     let n = usize::try_from(tensor.shape[0]).map_err(|_| {
         JetComputeError::InvalidShape("inv dimension is too large".to_string())
     })?;
@@ -2675,6 +3727,11 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
     }
     jet_compute_validate_tensor(a)?;
     jet_compute_validate_tensor(b)?;
+    if a.device == JetComputeDevice::Metal || b.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support solve; transfer inputs to CPU explicitly".to_string(),
+        ));
+    }
     let n = usize::try_from(a.shape[0])
         .map_err(|_| JetComputeError::InvalidShape("solve dimension is too large".to_string()))?;
     let rhs_cols = match b.shape.as_slice() {
@@ -2782,6 +3839,11 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
         ));
     }
     jet_compute_validate_tensor(tensor)?;
+    if tensor.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support fft; transfer to CPU explicitly".to_string(),
+        ));
+    }
     if tensor.shape.len() != 1 {
         return Err(JetComputeError::RankMismatch(
             "fft requires a rank-1 tensor".to_string(),
@@ -2815,7 +3877,7 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     Ok(out)
 }
 
-// ── #1138: stream + transfer receipts (CPU oracle) ──────────────────────────
+// ── #1138 / #1145: stream + transfer receipts ───────────────────────────────
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetComputeStream {
@@ -2845,9 +3907,14 @@ fn jet_compute_validate_transfer_receipt(
             "transfer receipt destination does not match Tensor placement".to_string(),
         ));
     }
+    let scalar_bytes = if tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE {
+        std::mem::size_of::<f32>()
+    } else {
+        std::mem::size_of::<f64>()
+    };
     let logical_bytes = jet_compute_tensor_values(tensor)
         .len()
-        .checked_mul(std::mem::size_of::<f64>())
+        .checked_mul(scalar_bytes)
         .and_then(|bytes| i64::try_from(bytes).ok())
         .ok_or_else(|| JetComputeError::Device("transfer byte count overflow".to_string()))?;
     let expected_bytes = if receipt.from == receipt.to {
@@ -2887,12 +3954,20 @@ impl JetShow for JetComputeTransferReceipt {
 }
 
 fn jet_compute_stream_new() -> JetComputeStream {
+    jet_compute_stream_new_on_device(JetComputeDevice::Cpu)
+        .unwrap_or_else(|error| jet_panic("Compute.rs", line!(), &error.jet_show()))
+}
+
+fn jet_compute_stream_new_on_device(
+    requested: JetComputeDevice,
+) -> Result<JetComputeStream, JetComputeError> {
+    let receipt = jet_compute_place_with_profile(requested, CPU_ORACLE_F32_PROFILE)?;
     static NEXT_STREAM_ID: std::sync::atomic::AtomicI64 =
         std::sync::atomic::AtomicI64::new(1);
-    JetComputeStream {
+    Ok(JetComputeStream {
         id: NEXT_STREAM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-        device: JetComputeDevice::Cpu,
-    }
+        device: receipt.selected,
+    })
 }
 
 fn jet_compute_stream_sync(stream: &JetComputeStream) -> Result<(), JetComputeError> {
@@ -2901,9 +3976,9 @@ fn jet_compute_stream_sync(stream: &JetComputeStream) -> Result<(), JetComputeEr
             "cannot synchronize an invalid compute stream".to_string(),
         ));
     }
-    if stream.device != JetComputeDevice::Cpu {
-        return Err(JetComputeError::Unsupported(
-            "only CPU compute streams are available in this profile".to_string(),
+    if stream.device == JetComputeDevice::Metal && !jet_compute_metal::available() {
+        return Err(JetComputeError::Device(
+            "Metal device was lost before stream synchronization".to_string(),
         ));
     }
     Ok(())
@@ -2930,6 +4005,12 @@ fn jet_compute_transfer(
         .ok_or_else(|| JetComputeError::Device("transfer byte count overflow".to_string()))?;
     let from = tensor.device;
     let mut out = jet_compute_on_device(tensor, device)?;
+    if from == JetComputeDevice::Metal && out.device == JetComputeDevice::Cpu {
+        let values = jet_compute_metal_values(tensor, "download")?;
+        let values = jet_compute_metal::copy(&values)?;
+        out.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+        jet_compute_validate_tensor(&out)?;
+    }
     let (bytes, transfer_kind) = if from == out.device {
         (0, "no-op; same backend and allocation".to_string())
     } else {
@@ -3011,6 +4092,65 @@ fn jet_compute_reduce_to_shape(
     let mut out = jet_compute_tensor_from_shape_like(tensor, target_shape.to_vec(), 0.0)?;
     let rank_delta = tensor.shape.len() - target_shape.len();
     let values = jet_compute_tensor_values(tensor);
+    if tensor.device == JetComputeDevice::Metal {
+        let output_len = jet_compute_storage_len(target_shape)?;
+        let mut buckets = vec![Vec::<f32>::new(); output_len];
+        for (flat, value) in values.iter().enumerate() {
+            let mut rem = flat as i64;
+            let mut output_coords = vec![0i64; tensor.shape.len()];
+            for axis in (0..tensor.shape.len()).rev() {
+                let dim = tensor.shape[axis];
+                output_coords[axis] = if dim == 0 { 0 } else { rem % dim };
+                rem = if dim == 0 { 0 } else { rem / dim };
+            }
+            let mut target_coords = vec![0i64; target_shape.len()];
+            for axis in 0..target_shape.len() {
+                let source_axis = axis + rank_delta;
+                target_coords[axis] = if target_shape[axis] == 1 {
+                    0
+                } else {
+                    output_coords[source_axis]
+                };
+            }
+            let target_offset = jet_compute_offset(&out, &target_coords)?;
+            buckets[target_offset].push(jet_compute_f32_value(
+                *value,
+                "Metal gradient accumulation",
+            )?);
+        }
+        let mut sums = Vec::with_capacity(output_len);
+        for bucket in buckets {
+            let sum = if bucket.is_empty() {
+                0.0
+            } else {
+                jet_compute_metal::sum(&bucket)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        JetComputeError::Device(
+                            "Metal gradient reduction returned no value".to_string(),
+                        )
+                    })?
+            };
+            sums.push(sum);
+        }
+        let Some(storage) = std::sync::Arc::get_mut(&mut out.data) else {
+            return Err(JetComputeError::Unsupported(
+                "Metal gradient accumulation requires exclusive output storage".to_string(),
+            ));
+        };
+        for (slot, sum) in storage.iter_mut().zip(sums) {
+            *slot = f64::from(sum);
+        }
+        return jet_compute_record(
+            out,
+            &[tensor],
+            vec![tensor.clone()],
+            JetComputeTapeRule::ReduceToShape {
+                source_shape: tensor.shape.clone(),
+            },
+        );
+    }
     for flat in 0..values.len() {
         let mut rem = flat as i64;
         let mut output_coords = vec![0i64; tensor.shape.len()];
@@ -3725,18 +4865,16 @@ fn jet_compute_f32_projection(tensor: &JetTensor) -> Result<JetTensor, JetComput
         .into_iter()
         .map(|value| jet_compute_f32_value(value, "f32 autodiff input"))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut projected = jet_compute_tensor_from_shape(
-        tensor.shape.clone(),
-        0.0,
-        JetComputeDevice::Cpu,
-    )?;
+    let mut projected = jet_compute_tensor_from_shape_like(tensor, tensor.shape.clone(), 0.0)?;
     projected.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
-    projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
-    projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
-        .iter()
-        .map(|ability| (*ability).to_string())
-        .collect();
-    projected.last_placement.reason = "autodiff f32 projection".to_string();
+    if projected.device != JetComputeDevice::Metal {
+        projected.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+        projected.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+            .iter()
+            .map(|ability| (*ability).to_string())
+            .collect();
+        projected.last_placement.reason = "autodiff f32 projection".to_string();
+    }
     jet_compute_validate_tensor(&projected)?;
     Ok(projected)
 }
@@ -3962,6 +5100,20 @@ fn jet_compute_mse_loss(
     target: &JetTensor,
 ) -> Result<JetTensor, JetComputeError> {
     let (pred_values, target_values) = jet_compute_validate_mse_inputs(pred, target)?;
+    if pred.device == JetComputeDevice::Metal {
+        let pred_values = jet_compute_metal_values(pred, "MSE input")?;
+        let target_values = jet_compute_metal_values(target, "MSE input")?;
+        let loss = jet_compute_metal::mse(&pred_values, &target_values)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| JetComputeError::Device("Metal MSE returned no value".to_string()))?;
+        return jet_compute_record(
+            jet_compute_scalar_from_like(pred, f64::from(loss))?,
+            &[pred, target],
+            vec![pred.clone(), target.clone()],
+            JetComputeTapeRule::MseLoss,
+        );
+    }
     let loss = jet_compute_mse_value(pred, &pred_values, &target_values)?;
     jet_compute_record(
         jet_compute_scalar_from_like(pred, loss)?,
@@ -3989,6 +5141,21 @@ fn jet_compute_mse_vjp(
         .first()
         .copied()
         .ok_or_else(|| JetComputeError::InvalidShape("mse_loss cotangent is empty".to_string()))?;
+    if pred.device == JetComputeDevice::Metal {
+        let pred_values = jet_compute_metal_values(pred, "MSE gradient input")?;
+        let target_values = jet_compute_metal_values(target, "MSE gradient input")?;
+        let cot_value = jet_compute_f32_value(cot_value, "mse_loss cotangent")?;
+        let data = jet_compute_metal::mse_grad(
+            &pred_values,
+            &target_values,
+            &[cot_value],
+            positive,
+        )?;
+        return jet_compute_tensor_from_values_like(
+            pred,
+            &data.into_iter().map(f64::from).collect::<Vec<_>>(),
+        );
+    }
     let data = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
         let cot_value = jet_compute_f32_value(cot_value, "mse_loss cotangent")?;
         let factor = 2.0_f32 / pred_values.len() as f32 * cot_value;
@@ -4069,6 +5236,22 @@ fn jet_compute_mse_jvp(
     jet_compute_require_same_contract(target, target_tangent, "mse_loss tangent")?;
     let pred_tangent_values = jet_compute_tensor_values(pred_tangent);
     let target_tangent_values = jet_compute_tensor_values(target_tangent);
+    if pred.device == JetComputeDevice::Metal {
+        let pred_values = jet_compute_metal_values(pred, "MSE JVP input")?;
+        let target_values = jet_compute_metal_values(target, "MSE JVP input")?;
+        let pred_tangent_values = jet_compute_metal_values(pred_tangent, "MSE JVP tangent")?;
+        let target_tangent_values = jet_compute_metal_values(target_tangent, "MSE JVP tangent")?;
+        let value = jet_compute_metal::mse_jvp(
+            &pred_values,
+            &target_values,
+            &pred_tangent_values,
+            &target_tangent_values,
+        )?
+        .into_iter()
+        .next()
+        .ok_or_else(|| JetComputeError::Device("Metal MSE JVP returned no value".to_string()))?;
+        return jet_compute_scalar_from_like(pred, f64::from(value));
+    }
     let value = if pred.last_placement.profile == CPU_ORACLE_F32_PROFILE {
         let mut sum = 0.0_f32;
         for (((pred_value, target_value), pred_tangent), target_tangent) in pred_values
@@ -4140,6 +5323,20 @@ fn jet_compute_sgd_step(
         return Err(JetComputeError::Arithmetic(
             "sgd learning rate must be finite and non-negative".to_string(),
         ));
+    }
+    if param.device == JetComputeDevice::Metal {
+        let parameter = jet_compute_metal_values(param, "SGD input")?;
+        let gradient = jet_compute_metal_values(grad, "SGD input")?;
+        let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+        let data = jet_compute_metal::sgd(&parameter, &gradient, learning_rate)?;
+        return jet_compute_record(
+            jet_compute_metal_result_like(param, param.shape.clone(), data)?,
+            &[param, grad],
+            vec![param.clone(), grad.clone()],
+            JetComputeTapeRule::SgdStep {
+                learning_rate: lr,
+            },
+        );
     }
 
     let param_values = jet_compute_tensor_values(param);
@@ -4223,6 +5420,21 @@ fn jet_compute_sgd_vjp(
         ));
     }
     let cot_values = jet_compute_tensor_values(cot);
+    if param.device == JetComputeDevice::Metal {
+        let cot_values = jet_compute_metal_values(cot, "SGD cotangent")?;
+        let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
+        let gradients = jet_compute_metal::scale(&cot_values, -learning_rate)?;
+        return Ok((
+            jet_compute_tensor_from_values_like(
+                param,
+                &cot_values.into_iter().map(f64::from).collect::<Vec<_>>(),
+            )?,
+            jet_compute_tensor_from_values_like(
+                grad,
+                &gradients.into_iter().map(f64::from).collect::<Vec<_>>(),
+            )?,
+        ));
+    }
     let (parameter_values, gradient_values) = if param.last_placement.profile == CPU_ORACLE_F32_PROFILE {
         let learning_rate = jet_compute_f32_value(lr, "sgd learning rate")?;
         let mut parameters = Vec::with_capacity(cot_values.len());
@@ -4264,6 +5476,11 @@ fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> 
     if tensor.trace.is_some() {
         return Err(JetComputeError::Unsupported(
             "Tensor serialization does not accept traced tensors".to_string(),
+        ));
+    }
+    if tensor.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal Tensor serialization requires an explicit transfer to CPU".to_string(),
         ));
     }
     let values = jet_compute_tensor_values(tensor);
@@ -4450,6 +5667,12 @@ fn jet_compute_to_sparse(tensor: &JetTensor) -> Result<JetSparseCsr, JetComputeE
         ));
     }
     jet_compute_validate_tensor(tensor)?;
+    if tensor.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support sparse conversion; transfer to CPU explicitly"
+                .to_string(),
+        ));
+    }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
     let mut row_ptr = vec![0i64];
@@ -4491,6 +5714,12 @@ fn jet_compute_sparse_mv(
     }
     jet_compute_validate_sparse(sparse)?;
     jet_compute_validate_tensor(vector)?;
+    if vector.device == JetComputeDevice::Metal {
+        return Err(JetComputeError::Unsupported(
+            "Metal backend does not support sparse_mv; transfer the vector to CPU explicitly"
+                .to_string(),
+        ));
+    }
     if vector.shape.len() != 1 || vector.shape[0] != sparse.cols {
         return Err(JetComputeError::RankMismatch(format!(
             "sparse_mv expects a length-{} vector",
@@ -4794,6 +6023,30 @@ fn jet_compute_matmul_f32_tile(a: &JetTensor, b: &JetTensor) -> Result<JetTensor
             "matmul_f32_tile inner dims {} and {} disagree",
             k, k2
         )));
+    }
+    if a.device == JetComputeDevice::Metal {
+        jet_compute_require_same_contract(a, b, "matmul_f32_tile")?;
+        let rows = usize::try_from(m).map_err(|_| {
+            JetComputeError::InvalidShape("Metal f32 tile row count is too large".to_string())
+        })?;
+        let inner = usize::try_from(k).map_err(|_| {
+            JetComputeError::InvalidShape("Metal f32 tile inner dimension is too large".to_string())
+        })?;
+        let cols = usize::try_from(n).map_err(|_| {
+            JetComputeError::InvalidShape("Metal f32 tile column count is too large".to_string())
+        })?;
+        let left = jet_compute_metal_values(a, "f32 tile input")?;
+        let right = jet_compute_metal_values(b, "f32 tile input")?;
+        let data = jet_compute_metal::matmul(&left, &right, rows, inner, cols)?;
+        let mut out = jet_compute_metal_result_like(a, vec![m, n], data)?;
+        out.last_placement.reason =
+            "algorithm=metal-matmul; arithmetic=f32; reduction=ordered; dispatch=metal".to_string();
+        return jet_compute_record(
+            out,
+            &[a, b],
+            vec![a.clone(), b.clone()],
+            JetComputeTapeRule::MatmulF32Tile,
+        );
     }
     let output_shape = vec![m, n];
     let m = usize::try_from(m)

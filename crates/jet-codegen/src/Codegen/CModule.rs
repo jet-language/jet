@@ -168,11 +168,9 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
 /// which is ABI-identical to the C shape sema verified.
 fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {
     match ty {
-        Type::Int => "std::os::raw::c_longlong".to_string(),
-        Type::Float => "f64".to_string(),
-        Type::Bool => "bool".to_string(),
-        Type::Char => "u32".to_string(),
-        Type::String => "*const std::os::raw::c_char".to_string(),
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => {
+            c_scalar_rust_type(ty)
+        }
         Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { params, ret, .. } => {
@@ -199,6 +197,22 @@ fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String
             other.name()
         ),
     }
+}
+
+fn c_scalar_rust_type(ty: &Type) -> String {
+    let contract = crate::AST::ForeignAbiContract::C;
+    let scalar = match ty {
+        Type::Int => contract.integer,
+        Type::Float => contract.floating,
+        Type::Bool => contract.boolean,
+        Type::Char => contract.character,
+        Type::String => contract.string,
+        _ => jet_foundation::ice!(None, "I3: non-scalar reached C scalar lowering"),
+    };
+    scalar
+        .c_rust_name()
+        .expect("descriptor admitted a scalar without a C lowering")
+        .to_string()
 }
 
 /// The Rust type the safe wrapper accepts, matching cross-module call sites

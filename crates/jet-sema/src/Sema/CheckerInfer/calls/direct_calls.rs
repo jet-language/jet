@@ -1313,17 +1313,38 @@ impl<'a> Checker<'a> {
                 self.record_edge(call.name.clone(), call.name_span);
             }
     
-            // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
-            // must take responsibility inside their own `#Unsafe` block.
+            // D-FFI-CAP1/E0702: a raw foreign capability is legal in the
+            // signature, but safe callers must cross an audited boundary.
+            // Preserve E3103 for ordinary `#Unsafe fn` and C out-pointer
+            // contracts, which have no capability sigil.
             if sig.is_unsafe && !self.in_unsafe {
-                self.diags.push(Diagnostic::error(
-                    "E3103",
-                    format!("`{}` is an `#Unsafe` function", call.name),
-                    "its contract can't be checked by the compiler, so the caller must vouch for it"
-                        .to_string(),
-                    format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
-                    Some(call.name_span),
-                ));
+                if sig.is_extern {
+                    if let Some(capability) = crate::Sema::FFI::ffi_capability(&sig) {
+                        self.diags.push(crate::Sema::FFI::ffi_capability_error(
+                            &call.name,
+                            capability,
+                            call.name_span,
+                        ));
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E3103",
+                            format!("`{}` is an `#Unsafe` function", call.name),
+                            "its contract can't be checked by the compiler, so the caller must vouch for it"
+                                .to_string(),
+                            format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+                            Some(call.name_span),
+                        ));
+                    }
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E3103",
+                        format!("`{}` is an `#Unsafe` function", call.name),
+                        "its contract can't be checked by the compiler, so the caller must vouch for it"
+                            .to_string(),
+                        format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+                        Some(call.name_span),
+                    ));
+                }
             }
     
             // D-APILABEL1=A: one binder resolves labels, zones, reordering, and

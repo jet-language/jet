@@ -15,6 +15,10 @@ fn render_dep_spec(name: &str, spec: &crate::Manifest::DepSpec) -> String {
             };
             format!("{{ git: \"{url}\", {sel} }}")
         }
+        DepSpec::Foreign {
+            language,
+            reference,
+        } => format!("{}@{reference:?}", language.root()),
     }
 }
 

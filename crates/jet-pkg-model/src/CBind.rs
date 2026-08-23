@@ -56,12 +56,28 @@ pub struct BindResult {
     pub bound: Vec<String>,
     /// `(name, reason)` for prototypes skipped because a type isn't bindable.
     pub skipped: Vec<(String, String)>,
+    /// Exact descriptor identity embedded in the generated cache.
+    pub descriptor_stamp: String,
 }
 
 /// Translate C header source into a `#Bindgen` cache for library `lib`.
 /// `Err` only on a structural failure (no bindable function found at all), so
 /// the caller can surface E3208 honestly instead of writing an empty cache.
 pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::C)
+        .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+    generate_with_descriptor(header_src, lib, *descriptor)
+}
+
+/// Generate a binding from an explicit descriptor. The production entry point
+/// above supplies the canonical C descriptor; this seam makes descriptor
+/// mutation tests and future language binders use the same generator path.
+pub fn generate_with_descriptor(
+    header_src: &str,
+    lib: &str,
+    descriptor: crate::AST::BinderDescriptor,
+) -> Result<BindResult, String> {
+    let contract = descriptor.contract;
     let cleaned = strip_comments_and_directives(header_src);
     let mut bound = Vec::new();
     let mut skipped = Vec::new();
@@ -74,7 +90,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
             continue;
         }
         match parse_prototype(decl) {
-            Some(proto) => match render_binding(&proto, &mut used_names) {
+            Some(proto) => match render_binding(&proto, &mut used_names, contract) {
                 Ok(line) => {
                     bound.push(proto.name.clone());
                     lines.push_str("    ");
@@ -99,11 +115,16 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
         crate::Syntax::NameCase::Snake,
         "library",
     );
-    let source = format!("#Bindgen module c.{}.__bindgen__ {{\n{}}}\n", module_lib, lines);
+    let descriptor_stamp = descriptor.stamp();
+    let source = format!(
+        "// jet-ffi-descriptor={descriptor_stamp}\n#Bindgen module c.{}.__bindgen__ {{\n{}}}\n",
+        module_lib, lines
+    );
     Ok(BindResult {
         source,
         bound,
         skipped,
+        descriptor_stamp,
     })
 }
 
@@ -264,8 +285,12 @@ fn split_params(src: &str) -> Option<Vec<String>> {
 
 /// Render one prototype as a Jet `#Bindgen` line, or Err(reason) if a type in it
 /// isn't bindable in this subset.
-fn render_binding(p: &Proto, used_names: &mut BTreeSet<String>) -> Result<String, String> {
-    let ret_jet = match map_return_type(&p.ret) {
+fn render_binding(
+    p: &Proto,
+    used_names: &mut BTreeSet<String>,
+    contract: crate::AST::ForeignAbiContract,
+) -> Result<String, String> {
+    let ret_jet = match map_return_type(&p.ret, contract) {
         Ok(t) => t,
         Err(e) => return Err(e),
     };
@@ -285,7 +310,8 @@ fn render_binding(p: &Proto, used_names: &mut BTreeSet<String>) -> Result<String
             return Err("variadic (`...`) parameters aren't bindable".to_string());
         }
         let (ty, name) = split_param_type_and_name(raw, idx);
-        let jet_ty = map_type(&ty).ok_or_else(|| format!("type `{}` isn't bindable", ty.trim()))?;
+        let jet_ty = map_type(&ty, contract)
+            .ok_or_else(|| format!("type `{}` isn't bindable", ty.trim()))?;
         let name = unique_name(
             &mut used_param_names,
             &crate::Syntax::sanitize_generated_name(&name, crate::Syntax::NameCase::Snake, "arg"),
@@ -312,12 +338,12 @@ fn render_binding(p: &Proto, used_names: &mut BTreeSet<String>) -> Result<String
 }
 
 /// Map a C return type to `Some(JetType)` / `None` for `void`. Err if unbindable.
-fn map_return_type(c: &str) -> Result<Option<String>, String> {
+fn map_return_type(c: &str, contract: crate::AST::ForeignAbiContract) -> Result<Option<String>, String> {
     let norm = normalize_type(c);
     if norm == "void" {
         return Ok(None);
     }
-    match map_type(c) {
+    match map_type(c, contract) {
         Some(t) => Ok(Some(t)),
         None => Err(format!("return type `{}` isn't bindable", c.trim())),
     }
@@ -357,33 +383,15 @@ fn normalize_type(c: &str) -> String {
 }
 
 /// Map a C type to a Jet FFI type, or None if it's outside the bound subset.
-fn map_type(c: &str) -> Option<String> {
+fn map_type(c: &str, contract: crate::AST::ForeignAbiContract) -> Option<String> {
     let norm = normalize_type(c);
     let t = norm.trim();
-    // Pointers: only `char *` (any signedness) maps — to `String`. Other
-    // pointers cross the C boundary as raw addresses (E3202) and are out of
-    // scope for the auto-binder.
-    if t.ends_with('*') {
-        let base = t[..t.len() - 1].trim();
-        let base = normalize_type(base);
-        return match base.as_str() {
-            "char" | "signed char" | "unsigned char" => Some("String".to_string()),
-            _ => None,
-        };
+    if t == "void" {
+        return None;
     }
-    match t {
-        "void" => None,
-        "bool" | "_Bool" => Some("Bool".to_string()),
-        "float" | "double" | "long double" => Some("Float".to_string()),
-        // Integer family (signedness/width all land on Jet's 64-bit `Int`).
-        "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int"
-        | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed" | "signed int"
-        | "long" | "unsigned long" | "long int" | "unsigned long int" | "long long"
-        | "unsigned long long" | "long long int" | "size_t" | "ssize_t" | "ptrdiff_t"
-        | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t" | "int64_t" | "uint8_t"
-        | "uint16_t" | "uint32_t" | "uint64_t" => Some("Int".to_string()),
-        _ => None,
-    }
+    contract
+        .c_scalar(t)
+        .and_then(|scalar| scalar.jet_name().map(str::to_string))
 }
 
 fn is_ident(s: &str) -> bool {
@@ -4042,6 +4050,30 @@ mod tests {
         assert!(r.source.contains("fn is_ready() Bool = \"is_ready\";"));
         assert_eq!(r.bound.len(), 5);
         assert!(r.skipped.is_empty());
+    }
+
+    #[test]
+    fn descriptor_change_rewrites_stub_identity() {
+        let descriptor = *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::C).unwrap();
+        let base = generate("int ping(int value);", "identity").unwrap();
+        assert_eq!(base.descriptor_stamp, descriptor.stamp());
+        assert!(base
+            .source
+            .contains(&format!("jet-ffi-descriptor={}", descriptor.stamp())));
+        let (tokens, diagnostics) = crate::Lexer::lex_generated(&base.source);
+        assert!(diagnostics.is_empty(), "generated descriptor header lexed: {diagnostics:?}");
+        crate::Parser::parse(&tokens).expect("generated descriptor header parses");
+
+        let mut changed = descriptor;
+        changed.effect_root = "FFI.changed";
+        let rebound = generate_with_descriptor("int ping(int value);", "identity", changed).unwrap();
+        assert_ne!(base.descriptor_stamp, rebound.descriptor_stamp);
+        assert!(rebound
+            .source
+            .contains(&format!("jet-ffi-descriptor={}", rebound.descriptor_stamp)));
+        assert!(!rebound
+            .source
+            .contains(&format!("jet-ffi-descriptor={}", base.descriptor_stamp)));
     }
 
     #[test]

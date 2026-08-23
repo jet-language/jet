@@ -40,11 +40,14 @@ pub mod DotNetBind;
 pub mod FortranBind;
 pub mod GoBind;
 pub mod JavaBind;
+pub mod JavaScriptBind;
 pub mod PascalBind;
 pub mod PerlBind;
 pub mod RubyBind;
 pub mod PhpBind;
+pub mod PythonBind;
 pub mod RBind;
+pub mod OctaveBind;
 pub mod DartBind;
 pub mod PowerShellBind;
 pub mod TclBind;
@@ -57,6 +60,7 @@ pub mod LuaBind;
 // layer. `jetpack` re-exports both under their historical paths.
 pub mod EffectBudget;
 pub mod Envelope;
+pub mod ForeignBridge;
 // D-DX5-HOOK1=A / Tower #549: pure compiler-extension protocol/snapshot model.
 // The Wasmtime host source stays beside `Prelude/Plugin.rs`, but only the
 // isolated `jetpack` binary compiles it; the compiler never links Wasmtime.

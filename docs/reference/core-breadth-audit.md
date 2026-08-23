@@ -22,8 +22,8 @@ coverage in `tests/corelib.rs`.
 |---------|--------|-------|
 | `core.math` scalars | shipped | width-generic ops |
 | `core.compute` helpers | shipped | shared numeric Prelude |
-| `core.compute` Tensor / ndarray / FFT / sparse | shipped | CPU oracle; GPU deferred to E6 |
-| `core.compute` autodiff / ML / f32 tile | shipped | examples under `examples/features/tooling/compute_*.jet` |
+| `core.compute` Tensor / ndarray / FFT / sparse | shipped | CPU oracle; explicit Metal F32 covers the declared kernel subset; unsupported Metal ops fail closed |
+| `core.compute` autodiff / ML / f32 tile | shipped | CPU oracle plus Metal F32 elementwise, matmul, reduction, MSE, SGD, and derivative paths; examples under `examples/features/tooling/compute_*.jet` |
 | BLAS/LAPACK vendor binding | non-goal | expert `#Unsafe` / package |
 | Full autograd graph beyond VJP/JVP helpers | non-goal this epoch | CPU reverse tape and composable VJP/JVP are shipped; accelerator graphs remain outside this slice |
 
@@ -31,6 +31,10 @@ The ML example now exercises both F64 and F32 CPU paths end to end: inference,
 scalar MSE, named reverse gradients, SGD, and checksummed serialization back
 to a placement-preserving Tensor. `tests/compute_parity.rs` also covers shape,
 profile, checksum, learning-rate, bounds, and storage failures.
+Metal placement is explicit. The targeted backend check proves that F32
+placement either reaches the Metal path on an Apple target or returns the
+declared no-fallback error on an unavailable target; it does not treat CPU
+execution as Metal success.
 
 ## DB drivers (#117)
 

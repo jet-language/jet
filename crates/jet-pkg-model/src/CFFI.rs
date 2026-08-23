@@ -118,10 +118,13 @@ fn import_alias(imp: &ImportDecl) -> String {
 }
 
 fn binding_cache_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> std::path::PathBuf {
+    let extension = crate::AST::binder_descriptor(language)
+        .map(|descriptor| descriptor.cache_extension)
+        .unwrap_or(Syntax::FILE_EXT);
     project_root
         .join(Syntax::SOURCE_ROOT_DIR)
         .join(language.bindings_subdir())
-        .join(format!("{}.{}", lib, Syntax::FILE_EXT))
+        .join(format!("{lib}.{extension}"))
 }
 
 /// The synthetic module alias for a C library (`__c_raylib`). Never typeable by
@@ -387,6 +390,16 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 function.effect_root = Some("FFI.Go".to_string());
             }
         }
+        if lib.starts_with("jet_py_") {
+            for function in &mut merged {
+                function.effect_root = Some("FFI.Py".to_string());
+            }
+        }
+        if lib.starts_with("jet_js_") {
+            for function in &mut merged {
+                function.effect_root = Some("FFI".to_string());
+            }
+        }
         if lib.starts_with("jet_java_") {
             for function in &mut merged {
                 function.effect_root = Some("FFI.Java".to_string());
@@ -437,8 +450,18 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
         if lib.starts_with("jet_r_") {
             for function in &mut merged { function.effect_root=Some("FFI.R".to_string()); }
         }
+        if lib.starts_with("jet_octave_") {
+            for function in &mut merged { function.effect_root=Some("FFI.Octave".to_string()); }
+        }
         if lib.starts_with("jet_com_") {
             for function in &mut merged { function.effect_root=Some("FFI.Com".to_string()); }
+        }
+        if let Some(descriptor) = crate::AST::binder_descriptor(ForeignLanguage::C) {
+            for function in &mut merged {
+                if function.effect_root.is_none() {
+                    function.effect_root = Some(descriptor.effect_root.to_string());
+                }
+            }
         }
 
         let alias = synthetic_alias(lib);
@@ -1085,6 +1108,22 @@ fn load_cache_source(
     diags: &mut Vec<Diagnostic>,
     modules: &mut Vec<LoadedModule>,
 ) {
+    if source.contains("#Bindgen") {
+        let expected = crate::AST::binder_descriptor(ForeignLanguage::C)
+            .map(|descriptor| descriptor.stamp());
+        let actual = source
+            .lines()
+            .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="));
+        if let (Some(expected), Some(actual)) = (expected, actual) {
+            if actual != expected {
+                let reason = format!(
+                    "the generated cache descriptor is stale (expected `{expected}`, found `{actual}`)"
+                );
+                diags.push(e3208(&path.display().to_string(), lib, &reason));
+                return;
+            }
+        }
+    }
     let (toks, lex_diags) = crate::Lexer::lex_generated(source);
     if !lex_diags.is_empty() {
         diags.extend(lex_diags);
@@ -1197,6 +1236,20 @@ pub fn resolve_link_for_target(
         }
         return Err(e3201(lib));
     }
+    if let Some(actual) = lib.strip_prefix("jet_js_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::JS.bindings_subdir());
+        let archive = dir.join(format!("libjet_js_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_js_{actual}")],
+                ..Default::default()
+            });
+        }
+        return Err(e3201(lib));
+    }
     if let Some(actual) = lib.strip_prefix("jet_java_") {
         let dir = project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Java.bindings_subdir());
         let archive = dir.join(format!("libjet_java_{actual}.a"));
@@ -1258,6 +1311,12 @@ pub fn resolve_link_for_target(
         if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_pwsh_{actual}"),"pthread".into()],..Default::default()})}
         return Err(e3201(lib));
     }
+    if let Some(actual)=lib.strip_prefix("jet_py_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Py.bindings_subdir());
+        let archive=dir.join(format!("libjet_py_{actual}.a"));
+        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_py_{actual}"),"pthread".into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
     if let Some(actual)=lib.strip_prefix("jet_perl_") {
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Perl.bindings_subdir());
         let archive=dir.join(format!("libjet_perl_{actual}.a"));
@@ -1280,6 +1339,12 @@ pub fn resolve_link_for_target(
         let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::R.bindings_subdir());
         let archive=dir.join(format!("libjet_r_{actual}.a"));
         if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_r_{actual}"),"pthread".into()],..Default::default()})}
+        return Err(e3201(lib));
+    }
+    if let Some(actual)=lib.strip_prefix("jet_octave_") {
+        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Octave.bindings_subdir());
+        let archive=dir.join(format!("libjet_octave_{actual}.a"));
+        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_octave_{actual}"),"pthread".into()],..Default::default()})}
         return Err(e3201(lib));
     }
     if let Some(actual)=lib.strip_prefix("jet_com_") {
@@ -1555,6 +1620,28 @@ pub fn e3209(lib: &str) -> Diagnostic {
         ),
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_generated_descriptor_is_rejected_before_loading() {
+        let source = "// jet-ffi-descriptor=stale\n#Bindgen module c.probe.__bindgen__ { fn ping() Int = \"ping\"; }\n";
+        let mut diagnostics = Vec::new();
+        let mut modules = Vec::new();
+        load_cache_source(
+            source,
+            Path::new(".jet/bindings/c/probe.jet"),
+            "probe",
+            &mut diagnostics,
+            &mut modules,
+        );
+        assert_eq!(modules.len(), 0);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E3208");
+    }
 }
 
 enum PkgConfig {

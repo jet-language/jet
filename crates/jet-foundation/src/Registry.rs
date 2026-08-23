@@ -908,7 +908,10 @@ fn is_diagnostic_code(code: &str) -> bool {
     let Some((prefix, rest)) = code.as_bytes().split_first() else {
         return false;
     };
-    !rest.is_empty() && matches!(*prefix, b'E' | b'L' | b'R' | b'W')
+    (!rest.is_empty() && matches!(*prefix, b'E' | b'L' | b'R' | b'W'))
+        || (code.len() == 6
+            && code.starts_with("JT")
+            && code.as_bytes()[2..].iter().all(|byte| byte.is_ascii_digit()))
 }
 
 fn is_snake_case_lint_name(name: &str) -> bool {
@@ -950,7 +953,7 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     };
     assert!(
         is_diagnostic_code(code),
-        "diagnostic code needs a nonempty E/L/R/W identity: {line}"
+        "diagnostic code needs a nonempty E/L/R/W/JT identity: {line}"
     );
     assert_eq!(
         severity == Severity::Lint,

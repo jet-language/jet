@@ -6060,8 +6060,8 @@ pub(crate) fn wrap_foreign_undo(
     let mut inverse_args = Vec::with_capacity(args.len());
     let mut captures = Vec::with_capacity(args.len());
     for (index, arg) in args.into_iter().enumerate() {
-        let (value, module_arg) = match arg {
-            Arg::Extern(arg) => (arg.value, None),
+        let (value, module_arg, extern_mut_borrow) = match arg {
+            Arg::Extern(arg) => (arg.value, None, arg.mut_borrow),
             Arg::Module(arg) => {
                 let TCallArg {
                     value,
@@ -6083,6 +6083,7 @@ pub(crate) fn wrap_foreign_undo(
                         widen_to_union,
                         box_as_trait,
                     )),
+                    false,
                 )
             }
         };
@@ -6140,6 +6141,7 @@ pub(crate) fn wrap_foreign_undo(
                 forward_extern_args.push(TExternArg {
                     value: local_for_forward,
                     clone: !ty.is_scalar(),
+                    mut_borrow: extern_mut_borrow,
                 });
             }
         }
@@ -6312,6 +6314,10 @@ impl OrderedArg for crate::Codegen::TIR::TExternArg {
         &self.value
     }
 
+    fn can_bind(&self) -> bool {
+        !self.mut_borrow
+    }
+
     fn take_for_binding(&mut self, replacement: TExpr) -> TExpr {
         let mut value = std::mem::replace(&mut self.value, replacement);
         if self.clone {
@@ -6320,6 +6326,16 @@ impl OrderedArg for crate::Codegen::TIR::TExternArg {
                 kind: TExprKind::Clone(Box::new(value)),
             };
             self.clone = false;
+        }
+        if self.mut_borrow {
+            value = TExpr {
+                ty: value.ty.clone(),
+                kind: TExprKind::Borrow {
+                    place: Box::new(value),
+                    mutable: true,
+                },
+            };
+            self.mut_borrow = false;
         }
         value
     }
@@ -6536,8 +6552,8 @@ mod source_order_tests {
             kind: TExprKind::ExternCall {
                 wrapper: "ordered".to_string(),
                 args: vec![
-                    TExternArg { value: print(), clone: false },
-                    TExternArg { value: division(), clone: false },
+                    TExternArg { value: print(), clone: false, mut_borrow: false },
+                    TExternArg { value: division(), clone: false, mut_borrow: false },
                 ],
             },
         };

@@ -4553,6 +4553,9 @@ pub enum TModuleCallForm {
 pub struct TExternArg {
     pub value: TExpr,
     pub clone: bool,
+    /// D-FFI-CAP1: an explicit `&` foreign parameter keeps exclusive access
+    /// through the call instead of silently becoming a cloned value.
+    pub mut_borrow: bool,
 }
 
 /// c109 Phase 13: the closure-taking core-call shapes (see

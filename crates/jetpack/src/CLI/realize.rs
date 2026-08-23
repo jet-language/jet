@@ -500,9 +500,9 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ),
         ProviderError::ForeignProjection(reason) => theme.error_coded(
             "E1256",
-            "couldn't project the foreign environment",
+            "couldn't project the foreign package or environment",
             reason,
-            "use the supported literal devShell fields, run `jet os bridge flake` for the loss report, or declare the environment in `env.*`.",
+            "provide the pinned provider artifact and generated `.jet/bindings/<language>/<library>.jet`, use supported literal devShell fields, or declare the environment in `env.*`.",
         ),
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",

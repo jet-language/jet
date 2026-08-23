@@ -189,6 +189,92 @@ mod semantics {
         }
     }
 
+    #[cfg(test)]
+    mod metal_tests {
+        use super::*;
+
+        fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+            let mut tensor =
+                jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+            tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+            tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+            tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+                .iter()
+                .map(|ability| (*ability).to_string())
+                .collect();
+            jet_compute_validate_tensor(&tensor).unwrap();
+            tensor
+        }
+
+        #[test]
+        fn explicit_metal_is_real_when_available_and_fails_closed_when_not() {
+            let cpu = f32_tensor(vec![1], vec![2.0]);
+            let result = jet_compute_on_device(&cpu, JetComputeDevice::Metal);
+            if !jet_compute_metal::available() {
+                let error = result.expect_err("unavailable Metal must not fall back to CPU");
+                assert!(
+                    matches!(&error, JetComputeError::Unsupported(_) | JetComputeError::Device(_)),
+                    "unexpected unavailable Metal error: {error:?}"
+                );
+                return;
+            }
+
+            let metal = result.expect("system Metal device should accept F32 placement");
+            assert_eq!(metal.device, JetComputeDevice::Metal);
+            assert_eq!(metal.last_placement.backend, METAL_BACKEND);
+            assert_eq!(metal.last_placement.profile, CPU_ORACLE_F32_PROFILE);
+
+            let doubled = jet_compute_binary("add", &metal, &metal).unwrap();
+            assert_eq!(jet_compute_tensor_values(&doubled), vec![4.0]);
+            let downloaded = jet_compute_transfer(&doubled, JetComputeDevice::Cpu).unwrap();
+            assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0]);
+            assert_eq!(downloaded.last_transfer.unwrap().bytes, 4);
+
+            let stream = jet_compute_stream_new_on_device(JetComputeDevice::Metal).unwrap();
+            jet_compute_stream_sync(&stream).unwrap();
+
+            let unsupported = jet_compute_det(&metal).unwrap_err();
+            assert!(matches!(unsupported, JetComputeError::Unsupported(_)));
+        }
+
+        #[test]
+        fn metal_mse_vjp_and_jvp_use_the_device_kernel() {
+            if !jet_compute_metal::available() {
+                eprintln!("SKIP metal autodiff: no system Metal device");
+                return;
+            }
+            let prediction = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![3.0]),
+                JetComputeDevice::Metal,
+            )
+            .unwrap();
+            let target = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![1.0]),
+                JetComputeDevice::Metal,
+            )
+            .unwrap();
+            let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+            let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+            let state = jet_compute_vjp_begin(loss, tape);
+            let seed = jet_compute_gradient_seed(&state).unwrap();
+            let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
+            assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
+            let tangent_prediction = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![1.0]),
+                JetComputeDevice::Metal,
+            )
+            .unwrap();
+            let tangent_target = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![0.0]),
+                JetComputeDevice::Metal,
+            )
+            .unwrap();
+            let tangent = jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
+        }
+    }
+
     pub(super) type Tensor = JetTensor;
     pub(super) type Device = JetComputeDevice;
     pub(super) type Stream = JetComputeStream;
@@ -310,10 +396,15 @@ mod semantics {
         jet_compute_device_auto()
     }
 
+    pub(super) fn device_metal() -> Device {
+        jet_compute_device_metal()
+    }
+
     pub(super) fn device_word(device: Device) -> i64 {
         match device {
             JetComputeDevice::Auto => 0,
             JetComputeDevice::Cpu => 1,
+            JetComputeDevice::Metal => 2,
         }
     }
 
@@ -321,6 +412,7 @@ mod semantics {
         match word {
             0 => Some(JetComputeDevice::Auto),
             1 => Some(JetComputeDevice::Cpu),
+            2 => Some(JetComputeDevice::Metal),
             _ => None,
         }
     }
@@ -355,6 +447,10 @@ mod semantics {
 
     pub(super) fn stream_new() -> Stream {
         jet_compute_stream_new()
+    }
+
+    pub(super) fn stream_new_on(device: Device) -> Result<Stream, String> {
+        jet_compute_stream_new_on_device(device).map_err(|error| error.jet_show())
     }
 
     pub(super) fn stream_sync(stream: &Stream) -> Result<(), String> {
@@ -1545,6 +1641,10 @@ fn jet_jit_compute_device_auto() -> i64 {
     semantics::device_word(semantics::device_auto())
 }
 
+fn jet_jit_compute_device_metal() -> i64 {
+    semantics::device_word(semantics::device_metal())
+}
+
 fn jet_jit_compute_on_device(tensor: i64, device: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(device) = semantics::device_from_word(device) else {
@@ -1639,6 +1739,21 @@ fn jet_jit_compute_stream_new() -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         runtime.compute.streams.push(Some(semantics::stream_new()));
         runtime.compute.streams.len() as i64
+    })
+}
+
+fn jet_jit_compute_stream_new_on_device(device: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        let Some(device) = semantics::device_from_word(device) else {
+            return result_err_msg("core.compute.stream_new_on received an invalid device");
+        };
+        match semantics::stream_new_on(device) {
+            Ok(stream) => {
+                runtime.compute.streams.push(Some(stream));
+                result_ok(runtime.compute.streams.len() as u64)
+            }
+            Err(message) => result_err_msg(&message),
+        }
     })
 }
 
@@ -2413,6 +2528,7 @@ host_fns! {
     placement: "jet_compute_tensor_placement" => jet_jit_compute_placement: sig_one;
     device_cpu: "jet_compute_device_cpu" => jet_jit_compute_device_cpu: sig_zero;
     device_auto: "jet_compute_device_auto" => jet_jit_compute_device_auto: sig_zero;
+    device_metal: "jet_compute_device_metal" => jet_jit_compute_device_metal: sig_zero;
     on_device: "jet_compute_on_device" => jet_jit_compute_on_device: sig_two;
     broadcast_to: "jet_compute_broadcast_to" => jet_jit_compute_broadcast_to: sig_two;
     transpose: "jet_compute_transpose" => jet_jit_compute_transpose: sig_one;
@@ -2421,6 +2537,7 @@ host_fns! {
     solve: "jet_compute_solve" => jet_jit_compute_solve: sig_two;
     fft: "jet_compute_fft" => jet_jit_compute_fft: sig_one;
     stream_new: "jet_compute_stream_new" => jet_jit_compute_stream_new: sig_zero;
+    stream_new_on: "jet_compute_stream_new_on_device" => jet_jit_compute_stream_new_on_device: sig_one;
     stream_sync: "jet_compute_stream_sync" => jet_jit_compute_stream_sync: sig_one;
     stream_show: "jet_compute_stream_show" => jet_jit_compute_stream_show: sig_one;
     transfer: "jet_compute_transfer" => jet_jit_compute_transfer: sig_two;

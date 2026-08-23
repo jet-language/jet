@@ -3,6 +3,7 @@
 //! header text, and every native input participates in provenance/cache identity.
 
 use crate::JSON::{self, JSONValue};
+use crate::ForeignBridge::IdentityBuilder;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -171,7 +172,7 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     let jet = render_jet(&options.lib, &surface);
     let clang_version = tool_version(&options.clang, "clang++")?;
     let archiver_version = tool_version(&options.archiver, "ar")?;
-    let identity = binding_identity(
+    let digest = binding_identity(
         &canonical,
         &header_bytes,
         &ast_identity,
@@ -182,7 +183,6 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         options,
         &options.target,
     );
-    let digest = crate::SHA256::sha256_hex(&identity);
     let store = cache.join(&digest);
     let archive = store.join(format!("libjet_cpp_{}.a", options.lib));
     std::fs::create_dir_all(&store)
@@ -224,7 +224,8 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
 
 #[doc(hidden)]
 pub fn cache_identity_for_test(header: &Path, options: &BindOptions, target: &str) -> String {
-    let bytes = std::fs::read(header).unwrap_or_default();
+    let canonical = std::fs::canonicalize(header).unwrap_or_else(|_| header.to_path_buf());
+    let bytes = std::fs::read(&canonical).unwrap_or_default();
     let mut resolved = options.clone();
     if let Ok(path) = std::fs::canonicalize(&options.clang) {
         resolved.clang = path;
@@ -235,17 +236,17 @@ pub fn cache_identity_for_test(header: &Path, options: &BindOptions, target: &st
     let options = &resolved;
     let clang_version = tool_version(&options.clang, "clang++").unwrap_or_default();
     let archiver_version = tool_version(&options.archiver, "ar").unwrap_or_default();
-    crate::SHA256::sha256_hex(&binding_identity(
-        header,
+    binding_identity(
+        &canonical,
         &bytes,
+        &[],
         &clang_version,
         &archiver_version,
-        &[],
         "",
         "",
         options,
         target,
-    ))
+    )
 }
 
 fn validate_options(options: &BindOptions) -> Result<(), BindError> {
@@ -321,110 +322,63 @@ fn binding_identity(
     jet: &str,
     options: &BindOptions,
     target: &str,
-) -> Vec<u8> {
-    let mut identity = Vec::new();
-    push_identity(&mut identity, "schema", SCHEMA.as_bytes());
-    push_identity(
-        &mut identity,
-        "header",
-        header.as_os_str().as_encoded_bytes(),
-    );
-    push_identity(&mut identity, "header_bytes", header_bytes);
-    push_identity(&mut identity, "ast", ast);
-    push_identity(&mut identity, "clang_version", clang_version);
-    push_identity(&mut identity, "archiver_version", archiver_version);
-    push_identity(&mut identity, "shim", shim.as_bytes());
-    push_identity(&mut identity, "jet", jet.as_bytes());
-    push_identity(&mut identity, "lib", options.lib.as_bytes());
-    push_identity(&mut identity, "selected_target", target.as_bytes());
-    push_identity(&mut identity, "command_target", options.target.as_bytes());
-    push_identity(
-        &mut identity,
-        "clang",
-        options.clang.as_os_str().as_encoded_bytes(),
-    );
-    push_identity(
-        &mut identity,
-        "archiver",
-        options.archiver.as_os_str().as_encoded_bytes(),
-    );
-    push_identity(
-        &mut identity,
+) -> String {
+    let mut identity = IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
+    identity.field("binder_schema", SCHEMA.as_bytes());
+    identity.field("header", header.as_os_str().as_encoded_bytes());
+    identity.field("header_bytes", header_bytes);
+    identity.field("ast", ast);
+    identity.field("clang_version", clang_version);
+    identity.field("archiver_version", archiver_version);
+    identity.field("shim", shim.as_bytes());
+    identity.field("jet", jet.as_bytes());
+    identity.field("lib", options.lib.as_bytes());
+    identity.field("selected_target", target.as_bytes());
+    identity.field("command_target", options.target.as_bytes());
+    identity.field("clang", options.clang.as_os_str().as_encoded_bytes());
+    identity.field("archiver", options.archiver.as_os_str().as_encoded_bytes());
+    identity.field(
         "proof_suffix",
         crate::FFI::proof_suffix_for_target(target).as_bytes(),
     );
-    push_identity(
-        &mut identity,
+    identity.field(
         "undefined_symbols",
         crate::FFI::undefined_symbol_flag_for_target(target).as_bytes(),
     );
-    push_identity(
-        &mut identity,
-        "cxx_runtime",
-        crate::FFI::cxx_runtime_for_target(target).as_bytes(),
-    );
-    push_identity(
-        &mut identity,
-        "fixed_flags",
-        b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs",
-    );
-    push_identity_count(&mut identity, "include_dirs", options.include_dirs.len());
+    identity.field("cxx_runtime", crate::FFI::cxx_runtime_for_target(target).as_bytes());
+    identity.field("fixed_flags", b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs");
+    identity.field("include_dirs_count", &(options.include_dirs.len() as u64).to_le_bytes());
     for value in &options.include_dirs {
-        push_identity(
-            &mut identity,
-            "include_dir",
-            value.as_os_str().as_encoded_bytes(),
-        );
+        identity.field("include_dir", value.as_os_str().as_encoded_bytes());
     }
-    push_identity_count(&mut identity, "library_dirs", options.library_dirs.len());
+    identity.field(
+        "library_dirs_count",
+        &(options.library_dirs.len() as u64).to_le_bytes(),
+    );
     for value in &options.library_dirs {
-        push_identity(
-            &mut identity,
-            "library_dir",
-            value.as_os_str().as_encoded_bytes(),
-        );
+        identity.field("library_dir", value.as_os_str().as_encoded_bytes());
     }
-    push_identity_count(&mut identity, "libraries", options.libraries.len());
+    identity.field("libraries_count", &(options.libraries.len() as u64).to_le_bytes());
     for value in &options.libraries {
-        push_identity(&mut identity, "library", value.as_bytes());
+        identity.field("library", value.as_bytes());
     }
-    push_identity_count(&mut identity, "namespaces", options.namespaces.len());
+    identity.field("namespaces_count", &(options.namespaces.len() as u64).to_le_bytes());
     for value in &options.namespaces {
-        push_identity(&mut identity, "namespace", value.as_bytes());
+        identity.field("namespace", value.as_bytes());
     }
-    push_identity_count(&mut identity, "templates", options.templates.len());
+    identity.field("templates_count", &(options.templates.len() as u64).to_le_bytes());
     for template in &options.templates {
-        push_identity(
-            &mut identity,
-            "template.qualified_name",
-            template.qualified_name.as_bytes(),
-        );
-        push_identity_count(
-            &mut identity,
-            "template.cpp_args",
-            template.cpp_args.len(),
+        identity.field("template.qualified_name", template.qualified_name.as_bytes());
+        identity.field(
+            "template.cpp_args_count",
+            &(template.cpp_args.len() as u64).to_le_bytes(),
         );
         for value in &template.cpp_args {
-            push_identity(&mut identity, "template.cpp_arg", value.as_bytes());
+            identity.field("template.cpp_arg", value.as_bytes());
         }
-        push_identity(
-            &mut identity,
-            "template.jet_name",
-            template.jet_name.as_bytes(),
-        );
+        identity.field("template.jet_name", template.jet_name.as_bytes());
     }
-    identity
-}
-
-fn push_identity(identity: &mut Vec<u8>, tag: &str, value: &[u8]) {
-    identity.extend_from_slice(&(tag.len() as u64).to_le_bytes());
-    identity.extend_from_slice(tag.as_bytes());
-    identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
-    identity.extend_from_slice(value);
-}
-
-fn push_identity_count(identity: &mut Vec<u8>, tag: &str, count: usize) {
-    push_identity(identity, tag, &(count as u64).to_le_bytes());
+    identity.finish()
 }
 
 fn project_surface(ast: &JSONValue, header: &Path, selected: &[String]) -> Result<Surface, BindError> {
@@ -900,7 +854,8 @@ fn render_provenance(
     archiver_version: &[u8],
 ) -> String {
     let mut value = format!(
-        "schema={SCHEMA}\nsha256={digest}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
+        "schema={SCHEMA}\nidentity_schema={}\nidentity={digest}\nsha256={digest}\nheader={}\ntarget={}\nclang={}\narchiver={}\nclasses={}\nfunctions={}\n",
+        crate::ForeignBridge::IDENTITY_SCHEMA,
         header.display(),
         options.target,
         options.clang.display(),

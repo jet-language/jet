@@ -3405,10 +3405,13 @@ fn run_upgrade() {
 }
 
 fn is_diagnostic_code(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some('E' | 'L'))
-        && chars.clone().next().is_some()
-        && chars.all(|c| c.is_ascii_digit())
+    let bytes = s.as_bytes();
+    (bytes.len() == 5
+        && matches!(bytes[0], b'E' | b'L')
+        && bytes[1..].iter().all(|byte| byte.is_ascii_digit()))
+        || (bytes.len() == 6
+            && bytes[..2] == *b"JT"
+            && bytes[2..].iter().all(|byte| byte.is_ascii_digit()))
 }
 
 /// Print front-end problems in the active output mode, with the trailing

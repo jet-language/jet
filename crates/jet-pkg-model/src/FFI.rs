@@ -11,9 +11,8 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
-use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
@@ -27,6 +26,7 @@ const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v3-cabi";
 /// the bridge rebuilds.
 const BRIDGE_ARTIFACTS_SCHEMA: &str = "jet-ffi-artifacts-v2";
 const SHARED_DEPS_SCHEMA: &str = "jet-ffi-shared-deps-v1";
+const BRIDGE_PROVENANCE_SCHEMA: &str = crate::ForeignBridge::PROVENANCE_SCHEMA;
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -42,6 +42,9 @@ pub struct ExternEntry {
     pub inline: Option<InlineEntry>,
     /// The declaration names a native C symbol assembled by CFFI.
     pub c_abi: bool,
+    /// D-FFI-CAP1: the sibling foreign function that consumes a returned
+    /// handle, when the declaration carries `#Close(close)`.
+    pub close: Option<String>,
 }
 /// A `#FFI` body carried through the existing hidden bridge. Keeping it on the
 /// same entry prevents a second call/link mechanism from growing beside S50.
@@ -121,6 +124,7 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 param_names: f.params.iter().map(|p| p.name.clone()).collect(),
                             }),
                             c_abi: false,
+                            close: None,
                         });
                     }
                 } else if let Item::CModule(c_module) = item {
@@ -150,6 +154,7 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                             ),
                             inline: None,
                             c_abi: true,
+                            close: function.close.as_ref().map(|(name, _)| name.clone()),
                         });
                     }
                 }
@@ -178,6 +183,7 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
         line_hint: format!("`{}` in `extern rust \"{}\"`", ef.name, block.crate_spec),
         inline: None,
         c_abi: false,
+        close: ef.close.as_ref().map(|(name, _)| name.clone()),
     }
 }
 
@@ -367,6 +373,7 @@ mod inline_asm_target_tests {
                 param_names: vec!["value".into()],
             }),
             c_abi: false,
+            close: None,
         }
     }
 
@@ -1572,7 +1579,7 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         None,
         &[],
     );
-    bridge_paths(key, &target, &[]).crypto_helper
+    bridge_paths(&key, &target, &[]).crypto_helper
 }
 
 fn build_bridge_full(
@@ -1711,7 +1718,8 @@ fn build_bridge_full(
         host_deps_dir,
         crypto_helper,
         secrets_helper,
-    } = bridge_paths(key, selected_target, native_link_args);
+        provenance,
+    } = bridge_paths(&key, selected_target, native_link_args);
 
     // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
     // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
@@ -1731,11 +1739,21 @@ fn build_bridge_full(
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
     )
-    .filter(|artifacts| bridge_cache_verified(&target, &crate_name, artifacts))
+    .filter(|artifacts| {
+        bridge_cache_verified(
+            &target,
+            &crate_name,
+            &key,
+            selected_target,
+            artifacts,
+        )
+    })
     {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
+            cache_identity: key,
+            provenance_path: provenance,
             rlib_path: rlib,
             cdylib_path: cdylib,
             target_deps_dir,
@@ -1778,11 +1796,21 @@ fn build_bridge_full(
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
     )
-    .filter(|artifacts| bridge_cache_verified(&target, &crate_name, artifacts))
+    .filter(|artifacts| {
+        bridge_cache_verified(
+            &target,
+            &crate_name,
+            &key,
+            selected_target,
+            artifacts,
+        )
+    })
     {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
+            cache_identity: key,
+            provenance_path: provenance,
             rlib_path: rlib,
             cdylib_path: cdylib,
             target_deps_dir,
@@ -1876,7 +1904,7 @@ fn build_bridge_full(
         fs::create_dir_all(&bin_dir)
             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
         fs::write(
-            bin_dir.join(format!("{}.rs", crypto_helper_bin_name(key))),
+            bin_dir.join(format!("{}.rs", crypto_helper_bin_name(&key))),
             emit_crypto_helper_bin(&crate_name),
         )
         .map_err(|e| tool_error(&format!("couldn't write the crypto helper: {}", e)))?;
@@ -1887,7 +1915,7 @@ fn build_bridge_full(
         fs::create_dir_all(&bin_dir)
             .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
         fs::write(
-            bin_dir.join(format!("{}.rs", secrets_helper_bin_name(key))),
+            bin_dir.join(format!("{}.rs", secrets_helper_bin_name(&key))),
             emit_secrets_helper_bin(&crate_name),
         )
         .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
@@ -2004,9 +2032,21 @@ fn build_bridge_full(
     if let Err(error) = publish_bridge_manifest(&target, &crate_name, &artifacts) {
         return Err(tool_error(&error));
     }
+    if let Err(error) = publish_bridge_provenance(
+        &provenance,
+        &key,
+        selected_target,
+        &crate_name,
+        &target,
+        &artifacts,
+    ) {
+        return Err(tool_error(&error));
+    }
     let cdylib = artifacts[1].clone();
     Ok(FfiLink {
         crate_name,
+        cache_identity: key,
+        provenance_path: provenance,
         rlib_path: rlib,
         cdylib_path: cdylib,
         target_deps_dir,
@@ -2325,11 +2365,12 @@ struct BridgePaths {
     host_deps_dir: PathBuf,
     crypto_helper: PathBuf,
     secrets_helper: PathBuf,
+    provenance: PathBuf,
 }
 
-fn bridge_paths(key: u64, selected_target: &str, native_link_args: &[String]) -> BridgePaths {
-    let cache_root = cache_dir().join(format!("{key:016x}"));
-    let crate_name = format!("jet_ffi_{key:016x}");
+fn bridge_paths(key: &str, selected_target: &str, native_link_args: &[String]) -> BridgePaths {
+    let cache_root = cache_dir().join(key);
+    let crate_name = format!("jet_ffi_{key}");
     let target_dir = shared_target_dir(selected_target, native_link_args);
     let target = target_dir.join(selected_target).join("release");
     BridgePaths {
@@ -2338,6 +2379,7 @@ fn bridge_paths(key: u64, selected_target: &str, native_link_args: &[String]) ->
         host_deps_dir: target_dir.join("release/deps"),
         crypto_helper: target.join(crypto_helper_bin_name(key)),
         secrets_helper: target.join(secrets_helper_bin_name(key)),
+        provenance: target.join(format!("{crate_name}.provenance")),
         cache_root,
         crate_name,
         target_dir,
@@ -2353,24 +2395,31 @@ fn bridge_paths(key: u64, selected_target: &str, native_link_args: &[String]) ->
 /// rebuild a per-key dir would have avoided. The profile is the `release` path
 /// segment Cargo itself appends.
 fn shared_target_dir(selected_target: &str, native_link_args: &[String]) -> PathBuf {
-    let mut hasher = DefaultHasher::new();
-    SHARED_DEPS_SCHEMA.hash(&mut hasher);
-    selected_target.hash(&mut hasher);
-    native_toolchain_identity().hash(&mut hasher);
-    native_link_args.hash(&mut hasher);
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
+        crate::ForeignBridge::IDENTITY_SCHEMA,
+    );
+    identity.field("descriptor_schema", SHARED_DEPS_SCHEMA.as_bytes());
+    identity.field("selected_target", selected_target.as_bytes());
+    identity.field(
+        "rust_toolchain",
+        native_toolchain_identity().as_bytes(),
+    );
+    for argument in native_link_args {
+        identity.field("rustflag", argument.as_bytes());
+    }
     cache_dir()
         .join("deps")
-        .join(format!("{:016x}", hasher.finish()))
+        .join(identity.finish())
 }
 
 /// Bin target names Cargo uplifts into the shared release dir. Keyed, because
 /// the dir is shared and the uplift path is the bin's name.
-fn crypto_helper_bin_name(key: u64) -> String {
-    format!("jet-crypto-helper-{key:016x}")
+fn crypto_helper_bin_name(key: &str) -> String {
+    format!("jet-crypto-helper-{key}")
 }
 
-fn secrets_helper_bin_name(key: u64) -> String {
-    format!("jet-secrets-helper-{key:016x}")
+fn secrets_helper_bin_name(key: &str) -> String {
+    format!("jet-secrets-helper-{key}")
 }
 
 fn collect_crate_deps(entries: &[ExternEntry]) -> BTreeMap<String, String> {
@@ -2414,95 +2463,119 @@ fn cache_key_full(
     selected_target: &str,
     native_toolchain: Option<&InlineNativeToolchain>,
     native_link_args: &[String],
-) -> u64 {
-    let mut h = DefaultHasher::new();
-    INLINE_BRIDGE_SCHEMA.hash(&mut h);
-    selected_target.hash(&mut h);
-    native_toolchain_identity().hash(&mut h);
+) -> String {
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
+        crate::ForeignBridge::IDENTITY_SCHEMA,
+    );
+    identity.field("descriptor_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
+    identity.field("selected_target", selected_target.as_bytes());
+    let rust_toolchain = native_toolchain_identity();
+    identity.field("rust_toolchain", rust_toolchain.as_bytes());
     if let Some(toolchain) = native_toolchain {
-        inline_toolchain_identity(toolchain).hash(&mut h);
-        emit_inline_build_rs(entries, toolchain).hash(&mut h);
+        identity.field(
+            "inline_toolchain",
+            inline_toolchain_identity(toolchain).as_bytes(),
+        );
+        identity.field(
+            "inline_build_script",
+            emit_inline_build_rs(entries, toolchain).as_bytes(),
+        );
     }
-    native_link_args.hash(&mut h);
-    hash_static_link_inputs(native_link_args, &mut h);
-    // Only perturb the key when a ring module is actually needed, so programs
-    // without those modules keep their historical cache key. The dep is already
-    // in `deps`; the flag guards the (currently impossible) empty-deps case.
+    for argument in native_link_args {
+        identity.field("rustflag", argument.as_bytes());
+    }
+    identity_static_link_inputs(&mut identity, native_link_args);
+    identity.field("needs_regex", &[needs_regex as u8]);
     if needs_regex {
-        needs_regex.hash(&mut h);
+        identity.field("regex_runtime", b"ring");
     }
+    identity.field("needs_archive", &[needs_archive as u8]);
     if needs_archive {
-        needs_archive.hash(&mut h);
-        ARCHIVE_SOURCE.hash(&mut h);
+        identity.field("archive_runtime", ARCHIVE_SOURCE.as_bytes());
     }
+    identity.field("needs_db", &[needs_db as u8]);
     if needs_db {
-        needs_db.hash(&mut h);
-        DB_RUNTIME.hash(&mut h);
+        identity.field("db_runtime", DB_RUNTIME.as_bytes());
     }
+    identity.field("needs_http_client", &[needs_http_client as u8]);
     if needs_http_client {
-        needs_http_client.hash(&mut h);
-        HTTP_CLIENT_RUNTIME.hash(&mut h);
-        HTTP_PUBLIC_SUFFIX_LIST.hash(&mut h);
+        identity.field("http_client_runtime", HTTP_CLIENT_RUNTIME.as_bytes());
+        identity.field("http_public_suffix_list", HTTP_PUBLIC_SUFFIX_LIST.as_bytes());
     }
+    identity.field("needs_http_server_tls", &[needs_http_server_tls as u8]);
     if needs_http_server_tls {
-        needs_http_server_tls.hash(&mut h);
-        HTTP_SERVER_TLS_RUNTIME.hash(&mut h);
+        identity.field("http_server_tls_runtime", HTTP_SERVER_TLS_RUNTIME.as_bytes());
     }
+    identity.field("needs_net_tls", &[needs_net_tls as u8]);
     if needs_net_tls {
-        needs_net_tls.hash(&mut h);
-        NET_TLS_RUNTIME.hash(&mut h);
+        identity.field("net_tls_runtime", NET_TLS_RUNTIME.as_bytes());
     }
+    identity.field("needs_crypto", &[needs_crypto as u8]);
     if needs_crypto {
-        needs_crypto.hash(&mut h);
-        standalone_outcome_runtime().hash(&mut h);
-        CRYPTO_RUNTIME.hash(&mut h);
-        CRYPTO_ENTROPY_RUNTIME.hash(&mut h);
+        identity.field(
+            "standalone_outcome_runtime",
+            standalone_outcome_runtime().as_bytes(),
+        );
+        identity.field("crypto_runtime", CRYPTO_RUNTIME.as_bytes());
+        identity.field("crypto_entropy_runtime", CRYPTO_ENTROPY_RUNTIME.as_bytes());
         // The helper is a separately cached binary. Its closed status protocol
         // and cleanup behavior must invalidate old cache entries too.
-        emit_crypto_helper_bin("jet_ffi_cache_key").hash(&mut h);
+        identity.field(
+            "crypto_helper_runtime",
+            emit_crypto_helper_bin("jet_ffi_cache_key").as_bytes(),
+        );
     }
+    identity.field("needs_compress", &[needs_compress as u8]);
     if needs_compress {
-        needs_compress.hash(&mut h);
-        COMPRESS_RUNTIME.hash(&mut h);
+        identity.field("compress_runtime", COMPRESS_RUNTIME.as_bytes());
     }
+    identity.field("needs_plugin", &[needs_plugin as u8]);
     if needs_plugin {
-        needs_plugin.hash(&mut h);
-        PLUGIN_RUNTIME.hash(&mut h);
+        identity.field("plugin_runtime", PLUGIN_RUNTIME.as_bytes());
     }
+    identity.field("needs_secrets", &[needs_secrets as u8]);
     if needs_secrets {
-        needs_secrets.hash(&mut h);
-        UNICODE_TABLES_RUNTIME.hash(&mut h);
-        VAULT_NFC_RUNTIME.hash(&mut h);
-        SECRETS_RUNTIME.hash(&mut h);
-        VAULT_KEY_WRAP_RUNTIME.hash(&mut h);
+        identity.field("unicode_tables_runtime", UNICODE_TABLES_RUNTIME.as_bytes());
+        identity.field("vault_nfc_runtime", VAULT_NFC_RUNTIME.as_bytes());
+        identity.field("secrets_runtime", SECRETS_RUNTIME.as_bytes());
+        identity.field("vault_key_wrap_runtime", VAULT_KEY_WRAP_RUNTIME.as_bytes());
     }
     for (k, v) in deps {
-        k.hash(&mut h);
-        v.hash(&mut h);
+        identity.field("dependency", k.as_bytes());
+        identity.field("dependency_version", v.as_bytes());
     }
     for e in entries {
-        e.wrapper_name.hash(&mut h);
-        e.rust_path.hash(&mut h);
-        e.crate_spec.hash(&mut h);
-        e.c_abi.hash(&mut h);
+        identity.field("jet_name", e.jet_name.as_bytes());
+        identity.field("rust_path", e.rust_path.as_bytes());
+        identity.field("wrapper_name", e.wrapper_name.as_bytes());
+        identity.field("crate_spec", e.crate_spec.as_bytes());
+        identity.field("c_abi", &[e.c_abi as u8]);
         if let Some(inline) = &e.inline {
-            INLINE_BRIDGE_SCHEMA.hash(&mut h);
-            inline.lang.hash(&mut h);
-            inline.source.hash(&mut h);
-            inline.param_names.hash(&mut h);
+            identity.field("inline_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
+            identity.field("inline_language", inline.lang.as_bytes());
+            identity.field("inline_source", inline.source.as_bytes());
+            for name in &inline.param_names {
+                identity.field("inline_parameter", name.as_bytes());
+            }
         }
         for (c, t) in &e.params {
-            format!("{:?}", c).hash(&mut h);
-            type_key(t).hash(&mut h);
+            identity.field("parameter_convention", format!("{:?}", c).as_bytes());
+            identity.field("parameter_type", type_key(t).as_bytes());
         }
         if let Some(rt) = &e.return_type {
-            type_key(rt).hash(&mut h);
+            identity.field("return_type", type_key(rt).as_bytes());
+        }
+        if let Some(close) = &e.close {
+            identity.field("close_function", close.as_bytes());
         }
     }
-    h.finish()
+    identity.finish()
 }
 
-fn hash_static_link_inputs(args: &[String], hasher: &mut impl Hasher) {
+fn identity_static_link_inputs(
+    identity: &mut crate::ForeignBridge::IdentityBuilder,
+    args: &[String],
+) {
     let mut dirs = Vec::new();
     let mut static_libs = Vec::new();
     for pair in args.windows(2) {
@@ -2521,15 +2594,18 @@ fn hash_static_link_inputs(args: &[String], hasher: &mut impl Hasher) {
         }
     }
     for name in static_libs {
-        if let Some(path) = dirs
+        let path = dirs
             .iter()
             .map(|dir| dir.join(format!("lib{name}.a")))
-            .find(|path| path.is_file())
-        {
-            path.hash(hasher);
-            if let Ok(bytes) = fs::read(path) {
-                bytes.hash(hasher);
+            .find(|path| path.is_file());
+        if let Some(path) = path {
+            identity.field("static_library_path", path.as_os_str().as_encoded_bytes());
+            match fs::read(&path) {
+                Ok(bytes) => identity.field("static_library_bytes", &bytes),
+                Err(_) => identity.field("static_library_unreadable", b"true"),
             }
+        } else {
+            identity.field("static_library_missing", name.as_bytes());
         }
     }
 }
@@ -2639,6 +2715,7 @@ fn invalidate_bridge_artifacts(
         target.join(format!("{stem}.dylib")),
         target.join(format!("{crate_name}.dll")),
         bridge_manifest_path(target, crate_name),
+        bridge_provenance_path(target, crate_name),
     ]
     .into_iter()
     .chain(helper_bin.map(Path::to_path_buf))
@@ -2668,7 +2745,17 @@ fn bridge_manifest_path(target: &Path, crate_name: &str) -> PathBuf {
     target.join(format!("{crate_name}.sha256"))
 }
 
-fn bridge_cache_verified(target: &Path, crate_name: &str, artifacts: &[PathBuf]) -> bool {
+fn bridge_provenance_path(target: &Path, crate_name: &str) -> PathBuf {
+    target.join(format!("{crate_name}.provenance"))
+}
+
+fn bridge_cache_verified(
+    target: &Path,
+    crate_name: &str,
+    cache_identity: &str,
+    selected_target: &str,
+    artifacts: &[PathBuf],
+) -> bool {
     let Ok(manifest) = fs::read_to_string(bridge_manifest_path(target, crate_name)) else {
         return false;
     };
@@ -2702,7 +2789,7 @@ fn bridge_cache_verified(target: &Path, crate_name: &str, artifacts: &[PathBuf])
     if expected.len() != artifacts.len() {
         return false;
     }
-    artifacts.iter().all(|path| {
+    let artifacts_verified = artifacts.iter().all(|path| {
         let Some(relative) = artifact_relative_path(target, path) else {
             return false;
         };
@@ -2712,6 +2799,30 @@ fn bridge_cache_verified(target: &Path, crate_name: &str, artifacts: &[PathBuf])
         fs::read(path)
             .ok()
             .is_some_and(|bytes| crate::SHA256::sha256_hex(&bytes) == *expected)
+    });
+    if !artifacts_verified {
+        return false;
+    }
+    let Ok(provenance) = crate::ForeignBridge::read_provenance(&bridge_provenance_path(
+        target, crate_name,
+    )) else {
+        return false;
+    };
+    if provenance.schema != BRIDGE_PROVENANCE_SCHEMA
+        || provenance.identity != cache_identity
+        || provenance.value("target") != Some(selected_target)
+        || provenance.value("crate") != Some(crate_name)
+    {
+        return false;
+    }
+    artifacts.iter().all(|path| {
+        let Some(relative) = artifact_relative_path(target, path) else {
+            return false;
+        };
+        let Some(digest) = provenance.value(&format!("artifact.{relative}")) else {
+            return false;
+        };
+        expected.get(&relative).is_some_and(|expected| digest == expected)
     })
 }
 
@@ -2742,6 +2853,40 @@ fn publish_bridge_manifest(
         return Err(format!("could not publish {}: {error}", manifest_path.display()));
     }
     Ok(())
+}
+
+fn publish_bridge_provenance(
+    path: &Path,
+    cache_identity: &str,
+    selected_target: &str,
+    crate_name: &str,
+    target: &Path,
+    artifacts: &[PathBuf],
+) -> Result<(), String> {
+    let mut artifact_digests = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        let relative = artifact_relative_path(target, artifact).ok_or_else(|| {
+            format!(
+                "FFI artifact escapes the shared target dir: {}",
+                artifact.display()
+            )
+        })?;
+        let bytes = fs::read(artifact)
+            .map_err(|error| format!("could not read FFI artifact {}: {error}", artifact.display()))?;
+        artifact_digests.push((relative, crate::SHA256::sha256_hex(&bytes)));
+    }
+    let toolchain_digest = crate::SHA256::sha256_hex(native_toolchain_identity().as_bytes());
+    crate::ForeignBridge::write_provenance(
+        path,
+        cache_identity,
+        &[
+            ("target", selected_target),
+            ("crate", crate_name),
+            ("descriptor", INLINE_BRIDGE_SCHEMA),
+            ("toolchain", &toolchain_digest),
+        ],
+        &artifact_digests,
+    )
 }
 
 fn cache_dir() -> PathBuf {
@@ -3481,7 +3626,12 @@ fn emit_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String 
         .params
         .iter()
         .enumerate()
-        .map(|(i, (_, ty))| format!("p{i}: {}", rust_type(ty, user_types)))
+        .map(|(i, (convention, ty))| {
+            format!(
+                "p{i}: {}",
+                foreign_rust_param_type(*convention, ty, user_types)
+            )
+        })
         .collect();
     let ret = entry
         .return_type
@@ -3515,6 +3665,21 @@ fn emit_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String 
     )
 }
 
+/// D-FFI-CAP1: the hidden Rust bridge preserves the declaration's ownership
+/// contract at its safe wrapper edge. Read and move remain ordinary Rust
+/// values; `&` is the one exclusive borrow that lasts for this call only.
+fn foreign_rust_param_type(
+    convention: AccessConvention,
+    ty: &Type,
+    user_types: &HashSet<String>,
+) -> String {
+    let base = rust_type(ty, user_types);
+    match convention {
+        AccessConvention::Write => format!("&mut {base}"),
+        AccessConvention::Read | AccessConvention::Move => base,
+    }
+}
+
 /// Cranelift-callable C ABI twin of a Rust-ABI wrapper. Scalars pass as i64/f64;
 /// `String` uses `(ptr,len)` in and `(out_ptr,out_len)` heap buffers the JIT frees
 /// via `jet_ffi_cabi_free`.
@@ -3530,7 +3695,14 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
                 | Type::String
         )
     }
-    for (_, ty) in &entry.params {
+    // The C ABI trampoline is a value-only JIT adapter. Capability-bearing
+    // declarations stay on the native checked wrapper path; emitting a
+    // value-shaped trampoline for `&` or `^` would erase the ownership
+    // contract before the call (D-FFI-CAP1/I9).
+    for (convention, ty) in &entry.params {
+        if *convention != AccessConvention::Read {
+            return None;
+        }
         if !cabi_ok(ty) {
             return None;
         }
@@ -3548,7 +3720,7 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
             Type::String => {
                 params.push(format!("p{i}_ptr: *const u8, p{i}_len: usize"));
                 call_args.push(format!(
-                    "unsafe {{ String::from_utf8_unchecked(std::slice::from_raw_parts(p{i}_ptr, p{i}_len).to_vec()) }}"
+                    "{{ let bytes = if p{i}_len == 0 {{ Vec::new() }} else if p{i}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{i}_ptr, p{i}_len).to_vec() }} }}; String::from_utf8(bytes).unwrap_or_else(|_| ffi_panic()) }}"
                 ));
             }
             Type::Int | Type::InlineRange { .. } => {
@@ -3585,7 +3757,7 @@ fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> O
             },
             " -> i32".to_string(),
             format!(
-                "    let s = {call};\n    let mut v = s.into_bytes();\n    v.shrink_to_fit();\n    let len = v.len();\n    let ptr = v.as_mut_ptr();\n    std::mem::forget(v);\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
+                "    if out_ptr.is_null() || out_len.is_null() {{ ffi_panic(); }}\n    let s = {call};\n    let v = s.into_bytes().into_boxed_slice();\n    let len = v.len();\n    let ptr = Box::into_raw(v) as *mut u8;\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
             ),
         ),
         Some(Type::Int) | Some(Type::InlineRange { .. }) => (
@@ -3810,6 +3982,33 @@ mod tests {
     }
 
     #[test]
+    fn cabi_trampoline_validates_text_and_preserves_capability_boundaries() {
+        let value_entry = ExternEntry {
+            jet_name: "echo".into(),
+            rust_path: "std::convert::identity".into(),
+            wrapper_name: "jet_ffi_echo".into(),
+            params: vec![(AccessConvention::Read, Type::String)],
+            return_type: Some(Type::String),
+            crate_spec: "std".into(),
+            line_hint: "extern rust echo".into(),
+            inline: None,
+            c_abi: false,
+            close: None,
+        };
+        let source = emit_cabi_trampoline(&value_entry, &HashSet::new()).unwrap();
+        assert!(source.contains("String::from_utf8(bytes)"), "{source}");
+        assert!(source.contains("p0_ptr.is_null()"), "{source}");
+        assert!(source.contains("out_ptr.is_null() || out_len.is_null()"), "{source}");
+        assert!(!source.contains("from_utf8_unchecked"), "{source}");
+
+        let capability_entry = ExternEntry {
+            params: vec![(AccessConvention::Write, Type::String)],
+            ..value_entry
+        };
+        assert!(emit_cabi_trampoline(&capability_entry, &HashSet::new()).is_none());
+    }
+
+    #[test]
     fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
         let source = emit_wrapper_lib(&[], false, false, false, false, false, false, true, false, false, false);
 
@@ -3917,6 +4116,7 @@ mod tests {
                 param_names: vec!["value".into()],
             }),
             c_abi: false,
+            close: None,
         };
         let mut cpp_entry = entry.clone();
         cpp_entry.jet_name = "cpp_probe".into();

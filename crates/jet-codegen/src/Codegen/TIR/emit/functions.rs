@@ -165,7 +165,8 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // C-ABI callback parameter (`callback_twice(increment, x)`) genuinely
     // needs the C calling convention: the referenced Rust item's own type
     // must match the raw `extern "C" fn` pointer type the C side expects.
-    let abi = if cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty() {
+    let ffi_callback = cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty();
+    let abi = if ffi_callback {
         "extern \"C\" "
     } else {
         ""
@@ -236,7 +237,16 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         ret = ret_clause,
         abi = abi,
     ));
-    emit_tir_function_body(tir, cx, out, 1);
+    if ffi_callback {
+        // D-FFI-UNIFY1 / card #1121: no Rust unwind may cross a foreign
+        // callback frame. Prelude owns failure conversion; this emitter only
+        // supplies the callback body and ABI spelling.
+        out.push_str("    jet_ffi_callback_boundary(|| {\n");
+        emit_tir_function_body(tir, cx, out, 2);
+        out.push_str("    })\n");
+    } else {
+        emit_tir_function_body(tir, cx, out, 1);
+    }
     out.push_str("}\n\n");
 }
 

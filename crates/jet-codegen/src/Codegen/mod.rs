@@ -2221,6 +2221,62 @@ pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
     out.push_str("impl<T: __jet_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n");
 }
 
+/// D-FFI-CAP1: connect a validated `#Close(close)` descriptor to the same
+/// nominal cleanup protocol used by ordinary Jet resources. The bridge owns
+/// the foreign transport; this generated impl only marshals the consumed
+/// handle to the already-checked `jet_ffi_<close>` wrapper.
+pub(crate) fn emit_synthetic_foreign_close_impls(
+    cx: &Cx,
+    items: &[Item],
+    out: &mut String,
+) {
+    fn emit_functions(
+        cx: &Cx,
+        functions: &[crate::AST::ExternFn],
+        out: &mut String,
+        emitted: &mut HashSet<String>,
+    ) {
+        let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+        for function in functions {
+            let Some((close_name, _)) = &function.close else {
+                continue;
+            };
+            let Some(return_type) = &function.return_type else {
+                continue;
+            };
+            let ty = cx.rust_type(return_type);
+            if emitted.insert(ty.clone()) {
+                out.push_str(&format!(
+                    "impl __jet_Close for {ty} {{ fn close(self) {{ {ffi}::jet_ffi_{close_name}(self); }} }}\n"
+                ));
+            }
+        }
+    }
+
+    fn collect(
+        cx: &Cx,
+        items: &[Item],
+        out: &mut String,
+        emitted: &mut HashSet<String>,
+    ) {
+        for item in items {
+            match item {
+                Item::ExternRust(block) => emit_functions(cx, &block.functions, out, emitted),
+                Item::CModule(module) => emit_functions(cx, &module.functions, out, emitted),
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        collect(cx, body, out, emitted);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    collect(cx, items, out, &mut HashSet::new());
+    out.push('\n');
+}
+
 fn collect_allocator_constructors(
     stmts: &[Stmt],
     cx: &Cx,
@@ -2664,6 +2720,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_synthetic_display_trait(&mut out, true);
     emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
+    emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);
     emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
@@ -2775,6 +2832,8 @@ mod tests {
     fn aot_ffi_host_installs_bridge_reporter() {
         let link = FfiLink {
             crate_name: "jet_ffi_fixture".into(),
+            cache_identity: "fixture-identity".into(),
+            provenance_path: "fixture.provenance".into(),
             rlib_path: "fixture.rlib".into(),
             cdylib_path: "fixture.so".into(),
             target_deps_dir: "deps".into(),
@@ -3904,6 +3963,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_synthetic_display_trait(&mut out, true);
     emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
+    emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);
     emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
     let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
     emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);

@@ -256,6 +256,8 @@ fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTabl
         Source::JetRegistry => "jet-registry".to_string(),
         Source::Npm => "npm".to_string(),
         Source::Cargo => "cargo".to_string(),
+        Source::PyPI => "pypi".to_string(),
+        Source::SwiftPM => "swiftpm".to_string(),
         Source::Named(_) => table
             .upstream(source_name)
             .and_then(|upstream| upstream.rsplit_once('@').map(|(_, provider)| provider))

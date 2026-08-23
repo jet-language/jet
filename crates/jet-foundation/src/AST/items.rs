@@ -894,6 +894,10 @@ pub struct ExternFn {
     pub effect_root: Option<String>,
     /// D-BOUND-UNDO1=A: optional compensating function for transactional calls.
     pub undo: Option<(String, Span)>,
+    /// D-FFI-CAP1=A: optional consuming close function for a returned foreign
+    /// handle. Sema proves the named function accepts exactly `^` of the
+    /// returned type and returns no value.
+    pub close: Option<(String, Span)>,
     pub span: Span,
 }
 

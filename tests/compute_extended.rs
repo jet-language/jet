@@ -195,6 +195,11 @@ fn run() {
         include_str!("../examples/features/tooling/compute_device.jet"),
         &["device:CPU", "placement:Placement", "transfer:Transfer("],
     );
+    assert_aot_and_default_parity(
+        "compute_metal_targeted",
+        include_str!("../examples/features/tooling/compute_metal.jet"),
+        &["metal:f64:rejected", "stream:cpu-ok"],
+    );
 }
 
 #[test]

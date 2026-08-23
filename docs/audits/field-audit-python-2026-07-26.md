@@ -487,9 +487,9 @@ environment at deployment, and no async rewrite when work becomes concurrent.
 4. **Make the notebook a notebook.** Reopen #442 or create a successor for
    editable cells, execution, outputs, plots, keyboard use, and recovery.
    Remove the false-green `|| true` assertion.
-5. **Prove the Python bridge and importer.** Close #1155, #1156, #180, and
-   #1125 against a representative typed Python package and explicit
-   unsupported-construct reporting.
+5. **Prove the Python bridge and importer.** The first source-import subset now
+   has a fixed-corpus differential and idempotence proof in #1156. The bridge
+   and broader typed-package work still need #1155, #180, and #1125.
 
 ### P1 — Surface parity
 

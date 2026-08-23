@@ -20,6 +20,13 @@ pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::M
             // resolved by `Source/CFFI.rs` into linker flags, never realized
             // as source or written to the package lock. Skip it here.
             DepSource::CLib { .. } => continue,
+            DepSource::Foreign {
+                language,
+                reference,
+            } => DepSpec::Foreign {
+                language: *language,
+                reference: reference.clone(),
+            },
             DepSource::Version(v) => DepSpec::Registry(v.clone()),
             DepSource::Git { url, selector } => DepSpec::Git {
                 url: url.clone(),

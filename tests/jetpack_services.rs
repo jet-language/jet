@@ -751,29 +751,20 @@ minio)
     ;;
 mailpit)
     database=
+    listen=
     smtp=
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --database) shift; database=$1 ;;
+            --listen) shift; listen=$1 ;;
             --smtp) shift; smtp=$1 ;;
         esac
         shift
     done
     [ -n "$database" ]
+    [ "$listen" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
     [ "$smtp" = "127.0.0.1:1025" ]
     : > "$(dirname "$database")/.service-running"
-    exec sleep 30
-    ;;
-adminer)
-    root=
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --root) shift; root=$1 ;;
-        esac
-        shift
-    done
-    [ -n "$root" ]
-    : > "$root/.service-running"
     exec sleep 30
     ;;
 nginx)
@@ -828,12 +819,20 @@ curl)
     url=
     for arg in "$@"; do url=$arg; done
     case "$url" in
-        */minio/health/live) [ -f .jet/services/minio/data/.service-running ] ;;
-        */api/v1/info) [ -f .jet/services/mailpit/data/.service-running ] ;;
+        */minio/health/live)
+            port=$(cat .jet/services/minio/ports)
+            [ "$url" = "http://127.0.0.1:${port}/minio/health/live" ]
+            [ -f .jet/services/minio/data/.service-running ]
+            ;;
+        */api/v1/info)
+            port=$(cat .jet/services/mailpit/ports)
+            [ "$url" = "http://127.0.0.1:${port}/api/v1/info" ]
+            [ -f .jet/services/mailpit/data/.service-running ]
+            ;;
         *)
             healthy=1
             matched=0
-            for service in nginx adminer; do
+            for service in nginx; do
                 port=$(cat ".jet/services/$service/ports" 2>/dev/null || true)
                 [ -n "$port" ] || continue
                 case "$url" in *":$port/"*)
@@ -846,8 +845,6 @@ curl)
                             break
                         done
                         [ -n "$nginx_marker" ] || healthy=0
-                    else
-                        [ -f .jet/services/adminer/data/.service-running ] || healthy=0
                     fi
                 esac
             done
@@ -870,7 +867,6 @@ esac
         "mariadbd",
         "minio",
         "mailpit",
-        "adminer",
         "nginx",
         "pg_isready",
         "redis-cli",
@@ -927,7 +923,6 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         "nginx",
         "minio",
         "mailpit",
-        "adminer",
     ] {
         let plan = DevServicePlan {
             name: name.to_string(),
@@ -970,7 +965,7 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
             "redis" => assert!(data_dir.join(".service-running").is_file()),
             "postgres" => assert!(data_dir.join("PG_VERSION").is_file()),
             "mysql" | "mariadb" => assert!(data_dir.join("mysql").is_dir()),
-            "minio" | "mailpit" | "adminer" => {
+            "minio" | "mailpit" => {
                 assert!(data_dir.join(".service-running").is_file())
             }
             "nginx" => {
@@ -1038,6 +1033,7 @@ fn production_minio_preset_port_conflict_has_terminal_state() {
     let output = worker.wait_with_output().unwrap();
     assert!(!output.status.success(), "port conflict must reach the worker");
     assert!(!service_dir.join("pid").exists());
+    assert!(!service_dir.join("ports").exists());
     assert!(service_dir.join("supervisor.error").is_file());
     let lifecycle = fs::read_to_string(service_dir.join("lifecycle")).unwrap();
     assert!(lifecycle.contains("phase=failed"), "{lifecycle}");
@@ -1080,6 +1076,7 @@ fn production_postgres_preset_initialization_failure_has_terminal_state() {
     let output = worker.wait_with_output().unwrap();
     assert!(!output.status.success(), "initdb failure must reach the worker");
     assert!(!service_dir.join("pid").exists());
+    assert!(!service_dir.join("ports").exists());
     assert!(service_dir.join("supervisor.error").is_file());
     let lifecycle = fs::read_to_string(service_dir.join("lifecycle")).unwrap();
     assert!(lifecycle.contains("phase=failed"), "{lifecycle}");

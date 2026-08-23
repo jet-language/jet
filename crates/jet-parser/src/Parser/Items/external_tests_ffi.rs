@@ -589,13 +589,14 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
-            let (abi, undo) = if matches!(self.peek().kind, TokKind::Hash) {
+            let (abi, undo, close) = if matches!(self.peek().kind, TokKind::Hash) {
                 let markers = self.parse_attached_marker_sequence(
                     crate::Policy::RuleSite::Function,
                     "C declaration",
                 )?;
                 let mut abi = None;
                 let mut undo = None;
+                let mut close = None;
                 for marker in &markers {
                     match marker.name.as_str() {
                         Syntax::MARKER_ABI => {
@@ -630,13 +631,29 @@ impl<'a> Parser<'a> {
                             };
                             undo = Some((name.clone(), *span));
                         }
+                        Syntax::MARKER_CLOSE => {
+                            if close.is_some() {
+                                return Err(Diagnostic::error(
+                                    "E3212",
+                                    "a foreign declaration may have only one `#Close` marker".to_string(),
+                                    "one returned foreign handle has one consuming close function".to_string(),
+                                    "remove the repeated `#Close(close)` marker".to_string(),
+                                    Some(marker.span),
+                                ));
+                            }
+                            let arguments = self.bound_registered_rule_arguments(marker)?;
+                            let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
+                                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_CLOSE, marker.span));
+                            };
+                            close = Some((name.clone(), *span));
+                        }
                         _ => {
                             return Err(Diagnostic::error(
                                 "E3212",
                                 format!("unknown foreign declaration marker `#{}`", marker.name),
-                                "foreign declarations accept `#ABI(name)` and `#Undo(inverse)` markers"
+                                "foreign declarations accept `#ABI(name)`, `#Undo(inverse)`, and `#Close(close)` markers"
                                     .to_string(),
-                                "remove the marker or use `#Undo(inverse)` for a compensating call"
+                                "remove the marker or use one of the documented foreign binding markers"
                                     .to_string(),
                                 Some(marker.name_span),
                             ));
@@ -644,8 +661,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
-                (abi, undo)
-            } else { (None, None) };
+                (abi, undo, close)
+            } else { (None, None, None) };
             let fn_span = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
             let fn_start = fn_span.start;
@@ -702,6 +719,7 @@ impl<'a> Parser<'a> {
                 rust_path_span,
                 effect_root: None,
                 undo,
+                close,
                 span: Span::new(fn_start, end),
             })
         }

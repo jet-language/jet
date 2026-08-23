@@ -240,6 +240,7 @@ one owner. Fifteen are closed.
 | `examples/features/lowlevel/polyglot_go/main.jet` | generator + project step | closed |
 | `examples/features/lowlevel/polyglot_java/main.jet` | project step | closed |
 | `examples/features/lowlevel/polyglot_dotnet/main.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_pascal/main.jet` | generator + project step | closed |
 | `examples/features/lowlevel/polyglot_fortran/main.jet` | generator + project step | closed |
 | `examples/features/tooling/programmable_build/main.jet` | compiler | open |
 | `examples/features/comptime/comptime_block.jet` | compiler | closed |
@@ -254,16 +255,16 @@ one owner. Fifteen are closed.
 
 ### What each owner meant
 
-**Project step.** Ten example projects call a foreign module that
+**Project step.** The polyglot example projects call a foreign module that
 `jet inspect bind <language> <source> --pkg <name>` generates. The generated
 `*.jet` binding is deterministic Jet source, so each project now carries the
 exact file its real bind step produced, and `main.jet` checks on a host without
 that foreign toolchain. The machine-specific output beside it (native archives,
 class files, worker scripts, provenance, resolved host paths) stays ignored.
 
-**Generator.** The Lua, Go, Fortran, and Pascal binders wrote `->` for callable
-results in the Jet they generate. Every generated binding failed the front end
-with E0070 as soon as its project step ran. All four now write `=>`.
+**Generator.** The Lua, Go, Fortran, and Pascal binders write the canonical
+`->` callable form. Generated Pascal bindings also use `Type{...}` typed
+construction, and the project step checks the real source through its binder.
 
 **Core.** D-API-LEN1 retired `crypto.constant_time_eq`, but only its teaching
 diagnostic was updated. The retired name stayed registered and pointed at a

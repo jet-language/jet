@@ -22,7 +22,14 @@ pub(crate) fn cpp_callback_abi_type(ty: &Type) -> Option<&Type> {
 }
 
 pub(crate) fn is_callback_boundary_param(is_c_abi: bool, ty: &Type) -> bool {
-    (is_c_abi && matches!(ty, Type::Fn { .. })) || cpp_callback_abi_type(ty).is_some()
+    let c_contract = crate::AST::ForeignLanguage::C.abi_contract();
+    (is_c_abi
+        && matches!(
+            c_contract.callbacks,
+            crate::AST::ForeignCallbackModel::ReentrantThreadSafe
+        )
+        && matches!(ty, Type::Fn { .. }))
+        || cpp_callback_abi_type(ty).is_some()
 }
 
 pub(crate) fn check_extern_block(
@@ -56,6 +63,9 @@ pub(crate) fn check_extern_block(
         if !check_extern_fn(ef, registry, diags) {
             ok = false;
         }
+        if !check_close_contract(ef, &block.functions, diags) {
+            ok = false;
+        }
     }
     ok
 }
@@ -67,21 +77,6 @@ pub(crate) fn check_extern_fn(
 ) -> bool {
     let mut ok = true;
     for p in &ef.params {
-        // D-MEM1: unmarked (`Read`) is by-value and fine at the boundary; only
-        // an explicit `&`/`^` marker is rejected.
-        if !matches!(p.convention, AccessConvention::Read) {
-            diags.push(ffi_type_error(
-                &format!(
-                    "`{}` can't use `{}` at the FFI boundary",
-                    p.name,
-                    access_keyword(p.convention)
-                ),
-                "foreign functions take owned copies — the write-access marker `&` and move marker `^` aren't allowed here",
-                "remove the access marker and pass by value",
-                p.name_span,
-            ));
-            ok = false;
-        }
         if !is_ffi_type(&p.ty, registry) {
             diags.push(ffi_type_error(
                 &format!("`{}` has type `{}`, which can't cross into Rust", p.name, p.ty.name()),
@@ -104,6 +99,57 @@ pub(crate) fn check_extern_fn(
         }
     }
     ok
+}
+
+/// D-FFI-CAP1: a foreign close is a normal consuming close protocol, not an
+/// unchecked destructor guess. The declaration must name a sibling foreign
+/// function with one matching `^Handle` parameter and no result, so the
+/// compiler can prove the close call is unique and cannot fabricate a cleanup
+/// success value.
+fn check_close_contract(
+    ef: &ExternFn,
+    functions: &[ExternFn],
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some((close_name, close_span)) = &ef.close else {
+        return true;
+    };
+    let Some(return_type) = ef.return_type.as_ref() else {
+        diags.push(ffi_type_error(
+            &format!("`#Close({close_name})` is attached to `{}`", ef.name),
+            "a close function belongs to a returned foreign handle",
+            "remove `#Close`, or give the foreign function a handle return type",
+            *close_span,
+        ));
+        return false;
+    };
+    let Some(close_fn) = functions.iter().find(|candidate| candidate.name == *close_name) else {
+        diags.push(ffi_type_error(
+            &format!("foreign close function `{close_name}` is not declared"),
+            "the close protocol must name a function in the same foreign binding",
+            "declare `fn {close_name}(handle: ^Handle);` in this binding, or remove `#Close`",
+            *close_span,
+        ));
+        return false;
+    };
+    let valid = close_fn.params.len() == 1
+        && !close_fn.params[0].variadic
+        && close_fn.params[0].convention == AccessConvention::Move
+        && close_fn.params[0].ty == *return_type
+        && close_fn.return_type.is_none();
+    if valid {
+        return true;
+    }
+    diags.push(ffi_type_error(
+        &format!("foreign close function `{close_name}` has the wrong signature"),
+        "`#Close` runs the named function exactly once by consuming the returned handle",
+        &format!(
+            "declare `fn {close_name}(handle: ^{})` with no return value",
+            return_type.name()
+        ),
+        close_fn.name_span,
+    ));
+    false
 }
 
 /// S59 (E2-M14): type rules at the **C** boundary. Stricter than Rust FFI: only
@@ -319,20 +365,6 @@ pub(crate) fn check_c_module(
             }
         }
         for p in &ef.params {
-            // D-MEM1: unmarked (`Read`) is by-value; only explicit markers reject.
-            if !matches!(p.convention, AccessConvention::Read) {
-                diags.push(ffi_type_error(
-                    &format!(
-                        "`{}` can't use `{}` at the C boundary",
-                        p.name,
-                        access_keyword(p.convention)
-                    ),
-                    "C functions take values by copy — the write-access marker `&` and move marker `^` aren't allowed here",
-                    "remove the access marker and pass by value",
-                    p.name_span,
-                ));
-                ok = false;
-            }
             if let Type::Apply { name, args } = &p.ty {
                 if name == Syntax::TYPE_PTR {
                 // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C
@@ -360,6 +392,9 @@ pub(crate) fn check_c_module(
                 ok = false;
             }
         }
+        if !check_close_contract(ef, &cm.functions, diags) {
+            ok = false;
+        }
     }
     ok
 }
@@ -373,13 +408,37 @@ pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
 }
 
 pub(crate) fn ffi_type_error(what: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
+    Diagnostic::from_row(
         "E0702",
-        what.to_string(),
-        why.to_string(),
-        fix.to_string(),
+        &[("subject", what), ("reason", why), ("fix", fix)],
         Some(span),
     )
+}
+
+/// D-FFI-CAP1: raw foreign capabilities are typed in the declaration, but a
+/// call must name an audited boundary unless a generated binding owns the
+/// adapter. The generated binding distinction is carried by later binder
+/// work; this common seam keeps the safe/#Unsafe diagnostic identical today.
+pub(crate) fn ffi_capability_error(name: &str, capability: &str, span: Span) -> Diagnostic {
+    ffi_type_error(
+        &format!("call `{name}` uses capability `{capability}` outside `#Unsafe`"),
+        "a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary",
+        &format!(
+            "call `{name}` inside `#Unsafe(\"…\") {{ … }}`, or expose it through a generated typed binding"
+        ),
+        span,
+    )
+}
+
+/// Return the first explicit capability in a foreign signature. The signature
+/// retains declaration order, so this is stable even when a later descriptor
+/// grows more capability metadata.
+pub(crate) fn ffi_capability(sig: &FuncSig) -> Option<&'static str> {
+    sig.params.iter().find_map(|(convention, _)| match convention {
+        AccessConvention::Read => None,
+        AccessConvention::Write => Some(Syntax::SIGIL_WRITE),
+        AccessConvention::Move => Some(Syntax::SIGIL_MOVE),
+    })
 }
 
 pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {

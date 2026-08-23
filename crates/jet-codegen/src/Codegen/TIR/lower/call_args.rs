@@ -463,6 +463,9 @@ pub(crate) fn lower_extern_call_arg(
     } else {
         lower_expr(&a.expr, cx, env)
     };
+    let mut_borrow = conv
+        .as_ref()
+        .is_some_and(|(convention, _)| *convention == AccessConvention::Write);
     let non_scalar_param = conv
         .as_ref()
         .map(|(_, ty)| !ty.is_scalar() && !c_callback)
@@ -470,8 +473,13 @@ pub(crate) fn lower_extern_call_arg(
     // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or the
     // non-scalar-param clone (when implicit_clone is false). The two never stack — the
     // AST applies the param clone only `&& !a.flags.implicit_clone`.
-    let clone = a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone);
-    TExternArg { value, clone }
+    let clone = !mut_borrow
+        && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone));
+    TExternArg {
+        value,
+        clone,
+        mut_borrow,
+    }
 }
 
 /// c109 Phase 13: does this AST arg expression emit as a `Box::new(…)` (a bare

@@ -228,6 +228,13 @@ pub enum DepSpec {
     /// Registry version string. `jet fetch` materializes its verified source
     /// tree before the compiler builds module search paths.
     Registry(String),
+    /// D-FFI-UNIFY1 project-tier dependency. The map key is the foreign
+    /// library name; Jetpack realizes the provider ref and projects its
+    /// binding into `.jet/bindings/<language>/` before compilation.
+    Foreign {
+        language: crate::AST::ForeignLanguage,
+        reference: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

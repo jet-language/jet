@@ -18,8 +18,8 @@ pub use program_imports::{
     core_import_maps, core_list_path, core_list_prefix, member_import_local,
     rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
-    ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
-    PackageGuarantees, Program, ProgramBundle, TryConvert,
+    ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
+    MigrationOp, PackageGuarantees, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]
@@ -83,4 +83,12 @@ pub use comptime::{
 
 #[path = "AST/ffi.rs"]
 mod ffi;
-pub use ffi::{CFfi, CImportLink, CLib, ComptimeInput, FfiLink};
+pub use ffi::{
+    binder_descriptor, foreign_abi_contract, BinderCapability, BinderCapabilityReport,
+    BinderDescriptor, BinderRuntime, BinderStatus, BinderSurface, BindingStubKind, CFfi,
+    CImportLink, CLib, ComptimeInput, ForeignAbiContract, ForeignAsyncModel,
+    ForeignCallbackModel, ForeignCallingConvention, ForeignErrorModel, ForeignLayoutModel,
+    ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar,
+    ForeignStubFile, ForeignTaskBoundary, FfiLink, FOREIGN_ABI_CONTRACT_VERSION,
+    FOREIGN_BINDERS, FOREIGN_DESCRIPTOR_SCHEMA,
+};

@@ -1039,7 +1039,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("Tensor".to_string()))],
             Some(Type::String),
         )),
-        ("core.compute", "device_cpu" | "device_auto") => Some((vec![], Some(Type::Named("ComputeDevice".to_string())))),
+        ("core.compute", "device_cpu" | "device_auto" | "device_metal") => Some((
+            vec![],
+            Some(Type::Named("ComputeDevice".to_string())),
+        )),
         ("core.compute", "on_device") => Some((
             vec![
                 (read, Type::Named("Tensor".to_string())),
@@ -1117,6 +1120,13 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.compute", "stream_new") => Some((vec![], Some(Type::Named("ComputeStream".to_string())))),
+        ("core.compute", "stream_new_on") => Some((
+            vec![(read, Type::Named("ComputeDevice".to_string()))],
+            Some(result_ty(
+                Type::Named("ComputeStream".to_string()),
+                Type::Named("ComputeError".to_string()),
+            )),
+        )),
         ("core.compute", "stream_sync") => Some((
             vec![(read, Type::Named("ComputeStream".to_string()))],
             Some(result_ty(

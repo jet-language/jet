@@ -313,6 +313,12 @@ impl TraitRegistry {
                         self.fn_params.insert(f.name.clone(), f.type_params.clone());
                     }
                 }
+                // D-FFI-CAP1: a declared foreign close function is the
+                // implementation of the one nominal cleanup protocol. Keep
+                // the registration in the shared trait table so `close(^h)`
+                // is checked like every other Close implementation.
+                Item::ExternRust(block) => self.register_foreign_close(&block.functions),
+                Item::CModule(module) => self.register_foreign_close(&module.functions),
                 Item::Impl(i) => self.register_impl(i, diags),
                 Item::ErrorConv(ec) => {
                     self.register_error_conv(&ec.from_ty, &ec.to_ty, ec.from_span, diags);
@@ -368,6 +374,33 @@ impl TraitRegistry {
         self.reject_partial_comparable_derives(items, diags);
         self.compute_auto_derives(items);
         self.collect_iter_index_metadata(items);
+    }
+
+    fn register_foreign_close(&mut self, functions: &[crate::AST::ExternFn]) {
+        for function in functions {
+            let Some((close_name, _)) = &function.close else {
+                continue;
+            };
+            let Some(return_type) = &function.return_type else {
+                continue;
+            };
+            let type_name = match return_type {
+                Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+                _ => continue,
+            };
+            let valid = functions.iter().any(|candidate| {
+                candidate.name == *close_name
+                    && candidate.params.len() == 1
+                    && !candidate.params[0].variadic
+                    && candidate.params[0].convention == AccessConvention::Move
+                    && candidate.params[0].ty == *return_type
+                    && candidate.return_type.is_none()
+            });
+            if valid {
+                self.trait_impls
+                    .insert((type_name, crate::Syntax::TRAIT_CLOSE.to_string()));
+            }
+        }
     }
 
     fn register_distinct_meta(&mut self, d: &DistinctDef) {

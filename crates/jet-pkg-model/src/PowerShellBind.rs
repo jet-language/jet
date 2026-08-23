@@ -78,7 +78,79 @@ while ($true) {{
 }}
 "#)}
 
-fn render_jet(lib:&str,functions:&[BoundFunction])->String{let abi=format!("jet_pwsh_{lib}");let mut out=format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");for f in functions{out.push_str(&format!("    fn {}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{}\"\n",f.jet,f.jet));}out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum PowerShellError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{}}\n\npub fn open() => Session PowerShellError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PowerShellError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));for f in functions{out.push_str(&format!("pub fn {}(session: Session, input: DataTree, deadline_ms: Int) => DataTree PowerShellError! {{\n    raw :: abi.{}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(PowerShellError.NotRunning) }}\n    if code == 2 {{ return Err(PowerShellError.Timeout) }}\n    if code == 3 {{ return Err(PowerShellError.Cancelled) }}\n    if code == 5 {{ return Err(PowerShellError.Limit) }}\n    if code != 0 {{ return Err(PowerShellError.Protocol) }}\n    response := json.parse(raw) ?? return Err(PowerShellError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(PowerShellError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n",f.jet,f.jet));}out}
+fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
+    let abi = format!("jet_pwsh_{lib}");
+    let mut out = format!(
+        r#"#Extern module c.{abi} {{
+    fn open() Int = "{abi}_open"
+    fn take_error() Int = "{abi}_take_error"
+    fn cancel(handle: Int) = "{abi}_cancel"
+    fn close(handle: Int) = "{abi}_close"
+"#
+    );
+    for function in functions {
+        out.push_str(&format!(
+            "    fn {}(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{}\"\n",
+            function.jet, function.jet
+        ));
+    }
+    out.push_str(&format!(
+        r#"}}
+use c.{abi} as abi
+use core.encoding.json as json
+
+pub struct Session {{
+    value: Int
+}}
+
+pub enum PowerShellError {{
+    NotRunning
+    Timeout
+    Cancelled
+    Protocol
+    CommandFailed
+    Limit
+}}
+
+impl Session.Close {{
+    fn close(^self) {{ abi.close(self.value) }}
+}}
+
+pub fn close(session: ^Session) {{}}
+
+pub fn open() Session PowerShellError! -> {{
+    handle :: abi.open()
+    if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
+    return Ok(Session{{ value: handle }})
+}}
+
+pub fn cancel(session: Session) {{ abi.cancel(session.value) }}
+
+"#
+    ));
+    for function in functions {
+        let call = format!("abi.{}", function.jet);
+        out.push_str(&format!(
+            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) DataTree PowerShellError! -> {{
+    raw :: {}(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 -> return Err(PowerShellError.NotRunning)
+    if code == 2 -> return Err(PowerShellError.Timeout)
+    if code == 3 -> return Err(PowerShellError.Cancelled)
+    if code == 5 -> return Err(PowerShellError.Limit)
+    if code != 0 -> return Err(PowerShellError.Protocol)
+    response := json.parse(raw) ?? return Err(PowerShellError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded -> return Err(PowerShellError.CommandFailed)
+    return Ok(response.field("value") ?? DataTree.Null)
+}}
+
+"#,
+            function.jet, call
+        ));
+    }
+    out
+}
 
 fn render_c(lib:&str,pwsh:&Path,worker:&Path,script:&Path,functions:&[BoundFunction])->String{let abi=format!("jet_pwsh_{lib}");let mut wrappers=String::new();for f in functions{wrappers.push_str(&format!("const char* {abi}_invoke_{}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{}\",input,deadline);}}\n",f.jet,f.pwsh));}render_supervisor_c(&abi,pwsh,worker,script,&wrappers,"\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path")}
 
@@ -150,6 +222,11 @@ mod tests{
         let jet=super::render_jet("ops",&functions);
         let worker=super::render_worker(&functions);
         assert!(jet.contains("pub fn get_stateful("));
+        assert!(jet.contains("fn open() Int ="));
+        assert!(jet.contains("pub fn open() Session PowerShellError! -> {"));
+        assert!(jet.contains("Session{ value: handle }"));
+        assert!(!jet.contains("=>"));
+        assert!(!jet.contains("Session.{"));
         assert!(worker.contains("'Get-Stateful'"));
     }
 

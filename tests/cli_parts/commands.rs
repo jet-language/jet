@@ -210,6 +210,13 @@ fn r_bind_launders_parse_failure_as_e3208() {
     let output=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("unexpected '}'"));assert!(!stderr.contains("broken.R:"));check_snapshot("bind_r_invalid_e3208.txt",&scrub(&stderr,&script));
 }
 
+#[test]
+fn octave_bind_reports_checked_diagnostic_for_unsupported_shape() {
+    let dir=isolated_cwd("octave_bind_invalid");let script=dir.join("broken.m");fs::write(&script,"function [left, right] = split(input)\n  left = input; right = input;\nend\n").unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","octave"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.m:"));
+}
+
 #[cfg(not(target_os="windows"))]
 #[test]
 fn com_bind_rejects_non_windows_before_reading_input() {
@@ -287,7 +294,8 @@ end module broken_math
 
 #[test]
 fn cobol_bind_launders_foreign_compiler_failure_as_e3208() {
-    if Command::new("cobc").arg("--version").output().is_err() { return; }
+    let cobc = Command::new("cobc").arg("--version").output().expect("jet-env full must provision cobc");
+    assert!(cobc.status.success(), "provisioned cobc failed its version check");
     let dir=isolated_cwd("cobol_bind_failure"); let source=dir.join("broken.cob"); let copybook=dir.join("record.cpy");
     fs::write(&source,"       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BROKEN.\n       THIS IS NOT COBOL.\n").unwrap();
     fs::write(&copybook,"       01 RECORD.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();

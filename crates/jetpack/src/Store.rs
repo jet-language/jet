@@ -2423,6 +2423,13 @@ fn receipt_source_matches(package: &super::Lock::LockedPackage, reference: &str)
         | super::Lock::LockSource::Registry {
             reference: value, ..
         } => value == reference,
+        // Only a foreign source carries a language, so it cannot share the
+        // or-pattern above: it also matches the `language@reference` spelling.
+        super::Lock::LockSource::Foreign {
+            language,
+            reference: value,
+            ..
+        } => value == reference || format!("{}@{}", language.root(), value) == reference,
     }
 }
 

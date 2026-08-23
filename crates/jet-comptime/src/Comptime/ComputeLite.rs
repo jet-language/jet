@@ -51,6 +51,7 @@ fn device_to_ct(device: JetComputeDevice) -> CtValue {
         variant: match device {
             JetComputeDevice::Auto => "Auto".to_string(),
             JetComputeDevice::Cpu => "CPU".to_string(),
+            JetComputeDevice::Metal => "Metal".to_string(),
         },
         args: Vec::new(),
     }
@@ -63,10 +64,12 @@ fn ct_to_device(value: &CtValue, span: Span) -> Result<JetComputeDevice, Diagnos
         } if type_name == "ComputeDevice" => match variant.as_str() {
             "Auto" => Ok(JetComputeDevice::Auto),
             "CPU" | "Cpu" => Ok(JetComputeDevice::Cpu),
+            "Metal" | "METAL" => Ok(JetComputeDevice::Metal),
             _ => Err(unsupported("ComputeDevice variant", span)),
         },
         CtValue::Str(s) if s == "Auto" => Ok(JetComputeDevice::Auto),
         CtValue::Str(s) if s == "CPU" || s == "Cpu" => Ok(JetComputeDevice::Cpu),
+        CtValue::Str(s) if s == "Metal" || s == "METAL" => Ok(JetComputeDevice::Metal),
         _ => Err(unsupported("ComputeDevice", span)),
     }
 }
@@ -1503,6 +1506,7 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         )?))),
         "device_cpu" => Ok(device_to_ct(jet_compute_device_cpu())),
         "device_auto" => Ok(device_to_ct(jet_compute_device_auto())),
+        "device_metal" => Ok(device_to_ct(jet_compute_device_metal())),
         "on_device" => Ok(
             match jet_compute_on_device(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
             {
@@ -1574,6 +1578,12 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             },
         ),
         "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
+        "stream_new_on" => Ok(match jet_compute_stream_new_on_device(ct_to_device(
+            one(0)?, span,
+        )?) {
+            Ok(stream) => stream_to_ct(&stream),
+            Err(e) => err_compute(e),
+        }),
         "stream_sync" => Ok(
             match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),

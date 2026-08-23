@@ -17,11 +17,64 @@ mod common;
 use common::have_rustc;
 
 #[test]
-fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
-    if Command::new("cobc").arg("--version").output().is_err() {
-        eprintln!("note: provisioned cobc unavailable; skipping COBOL integration");
+fn octave_sidecar_runs_real_matrix_round_trip() {
+    let tool = ["octave-cli", "octave"].iter().find(|candidate| {
+        Command::new(candidate)
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    });
+    let Some(tool) = tool else {
+        eprintln!("note: provisioned Octave unavailable; skipping Octave integration");
         return;
+    };
+    eprintln!("using {tool} for Octave integration");
+    let root = std::env::temp_dir().join(format!("jet_octave_e2e_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/octave");
+    for file in ["scale.m", "main.jet", "expected.out"] {
+        fs::copy(example.join(file), root.join(file)).unwrap();
     }
+    let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "bind", "octave", "scale.m", "--pkg", "scale"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Octave bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let generated = fs::read_to_string(root.join(".jet/bindings/octave/scale.jet")).unwrap();
+    assert!(generated.contains("Tensor"));
+    assert!(generated.contains("FFI.Octave"));
+    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Octave binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        fs::read_to_string(root.join("expected.out")).unwrap()
+    );
+    let provenance = fs::read_to_string(root.join(".jet/bindings/octave/scale.provenance"))
+        .unwrap();
+    assert!(provenance.contains("transport=json"));
+    assert!(provenance.contains("shape=rank-2"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
+    let cobc = Command::new("cobc").arg("--version").output().expect("jet-env full must provision cobc");
+    assert!(cobc.status.success(), "provisioned cobc failed its version check");
     let root = std::env::temp_dir().join(format!("jet_cobol_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -34,9 +87,11 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
         .current_dir(&root).output().unwrap();
     assert!(bind.status.success(), "{}", String::from_utf8_lossy(&bind.stderr));
     let generated = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.jet")).unwrap();
-    assert!(generated.contains("gross_pay: Decimal;"));
+    assert!(generated.contains("gross_pay: Decimal\n"));
     assert!(generated.contains("offset=24 width=5 type=Decimal scale=2 encoding=COMP-3"));
     assert!(!generated.contains("gross_pay: Float"));
+    assert!(generated.contains("Int CobolError! -[FFI.Cobol]>"));
+    assert!(!generated.contains("=>"));
     let run = Command::new(env!("CARGO_BIN_EXE_jet")).args(["run", "main.jet"]).current_dir(&root).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout), fs::read_to_string(root.join("expected.out")).unwrap());
@@ -58,6 +113,129 @@ fn forged_fortran_library_prefix_cannot_admit_list_abi() {
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E3203"),
         "forged prefix admitted a list ABI: {diagnostics:?}"
     );
+}
+
+#[test]
+fn cffi_layout_mismatch_fails_before_the_foreign_call() {
+    let root = common::unique_tmp("jet_ffi_layout_mismatch");
+    fs::create_dir_all(&root).unwrap();
+    let source = r#"
+struct Point {
+    x: Int
+    y: Int
+}
+#Extern module c.demo {
+    fn make_point() Point = "demo_make_point";
+}
+fn run() {}
+"#;
+    let path = root.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let diagnostics = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3203"),
+        "a non-#Layout(c) aggregate must fail at the typed layout gate: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn ffi_capability_boundary_is_safe_only_inside_unsafe() {
+    let root = common::unique_tmp("jet_ffi_capability_boundary");
+    fs::create_dir_all(&root).unwrap();
+    let safe = r#"
+extern rust "std" {
+    fn borrow(s: &String) String = "std::convert::identity"
+}
+fn run() {
+    value := "hi"
+    print(borrow(&value))
+}
+"#;
+    let safe_path = root.join("safe.jet");
+    fs::write(&safe_path, safe).unwrap();
+    let safe_diags = jet::check_with_path(safe_path.to_str().unwrap());
+    assert!(
+        safe_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        "safe raw capability call must be rejected with E0702: {safe_diags:?}"
+    );
+    assert!(
+        !safe_diags.iter().any(|diagnostic| diagnostic.code == "E3103"),
+        "capability gate must use E0702, not E3103: {safe_diags:?}"
+    );
+
+    let audited = r#"
+extern rust "std" {
+    fn borrow(s: &String) String = "std::convert::identity"
+}
+fn run() {
+    value := "hi"
+    #Unsafe("the foreign call may write through the borrowed value") {
+        print(borrow(&value))
+    }
+}
+"#;
+    let audited_path = root.join("audited.jet");
+    fs::write(&audited_path, audited).unwrap();
+    let audited_diags = jet::check_with_path(audited_path.to_str().unwrap());
+    assert!(
+        !audited_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        "an audited raw capability call must clear the E0702 boundary gate: {audited_diags:?}"
+    );
+    let audited_output = jet::compile_with_path(
+        audited,
+        audited_path.to_str().unwrap(),
+    )
+    .expect("an audited capability call must lower through the checked wrapper");
+    assert!(
+        audited_output.rust.contains("jet_ffi_borrow(&mut"),
+        "`&` must remain an exclusive borrow at the generated call edge"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn foreign_close_contract_registers_only_a_matching_consuming_function() {
+    let root = common::unique_tmp("jet_ffi_close_contract");
+    fs::create_dir_all(&root).unwrap();
+    let valid = r#"
+extern rust "std" {
+    #Close(release)
+fn acquire() String = "std::string::String::new";
+    fn release(handle: ^String) = "std::mem::drop";
+}
+fn run() {
+    handle := acquire()
+    close(^handle)
+}
+"#;
+    let valid_path = root.join("valid.jet");
+    fs::write(&valid_path, valid).unwrap();
+    let valid_diags = jet::check_with_path(valid_path.to_str().unwrap());
+    assert!(
+        valid_diags.is_empty(),
+        "matching #Close(^handle) contract must pass: {valid_diags:?}"
+    );
+    let compiled = jet::compile_with_path(valid, valid_path.to_str().unwrap())
+        .expect("validated foreign close contract must lower through production codegen");
+    assert!(
+        compiled.rust.contains("impl __jet_Close for String")
+            && compiled.rust.contains("jet_ffi_release"),
+        "the close contract must reach the generated bridge call: {}",
+        compiled.rust
+    );
+
+    let invalid = valid.replace("handle: ^String", "handle: String");
+    let invalid_path = root.join("invalid.jet");
+    fs::write(&invalid_path, invalid).unwrap();
+    let invalid_diags = jet::check_with_path(invalid_path.to_str().unwrap());
+    assert!(
+        invalid_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        "layout/ownership mismatch must fail as a typed FFI diagnostic: {invalid_diags:?}"
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -85,7 +263,7 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             "py",
             "bindings/py",
             BinderSurface::Namespace,
-            BinderStatus::Planned,
+            BinderStatus::Active,
         ),
         (
             ForeignLanguage::JS,
@@ -193,6 +371,13 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderStatus::Active,
         ),
         (
+            ForeignLanguage::Octave,
+            "octave",
+            "bindings/octave",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
             ForeignLanguage::Com,
             "com",
             "bindings/com",
@@ -237,6 +422,7 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
         ("ruby", ForeignLanguage::Ruby),
         ("php", ForeignLanguage::Php),
         ("r", ForeignLanguage::R),
+        ("octave", ForeignLanguage::Octave),
         ("com", ForeignLanguage::Com),
     ];
 
@@ -651,6 +837,46 @@ fn foreign_interop_routes_r_as_active_supervised_worker() {
     assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedR);
     assert_eq!(route.descriptor.stub_kind,BindingStubKind::RScript);
     assert_eq!(route.host,ForeignHost::SupervisedR);
+}
+
+#[test]
+fn foreign_interop_routes_python_as_active_supervised_sidecar() {
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignAbiContract, ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("py.math").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Py);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedPythonSidecar);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::PythonIntrospection);
+    assert_eq!(route.host, ForeignHost::SupervisedPythonSidecar);
+    assert_eq!(route.abi_contract, ForeignAbiContract::MESSAGE);
+    assert_eq!(route.descriptor.provider, jet::AST::ForeignProvider::PyPi);
+}
+
+#[test]
+fn foreign_interop_routes_octave_as_active_supervised_worker() {
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("octave.matrix").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Octave);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedOctave);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::OctaveScript);
+    assert_eq!(route.host, ForeignHost::SupervisedOctave);
 }
 
 #[test]
@@ -1692,6 +1918,32 @@ fn auto_bind_on_cache_miss() {
     let _ = fs::remove_dir_all(&root);
 }
 
+#[test]
+fn descriptor_mismatch_rejects_generated_cache_before_call() {
+    let root = std::env::temp_dir().join(format!("jet_descriptor_mismatch_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache_dir).unwrap();
+    let generated = jet::CBind::generate("int ping(int value);\n", "mismatch").unwrap();
+    let stale = generated
+        .source
+        .replacen(&generated.descriptor_stamp, "stale", 1);
+    fs::write(cache_dir.join("mismatch.jet"), stale).unwrap();
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use c.mismatch as m;\nfn run() { print(m.ping(1)); }\n",
+    )
+    .unwrap();
+    let source = fs::read_to_string(&main).unwrap();
+    let diagnostics = jet::compile_with_path(&source, main.to_str().unwrap()).unwrap_err();
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        "stale descriptor must be rejected before the foreign call: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// Probe 2 — header changes after a successful bind → hash mismatch detected,
 /// the compiler RE-BINDS (does not use the stale cache).
 #[test]
@@ -2066,24 +2318,20 @@ Error [E3210]: Couldn't fetch C library `raylib` from nixpkgs.
 
 #[test]
 fn e3202_pointer_boundary_snapshot() {
-    // E3202 belongs to the E2-M13 pointer tier, which is not implemented, so no
-    // real source can reach it. Per I4 the diagnostic must still exist with a
-    // pinned snapshot; this is it. When E2-M13 lands, a `tests/ui/` fixture that
-    // actually triggers it should replace this rendered-form pin.
-    use jet::Diagnostics::Span;
-    let src = "fn f(p: Ptr<Int>) = \"f\";\n";
-    let d = jet::Sema::e3202("Ptr<Int>", Span::new(8, 16));
-    assert_eq!(d.code, "E3202");
-    let rendered = jet::render_diagnostics("main.jet", src, std::slice::from_ref(&d));
-    let expected = "\
-Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
-  --> main.jet:1:9
-    |
-  1 | fn f(p: Ptr<Int>) = \"f\";
-    |         ^^^^^^^^
- Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
- Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.
-";
+    // I4: exercise the production C-module checker and compare its rendered
+    // report with the UI snapshot. A synthetic Diagnostic would not prove the
+    // parser → sema path reaches E3202.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("tests/ui/cffi_e3202_ptr_boundary.jet");
+    let shown = "tests/ui/cffi_e3202_ptr_boundary.jet";
+    let src = fs::read_to_string(&path).unwrap();
+    let diags = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diags.iter().any(|diagnostic| diagnostic.code == "E3202"),
+        "production C boundary must reach E3202: {diags:?}"
+    );
+    let rendered = jet::render_diagnostics(shown, &src, &diags);
+    let expected = fs::read_to_string(path.with_extension("stderr")).unwrap();
     assert_eq!(rendered, expected);
 }
 

@@ -1,0 +1,57 @@
+use c.jet_pascal_counter as abi
+
+#Extern module c.jet_pascal_counter {
+    fn take_error() Int = "jet_pascal_counter_take_error"
+    fn add_scalar(a: Int, b: Int) Int = "jet_pascal_counter_add_scalar"
+    fn add_float(a: Float, b: Float) Float = "jet_pascal_counter_add_float"
+    fn counter_new(value: Int) Int = "jet_pascal_counter_counter_new"
+    fn counter_add(handle: Int, delta: Int) Int = "jet_pascal_counter_counter_add"
+    fn counter_close(handle: Int) = "jet_pascal_counter_counter_close"
+}
+
+pub enum PascalError {
+    InvalidHandle
+    Foreign
+    ResourceLimit
+}
+
+pub struct Counter {
+    value: Int
+}
+
+fn error(code: Int) PascalError -> {
+    if code == 1 -> return PascalError.InvalidHandle
+    if code == 2 -> return PascalError.ResourceLimit
+    return PascalError.Foreign
+}
+
+pub fn add_scalar(a: Int, b: Int) Int -> {
+    return abi.add_scalar(a, b)
+}
+
+pub fn add_float(a: Float, b: Float) Float -> {
+    return abi.add_float(a, b)
+}
+
+pub fn counter_new(value: Int) Counter PascalError! -> {
+    raw_handle :: abi.counter_new(value)
+    code :: abi.take_error()
+    if code != 0 -> return Err(error(code))
+    return Ok(Counter{value: raw_handle})
+}
+
+pub fn counter_add(handle: Counter, delta: Int) Int PascalError! -> {
+    result_value :: abi.counter_add(handle.value, delta)
+    code :: abi.take_error()
+    if code != 0 -> return Err(error(code))
+    return Ok(result_value)
+}
+
+pub fn close(^handle: Counter) {}
+
+impl Counter.Close {
+    fn close(^self) {
+        abi.counter_close(self.value)
+        if abi.take_error() != 0 -> panic("invalid Pascal handle")
+    }
+}

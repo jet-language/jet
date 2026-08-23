@@ -126,6 +126,7 @@ impl<'a> Parser<'a> {
                 | TokKind::Ident(_)
                 | TokKind::LParen
                 | TokKind::LBracket
+                | TokKind::Star
         )
         // D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2): `fn(…) :[]>` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a

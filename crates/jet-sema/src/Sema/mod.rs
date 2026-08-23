@@ -753,13 +753,14 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
         foreign_effect_root: ef.effect_root.clone(),
         undo: ef.undo.as_ref().map(|(name, _)| name.clone()),
-        // D-CABI-RESULT1=C: any raw out-pointer declaration is callable only
-        // from an audited `#Unsafe` region. The declaration remains the exact
-        // C status/out shape; no Result adapter is invented.
-        is_unsafe: is_c_abi
-            && ef.params.iter().any(|p| {
-                matches!(&p.ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_PTR)
-            }),
+        // D-FFI-CAP1: capability-bearing foreign declarations are typed, but
+        // raw calls require an audited `#Unsafe` boundary. C out-pointers keep
+        // their existing E3103 gate; no Result adapter is invented here.
+        is_unsafe: ef.params.iter().any(|p| p.convention != AccessConvention::Read)
+            || (is_c_abi
+                && ef.params.iter().any(|p| {
+                    matches!(&p.ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_PTR)
+                })),
         is_pure: false,      // extern functions are always considered impure
         memo_bound: None,
         is_foreign_thread_safe: false,

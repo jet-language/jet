@@ -217,6 +217,26 @@ fn enforce_provenance_policy(
     })
 }
 
+fn foreign_provider_diagnostic(error: &jetpack::Provider::ProviderError) -> Diagnostic {
+    Diagnostic::error(
+        error.code().unwrap_or("E1256"),
+        "couldn't realize the foreign package provider".to_string(),
+        format!("the verified provider projection failed: {error:?}"),
+        "provide a pinned, hash-verified provider artifact with its generated binding, then run `jet fetch` again".to_string(),
+        None,
+    )
+}
+
+fn foreign_dependency_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1256",
+        format!("foreign dependency `{dep_name}` has no valid provider projection"),
+        detail.to_string(),
+        "run `jet fetch` with the pinned provider artifact available; Jet will not invent or bypass a binding".to_string(),
+        None,
+    )
+}
+
 // ──────────────────────────────────────────────
 // Resolver
 // ──────────────────────────────────────────────
@@ -235,6 +255,8 @@ struct Resolver<'a> {
     registry_plan: BTreeMap<String, Publish::IndexEntry>,
     /// Packages allowed to move during `jet update <package>`.
     update_scope: BTreeSet<String>,
+    /// Verified package-provider projections for foreign namespace deps.
+    foreign: BTreeMap<String, jetpack::Foreign::Realization>,
 }
 
 struct ResolvedPkg {
@@ -246,6 +268,8 @@ struct ResolvedPkg {
     deps: Vec<String>,
     source_dir: PathBuf,
     provenance: Option<Lock::DependencyProvenance>,
+    envelope: Option<Lock::LockEnvelope>,
+    receipt: Option<String>,
 }
 
 impl<'a> Resolver<'a> {
@@ -265,6 +289,7 @@ impl<'a> Resolver<'a> {
             version_seen: HashMap::new(),
             registry_plan: BTreeMap::new(),
             update_scope: compute_update_scope(existing_lock, opts),
+            foreign: BTreeMap::new(),
         }
     }
 
@@ -272,6 +297,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         manifest: &Manifest,
     ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
+        self.realize_foreign_dependencies(manifest)?;
         self.registry_plan = self.prepare_registry_plan(manifest)?;
         let root_deps: Vec<String> = manifest.dependencies.keys().cloned().collect();
 
@@ -322,9 +348,9 @@ impl<'a> Resolver<'a> {
                 inferred_layer: None,
                 effects: Vec::new(),
                 effect_grants: Vec::new(),
-                envelope: None,
-                receipt: Default::default(),
                 provenance: pkg.provenance.clone(),
+                envelope: pkg.envelope.clone(),
+                receipt: pkg.receipt.clone(),
             });
         }
 
@@ -372,6 +398,41 @@ impl<'a> Resolver<'a> {
         }
 
         Ok((new_lock, dep_dirs))
+    }
+
+    fn realize_foreign_dependencies(
+        &mut self,
+        manifest: &Manifest,
+    ) -> Result<(), Vec<Diagnostic>> {
+        if !manifest
+            .dependencies
+            .values()
+            .any(|spec| matches!(spec, DepSpec::Foreign { .. }))
+        {
+            return Ok(());
+        }
+
+        let roots = jetpack::Store::resolve();
+        let store_dir = roots.hangar_dir();
+        let fixtures = jetpack::Provider::fixtures_from_env(None);
+        let context = jetpack::Provider::Ctx {
+            fixtures: fixtures.as_deref(),
+            store_dir: &store_dir,
+            offline: false,
+            project_dir: Some(self.project_root),
+        };
+        let realized = jetpack::Foreign::realize_manifest_dependencies(
+            &roots,
+            self.project_root,
+            manifest,
+            &context,
+        )
+        .map_err(|error| vec![foreign_provider_diagnostic(&error)])?;
+        self.foreign = realized
+            .into_iter()
+            .map(|item| (item.name.clone(), item))
+            .collect();
+        Ok(())
     }
 
     fn prepare_registry_plan(
@@ -743,6 +804,8 @@ impl<'a> Resolver<'a> {
                         deps: trans_deps,
                         source_dir: abs_path,
                         provenance,
+                        envelope: None,
+                        receipt: None,
                     },
                 );
             }
@@ -857,6 +920,8 @@ impl<'a> Resolver<'a> {
                         deps: trans_deps,
                         source_dir: clone_dir,
                         provenance,
+                        envelope: None,
+                        receipt: None,
                     },
                 );
             }
@@ -1184,6 +1249,68 @@ impl<'a> Resolver<'a> {
                         deps: trans_deps,
                         source_dir: store_path,
                         provenance,
+                        envelope: None,
+                        receipt: None,
+                    },
+                );
+            }
+
+            DepSpec::Foreign {
+                language,
+                reference,
+            } => {
+                let Some(realization) = self.foreign.get(dep_name).cloned() else {
+                    return Err(vec![foreign_dependency_diagnostic(
+                        dep_name,
+                        "the provider projection was not produced for this dependency",
+                    )]);
+                };
+                if realization.language != *language || realization.reference != *reference {
+                    return Err(vec![foreign_dependency_diagnostic(
+                        dep_name,
+                        "the provider projection identity disagrees with package.jet",
+                    )]);
+                }
+                let dep_version = realization.entry.version.clone();
+                if let Some((previous, previous_chain)) =
+                    self.version_seen.get(dep_name).cloned()
+                {
+                    if previous != dep_version {
+                        return Err(vec![Lock::e1201(
+                            dep_name,
+                            &previous,
+                            &previous_chain,
+                            &dep_version,
+                            chain,
+                        )]);
+                    }
+                } else {
+                    self.version_seen
+                        .insert(dep_name.to_string(), (dep_version.clone(), chain.to_vec()));
+                }
+                self.resolved.insert(
+                    dep_name.to_string(),
+                    ResolvedPkg {
+                        version: dep_version,
+                        source: LockSource::Foreign {
+                            language: *language,
+                            reference: reference.clone(),
+                            output: realization.entry.out.clone(),
+                        },
+                        locked: None,
+                        fingerprint: realization.entry.envelope.output_hash.clone(),
+                        content_hash: Some(realization.entry.envelope.output_hash.clone()),
+                        deps: Vec::new(),
+                        source_dir: PathBuf::from(&realization.entry.out),
+                        provenance: None,
+                        envelope: Some(Lock::LockEnvelope {
+                            output_hash: realization.entry.envelope.output_hash.clone(),
+                            platform: realization.entry.envelope.platform.clone(),
+                            signature: realization.entry.envelope.signature.clone(),
+                            provenance: realization.entry.envelope.provenance.clone(),
+                        }),
+                        receipt: (!realization.entry.receipt.is_empty())
+                            .then(|| realization.entry.receipt.clone()),
                     },
                 );
             }
@@ -2037,10 +2164,142 @@ fn build_dep_dirs_from_lock(
                 verify_registry_hangar_entry(dep_name, &store_path, source_hash)?;
                 store_path
             }
+            DepSpec::Foreign {
+                language,
+                reference,
+            } => validate_locked_foreign_dependency(lock, project_root, dep_name, *language, reference)?,
         };
         dep_dirs.insert(dep_name.clone(), source_dir);
     }
     Ok(dep_dirs)
+}
+
+fn validate_locked_foreign_dependency(
+    lock: &LockFile,
+    project_root: &Path,
+    dep_name: &str,
+    language: crate::AST::ForeignLanguage,
+    reference: &str,
+) -> Result<PathBuf, Vec<Diagnostic>> {
+    let Some(package) = lock.packages.iter().find(|package| {
+        package.name == dep_name
+            && matches!(
+                &package.source,
+                LockSource::Foreign {
+                    language: locked_language,
+                    reference: locked_reference,
+                    ..
+                } if *locked_language == language && locked_reference == reference
+            )
+    }) else {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "the lock has no matching language-qualified provider identity",
+        )]);
+    };
+    let LockSource::Foreign { output, .. } = &package.source else {
+        unreachable!("foreign package predicate guarantees a foreign lock source")
+    };
+    let output = PathBuf::from(output);
+    let output_metadata = std::fs::symlink_metadata(&output).map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("locked Hangar output is unavailable: {error}"),
+        )]
+    })?;
+    if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "locked Hangar output is not a real directory",
+        )]);
+    }
+    let Some(envelope) = package.envelope.as_ref() else {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "the foreign lock record has no verified output envelope",
+        )]);
+    };
+    if envelope.output_hash.is_empty() {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "the foreign lock record has no output hash",
+        )]);
+    }
+    let roots = jetpack::Store::resolve();
+    let actual = jetpack::Envelope::try_output_hash_of_in_hangar(
+        &output.to_string_lossy(),
+        &roots.hangar_dir(),
+        false,
+    )
+    .map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("locked foreign output failed integrity verification: {error}"),
+        )]
+    })?;
+    if actual != envelope.output_hash {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "locked foreign output hash disagrees with its envelope",
+        )]);
+    }
+
+    let stored_binding = output
+        .join(Syntax::SOURCE_ROOT_DIR)
+        .join(language.bindings_subdir())
+        .join(format!("{dep_name}.{}", Syntax::FILE_EXT));
+    let project_binding = jetpack::Foreign::project_binding_path(project_root, language, dep_name);
+    let stored_metadata = std::fs::symlink_metadata(&stored_binding).map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("locked generated binding is unavailable: {error}"),
+        )]
+    })?;
+    let project_metadata = std::fs::symlink_metadata(&project_binding).map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("project binding cache is unavailable: {error}"),
+        )]
+    })?;
+    if stored_metadata.file_type().is_symlink()
+        || !stored_metadata.is_file()
+        || project_metadata.file_type().is_symlink()
+        || !project_metadata.is_file()
+    {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "the locked generated binding is not a regular file",
+        )]);
+    }
+    let stored_bytes = std::fs::read(&stored_binding).map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("could not read locked generated binding: {error}"),
+        )]
+    })?;
+    let project_bytes = std::fs::read(&project_binding).map_err(|error| {
+        vec![foreign_locked_diagnostic(
+            dep_name,
+            &format!("could not read project generated binding: {error}"),
+        )]
+    })?;
+    if stored_bytes != project_bytes {
+        return Err(vec![foreign_locked_diagnostic(
+            dep_name,
+            "project binding cache disagrees with the locked Hangar binding",
+        )]);
+    }
+    Ok(output)
+}
+
+fn foreign_locked_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1204",
+        format!("locked foreign dependency `{dep_name}` failed verification"),
+        detail.to_string(),
+        "run `jet fetch` to recreate the verified provider projection, then commit the resulting `.jet/lock`".to_string(),
+        None,
+    )
 }
 
 // ──────────────────────────────────────────────

@@ -398,9 +398,9 @@ impl ImportDecl {
     }
 }
 
-/// D-FFI-UNIFY1: registered foreign language roots. C and JS are active
-/// namespace binders; rust/py/swift are ratified mounts whose binder depth
-/// lands on later cards.
+/// D-FFI-UNIFY1: registered foreign language roots. C, Python, JS, and Octave
+/// are active namespace binders; rust/swift remain ratified mounts whose
+/// binder depth lands on later cards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignLanguage {
     C,
@@ -424,11 +424,12 @@ pub enum ForeignLanguage {
     Ruby,
     Php,
     R,
+    Octave,
     Com,
 }
 
 impl ForeignLanguage {
-    pub const ALL: [ForeignLanguage; 22] = [
+    pub const ALL: [ForeignLanguage; 23] = [
         ForeignLanguage::C,
         ForeignLanguage::Cpp,
         ForeignLanguage::Rust,
@@ -450,6 +451,7 @@ impl ForeignLanguage {
         ForeignLanguage::Ruby,
         ForeignLanguage::Php,
         ForeignLanguage::R,
+        ForeignLanguage::Octave,
         ForeignLanguage::Com,
     ];
 
@@ -476,6 +478,7 @@ impl ForeignLanguage {
             Syntax::RUBY_MODULE_ROOT => Some(ForeignLanguage::Ruby),
             Syntax::PHP_MODULE_ROOT => Some(ForeignLanguage::Php),
             Syntax::R_MODULE_ROOT => Some(ForeignLanguage::R),
+            Syntax::OCTAVE_MODULE_ROOT => Some(ForeignLanguage::Octave),
             Syntax::COM_MODULE_ROOT => Some(ForeignLanguage::Com),
             _ => None,
         }
@@ -504,6 +507,7 @@ impl ForeignLanguage {
             ForeignLanguage::Ruby => Syntax::RUBY_MODULE_ROOT,
             ForeignLanguage::Php => Syntax::PHP_MODULE_ROOT,
             ForeignLanguage::R => Syntax::R_MODULE_ROOT,
+            ForeignLanguage::Octave => Syntax::OCTAVE_MODULE_ROOT,
             ForeignLanguage::Com => Syntax::COM_MODULE_ROOT,
         }
     }

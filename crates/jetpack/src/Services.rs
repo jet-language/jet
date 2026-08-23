@@ -53,7 +53,7 @@ struct Catalog {
     pkg_ref: &'static str,
     /// The executable exposed by the package. Package names and executable
     /// names are not assumed to match (for example, `postgresql` provides
-    /// `postgres`).
+    /// `postgres`). Empty means the package is source-only and owner-gated.
     executable: &'static str,
     port: i64,
     run: fn(port: i64, data_dir: &Path) -> Vec<String>,
@@ -65,11 +65,24 @@ impl Catalog {
     fn canonical_name(&self) -> &'static str {
         self.names[0]
     }
+
+    fn executable_name(&self) -> Option<&'static str> {
+        (!self.executable.is_empty()).then_some(self.executable)
+    }
+
+    fn require_runtime(&self, name: &str) -> Result<(), String> {
+        if self.executable_name().is_none() {
+            return Err(format!(
+                "service preset `{name}` is owner-gated until a PHP runtime/source projection is ratified"
+            ));
+        }
+        Ok(())
+    }
 }
 
-/// Typed metadata exposed by the shared preset constructor registry. The
-/// runtime still requires a real executable for every preset; this record is
-/// discovery metadata, not a fake service implementation.
+/// Typed metadata exposed by the shared preset constructor registry. A
+/// source-only owner-gated row remains discovery metadata until its runtime
+/// projection is ratified; it is never treated as a runnable service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServicePreset {
     pub name: String,
@@ -403,7 +416,10 @@ const CATALOG: &[Catalog] = &[
     Catalog {
         names: &["adminer"],
         pkg_ref: "adminer@nixpkgs",
-        executable: "adminer",
+        // Nixpkgs exposes Adminer as PHP source, not a runnable executable.
+        // Keep its typed catalog facts for discovery, but require the owner
+        // gate before host or image fallback can execute the row.
+        executable: "",
         port: 8081,
         run: |port, data_dir| {
             vec![
@@ -995,7 +1011,7 @@ pub fn catalog_pkg_ref(name: &str) -> Option<&'static str> {
 /// The executable that a catalog package contributes to an environment image.
 /// Keep this beside `catalog_pkg_ref`: package labels are not executable paths.
 pub fn catalog_executable(name: &str) -> Option<&'static str> {
-    catalog(name).map(|c| c.executable)
+    catalog(name).and_then(Catalog::executable_name)
 }
 
 /// Resolve the executable vector used when an environment image projects a
@@ -1018,6 +1034,7 @@ pub fn image_run_command(plan: &DevServicePlan) -> Result<Vec<String>, String> {
             plan.name
         ));
     };
+    entry.require_runtime(&plan.name)?;
     let port = plan.ports.first().copied().unwrap_or(entry.port);
     if !(1..=65535).contains(&port) {
         return Err(format!("service {} has an invalid port", plan.name));
@@ -1486,7 +1503,10 @@ fn resolve(project_dir: &Path, plan: &DevServicePlan) -> Result<Resolved, String
     };
     let run = match (&plan.run, &cat) {
         (Some(command), _) => command.clone(),
-        (None, Some(c)) => (c.run)(ports.first().copied().unwrap_or(c.port), &data_dir),
+        (None, Some(c)) => {
+            c.require_runtime(&plan.name)?;
+            (c.run)(ports.first().copied().unwrap_or(c.port), &data_dir)
+        }
         (None, None) => {
             return Err(format!(
                 "service `{}` has no `run:` command and isn't a known built-in service",
@@ -2924,14 +2944,9 @@ fn start_one_with_recovery(
                 return Err(format!("{error}{cleanup}"));
             }
         };
-        let state = publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)?;
-        lifecycle.pid = Some(state.pid);
-        lifecycle.phase = "running".to_string();
-        if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
-            let cleanup = cleanup_child_with_authority(&mut child, &authority);
-            let _ = fs::remove_file(pid_path(&resolved.dir));
-            return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
-        }
+        // Publish the allocated ports before the PID becomes observable. A
+        // readiness reader that sees `pid` must resolve the same ports that
+        // this process received, never the unresolved `0` placeholders.
         if !resolved.ports.is_empty() {
             let encoded = resolved
                 .ports
@@ -2941,10 +2956,25 @@ fn start_one_with_recovery(
                 .join("\n");
             if let Err(error) = write_atomic(&ports_path(&resolved.dir), encoded.as_bytes()) {
                 let cleanup = cleanup_child_with_authority(&mut child, &authority);
-                let _ = fs::remove_file(pid_path(&resolved.dir));
                 let _ = fs::remove_file(ports_path(&resolved.dir));
                 return Err(format!("couldn't publish service ports: {error}{cleanup}"));
             }
+        }
+        let state = match publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)
+        {
+            Ok(state) => state,
+            Err(error) => {
+                let _ = fs::remove_file(ports_path(&resolved.dir));
+                return Err(error);
+            }
+        };
+        lifecycle.pid = Some(state.pid);
+        lifecycle.phase = "running".to_string();
+        if let Err(error) = write_lifecycle(&resolved.dir, &lifecycle) {
+            let cleanup = cleanup_child_with_authority(&mut child, &authority);
+            let _ = fs::remove_file(pid_path(&resolved.dir));
+            let _ = fs::remove_file(ports_path(&resolved.dir));
+            return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
         }
         Ok(Some(StartedService {
             child,
@@ -2963,6 +2993,7 @@ fn record_start_failure(dir: &Path, lifecycle: &mut LifecycleFacts, error: &str)
     lifecycle.phase = "failed".to_string();
     lifecycle.recovery = "startup-failed".to_string();
     lifecycle.pid = None;
+    let _ = fs::remove_file(ports_path(dir));
     let _ = write_lifecycle(dir, lifecycle);
     let _ = write_atomic(&supervisor_error_path(dir), error.as_bytes());
 }
@@ -5570,7 +5601,6 @@ mod tests {
             assert_eq!(&preset.package, package);
             assert_eq!(preset.default_port, *port);
             assert_eq!(catalog_pkg_ref(name), Some(*package));
-            assert_eq!(catalog_executable(name), Some(*executable));
 
             let plan = DevServicePlan {
                 name: (*name).to_string(),
@@ -5578,6 +5608,18 @@ mod tests {
                 ports: vec![*port],
                 ..Default::default()
             };
+            if *name == "adminer" {
+                assert_eq!(catalog_executable(name), None);
+                let image_error = image_run_command(&plan).unwrap_err();
+                assert!(image_error.contains("owner-gated"), "{image_error}");
+                let host_error = match resolve(&dir, &plan) {
+                    Ok(_) => panic!("owner-gated Adminer preset must not resolve"),
+                    Err(error) => error,
+                };
+                assert!(host_error.contains("owner-gated"), "{host_error}");
+                continue;
+            }
+            assert_eq!(catalog_executable(name), Some(*executable));
             let command = image_run_command(&plan).expect("every preset must have an image command");
             assert_eq!(command.first().map(String::as_str), Some(*executable));
             let resolved = resolve(&dir, &plan).expect("every preset must resolve for host services");
@@ -5646,10 +5688,6 @@ mod tests {
                         ))
                     );
                 }
-                "adminer" => assert_eq!(
-                    resolved.ready_probe,
-                    Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8081/".to_string()))
-                ),
                 "blackfire" | "tailscale" => assert_eq!(
                     resolved.ready_probe,
                     Some(ReadyProbe::Exec("true".to_string()))

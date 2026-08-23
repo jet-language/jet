@@ -125,7 +125,7 @@ impl LockedPackage {
                     .envelope
                     .as_ref()
                     .map(|envelope| envelope.output_hash.clone()),
-                LockSource::Root | LockSource::Path(_) | LockSource::Git { .. } => None,
+                LockSource::Root | LockSource::Path(_) | LockSource::Git { .. } | LockSource::Foreign { .. } => None,
             })
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "not recorded".to_string());
@@ -320,6 +320,13 @@ pub enum LockSource {
         /// Canonical gate summary recorded by the Jet package registry.
         gate_status: String,
     },
+    /// D-FFI-UNIFY1: the exact foreign package provider ref and the verified
+    /// Hangar projection used to materialize its binding.
+    Foreign {
+        language: crate::AST::ForeignLanguage,
+        reference: String,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -464,6 +471,16 @@ pub fn write(lock: &LockFile) -> String {
             LockSource::Registry { registry, reference, output, source_hash, repository, authority, tier, gate_status } => format!(
                 "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\", tier = \"{}\", gate-status = \"{}\" }}",
                 escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority), escape_str(tier), escape_str(gate_status)
+            ),
+            LockSource::Foreign {
+                language,
+                reference,
+                output,
+            } => format!(
+                "{{ foreign = \"{}\", reference = \"{}\", output = \"{}\" }}",
+                escape_str(language.root()),
+                escape_str(reference),
+                escape_str(output)
             ),
         };
         out.push_str(&format!("source = {}\n", source_str));
@@ -1743,6 +1760,19 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             gate_status: kv_field(s, "gate-status").unwrap_or_else(|| "unknown".to_string()),
         });
     }
+    if let Some(language) = kv_field(s, "foreign") {
+        let language = crate::AST::ForeignLanguage::from_root(&language)
+            .ok_or_else(|| format!("unknown foreign language `{language}`"))?;
+        let reference = kv_field(s, "reference")
+            .ok_or_else(|| "foreign source is missing `reference`".to_string())?;
+        let output = kv_field(s, "output")
+            .ok_or_else(|| "foreign source is missing `output`".to_string())?;
+        return Ok(LockSource::Foreign {
+            language,
+            reference,
+            output,
+        });
+    }
     if let Some(url) = kv_field(s, "git") {
         let selector = if let Some(t) = kv_field(s, "tag") {
             format!("tag = \"{}\"", t)
@@ -2047,6 +2077,112 @@ pub fn record_nix_realization(
         .iter_mut()
         .find(|p| p.name == name && matches!(&p.source, LockSource::Nix { .. }))
     {
+        *existing = entry;
+    } else {
+        lock.packages.push(entry);
+    }
+    ensure_build_stamp(project_root, &mut lock);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "could not create project lock directory `{}`: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    write_lock_atomically(&lock_path, &write(&lock))
+}
+
+/// Record one verified package-backed foreign namespace projection. The
+/// language and provider ref stay in the lock source, while `output` names
+/// the Hangar projection that supplied the generated binding. Upserting by
+/// foreign dependency name keeps a provider change visible and preserves the
+/// receipt only when the complete identity and envelope are unchanged.
+pub fn record_foreign_realization(
+    project_root: &Path,
+    name: &str,
+    version: &str,
+    language: crate::AST::ForeignLanguage,
+    reference: &str,
+    output: &str,
+    envelope: LockEnvelope,
+) -> Result<(), String> {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = match std::fs::read_to_string(&lock_path) {
+        Ok(raw) => parse(&raw).map_err(|error| {
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            )
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            authority: None,
+            workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            browsers: Vec::new(),
+            source_channels: Vec::new(),
+            build_stamp: None,
+            build_contributions: Vec::new(),
+        },
+        Err(error) => {
+            return Err(format!(
+                "could not read project lock `{}`: {error}",
+                lock_path.display()
+            ));
+        }
+    };
+    lock.version = LOCK_VERSION;
+    let existing_receipt = lock
+        .packages
+        .iter()
+        .find(|package| {
+            package.name == name
+                && package.version == version
+                && matches!(
+                    &package.source,
+                    LockSource::Foreign {
+                        language: locked_language,
+                        reference: locked_reference,
+                        output: locked_output,
+                    } if locked_language == &language
+                        && locked_reference == reference
+                        && locked_output == output
+                )
+                && package
+                    .envelope
+                    .as_ref()
+                    .is_some_and(|current| current.output_hash == envelope.output_hash)
+        })
+        .and_then(|package| package.receipt.clone());
+    let entry = LockedPackage {
+        name: name.to_string(),
+        version: version.to_string(),
+        source: LockSource::Foreign {
+            language,
+            reference: reference.to_string(),
+            output: output.to_string(),
+        },
+        locked: None,
+        fingerprint: envelope.output_hash.clone(),
+        content_hash: None,
+        dependencies: Vec::new(),
+        layer: None,
+        inferred_layer: None,
+        effects: Vec::new(),
+        effect_grants: Vec::new(),
+        envelope: Some(envelope),
+        receipt: existing_receipt,
+        provenance: None,
+    };
+    if let Some(existing) = lock.packages.iter_mut().find(|package| {
+        package.name == name && matches!(&package.source, LockSource::Foreign { .. })
+    }) {
         *existing = entry;
     } else {
         lock.packages.push(entry);
@@ -3125,6 +3261,14 @@ pub fn dep_source(dep_name: &str, spec: &DepSpec) -> LockSource {
             selector: git_selector_str(selector),
         },
         DepSpec::Registry(_) => LockSource::Path(format!("registry:{}", dep_name)),
+        DepSpec::Foreign {
+            language,
+            reference,
+        } => LockSource::Foreign {
+            language: *language,
+            reference: reference.clone(),
+            output: String::new(),
+        },
     }
 }
 

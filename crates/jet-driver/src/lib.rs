@@ -72,8 +72,9 @@ pub mod BuildPluginHook;
 // summary and lint-policy enforcement without depending on the full
 // `jetpack` engine for that.
 pub use jet_pkg_model::{
-    AdaBind, CBind, CFFI, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, LuaBind, Package, PascalBind, PerlBind, PhpBind, Policy, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, ScriptDeps,
+    AdaBind, CBind, CFFI, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, JavaScriptBind, LuaBind, Package, PascalBind, PerlBind, PhpBind, Policy, PythonBind, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, ScriptDeps,
     Store,
+    OctaveBind,
 };
 pub use jet_pkg_model::Authority;
 pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};

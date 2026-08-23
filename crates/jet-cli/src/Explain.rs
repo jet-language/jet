@@ -449,6 +449,9 @@ pub fn is_code(s: &str) -> bool {
         return matches!(b[0], b'E' | b'L')
             || (b[0] == b'W' && b[1..] == *b"0410");
     }
+    if b.len() == 6 && b[..2] == *b"JT" && b[2..].iter().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
     let Some(rest) = s.strip_prefix("E-").or_else(|| s.strip_prefix("L-")) else {
         return false;
     };
@@ -591,6 +594,13 @@ mod marker_registry_tests {
         let pure = super::lookup("Pure").expect("Pure retirement explanation");
         assert!(pure.retired);
         assert_eq!(pure.fix.as_deref(), Some("replace it with `-[]>`"));
+    }
+
+    #[test]
+    fn migration_tool_codes_have_explain_shape() {
+        assert!(super::is_code("JT0101"));
+        assert!(super::lookup("JT0101").is_some());
+        assert!(!super::is_code("JT101"));
     }
 
     #[test]

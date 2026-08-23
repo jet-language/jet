@@ -3106,6 +3106,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             | "Limits"
                             | "DkimConfig"
                             | "SMTPConfig"
+                            | "ModGrant"
                     )
             );
             let mut parts = fields
@@ -6397,7 +6398,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .iter()
                 .map(|a| {
                     let s = emit_tir_expr(&a.value, cx);
-                    if a.clone {
+                    if a.mut_borrow {
+                        format!("&mut ({s})")
+                    } else if a.clone {
                         format!("({}).clone()", s)
                     } else {
                         s

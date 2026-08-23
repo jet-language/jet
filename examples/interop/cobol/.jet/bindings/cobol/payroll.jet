@@ -15,10 +15,12 @@ pub struct PayrollRecord {
     fn apply_minor(record_id: Int, gross_pay_minor: Int) Int = "jet_cobol_payroll_apply_minor"
 }
 
-pub fn apply_minor(record_id: Int, gross_pay_minor: Int) Int -> {
-    if gross_pay_minor < -999999999 || gross_pay_minor > 999999999 {
-        panic("gross_pay_minor exceeds the 9-digit COMP-3 field")
-    }
-    if record_id < 0 || record_id > 999999 -> panic("record_id exceeds the 6-digit COMP-5 field")
-    return abi.apply_minor(record_id, gross_pay_minor)
+pub enum CobolError { Range ProgramFailed }
+
+pub fn apply_minor(record_id: Int, gross_pay_minor: Int) Int CobolError! -[FFI.Cobol]> {
+    if gross_pay_minor < -999999999 || gross_pay_minor > 999999999 -> return Err(CobolError.Range)
+    if record_id < 0 || record_id > 999999 -> return Err(CobolError.Range)
+    result :: abi.apply_minor(record_id, gross_pay_minor)
+    if result == -9223372036854775808 -> return Err(CobolError.ProgramFailed)
+    return Ok(result)
 }

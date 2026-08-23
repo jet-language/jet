@@ -6,6 +6,7 @@
 //! the callable bridge uses scaled minor units because Decimal is not a C ABI
 //! scalar.
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -74,14 +75,14 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
     let archive = cache.join(format!("lib{stem}.a"));
     let copy_dir = copybook_path.parent().unwrap_or_else(|| Path::new("."));
     run(Command::new("cobc").args(["-c", "-I"]).arg(copy_dir).arg(source_path).arg("-o").arg(&object), "cobc")?;
-    let config = output(Command::new("cob-config").arg("--cflags"), "cob-config")?;
+    let config = checked_output(Command::new("cob-config").arg("--cflags"), "cob-config")?;
     let cflags = String::from_utf8_lossy(&config.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>();
     std::fs::write(&bridge_c, render_bridge(&program, &layout, packed[0], input, lib))
         .map_err(|e| BindError::IO(format!("could not write the COBOL C bridge: {e}")))?;
     let mut cc = Command::new("cc"); cc.arg("-c").arg("-fPIC"); cc.args(&cflags).arg(&bridge_c).arg("-o").arg(&bridge_o);
     run(&mut cc, "cc")?;
     run(Command::new("ar").arg("rcs").arg(&archive).arg(&object).arg(&bridge_o), "ar")?;
-    let libs = output(Command::new("cob-config").arg("--libs"), "cob-config")?;
+    let libs = checked_output(Command::new("cob-config").arg("--libs"), "cob-config")?;
     let runtime_dir = String::from_utf8_lossy(&libs.stdout).split_whitespace().find_map(|v| v.strip_prefix("-L")).map(PathBuf::from)
         .filter(|p| p.is_absolute()).ok_or_else(|| BindError::Source("cob-config did not report an absolute libcob directory".into()))?;
     let _ = std::fs::remove_file(object); let _ = std::fs::remove_file(bridge_o); let _ = std::fs::remove_file(bridge_c);
@@ -89,20 +90,29 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
 }
 
 pub fn parse_copybook(source: &str) -> Result<RecordLayout, BindError> {
-    let mut record = None; let mut fields = Vec::new(); let mut offset = 0;
+    let mut record = None; let mut fields = Vec::new(); let mut names = HashSet::new(); let mut offset: usize = 0;
     for raw in source.lines() {
-        let line = raw.get(6..).unwrap_or(raw).split("*> ").next().unwrap_or(raw).trim().trim_end_matches('.').trim();
+        let line = raw.get(6..).unwrap_or(raw).split("*>").next().unwrap_or(raw).trim().trim_end_matches('.').trim();
         if line.is_empty() || line.starts_with('*') { continue; }
         let words = line.split_whitespace().collect::<Vec<_>>();
         if words.len() < 2 { continue; }
-        if words[0] == "01" { record = Some(jet_name(words[1])); continue; }
+        if words[0] == "01" {
+            if record.is_some() { return Err(BindError::Source("copybook must contain exactly one level 01 record".into())); }
+            let name = jet_name(words[1]);
+            if !is_ident(&name) { return Err(BindError::Source(format!("copybook record name `{}` is not a valid Jet identifier", words[1]))); }
+            record = Some(name);
+            continue;
+        }
         if words[0] != "05" || record.is_none() { return Err(BindError::Source(format!("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))); }
+        let name = jet_name(words[1]);
+        if !is_ident(&name) || !names.insert(name.clone()) { return Err(BindError::Source(format!("copybook field name `{}` is not a unique Jet identifier", words[1]))); }
         let pic_at = words.iter().position(|w| w.eq_ignore_ascii_case("PIC")).ok_or_else(|| BindError::Source(format!("copybook field `{}` has no PIC clause", words[1])))?;
         let pic = words.get(pic_at + 1).ok_or_else(|| BindError::Source("PIC clause has no shape".into()))?.to_ascii_uppercase();
         let clauses = words[pic_at + 2..].iter().map(|w| w.to_ascii_uppercase()).collect::<Vec<_>>();
         let kind = parse_pic(&pic, &clauses)?;
         let width = match kind { FieldKind::FixedText { characters } => characters, FieldKind::NativeInt { digits, .. } => if digits <= 4 { 2 } else if digits <= 9 { 4 } else if digits <= 18 { 8 } else { return Err(BindError::Source("COMP-5 fields may contain at most 18 digits".into())); }, FieldKind::PackedDecimal { digits, .. } => (digits + 2) / 2 };
-        fields.push(FieldLayout { name: jet_name(words[1]), offset, width, kind }); offset += width;
+        let next_offset = offset.checked_add(width).ok_or_else(|| BindError::Source("copybook record width overflows the supported ABI".into()))?;
+        fields.push(FieldLayout { name, offset, width, kind }); offset = next_offset;
     }
     let name = record.ok_or_else(|| BindError::Source("copybook has no level 01 record".into()))?;
     if fields.is_empty() { return Err(BindError::Source("copybook record has no level 05 fields".into())); }
@@ -111,15 +121,21 @@ pub fn parse_copybook(source: &str) -> Result<RecordLayout, BindError> {
 
 fn parse_pic(pic: &str, clauses: &[String]) -> Result<FieldKind, BindError> {
     if let Some(n) = pic.strip_prefix("X(").and_then(|v| v.strip_suffix(')')).and_then(|v| v.parse().ok()) {
-        if clauses.is_empty() { return Ok(FieldKind::FixedText { characters: n }); }
+        if clauses.is_empty() && n > 0 { return Ok(FieldKind::FixedText { characters: n }); }
     }
     let signed = pic.starts_with('S'); let numeric = pic.trim_start_matches('S');
     let (whole, frac) = numeric.split_once('V').map_or((numeric, None), |(a,b)| (a,Some(b)));
     let digits = pic_digits(whole).and_then(|a| pic_digits(frac.unwrap_or("")).map(|b| a + b));
     let scale = frac.and_then(pic_digits).unwrap_or(0);
     let Some(digits) = digits else { return Err(BindError::Source(format!("unsupported PIC shape `{pic}`"))); };
-    if clauses.iter().any(|c| c == "COMP-3" || c == "PACKED-DECIMAL") { return Ok(FieldKind::PackedDecimal { digits, scale, signed }); }
-    if clauses.iter().any(|c| c == "COMP-5" || c == "BINARY") && scale == 0 { return Ok(FieldKind::NativeInt { digits, signed }); }
+    if clauses.iter().any(|c| c == "COMP-3" || c == "PACKED-DECIMAL") {
+        if digits == 0 || digits > 18 { return Err(BindError::Source("COMP-3 fields may contain 1 to 18 digits for the Int minor-unit bridge".into())); }
+        return Ok(FieldKind::PackedDecimal { digits, scale, signed });
+    }
+    if clauses.iter().any(|c| c == "COMP-5" || c == "BINARY") && scale == 0 {
+        if digits == 0 || digits > 18 { return Err(BindError::Source("COMP-5 fields may contain 1 to 18 digits for the Int bridge".into())); }
+        return Ok(FieldKind::NativeInt { digits, signed });
+    }
     Err(BindError::Source(format!("unsupported PIC/usage `{pic} {}`; use X(n), COMP-5, or COMP-3", clauses.join(" "))))
 }
 
@@ -139,13 +155,14 @@ fn render_jet(lib: &str, layout: &RecordLayout, packed: &FieldLayout, input: Opt
     let abi = format!("jet_cobol_{lib}"); let mut out = format!("// cobol-layout {}: {} bytes\n", layout.name, layout.width);
     for f in &layout.fields { out.push_str(&format!("// cobol-field {}: offset={} width={} type={}{}\n", f.name, f.offset, f.width, f.kind.jet_type(), match f.kind { FieldKind::PackedDecimal { scale, .. } => format!(" scale={scale} encoding=COMP-3"), FieldKind::NativeInt { .. } => " encoding=COMP-5".into(), FieldKind::FixedText { .. } => " encoding=fixed-text".into() })); }
     out.push_str(&format!("#Codable\npub struct {} {{\n", upper_camel(&layout.name)));
-    for f in &layout.fields { out.push_str(&format!("    {}: {};\n", f.name, f.kind.jet_type())); } out.push_str("}\n\n");
+    for f in &layout.fields { out.push_str(&format!("    {}: {}\n", f.name, f.kind.jet_type())); } out.push_str("}\n\n");
     out.push_str(&format!("#Extern module c.{abi} {{\n    fn apply_minor("));
-    if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) => Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\n", packed.name));
-    out.push_str("pub fn apply_minor("); if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) => Int {{\n", packed.name));
-    if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) { let max=10_i128.pow(*digits as u32)-1; let min=if *signed{-max}else{0}; out.push_str(&format!("    if {}_minor < {min} || {}_minor > {max} {{ panic(\"{}_minor exceeds the {}-digit COMP-3 field\") }}\n",packed.name,packed.name,packed.name,digits)); }
-    if let Some(field)=input { if let FieldKind::NativeInt{digits,signed}=&field.kind {let max=10_i128.pow(*digits as u32)-1;let min=if *signed{-max}else{0};out.push_str(&format!("    if record_id < {min} || record_id > {max} {{ panic(\"record_id exceeds the {digits}-digit COMP-5 field\") }}\n"));}}
-    out.push_str("    return abi.apply_minor("); if input.is_some() { out.push_str("record_id, "); } out.push_str(&format!("{}_minor)\n}}\n", packed.name)); out
+    if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n", packed.name));
+    out.push_str("pub fn apply_minor("); if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) Int CobolError! -[FFI.Cobol]> {{\n", packed.name));
+    if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) { let max=10_i128.pow(*digits as u32)-1; let min=if *signed{-max}else{0}; out.push_str(&format!("    if {}_minor < {min} || {}_minor > {max} -> return Err(CobolError.Range)\n",packed.name,packed.name)); }
+    if let Some(field)=input { if let FieldKind::NativeInt{digits,signed}=&field.kind {let max=10_i128.pow(*digits as u32)-1;let min=if *signed{-max}else{0};out.push_str(&format!("    if record_id < {min} || record_id > {max} -> return Err(CobolError.Range)\n"));}}
+    out.push_str("    result :: abi.apply_minor("); if input.is_some() { out.push_str("record_id, "); } out.push_str(&format!("{}_minor)\n", packed.name));
+    out.push_str("    if result == -9223372036854775808 -> return Err(CobolError.ProgramFailed)\n    return Ok(result)\n}\n"); out
 }
 
 fn render_bridge(program: &str, layout: &RecordLayout, packed: &FieldLayout, input: Option<&FieldLayout>, lib: &str) -> String {
@@ -155,7 +172,10 @@ fn render_bridge(program: &str, layout: &RecordLayout, packed: &FieldLayout, inp
     format!(r#"#include <stdint.h>
 #include <string.h>
 #include <libcob.h>
+#include <pthread.h>
 extern int {program}(unsigned char *record);
+static pthread_once_t jet_cobol_once = PTHREAD_ONCE_INIT;
+static void jet_cobol_init(void) {{ cob_init(0, NULL); }}
 static void pack(int64_t value, unsigned char *out, size_t n) {{
   uint64_t mag = value < 0 ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
   memset(out, 0, n); out[n-1] = (unsigned char)(value < 0 ? 0x0d : 0x0c);
@@ -165,9 +185,9 @@ static int64_t unpack(const unsigned char *in, size_t n) {{
   int64_t v=0; for(size_t nib=0;nib<n*2-1;++nib){{ unsigned d=(nib%2)?(in[nib/2]&15):(in[nib/2]>>4); v=v*10+(int64_t)d; }} return ((in[n-1]&15)==0x0d)?-v:v;
 }}
 int64_t jet_cobol_{lib}_apply_minor({args}) {{
-  static int initialized=0; unsigned char record[{record_width}]; memset(record, ' ', sizeof record);
+  unsigned char record[{record_width}]; memset(record, ' ', sizeof record);
 {pre}  pack(minor, record + {packed_offset}, {packed_width});
-  if(!initialized){{ cob_init(0, NULL); initialized=1; }}
+  if(pthread_once(&jet_cobol_once, jet_cobol_init)!=0) return INT64_MIN;
   if({program}(record)!=0) return INT64_MIN;
   return unpack(record + {packed_offset}, {packed_width});
 }}
@@ -176,6 +196,7 @@ int64_t jet_cobol_{lib}_apply_minor({args}) {{
 
 struct ToolOutput { status: std::process::ExitStatus, stdout: Vec<u8>, stderr: Vec<u8> }
 fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> { let o=output(command,tool)?; if o.status.success(){Ok(())}else{Err(BindError::ToolFailed{tool,detail:launder(&o.stderr)})} }
+fn checked_output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> { let o=output(command,tool)?; if o.status.success(){Ok(o)}else{Err(BindError::ToolFailed{tool,detail:launder(&o.stderr)})} }
 fn output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
     const LIMIT:usize=64*1024; command.stdout(Stdio::piped()).stderr(Stdio::piped()); let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;
     let stdout=child.stdout.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stdout")))?; let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;
@@ -193,4 +214,6 @@ fn is_ident(s:&str)->bool{let mut c=s.chars();matches!(c.next(),Some(v)if v.is_a
     use super::*;
     #[test] fn copybook_layout_keeps_packed_decimal_exact(){let l=parse_copybook("       01 PAYROLL-RECORD.\n          05 EMPLOYEE-ID PIC 9(6) COMP-5.\n          05 NAME PIC X(20).\n          05 GROSS-PAY PIC S9(7)V99 COMP-3.\n").unwrap();assert_eq!(l.width,29);assert_eq!(l.fields[2],FieldLayout{name:"gross_pay".into(),offset:24,width:5,kind:FieldKind::PackedDecimal{digits:9,scale:2,signed:true}});assert_eq!(l.fields[2].kind.jet_type(),"Decimal");}
     #[test] fn unsupported_layout_fails_instead_of_guessing(){assert!(parse_copybook("01 X.\n05 RATE PIC 9(4)V99 COMP-1.\n").is_err());}
+    #[test] fn generated_surface_uses_current_arrows_and_typed_failure(){let l=parse_copybook("       01 X.\n          05 ID PIC 9(6) COMP-5.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();let source=render_jet("payroll",&l,&l.fields[1],Some(&l.fields[0]));assert!(source.contains("Int CobolError! -[FFI.Cobol]>"));assert!(source.contains("-> return Err(CobolError.Range)"));assert!(!source.contains("=>"));assert!(!source.contains(":[FFI.Cobol]"));}
+    #[test] fn oversized_packed_decimal_fails_before_abi_codegen(){assert!(parse_copybook("01 X.\n05 AMOUNT PIC 9(19) COMP-3.\n").is_err());}
 }

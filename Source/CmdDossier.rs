@@ -116,11 +116,22 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         return;
     }
 
+    // D-FFI-UNIFY1: the capability report is derived from the same descriptor
+    // table used by import routing and cache/link planning.
+    if positional.first().copied() == Some("ffi") {
+        if json {
+            println!("{}", jet::Foreign::capability_report_json());
+        } else {
+            print!("{}", jet::Foreign::capability_report_text());
+        }
+        return;
+    }
+
     let (path, target) = match positional.as_slice() {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
         _ => {
-            crate::cli_error!(@fix "E2104", "`jet inspect dossier` needs an entry file and optional symbol", "jet inspect dossier examples/features/basics/hello.jet run; use `target board.sensor_v1` or `data` for those dossiers");
+            crate::cli_error!(@fix "E2104", "`jet inspect dossier` needs an entry file and optional symbol", "jet inspect dossier examples/features/basics/hello.jet run; use `target board.sensor_v1`, `data`, or `ffi` for those dossiers");
             exit(ExitCodes::USER_ERROR);
         }
     };

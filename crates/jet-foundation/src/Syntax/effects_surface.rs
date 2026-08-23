@@ -496,6 +496,10 @@ pub const REF_SOURCE_JET_REGISTRY: &str = "jet-registry";
 pub const REF_SOURCE_NPM: &str = "npm";
 /// D-JPK-PROVIDERS2: direct Cargo ecosystem root.
 pub const REF_SOURCE_CARGO: &str = "cargo";
+/// D-JPK-EXTPROV1: direct PyPI ecosystem root.
+pub const REF_SOURCE_PYPI: &str = "pypi";
+/// D-JPK-EXTPROV1: direct SwiftPM ecosystem root.
+pub const REF_SOURCE_SWIFTPM: &str = "swiftpm";
 
 /// The one home for "which source tokens are built-in providers" — every
 /// recognized `REF_SOURCE_*` above, in the order a ref may not put them
@@ -515,6 +519,8 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
     REF_SOURCE_JET_REGISTRY,
     REF_SOURCE_NPM,
     REF_SOURCE_CARGO,
+    REF_SOURCE_PYPI,
+    REF_SOURCE_SWIFTPM,
 ];
 
 /// D-JPK2/9: the Phase 1 verb set.

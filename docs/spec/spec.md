@@ -1283,7 +1283,7 @@ Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
 Every root accepts the same single-library form and the same member list:
 `use <lang>.<lib> as alias` or `use <lang>.[lib as alias, other]`.
-C, C++, and JS are active namespace binders. C uses the namespace surface
+C, C++, Python, and JS are active namespace binders. C uses the namespace surface
 (`use c.<lib>` or `use c.[lib as alias, other]` / `#Extern module c.<lib>`).
 C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
@@ -1298,9 +1298,22 @@ JS-on-WASM host on native targets. Generated JS binding caches live under
 `.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
 `<lib>.d.ts` records the TypeScript declaration provenance. Rust keeps the shipped
 `extern rust "crate@version" { ... }` declaration block as its active binder
-surface until the `rust.*` namespace migrates. Python and Swift roots are
-registered for their ratified binders; Swift's planned route is a typed bridge
-over generated C-ABI shims.
+surface until the `rust.*` namespace migrates. Python is active through its
+supervised sidecar; Swift's planned route is a typed bridge over generated
+C-ABI shims.
+
+`jet inspect bind js <lib>.d.ts --runtime <module.js>` accepts only exported
+scalar declarations (`number`, `bigint`, and `boolean`). It emits the same
+checked C/Jet wrapper, a supervised Node worker, and descriptor-stamped
+provenance. The Node broker is the explicit opt-in transport; target-dispatched
+JS remains the native/web execution route.
+
+The compiler stores this shape in one descriptor table. Each descriptor names
+the ABI contract, ownership and layout rules, callback and error model, safe
+wrapper boundary, cache suffix, provider, effect leaf, and capability set.
+Generated stubs and binder artifacts include the descriptor stamp. A stale
+stamp is a binding-generation error before the foreign call. `jet inspect bind`
+reports the same descriptor data for every language root.
 
 The inline fourth tier is also implemented. `#FFI(c|cpp) fn` carries one exact
 triple-quoted raw body whose Jet signature remains the checked contract.
@@ -1309,6 +1322,31 @@ with `use core.mem`; its named operands, return anchor, clobbers, and selected
 target are checked before lowering. These native boundaries are not resident-JIT
 code: the JIT reports the foreign boundary by name, while native build/run owns
 execution and link proof.
+
+## E3 — Typed Python sidecar (D-FFI-PY1=A, sidecar vertical)
+
+`jet inspect bind py <script.py> --pkg <lib>` checks top-level Python functions
+with scalar annotations (`int`, `float`, and `bool`), then writes the typed
+`.jet/bindings/py/<lib>.jet` cache, a supervised worker, a C archive, and a
+queryable provenance record. The generated Jet wrapper is the only safe call
+surface. It uses the shared descriptor stamp, scalar wire values, and the
+`-[FFI.Py]>` effect row. `py.*` calls never expose a Python exception,
+traceback, command string, or raw foreign symbol to Jet; a failed worker call
+becomes a checked result error.
+
+The sidecar adapter uses the common checked C bridge used by scalar foreign
+adapters. Its worker validates the declared argument and result types before
+the foreign call, contains Python stdout/stderr, and fails closed on malformed
+or non-finite values. Unsupported annotations, async functions, defaults,
+variadics, and malformed signatures reject during binding with **E3208**.
+Python package realization remains the PyPI provider's responsibility; the
+bridge consumes the provisioned `python3` runtime and records its descriptor,
+source, worker, and archive identities in provenance.
+
+`jet inspect dossier ffi` prints the golden-tested per-language capability
+matrix derived from the same descriptor table that routes imports and resolves
+foreign archives. Planned roots remain visible as planned; no host-tool probe
+turns an unavailable local installation into a false active claim.
 
 ## M7 — Rust FFI (`extern rust`, done)
 
@@ -1321,8 +1359,14 @@ no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
 `Char`, `[T]`/`[K:V]`/`T?`/`T E!` built from allowed types, and
-structs/enums whose fields are allowed. No borrowed parameters or returns, no
-callbacks (**E0702**).
+structs/enums whose fields are allowed. Capability parameters use the ratified
+`&`/`^` meanings from D-FFI-CAP1; raw foreign calls carrying one require an
+audited `#Unsafe` boundary (**E0702**). Generated typed bindings own the
+adapter and may expose the capability directly. Unsupported types still fail
+at the declaration boundary with **E0702**.
+A returned handle may use `#Close(close)`; the named sibling must consume
+exactly `^` of that handle and return no value, which registers it with
+`close(^handle)` exactly once.
 
 When any crate dependency is needed, the driver builds a hidden cached cargo
 bridge under `~/.cache/jet/ffi/` and links it into the generated program (R9:
@@ -1382,7 +1426,8 @@ shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
 implementation, D-CBIND3 superseded). It parses C function prototypes over the
 bindable type subset (scalars, `char*` strings, `void`) and emits a `#Bindgen`
 cache; declarations it cannot map are skipped and reported rather than faked
-(I3). **E3208** fires only when the header cannot be read or contains no
+(I3). The cache also records the shared descriptor stamp; a stale generated
+cache is rejected and must be regenerated. **E3208** fires only when the header cannot be read or contains no
 bindable prototypes — the fix is a hand-written `#Extern module c.<lib>` overlay
 for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
 **E3201–E3208** in diagnostics.md with snapshots (front-end ones under
@@ -1432,9 +1477,11 @@ level-05 fixed text, COMP-5 integers, and COMP-3 packed decimals. The binder
 records exact offsets and widths, emits an `#Codable` Jet record, and maps every
 COMP-3 field to `Decimal`, never `Float`. Its callable C bridge accepts packed
 decimal values as scaled minor-unit `Int` values, initializes `libcob` once,
-and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. Generated
-tools have 60-second deadlines and 64 KiB capture ceilings. Unknown layouts and
-laundered foreign-tool failures use **E3208**.
+and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. The public
+wrapper keeps range and foreign-program failures typed as `CobolError` while
+publishing the `-[FFI.Cobol]>` effect. Generated tools have 60-second deadlines
+and 64 KiB capture ceilings. Unknown layouts and laundered foreign-tool failures
+use **E3208**.
 
 ## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
 
@@ -1508,6 +1555,8 @@ future Tcl event-limit contract. Bridge tools run under a 60-second deadline
 with 64-KiB diagnostic capture. Binding provenance hashes the initialization
 script, Tcl runtime identity, and schema. Bind failures use **E3208**.
 
+Example: `examples/features/lowlevel/polyglot_tcl/`.
+
 ## E3 — Lua project binder (D-FFI-LUA1=A)
 
 `jet inspect bind lua <script.lua> --pkg <lib>` validates the script with the
@@ -1567,13 +1616,19 @@ Provenance hashes the spec, package body, GNAT runtime identity, and binding
 schema. The native link records the exact GNAT runtime directory and rejects a
 missing or non-absolute runtime identity.
 
+Example: `examples/features/lowlevel/polyglot_ada/`.
+
 ## E3 — Object Pascal project binder (D-FFI-PASCAL1=A)
 
 `jet inspect bind pascal <library.pas> --pkg <lib>` compiles a FreePascal
 library's exported `cdecl` routines and writes a typed `pascal.<lib>` cache.
 `Int64` and `Double` cross as Jet `Int` and `Float`. A declared class binds
-through exported `<class>_new`, pointer-first method, and `<class>_free`
+through exported `<class>_new`, pointer-first scalar methods, and `<class>_free`
 wrappers. Unsupported ABI shapes fail binding instead of being guessed.
+`jet import pascal <dir>` preserves the Pascal source as the authority and
+emits an editable binder stub plus JT0101 provenance; it does not invent a
+source translation for classes, runtime ownership, or unsupported bodies.
+Example: `examples/features/lowlevel/polyglot_pascal/`.
 
 Class pointers never reach Jet. A generated C bridge owns them in a bounded
 64-slot table and returns opaque integer identities wrapped in a move-only Jet
@@ -1643,6 +1698,8 @@ The bridge validates frame lengths and response envelopes before the generated
 Jet wrapper exposes a value. PowerShell exceptions become
 `PowerShellError.CommandFailed`; raw error records, script paths, stderr, and
 stack traces never cross the boundary. Calls carry the `FFI.PowerShell` effect leaf.
+Generated Jet source uses the canonical `->` callable arrow and dotless typed
+construction; retired spellings are never emitted.
 
 Each call declares a 1–300000 ms deadline. Expiry kills and reaps the whole
 worker process group and invalidates its session. `cancel(session)` performs
@@ -4441,6 +4498,11 @@ byte-idempotent. Update uses the last generated baseline: untouched generated
 files advance, owner-edited files remain when foreign source is unchanged, and
 simultaneous edits conflict before any conflicted file is written. Directory
 walks are deterministic and do not follow symlinks.
+
+The production proof is the fixed corpus in `tests/fixtures/source_import`:
+`tests/source_import.rs` runs the imported Jet against Python 3, compares the
+oracle output, and pins the generated bytes. It also proves a second import is
+byte-identical and that a three-way conflict writes no conflicted file.
 
 ## Deliberately absent
 

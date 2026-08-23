@@ -2,6 +2,12 @@
 
 **Date:** 2026-07-31. **Trigger:** owner goal statement. **Frame:** day-zero; artifacts only; every finding names work Jet can do.
 
+**Post-audit status (2026-08-22):** the PowerShell enterprise adapter from
+#986 now ships through `jet inspect bind pwsh`, with the supervised object
+pipeline, DataTree round-trip, laundered E3208 failures, and cancellation
+proof recorded by the card's targeted checks. The dated findings below remain
+the original 2026-07-31 snapshot.
+
 ## Goal audited
 
 Owner statement, 2026-07-31: as a later phase, Jet must (1) support Zig-style compilation of C; (2) offer an exceptional, incremental replacement path for the most common languages, aimed at enterprises and large codebases; (3) win market share through ease of adoption and transition over time; (4) ultimately replace every language in every domain, staged, not overnight.
@@ -22,7 +28,7 @@ Compared the goal against the shipped tree (`crates/jet-pkg-model/src/FFI.rs`, `
 
 - **UL11 / Unified FFI** (#180, #1120–#1126): one checked boundary for C/C++/Rust/Swift/JS/Python/JVM/.NET/R/Julia; ownership/callback/async mapping; live upstream conformance; **replacement overlays** that must pass differential (golden/fuzz/perf/side-effect) proof before a Jet package may substitute a foreign one (D-FFI-UNIFY1 in-situ shadowing).
 - **Enterprise adapters:** COM/VBA (#507), PowerShell/Dart/Tcl/Ada/Pascal (#986–#990), COBOL strangler-fig with copybooks (#504), Octave (#1154).
-- **Source migration contract** (#1155/#1156, D-MIGRATE-SRC1): `jet import <lang> <dir>` producing editable Jet plus TODOs, with differential and idempotence proof.
+- **Source migration contract** (#1155/#1156, D-MIGRATE-SRC1): the first Python proof now ships as `jet import py <dir>`, producing editable Jet plus TODOs with differential and idempotence proof. Other language importers remain separate work.
 - **Jetpack:** Nix bridge with "consume, coexist, replace; no flag day"; lockfile/migration importers from npm/Cargo/PyPI/etc. (E4-JP17, #941); flake bridge (#1070); offline bundles (#957).
 - **Epoch 5:** legacy build wrappers — Jet's build graph wrapping CMake/Make/Gradle/npm/cargo (D-BUILDLEGACY1).
 - **Cross-compilation:** toolchain/sysroot resolution (#758), C headers/libs/linker for foreign targets (#1058), expert target controls and matrix (#1059/#1060).
@@ -59,7 +65,7 @@ D-BUILDLEGACY1 wraps foreign builds **inside** Jet's graph. The reverse rule set
 
 ### G4 — Importer coverage stops at Python
 
-D-MIGRATE-SRC1 defines the contract, and only Python is carded as the first proof. The languages that dominate enterprise line counts — Java, C#, TypeScript/JavaScript, Go, C++ — have binders (call-in) but no source-import scope, not even a scoped-and-rejected verdict. The goal needs, per language, an explicit ruling: source import (full or subset), binder-only coexistence, or overlay replacement — plus cards for the chosen tier. C++ source import in particular should get an honest "binder + manual rewrite only" verdict rather than silence.
+D-MIGRATE-SRC1 defines the contract, and Python now has the first proven subset. The languages that dominate enterprise line counts — Java, C#, TypeScript/JavaScript, Go, C++ — have binders (call-in) but no source-import scope, not even a scoped-and-rejected verdict. The goal needs, per language, an explicit ruling: source import (full or subset), binder-only coexistence, or overlay replacement — plus cards for the chosen tier. C++ source import in particular should get an honest "binder + manual rewrite only" verdict rather than silence.
 
 ### G5 — No publishing into foreign ecosystems
 

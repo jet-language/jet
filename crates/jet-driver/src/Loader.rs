@@ -393,7 +393,11 @@ fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
         // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
         // package — it must not shadow `use <pkg>` resolution (e.g. a dep
         // named `c`). Skip it here; CFFI.rs reads it for link flags.
-        if matches!(source, crate::Package::DepSource::CLib { .. }) {
+        if matches!(
+            source,
+            crate::Package::DepSource::CLib { .. }
+                | crate::Package::DepSource::Foreign { .. }
+        ) {
             continue;
         }
         declared_deps.insert(name.clone());
@@ -1914,6 +1918,11 @@ fn collect_dep_dirs(
                 // Registry source trees are materialized by `jet fetch` before
                 // loading. Keep unresolved manifests out of module search
                 // instead of inventing a path or silently using a stale one.
+            }
+            Manifest::DepSpec::Foreign { .. } => {
+                // Foreign package bindings are projected into the shared
+                // `.jet/bindings/<language>/` namespace by Jetpack. They are
+                // not Jet module roots and must not participate in `use pkg`.
             }
         }
     }

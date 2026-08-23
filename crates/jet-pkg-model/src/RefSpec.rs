@@ -38,6 +38,10 @@ pub enum Source {
     Npm,
     /// A package from Cargo (D-JPK-PROVIDERS2).
     Cargo,
+    /// A distribution from PyPI (D-JPK-EXTPROV1).
+    PyPI,
+    /// A package from Swift Package Manager (D-JPK-EXTPROV1).
+    SwiftPM,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -57,6 +61,8 @@ impl Source {
             Source::JetRegistry => Syntax::REF_SOURCE_JET_REGISTRY,
             Source::Npm => Syntax::REF_SOURCE_NPM,
             Source::Cargo => Syntax::REF_SOURCE_CARGO,
+            Source::PyPI => Syntax::REF_SOURCE_PYPI,
+            Source::SwiftPM => Syntax::REF_SOURCE_SWIFTPM,
             Source::Named(name) => name,
         }
     }
@@ -81,6 +87,8 @@ impl Source {
             n if n == Syntax::REF_SOURCE_JET_REGISTRY => Some(Source::JetRegistry),
             n if n == Syntax::REF_SOURCE_NPM => Some(Source::Npm),
             n if n == Syntax::REF_SOURCE_CARGO => Some(Source::Cargo),
+            n if n == Syntax::REF_SOURCE_PYPI => Some(Source::PyPI),
+            n if n == Syntax::REF_SOURCE_SWIFTPM => Some(Source::SwiftPM),
             _ => None,
         }
     }
@@ -111,6 +119,8 @@ pub enum ProviderKind {
     JetRegistry,
     Npm,
     Cargo,
+    PyPI,
+    SwiftPM,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
@@ -131,6 +141,8 @@ impl ProviderKind {
             "jet-registry" => ProviderKind::JetRegistry,
             "npm" => ProviderKind::Npm,
             "cargo" => ProviderKind::Cargo,
+            "pypi" => ProviderKind::PyPI,
+            "swiftpm" => ProviderKind::SwiftPM,
             _ => ProviderKind::Nix,
         }
     }
@@ -147,6 +159,8 @@ impl ProviderKind {
             ProviderKind::JetRegistry => "jet-registry",
             ProviderKind::Npm => "npm",
             ProviderKind::Cargo => "cargo",
+            ProviderKind::PyPI => "pypi",
+            ProviderKind::SwiftPM => "swiftpm",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }

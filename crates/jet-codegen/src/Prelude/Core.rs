@@ -733,6 +733,45 @@ where
     }
 }
 
+/// The callback edge is below foreign code, so it cannot return a Rust unwind
+/// to the caller. Preserve Jet's typed runtime report when one exists and
+/// convert every other panic to a terminal E3001 report. Returning a default
+/// callback value would fabricate foreign success; aborting this process is
+/// the only fail-closed result for a callback with no error channel.
+fn jet_ffi_callback_boundary<F, T>(run: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) => jet_ffi_callback_panic(payload),
+    }
+}
+
+fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
+    match payload.downcast::<JetRuntimeDiagnostic>() {
+        Ok(report) => jet_runtime_process_exit(report.exit_code, Some(&report.rendered)),
+        Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+            Ok(report) => jet_runtime_process_exit(report.exit_code, Some(&report.rendered)),
+            Err(payload) => match payload.downcast::<JetExplicitExit>() {
+                Ok(exit) => jet_runtime_process_exit(exit.code, None),
+                Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_process_exit(70, None),
+                Err(payload) => {
+                    let message = payload
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("foreign callback panicked");
+                    let report = jet_runtime_stop_report(
+                        "E3001", "", 0, "", "", 1, 1, message, "",
+                    );
+                    jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
+                }
+            },
+        },
+    }
+}
+
 /// The same classification, on the one thread that is NOT the program's entry
 /// boundary: the interrupt dispatcher.
 ///

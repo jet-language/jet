@@ -445,7 +445,7 @@ pub const CORE_CANONICAL: &str = "core";
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
     "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "lua", "fortran",
-    "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "com", "http", "regex", "csv", "toml",
+    "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "octave", "com", "http", "regex", "csv", "toml",
     "crypto", "archive",
 ];
 
@@ -475,6 +475,7 @@ pub const FOREIGN_ROOTS: &[&str] = &[
     RUBY_MODULE_ROOT,
     PHP_MODULE_ROOT,
     R_MODULE_ROOT,
+    OCTAVE_MODULE_ROOT,
     COM_MODULE_ROOT,
 ];
 pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
@@ -495,6 +496,7 @@ pub const PERL_MODULE_ROOT: &str = "perl"; // D-FFI-PERL1 / D-FFI-UNIFY1
 pub const RUBY_MODULE_ROOT: &str = "ruby"; // D-FFI-RUBY1 / D-FFI-UNIFY1
 pub const PHP_MODULE_ROOT: &str = "php"; // D-FFI-PHP1 / D-FFI-UNIFY1
 pub const R_MODULE_ROOT: &str = "r"; // D-FFI-R1 / D-FFI-UNIFY1
+pub const OCTAVE_MODULE_ROOT: &str = "octave"; // D-FFI-OCTAVE1 / D-FFI-UNIFY1
 pub const COM_MODULE_ROOT: &str = "com"; // D-FFI-COM1 / D-FFI-UNIFY1
 
 /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.

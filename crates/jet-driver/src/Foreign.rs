@@ -1,7 +1,7 @@
 //! D-FFI-UNIFY1 shared binder registry.
 //!
 //! This is the narrow dispatch spine all foreign-language binders hang from.
-//! C and JS are active namespace binders; rust/py/swift are registered ratified
+//! C, Python, JS, and Octave are active namespace binders; rust/swift are registered ratified
 //! mounts so later cards add binder depth without inventing a second namespace
 //! model. The shipped S50 `extern rust` block stays on its existing path until
 //! the `rust.*` binder migrates it under D-FFI-UNIFY1.
@@ -9,7 +9,13 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use crate::AST::{
-    ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule, ProgramBundle,
+    ForeignAbiContract, ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule,
+    ProgramBundle,
+};
+pub use crate::AST::{
+    BinderCapability, BinderCapabilityReport, BinderDescriptor, BinderRuntime, BinderStatus,
+    BinderSurface, BindingStubKind, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
+    FOREIGN_BINDERS as BINDERS,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -21,77 +27,8 @@ fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
         .filter_map(move |(_, import)| seen.insert(import.span).then_some(import))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinderSurface {
-    /// `use <lang>.<lib>` / `#Extern module <lang>.<lib>` / generated cache.
-    Namespace,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinderStatus {
-    Active,
-    Planned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinderRuntime {
-    DirectCAbi,
-    ClangCppShim,
-    LegacyRustExtern,
-    SupervisedPythonSidecar,
-    TargetDispatchedJs,
-    SwiftCAbiBridge,
-    GoCArchive,
-    EmbeddedJvm,
-    EmbeddedDotNet,
-    EmbeddedTcl,
-    EmbeddedLua,
-    FortranIsoCBinding,
-    GnuCobolCAbi,
-    AdaGnatCAbi,
-    FreePascalCdecl,
-    DartApiDl,
-    SupervisedPowerShell,
-    SupervisedPerl,
-    SupervisedRuby,
-    SupervisedPhpPool,
-    SupervisedR,
-    WindowsComAutomation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingStubKind {
-    CHeader,
-    CppHeader,
-    RustExternBlock,
-    PythonIntrospection,
-    TypeScriptDeclarations,
-    SwiftModule,
-    GoExports,
-    JvmClass,
-    DotNetAssembly,
-    TclScript,
-    LuaScript,
-    FortranIsoCBinding,
-    GnuCobolCopybook,
-    AdaSpec,
-    PascalSource,
-    DartContract,
-    PowerShellScript,
-    PerlScript,
-    RubyScript,
-    PhpScript,
-    RScript,
-    ComTypeLibrary,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BinderDescriptor {
-    pub language: ForeignLanguage,
-    pub surface: BinderSurface,
-    pub status: BinderStatus,
-    pub runtime: BinderRuntime,
-    pub stub_kind: BindingStubKind,
+pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
+    crate::AST::binder_descriptor(language)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +60,7 @@ pub enum ForeignHost {
     SupervisedRuby,
     SupervisedPhpPool,
     SupervisedR,
+    SupervisedOctave,
     WindowsComAutomation,
     LegacyRustExtern,
 }
@@ -135,167 +73,7 @@ pub struct ForeignRoutePlan {
     pub binding_cache: PathBuf,
     pub type_stub: Option<PathBuf>,
     pub provenance: PathBuf,
-}
-
-pub const BINDERS: &[BinderDescriptor] = &[
-    BinderDescriptor {
-        language: ForeignLanguage::C,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::DirectCAbi,
-        stub_kind: BindingStubKind::CHeader,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Cpp,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::ClangCppShim,
-        stub_kind: BindingStubKind::CppHeader,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Rust,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Planned,
-        runtime: BinderRuntime::LegacyRustExtern,
-        stub_kind: BindingStubKind::RustExternBlock,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Py,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Planned,
-        runtime: BinderRuntime::SupervisedPythonSidecar,
-        stub_kind: BindingStubKind::PythonIntrospection,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::JS,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::TargetDispatchedJs,
-        stub_kind: BindingStubKind::TypeScriptDeclarations,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Swift,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Planned,
-        runtime: BinderRuntime::SwiftCAbiBridge,
-        stub_kind: BindingStubKind::SwiftModule,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Go,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::GoCArchive,
-        stub_kind: BindingStubKind::GoExports,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Java,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::EmbeddedJvm,
-        stub_kind: BindingStubKind::JvmClass,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::DotNet,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::EmbeddedDotNet,
-        stub_kind: BindingStubKind::DotNetAssembly,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Tcl,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::EmbeddedTcl,
-        stub_kind: BindingStubKind::TclScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Lua,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::EmbeddedLua,
-        stub_kind: BindingStubKind::LuaScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Fortran,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::FortranIsoCBinding,
-        stub_kind: BindingStubKind::FortranIsoCBinding,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Cobol,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::GnuCobolCAbi,
-        stub_kind: BindingStubKind::GnuCobolCopybook,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Ada,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::AdaGnatCAbi,
-        stub_kind: BindingStubKind::AdaSpec,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Pascal,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::FreePascalCdecl,
-        stub_kind: BindingStubKind::PascalSource,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Dart,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::DartApiDl,
-        stub_kind: BindingStubKind::DartContract,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::PowerShell,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::SupervisedPowerShell,
-        stub_kind: BindingStubKind::PowerShellScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Perl,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::SupervisedPerl,
-        stub_kind: BindingStubKind::PerlScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Ruby,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::SupervisedRuby,
-        stub_kind: BindingStubKind::RubyScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Php,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::SupervisedPhpPool,
-        stub_kind: BindingStubKind::PhpScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::R,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::SupervisedR,
-        stub_kind: BindingStubKind::RScript,
-    },
-    BinderDescriptor {
-        language: ForeignLanguage::Com,
-        surface: BinderSurface::Namespace,
-        status: BinderStatus::Active,
-        runtime: BinderRuntime::WindowsComAutomation,
-        stub_kind: BindingStubKind::ComTypeLibrary,
-    },
-];
-
-pub fn binder_for(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
-    BINDERS.iter().find(|b| b.language == language)
+    pub abi_contract: ForeignAbiContract,
 }
 
 pub fn binding_cache_dir(project_root: &Path, language: ForeignLanguage) -> PathBuf {
@@ -305,7 +83,10 @@ pub fn binding_cache_dir(project_root: &Path, language: ForeignLanguage) -> Path
 }
 
 pub fn binding_cache_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> PathBuf {
-    binding_cache_dir(project_root, language).join(format!("{}.{}", lib, Syntax::FILE_EXT))
+    let extension = binder_for(language)
+        .map(|descriptor| descriptor.cache_extension)
+        .unwrap_or(Syntax::FILE_EXT);
+    binding_cache_dir(project_root, language).join(format!("{lib}.{extension}"))
 }
 
 pub fn type_stub_file(
@@ -313,14 +94,16 @@ pub fn type_stub_file(
     language: ForeignLanguage,
     lib: &str,
 ) -> Option<PathBuf> {
-    if language == ForeignLanguage::Dart {
-        return Some(binding_cache_dir(project_root,language).join(format!("{lib}_host.dart")));
+    let descriptor = binder_for(language)?;
+    match descriptor.type_stub_file {
+        ForeignStubFile::None => None,
+        ForeignStubFile::Suffix(extension) => Some(
+            binding_cache_dir(project_root, language).join(format!("{lib}.{extension}")),
+        ),
+        ForeignStubFile::StemSuffix(suffix) => Some(
+            binding_cache_dir(project_root, language).join(format!("{lib}{suffix}")),
+        ),
     }
-    let ext = match language {
-        ForeignLanguage::JS => "d.ts",
-        _ => return None,
-    };
-    Some(binding_cache_dir(project_root, language).join(format!("{lib}.{ext}")))
 }
 
 pub fn provenance_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> PathBuf {
@@ -353,6 +136,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Ruby => ForeignHost::SupervisedRuby,
         ForeignLanguage::Php => ForeignHost::SupervisedPhpPool,
         ForeignLanguage::R => ForeignHost::SupervisedR,
+        ForeignLanguage::Octave => ForeignHost::SupervisedOctave,
         ForeignLanguage::Com => ForeignHost::WindowsComAutomation,
     }
 }
@@ -370,7 +154,106 @@ pub fn route_plan(
         provenance: provenance_file(project_root, namespace.language, &namespace.lib),
         descriptor,
         namespace,
+        abi_contract: descriptor.contract,
     })
+}
+
+/// Capability report used by inspection and package/provider integrations.
+/// Keeping it derived from the route descriptor makes cache provenance and
+/// runtime dispatch agree on one ABI version.
+pub fn capability_report(language: ForeignLanguage) -> Option<ForeignAbiContract> {
+    binder_for(language).map(|descriptor| descriptor.contract)
+}
+
+/// Stable inspection output derived directly from the canonical binder table.
+/// It reports structure and support claims, not host-tool presence: a missing
+/// provisioned tool is a binding error, never a false capability downgrade.
+pub fn capability_report_text() -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::from(
+        "foreign capabilities\nschema=jet-ffi-capability-report-v1\nlanguage status runtime stub contract effect provider capabilities\n",
+    );
+    for descriptor in BINDERS {
+        let report = descriptor.capability_report();
+        let capabilities = report
+            .capabilities
+            .iter()
+            .map(|capability| format!("{capability:?}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let _ = writeln!(
+            output,
+            "{} {:?} {:?} {:?} {:?} {} {:?} {}",
+            report.language.root(),
+            report.status,
+            descriptor.runtime,
+            descriptor.stub_kind,
+            contract_name(report.contract),
+            report.effect_root,
+            report.provider,
+            capabilities,
+        );
+    }
+    output
+}
+
+pub fn capability_report_json() -> String {
+    let rows = BINDERS
+        .iter()
+        .map(|descriptor| {
+            let report = descriptor.capability_report();
+            let capabilities = report
+                .capabilities
+                .iter()
+                .map(|capability| json_quote(&format!("{capability:?}")))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"language\":{},\"status\":{},\"runtime\":{},\"stub\":{},\"contract\":{},\"effect\":{},\"provider\":{},\"capabilities\":[{}]}}",
+                json_quote(report.language.root()),
+                json_quote(&format!("{:?}", report.status)),
+                json_quote(&format!("{:?}", descriptor.runtime)),
+                json_quote(&format!("{:?}", descriptor.stub_kind)),
+                json_quote(contract_name(report.contract)),
+                json_quote(report.effect_root),
+                json_quote(&format!("{:?}", report.provider)),
+                capabilities,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema\":\"jet-ffi-capability-report-v1\",\"languages\":[{rows}]}}"
+    )
+}
+
+fn contract_name(contract: ForeignAbiContract) -> &'static str {
+    if contract == ForeignAbiContract::C {
+        "C"
+    } else if contract == ForeignAbiContract::CXX {
+        "CXX"
+    } else if contract == ForeignAbiContract::NATIVE {
+        "NATIVE"
+    } else {
+        "MESSAGE"
+    }
+}
+
+fn json_quote(value: &str) -> String {
+    let mut output = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
 }
 
 pub fn is_active_namespace_import(
@@ -496,6 +379,15 @@ fn materialize_namespace(
 ) -> Result<usize, Vec<Diagnostic>> {
     let cache_path = binding_cache_file(&bundle.project_root, language, lib);
     let alias = synthetic_alias(language, lib);
+    let Some(descriptor) = binder_for(language) else {
+        return Err(vec![Diagnostic::error(
+            "E3208",
+            format!("no foreign binder descriptor is registered for `{}`", language.root()),
+            "generated foreign stubs require a registered typed ABI descriptor".to_string(),
+            "register the language binder before importing its namespace".to_string(),
+            None,
+        )]);
+    };
     let module_idx = bundle.modules.len();
 
     if cache_path.is_file() {
@@ -504,6 +396,21 @@ fn materialize_namespace(
             Err(_) => String::new(),
         };
         if !source.is_empty() {
+            if let Some(actual) = descriptor_stamp(&source) {
+                if actual != descriptor.stamp() {
+                    return Err(vec![Diagnostic::error(
+                        "E3208",
+                        format!(
+                            "generated `{}` binding has a stale descriptor",
+                            language.root()
+                        ),
+                        "the generated stub and binder must use the same foreign ABI descriptor"
+                            .to_string(),
+                        "regenerate the binding with `jet inspect bind`".to_string(),
+                        None,
+                    )]);
+                }
+            }
             let (tokens, lex_diags) = crate::Lexer::lex_generated(&source);
             if !lex_diags.is_empty() {
                 return Err(lex_diags);
@@ -571,4 +478,10 @@ fn mark_cpp_callback_abi(items: &mut [Item]) {
 
 fn synthetic_alias(language: ForeignLanguage, lib: &str) -> String {
     format!("__{}_{}", language.root(), lib)
+}
+
+fn descriptor_stamp(source: &str) -> Option<&str> {
+    source
+        .lines()
+        .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="))
 }

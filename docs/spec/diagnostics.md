@@ -36,15 +36,16 @@ repeating the distinction.
 
 ## Diagnostic code grammar
 
-Jet uses one code grammar with two valid shapes:
+Jet uses one code grammar with three valid shapes:
 
 - numeric: `E` or `L` followed by four digits, such as `E0102` or `L0202`;
+- migration-tool: `JT` followed by four digits, such as `JT0101`;
 - word-shaped: `E-<WORD>-<WORD>` with two or more uppercase words separated by
   `-`, such as `E-WEB-ABI-TYPE`.
 
 Each word starts with an uppercase letter and continues with uppercase letters
-or digits. Both shapes are stable diagnostic codes. `jet explain` and I4
-coverage checks accept both.
+or digits. All three shapes are stable diagnostic codes. `jet explain` and I4
+coverage checks accept all three.
 
 ## Adding a diagnostic
 
@@ -153,6 +154,8 @@ exists.
 New warning codes always use the `L` prefix. `W0410` predates that law and is
 the sole frozen historical `W`-prefix exception: its stable code must not be
 renumbered, and no new `W` code may be allocated.
+Source migration lints use the separate `JT` family because they are tool
+reports, not compiler warnings.
 
 ## Voice rules
 
@@ -537,7 +540,7 @@ renumbered, and no new `W` code may be allocated.
 | E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
 | E0632 | sema  | an arena `view` is read after its arena was reset (D-ALLOC2) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
-| E0702 | sema  | type or access mode can't cross the FFI boundary |
+| E0702 | sema  | an FFI boundary rejects a type or capability outside its checked value/audited `#Unsafe` tiers (D-FFI-CAP1) |
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
@@ -855,7 +858,7 @@ renumbered, and no new `W` code may be allocated.
 | E1253 | jet   | an inline script dependency (`use pkg#version;`) didn't resolve (D-JPK-SCRIPTDEP1) |
 | E1254 | jet   | project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1) |
 | E1255 | jet   | an untrusted project environment or build hook hit a non-interactive path with no `--trust`/exact grant (U19, D-JPK-DEVCOMPOSE1, D-JPK-BUILDSCRIPT1) |
-| E1256 | jet   | bounded native projection cannot translate a foreign flake/devShell surface into Jet facts (U16) |
+| E1256 | jet   | bounded native projection cannot translate a foreign package/environment surface into Jet facts or a generated binding (U16, D-FFI-UNIFY1) |
 | E1257 | jet   | a `target: sandbox` package's exported interface changed incompatibly since the last frozen build (D-PLUGIN-VERSION1=A) |
 | E1258 | jet   | a `target: sandbox` package's own code uses an effect — sandboxes are deny-by-default, zero host authority (D-PLUGIN1=B) |
 | E1259 | jet   | couldn't build a sandbox's WASM Component — missing/failed `rustc`/`wasm-tools` toolchain (D-DEP-WASM1=A) |
@@ -913,6 +916,9 @@ renumbered, and no new `W` code may be allocated.
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown or moved command spelling, with the canonical grouped spelling (E2-M3, D-DX, D-CLI-SURFACE1, D-CLI-SURFACE2) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
+| JT0101 | jet   | source importer omitted a construct; the omission carries source and generated-target provenance (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1) |
+| JT0198 | jet   | source importer could not read input or write output (D-MIGRATE-SRC1) |
+| JT0199 | jet   | source importer found an editable/generated three-way merge conflict (D-MIGRATE-SRC1) |
 | E2103 | jet   | external completion could not read a verified JetCommandSchema record (D-SHAPE-CLI-CARRIER1, D-SHAPE-CLI-COMPLETE1) |
 | E2104 | jet   | a command has missing, malformed, or conflicting input |
 | E2105 | jet   | a driver file, tool, or operating-system operation failed |
@@ -1880,6 +1886,25 @@ REPL step number in place of a file span (`<repl:N>`).
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
 | E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Abilities` and runtime invocation ability; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
 
+## Source import diagnostics (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
+
+Source importers use JT01xx for migration gaps and operation failures. JT0101
+is a non-blocking lint: import completes, but unsupported source is absent from
+callable Jet and remains in `import-report.json`. JT0198 and JT0199 are
+blocking tool errors.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| JT0101 | source import omitted `{construct}` at `{source}` | the importer cannot prove an equivalent Jet construct: `{reason}` | `{fix}`; generated target: `{target}` |
+| JT0198 | source import could not `{operation}` | `{reason}` | check the source path and write permissions, then rerun |
+| JT0199 | source import conflict in `{paths}` | generated source and editable Jet both changed since the stored baseline | reconcile the files, then rerun with `--update` |
+
+The production snapshot is the fixed `tests/fixtures/source_import` corpus. The
+targeted `tests/source_import.rs` proof invokes Python 3 as the source oracle,
+runs the generated Jet, compares stdout and stderr, and checks the exact
+generated Jet bytes. The same suite proves byte-idempotent reruns and refuses
+three-way conflicts before writing a conflicted file.
+
 ## CLI diagnostics (E2-M3 developer command UX)
 
 These are produced by the `jet` driver itself, not by checking a `.jet`
@@ -2002,7 +2027,7 @@ front-end `.jet` diagnostics).
 | E1253 | Inline dependency `{name}#{selector}` didn't resolve. | A manifest-less script's `use {name}#{selector};` has no source to resolve from — the Jet package registry has no fetch path yet, so an inline dependency only resolves from a committed local copy (D-JPK-SCRIPTDEP1). | Commit a copy at `.jet/inline-deps/{name}/<version>/`, or run `jet init` and depend on `{name}` through `package.jet` once you have a real source for it. |
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
-| E1256 | `{cmd}` cannot project the foreign environment. | The bounded native evaluator could not translate the foreign `flake.nix`/`devenv.nix` surface into Jet facts (U16). Jet does not shell out to an installed Nix binary for this path. | Use the supported literal devShell fields, run `jet os bridge flake` for the loss report, or declare the environment in `env.*`. |
+| E1256 | `{cmd}` cannot project the foreign package or environment. | The bounded native evaluator or verified package provider could not translate the foreign surface into Jet facts or a generated binding. Jet does not invent a binding or fall back to an installed foreign toolchain. | Provide the pinned provider artifact and generated `.jet/bindings/<language>/<library>.jet`, use supported literal devShell fields, or declare the environment in `env.*`. |
 | E1257 | This sandbox's exported interface changed incompatibly. | A `target: sandbox` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
 | E1258 | A sandbox can't use any effect. | This package builds as `target: sandbox` (D-PLUGIN1=B) — sandboxes run with zero host authority (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the sandbox into the host program that loads it. |
 | E1259 | Couldn't build the sandbox's WASM Component. | Building a `target: sandbox` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |

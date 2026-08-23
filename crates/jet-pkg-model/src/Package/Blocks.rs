@@ -281,6 +281,13 @@ pub enum DepSource {
     /// (pkg-config, bare `-l <lib>` fallback) or `lib: c@"vendor/path"`
     /// (local dir). A CLib dep is a link dep, not a Jet package.
     CLib { target: String },
+    /// D-FFI-UNIFY1: a package-backed foreign namespace dependency such as
+    /// `plotly: js@"plotly#version=2.35.0@npm"`. The map key is the library
+    /// name; the value retains the language root and the exact provider ref.
+    Foreign {
+        language: crate::AST::ForeignLanguage,
+        reference: String,
+    },
 }
 
 /// Render one `DepSource` back to its display/audit string form.
@@ -303,12 +310,16 @@ pub fn dep_display(source: &DepSource) -> String {
             format!("{{ git: {url:?}, {field}: {value:?} }}")
         }
         DepSource::CLib { target } => format!("lib: {target}"),
+        DepSource::Foreign {
+            language,
+            reference,
+        } => format!("{}@{reference:?}", language.root()),
     }
 }
 
 fn bad_dep_value(name: &str, value: &str) -> PackageParseError {
     err(format!(
-        "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, or inline git struct"
+        "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, foreign `lang@\"ref\"`, or inline git struct"
     ))
 }
 
@@ -333,6 +344,8 @@ pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, Pack
             parse_git_dep(&name, inner)?
         } else if let Some(target) = parse_c_lib_ref(trimmed) {
             DepSource::CLib { target }
+        } else if let Some(foreign) = parse_foreign_ref(&name, trimmed)? {
+            foreign
         } else {
             // Both the bare legacy tokens (`helpers: ../helpers`,
             // `textkit: textkit#1.2.0`) and the ratified quoted spelling
@@ -376,6 +389,42 @@ fn parse_c_lib_ref(value: &str) -> Option<String> {
         return None;
     }
     Some(unquote(target))
+}
+
+/// Detect the D-FFI-UNIFY1 project-tier dependency shape. Keep the inner
+/// provider ref quoted: that is the boundary between the foreign language
+/// root and the provider's own ref grammar. C remains owned by S59's native
+/// `c@target` form and is therefore deliberately not captured here.
+fn parse_foreign_ref(
+    name: &str,
+    value: &str,
+) -> Result<Option<DepSource>, PackageParseError> {
+    let Some((language, reference)) = value.split_once(Syntax::REF_PROVIDER_AT) else {
+        return Ok(None);
+    };
+    let Some(language) = crate::AST::ForeignLanguage::from_root(language.trim()) else {
+        return Ok(None);
+    };
+    if language == crate::AST::ForeignLanguage::C {
+        return Ok(None);
+    }
+    let reference = reference.trim();
+    if !reference.starts_with('"') || !reference.ends_with('"') {
+        return Err(err(format!(
+            "foreign dependency `{name}` must quote its provider ref as `{}@\"ref\"`",
+            language.root()
+        )));
+    }
+    let reference = unquote(reference);
+    if reference.trim().is_empty() {
+        return Err(err(format!(
+            "foreign dependency `{name}` has an empty provider ref"
+        )));
+    }
+    Ok(Some(DepSource::Foreign {
+        language,
+        reference,
+    }))
 }
 
 /// Parse an inline git dependency's body: `git: "<url>", tag/branch/rev:

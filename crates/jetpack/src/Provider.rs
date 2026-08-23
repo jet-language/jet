@@ -517,7 +517,11 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
-        ProviderKind::JetRegistry | ProviderKind::Npm | ProviderKind::Cargo => None,
+        ProviderKind::JetRegistry
+        | ProviderKind::Npm
+        | ProviderKind::Cargo
+        | ProviderKind::PyPI
+        | ProviderKind::SwiftPM => None,
         // An inferred source realized offline defaults to nix with no lock-backed
         // identity to match; no early cache path.
         ProviderKind::Infer => None,
@@ -1101,6 +1105,8 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::JetRegistry => format!("jet-registry:{}", spec.package),
         Source::Npm => format!("npm:{}", spec.package),
         Source::Cargo => format!("cargo:{}", spec.package),
+        Source::PyPI => format!("pypi:{}", spec.package),
+        Source::SwiftPM => format!("swiftpm:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             let package = if table.provider(name) == ProviderKind::Nix {
@@ -1738,6 +1744,8 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
         ProviderKind::JetRegistry => Box::new(UnsupportedProvider("jet-registry")),
         ProviderKind::Npm => Box::new(UnsupportedProvider("npm")),
         ProviderKind::Cargo => Box::new(UnsupportedProvider("cargo")),
+        ProviderKind::PyPI => Box::new(UnsupportedProvider("pypi")),
+        ProviderKind::SwiftPM => Box::new(UnsupportedProvider("swiftpm")),
         _ => Box::new(NixProvider),
     }
 }
@@ -1780,6 +1788,12 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::Cargo) {
         return ProviderKind::Cargo;
     }
+    if matches!(spec.source, Source::PyPI) {
+        return ProviderKind::PyPI;
+    }
+    if matches!(spec.source, Source::SwiftPM) {
+        return ProviderKind::SwiftPM;
+    }
     let Source::Named(name) = &spec.source else {
         return ProviderKind::Nix;
     };
@@ -1793,6 +1807,8 @@ pub fn resolve_kind(
         ProviderKind::JetRegistry => ProviderKind::JetRegistry,
         ProviderKind::Npm => ProviderKind::Npm,
         ProviderKind::Cargo => ProviderKind::Cargo,
+        ProviderKind::PyPI => ProviderKind::PyPI,
+        ProviderKind::SwiftPM => ProviderKind::SwiftPM,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
@@ -2093,7 +2109,11 @@ fn stage_adapter_source(
             "scripting-registry packages must be realized before they can be adapter source bytes."
                 .to_string(),
         )),
-        Source::JetRegistry | Source::Npm | Source::Cargo => Err(ProviderError::Adapter(
+        Source::JetRegistry
+        | Source::Npm
+        | Source::Cargo
+        | Source::PyPI
+        | Source::SwiftPM => Err(ProviderError::Adapter(
             "Jet registry, npm, and Cargo packages must be realized before they can be adapter source bytes."
                 .to_string(),
         )),

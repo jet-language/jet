@@ -618,7 +618,7 @@ end Geodesy;
 use type Interfaces.C.double;
 use type Interfaces.C.long_long;
 package body Geodesy is
-   Calls_Count := Interfaces.C.long_long.{ 0 };
+   Calls_Count : Interfaces.C.long_long := 0;
    function Double_Lat (Lat : Latitude) return Interfaces.C.double is
    begin
       Calls_Count := Calls_Count + 1;
@@ -634,6 +634,13 @@ end Geodesy;
     assert!(bind.status.success(),"Ada bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     assert!(dir.join(".jet/bindings/ada/libjet_ada_geodesy.a").is_file());
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
+    let generated=fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.jet")).unwrap();
+    assert!(generated.contains("pub fn double_lat(lat: Float) Float AdaError! -[FFI.Ada]>"));
+    assert!(generated.contains("lat < -90.0 || lat > 90.0"));
+    assert!(!generated.contains("=>"));
+    let provenance=fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.provenance")).unwrap();
+    assert!(provenance.contains("source=")&&provenance.contains("body=")&&provenance.contains("runtime="));
+    assert!(provenance.contains("constraints=double_lat.lat=-90.0..90.0"));
     fs::write(dir.join("main.jet"),r#"use ada.geodesy as geo
 
 fn run() -[FFI.Ada, IO]> {
@@ -670,6 +677,8 @@ destructor TCounter.Destroy;
 begin Destroyed := Destroyed + 1; inherited Destroy; end;
 function add_scalar(A, B: Int64): Int64; cdecl;
 begin Result := A + B; end;
+function add_float(A, B: Double): Double; cdecl;
+begin Result := A + B; end;
 function counter_new(Value: Int64): Pointer; cdecl;
 begin Result := Pointer(TCounter.Create(Value)); end;
 function counter_add(Handle: Pointer; Delta: Int64): Int64; cdecl;
@@ -678,17 +687,20 @@ procedure counter_free(Handle: Pointer); cdecl;
 begin TCounter(Handle).Free; end;
 function destroyed_count(): Int64; cdecl;
 begin Result := Destroyed; end;
-exports add_scalar, counter_new, counter_add, counter_free, destroyed_count;
+exports add_scalar, add_float, counter_new, counter_add, counter_free, destroyed_count;
 begin
 end.
 "#).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","pascal"]).arg(&source).args(["--pkg","inventory"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(bind.status.success(),"Pascal bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/pascal");assert!(cache.join("libjet_pascal_inventory.a").is_file());assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());assert!(cache.join("inventory.provenance").is_file());
+    let generated=fs::read_to_string(cache.join("inventory.jet")).unwrap();assert!(generated.contains("pub fn counter_new(")&&generated.contains("PascalError! ->"));assert!(!generated.contains("=>"));assert!(!generated.contains(".{"));
+    let provenance=fs::read_to_string(cache.join("inventory.provenance")).unwrap();assert!(provenance.contains("schema=jet-pascal-bind-v1\n"));assert!(provenance.contains("source="));assert!(provenance.contains("compiler="));assert!(provenance.contains("abi=cdecl\n"));assert!(provenance.contains("handles=opaque-int64-generation\n"));
     fs::write(dir.join("main.jet"),r#"use pascal.inventory as inv
 
 fn run() -[FFI.Pascal, IO]> {
     print(inv.add_scalar(20, 22))
+    print(inv.add_float(1.25, 2.25))
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
     print(inv.destroyed_count())
@@ -697,15 +709,29 @@ fn run() -[FFI.Pascal, IO]> {
 }
 "#).unwrap();
     let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(run.status.success(),"generated Pascal binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n42\n0\n1\n");
+    assert!(run.status.success(),"generated Pascal binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n3.5\n42\n0\n1\n");
     fs::write(dir.join("stale.c"),r#"#include <stdint.h>
 extern int64_t jet_pascal_inventory_counter_new(int64_t);
 extern void jet_pascal_inventory_counter_close(int64_t);
 extern int64_t jet_pascal_inventory_take_error(void);
 extern int64_t jet_pascal_inventory_destroyed_count(void);
-int main(void){int64_t h=jet_pascal_inventory_counter_new(1);if(!h)return 1;jet_pascal_inventory_counter_close(h);if(jet_pascal_inventory_destroyed_count()!=1)return 2;jet_pascal_inventory_counter_close(h);if(jet_pascal_inventory_take_error()!=1)return 3;if(jet_pascal_inventory_destroyed_count()!=1)return 4;return 0;}
+int main(void){int64_t first=jet_pascal_inventory_counter_new(1);if(!first)return 1;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_destroyed_count()!=1)return 2;int64_t second=jet_pascal_inventory_counter_new(2);if(!second||second==first)return 3;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_take_error()!=1)return 4;if(jet_pascal_inventory_destroyed_count()!=1)return 5;jet_pascal_inventory_counter_close(second);if(jet_pascal_inventory_destroyed_count()!=2)return 6;return 0;}
 "#).unwrap();
     let cc=Command::new("cc").arg("stale.c").args(["-L.jet/bindings/pascal","-Wl,-rpath,.jet/bindings/pascal","-l:libjet_pascal_inventory.a","-ljet_pascal_inventory_runtime","-lpthread","-ldl","-o","stale"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"stale-handle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let stale=Command::new(dir.join("stale")).current_dir(&dir).output().unwrap();assert!(stale.status.success(),"stale close reached Pascal destructor twice: {:?}",stale.status.code());
+}
+
+#[test]
+fn pascal_bind_rejects_unsupported_abi_shape_as_e3208() {
+    let dir=isolated_cwd("pascal_bind_abi_shape");let source=dir.join("broken.pas");
+    fs::write(&source,r#"library broken;
+type TCounter = class end;
+function counter_new(Value: Int64): Pointer; cdecl; begin Result := nil; end;
+function counter_bad(Handle: Pointer; Value: Integer): Int64; cdecl; begin Result := 0; end;
+procedure counter_free(Handle: Pointer); cdecl; begin end;
+exports counter_new, counter_bad, counter_free;
+begin end.
+"#).unwrap();
+    let output=Command::new(jet()).args(["inspect","bind","pascal"]).arg(&source).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();let stderr=String::from_utf8_lossy(&output.stderr);assert!(!output.status.success());assert!(stderr.contains("Error [E3208]")&&stderr.contains("unsupported parameter type `integer`"),"{stderr}");assert!(!dir.join(".jet/bindings/pascal/broken.jet").exists());check_snapshot("bind_pascal_abi_e3208.txt",&scrub(&stderr,&source));
 }
 
 #[test]
@@ -717,17 +743,19 @@ fn pascal_bind_launders_fpc_failure_as_e3208() {
 
 #[test]
 fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
-    if Command::new("dart").arg("--version").output().is_err(){return}
     let dir=isolated_cwd("dart_bind_round_trip");let contract=dir.join("callbacks.dart");let compute=dir.join("compute.jet");
-    fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) Int -[FFI.Dart]> {\n    return callbacks.dart_double(value) ?? -1\n}\n").unwrap();
+    fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) Int -[FFI.Dart]> {\n    return callbacks.dart_double(value) ?? -1\n}\n\npub fn compute_float(value: Float) Float -[FFI.Dart]> {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet",compute.to_str().unwrap(),"--pkg","callbacks"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(bind.status.success(),"Dart bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/dart");let native=cache.join(if cfg!(target_os="macos"){"libjet_dart_callbacks_compute.dylib"}else if cfg!(target_os="windows"){"libjet_dart_callbacks_compute.dll"}else{"libjet_dart_callbacks_compute.so"});
     assert!(cache.join("libjet_dart_callbacks.a").is_file());assert!(native.is_file());assert!(cache.join("callbacks_host.dart").is_file());assert!(cache.join("callbacks.provenance").is_file());
+    let generated=fs::read_to_string(cache.join("callbacks.jet")).unwrap();assert!(generated.contains("pub fn dart_double(value: Int) Int DartError! -[FFI.Dart]>"));assert!(generated.contains("pub fn dart_half(value: Float) Float DartError! -[FFI.Dart]>"));assert!(!generated.contains("=>"));
+    let host=fs::read_to_string(cache.join("callbacks_host.dart")).unwrap();assert!(host.contains("NativeCallable<Int64 Function(Int64)>.isolateLocal"));assert!(host.find("reset();").unwrap()<host.find("callback.close();").unwrap());
+    let provenance=fs::read_to_string(cache.join("callbacks.provenance")).unwrap();assert!(provenance.contains("compute=")&&provenance.contains("contract_provenance_sha256=")&&provenance.contains("sdk="));
     let native_path=native.to_string_lossy().replace('\\',"\\\\").replace('\'',"\\'");
-    fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); print(compute(21)); shutdownJetDart(); }}\n")).unwrap();
-    let run=Command::new("dart").args(["run","host.dart"]).current_dir(&dir).output().unwrap();assert!(run.status.success(),"Dart host failed:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n");
+    fs::write(dir.join("host.dart"),format!("import 'dart:ffi';\nimport '.jet/bindings/dart/callbacks_host.dart';\ntypedef ComputeNative = Int64 Function(Int64);\ntypedef ComputeDart = int Function(int);\ntypedef ComputeFloatNative = Double Function(Double);\ntypedef ComputeFloatDart = double Function(double);\nvoid main() {{ initializeJetDart('{native_path}'); final compute = jetDartLibrary.lookupFunction<ComputeNative, ComputeDart>('compute'); final computeFloat = jetDartLibrary.lookupFunction<ComputeFloatNative, ComputeFloatDart>('compute_float'); print(compute(21)); print(computeFloat(5.0)); shutdownJetDart(); }}\n")).unwrap();
+    let run=Command::new("dart").args(["run","host.dart"]).current_dir(&dir).output().unwrap();assert!(run.status.success(),"Dart host failed:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n2.5\n");
 }
 
 #[test]
@@ -739,41 +767,11 @@ fn dart_bind_rejects_untyped_contract_as_e3208() {
 #[test]
 fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
     if Command::new("pwsh").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("powershell_bind_round_trip");let script=dir.join("ops.ps1");
-    fs::write(&script,r#"$script:Counter = 0
-function Get-Stateful {
-  param($InputObject)
-  $script:Counter += 1
-  [ordered]@{
-    count = $script:Counter
-    nested = $InputObject.nested
-    list = @($InputObject.list)
-    scalar = $InputObject.scalar
-    nothing = $null
-  }
-}
-function Fail { param($InputObject) throw 'raw secret failure detail' }
-function Sleep { param($InputObject) Start-Sleep -Seconds 30; return $InputObject }
-"#).unwrap();
+    let dir=isolated_cwd("powershell_bind_round_trip");let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/powershell");let script=dir.join("ops.ps1");
+    fs::copy(example.join("ops.ps1"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","pwsh"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PowerShell bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/pwsh");assert!(cache.join("libjet_pwsh_ops.a").is_file());assert!(cache.join("ops_worker.ps1").is_file());assert!(cache.join("ops.provenance").is_file());
-    fs::write(dir.join("main.jet"),r#"use pwsh.ops as ops
-use core.encoding.json as json
-
-fn run() -[FFI.PowerShell, IO]> {
-    session :: ops.open() ?? panic("PowerShell open failed")
-    input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    first :: ops.get_stateful(session, ~input, 5000) ?? panic("first call failed")
-    second :: ops.get_stateful(session, ~input, 5000) ?? panic("second call failed")
-    print(json.canonical(first) ?? panic("value is not canonical JSON"))
-    print(json.canonical(second) ?? panic("value is not canonical JSON"))
-    failed :: ops.fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
-    print(json.canonical(failed) ?? panic("value is not canonical JSON"))
-    timed :: ops.sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
-    print(json.canonical(timed) ?? panic("value is not canonical JSON"))
-    ops.close(^session)
-}
-"#).unwrap();
-    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
+    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
+    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>

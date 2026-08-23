@@ -1717,6 +1717,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new(
         "core.compute",
+        "device_metal",
+        "jet_compute_device_metal",
+        true,
+        &[],
+    ),
+    CoreCallRecord::new(
+        "core.compute",
         "on_device",
         "jet_compute_on_device",
         true,
@@ -1760,6 +1767,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_compute_stream_new",
         true,
         &[],
+    ),
+    CoreCallRecord::new(
+        "core.compute",
+        "stream_new_on",
+        "jet_compute_stream_new_on_device",
+        true,
+        &[false],
     ),
     CoreCallRecord::new(
         "core.compute",

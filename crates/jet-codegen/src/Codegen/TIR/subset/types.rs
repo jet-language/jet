@@ -512,6 +512,10 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
             | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig"
+            // D-LIB-CALLGRANT1=A: the explicit load-site grant is a small
+            // constructable Prelude record, so it must stay on the same TIR
+            // path as `core.mod.load` on `jet run`.
+            | "ModGrant"
     )
 }
 

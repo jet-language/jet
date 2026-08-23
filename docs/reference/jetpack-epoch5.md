@@ -84,9 +84,12 @@ Provider importers lower Jet registry, npm, Cargo, PyPI, SwiftPM, Maven,
 NuGet, Conan, vcpkg, Homebrew, GitHub, and binary metadata into one fact
 report. Unsupported, ambiguous, or missing identity facts remain explicit loss
 records; they do not become invented defaults. Core, Nix, local path, Jet
-registry, and verified binary paths expose byte/lock abilities. The foreign
-ecosystem importers expose metadata facts until a dedicated verified transport
-adapter exists; they do not claim network fetch or offline substitution.
+registry, and verified binary paths expose byte/lock abilities. A package
+foreign dependency (`<lib>: <lang>@"<ref>"`) requires a verified provider
+artifact with `.jet/bindings/<language>/<lib>.jet`; `jet fetch` ingests that
+artifact into Hangar, projects the binding and provenance cache, and records
+the language-qualified reference and envelope in `.jet/lock`. Missing provider
+artifacts fail closed; there is no network or guessed-binding fallback.
 Homebrew retains bottle/source and relocatability facts, GitHub retains
 release/asset identity and digest facts, and binary metadata fails closed
 without an exact digest and target platform.

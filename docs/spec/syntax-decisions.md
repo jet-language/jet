@@ -3048,7 +3048,7 @@ overloads collapse to argument labels (S61); operator overloads become
 named methods. The overlay tier corrects wrong guesses. Internal staging
 may land C-linkage first, then classes/exceptions, then templates — the
 ratified surface is full depth, so no intermediate stage becomes law. Its
-effect clause is `:[FFI.Cpp]>`.
+effect clause is `-[FFI.Cpp]>`.
 
 **Polyglot binder wave (all =A, ratified by owner 2026-07-11, cards
 #502–#504; per-language depth under D-FFI-UNIFY1, host models following
@@ -3057,39 +3057,39 @@ the D-FFI-PY1 precedent):**
 - **D-FFI-GO1=A**: `go.*` — in-process `go build -buildmode=c-archive`
   static shims; Go runtime rides in-process; blocking calls carry
   effects; handle pinning bridges Go GC and Jet ownership. Its effect clause
-  is `:[FFI.Go]>`.
+  is `-[FFI.Go]>`.
 - **D-FFI-JVM1=A**: `java.*` (Kotlin/Scala ride the same bytecode
   surface) — embedded JVM via the JNI invocation API, created lazily on
   first `java.*` call; classes are opaque handles; checked exceptions
   surface as `T JavaError!`; JVM provisioned by jetpack (I6). Its effect
-  clause is `:[FFI.Java]>`.
+  clause is `-[FFI.Java]>`.
 - **D-FFI-DOTNET1=A**: `cs.*` (C#/F#) — hostfxr/hostpolicy embed; .NET
   Tasks bridge to Jet's concurrency runtime at the boundary; NuGet as jetpack
-  provider. Its effect clause is `:[FFI.DotNet]>`.
+  provider. Its effect clause is `-[FFI.DotNet]>`.
 - **D-FFI-FORTRAN1=A**: `fortran.*` — ISO_C_BINDING bridge via gfortran;
   arrays cross as `[T]`/`Tensor<T>` with explicit column-major facts
   recorded in the binding (order mismatch is a checked error, never a
-  silent transposition). Its effect clause is `:[FFI.Fortran]>`.
+  silent transposition). Its effect clause is `-[FFI.Fortran]>`.
 - **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K:V]` zero-copy views; effect leaf `:[FFI.Lua]>`.
+  point); tables ↔ `[K:V]` zero-copy views; effect leaf `-[FFI.Lua]>`.
 - **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
   state make embedding hostile); RubyGems as jetpack provider. Its effect
-  clause is `:[FFI.Ruby]>`.
+  clause is `-[FFI.Ruby]>`.
 - **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
-  scripts callable as-is. Its effect clause is `:[FFI.Perl]>`.
+  scripts callable as-is. Its effect clause is `-[FFI.Perl]>`.
 - **D-FFI-PHP1=A**: `php.*` — sidecar fpm-style worker pool; Packagist
-  provider. Its effect clause is `:[FFI.Php]>`.
+  provider. Its effect clause is `-[FFI.Php]>`.
 - **D-FFI-R1=A**: `r.*` (root reserved by D-DATA-BRIDGE1) — sidecar
   Rserve-style worker; `data.frame` ↔ `core.data.Table` typed round-trip;
   CRAN provider; plots return as SVG values (D-DATA-PLOT1-compatible). Its
-  effect clause is `:[FFI.R]>`.
+  effect clause is `-[FFI.R]>`.
 - **D-FFI-COBOL1=A**: `cobol.*` — GnuCOBOL C-ABI binder; copybooks import
   as `#Codable` structs with fixed-width/packed-decimal wire facts
   (COMP-3 money maps to `Decimal`, never `Float`); enables strangler-fig
-  migration of the COBOL estate. Its effect clause is `:[FFI.Cobol]>`.
+  migration of the COBOL estate. Its effect clause is `-[FFI.Cobol]>`.
 - **D-FFI-OCTAVE1=A**: `octave.*` — sidecar Octave worker
   (MATLAB-compatible); matrices ↔ `Matrix<M,N>`/`Tensor<T>`; `.m`
-  scripts callable; effect leaf `:[FFI.Octave]>`; jetpack-provisioned.
+  scripts callable; effect leaf `-[FFI.Octave]>`; jetpack-provisioned.
 - **D-FFI-SH1=A**: `Sh` typed text — the third D-TYPEDTEXT1 instance
   (same engine, I8): each `{hole}` becomes exactly one argv item, never
   word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
@@ -3101,22 +3101,22 @@ the D-FFI-PY1 precedent):**
   Windows-gated (honest error elsewhere); typed stubs generated from
   type libraries via `jet inspect bind com` (committable); dynamic
   IDispatch fallback behind `#Unsafe`; the Office/VBA estate becomes
-  automatable and migratable; its effect clause is `:[FFI.Com]>`.
+  automatable and migratable; its effect clause is `-[FFI.Com]>`.
   **D-FFI-PWSH1=A** — `pwsh.*` sidecar
   PowerShell 7+ worker; cmdlet objects cross as `DataTree`; pipelines
-  callable; its effect clause is `:[FFI.PowerShell]>`. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
+  callable; its effect clause is `-[FFI.PowerShell]>`. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
   (dart_api_dl) plus the Flutter embedding path (Jet compute compiled to
   C-ABI, callable from Flutter apps); interop floor for the mobile
-  strategy (#480); its effect clause is `:[FFI.Dart]>`. **D-FFI-TCL1=A** —
+  strategy (#480); its effect clause is `-[FFI.Dart]>`. **D-FFI-TCL1=A** —
   `tcl.*` in-process interpreter; live tool sessions for the EDA estate with
-  typed result parsing; its effect clause is `:[FFI.Tcl]>`.
+  typed result parsing; its effect clause is `-[FFI.Tcl]>`.
   **D-FFI-ADA1=A** — `ada.*` GNAT C-ABI binder; Ada range/constraint
   facts recorded in the binding become checked boundary errors; pairs
-  with `jet prove`; its effect clause is `:[FFI.Ada]>`. **D-FFI-PASCAL1=A** —
+  with `jet prove`; its effect clause is `-[FFI.Ada]>`. **D-FFI-PASCAL1=A** —
   `pascal.*` FreePascal cdecl
   binder; classes as opaque handles (cpp precedent, no templates); the
   Delphi estate gets call-in-place plus D-MIGRATE-SRC1 migration; its effect
-  clause is `:[FFI.Pascal]>`.
+  clause is `-[FFI.Pascal]>`.
 - **D-MIGRATE-SRC1=A**: source-importer framework law — `jet import
   <lang> <dir>` gains per-language semantic source importers; output is
   editable canonical Jet (D-WD5), every untranslatable construct is a
@@ -3124,7 +3124,9 @@ the D-FFI-PY1 precedent):**
   never dropped (D-JOS-NIXIMPORT1 discipline), detectable tests carry
   over, import is idempotent with update/dry-run/conflict policy; a body
   the importer cannot translate becomes a binder-backed FFI stub + TODO.
-  Per-language importers ship separately under this law.
+  The Pascal importer preserves the original library as the canonical source,
+  emits a `pascal.<lib>` binder stub, and records JT0101 for the unsupported
+  source body. Per-language importers ship separately under this law.
 
 **D-FFI-UNIFY1 — FFI structure law**: every foreign language mounts as a
 namespace `<lang>.<lib>` with the same three tiers (S59 generalized): script
@@ -3144,7 +3146,7 @@ binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
 binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
 Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
-worker (typed message boundary, crash-isolated, `:[FFI.Py]>` effect leaf added
+worker (typed message boundary, crash-isolated, `-[FFI.Py]>` effect leaf added
 by D-AUTHORITY-ROOTS1); opt-in `py@embed` switches to in-process libpython for
 zero-copy buffer-protocol arrays. One `use py.X` or `use py.[X, Y]` surface; the
 tier never moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` or

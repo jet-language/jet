@@ -47,6 +47,7 @@ pub mod Doctor;
 pub mod EnvFile;
 pub mod EnvFiles;
 pub mod EnvHook;
+pub mod Foreign;
 pub mod Image;
 pub mod JetOS;
 pub mod JetPin;
