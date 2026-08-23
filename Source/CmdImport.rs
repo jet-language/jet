@@ -367,7 +367,7 @@ fn translate_pascal_file(raw: &str, source: &Path, target: &Path) -> Translation
         (
             "Pascal source has no recognizable library declaration".into(),
             "the importer cannot establish a library boundary or ABI contract",
-            "add a Pascal `library` declaration or use a hand-written Jet FFI overlay; no source was silently emitted",
+            "add a Pascal `library` declaration or use a hand-written Jet FFI overlay; no source was silently emitted".to_string(),
         )
     };
     output.push_str("// The Pascal source remains the canonical source of truth.\n");

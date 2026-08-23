@@ -2693,7 +2693,21 @@ fn run_python_bind(args:&[&String]){
     let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind py` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|python_bind_error(path,&format!("the Python script could not be read ({e})")));
     let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PY_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PythonBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|python_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){python_bind_error(path,&format!("the generated cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){python_bind_error(path,&format!("the binding provenance could not be written ({e})")}
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        python_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        );
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.provenance")),
+        &result.provenance,
+    ) {
+        python_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        );
+    }
     println!("bound {} persistent Python function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn python_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment.".to_string())}
@@ -2706,7 +2720,27 @@ fn run_javascript_bind(args:&[&String]){
     let declaration=args[0].as_str();let mut runtime=None;let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--runtime"=>{runtime=args.get(i+1).map(|v|v.to_string());if runtime.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind js` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
     let lib=pkg.unwrap_or_else(||{let base=declaration.rsplit('/').next().unwrap_or(declaration);base.strip_suffix(".d.ts").or_else(||base.rsplit_once('.').map(|v|v.0)).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(declaration).unwrap_or_else(|e|javascript_bind_error(declaration,&format!("the TypeScript declaration file could not be read ({e})")));
     let Some(runtime)=runtime else {javascript_bind_error(declaration,"the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`")};let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::JS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::JavaScriptBind::bind(std::path::Path::new(declaration),&source,std::path::Path::new(&runtime),&lib,cache).unwrap_or_else(|e|javascript_bind_error(declaration,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){javascript_bind_error(declaration,&format!("the generated cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.d.ts")),&source){javascript_bind_error(declaration,&format!("the typed declaration cache could not be written ({e})")}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){javascript_bind_error(declaration,&format!("the binding provenance could not be written ({e})")}
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        javascript_bind_error(
+            declaration,
+            &format!("the generated cache could not be written ({e})"),
+        );
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.d.ts")), &source) {
+        javascript_bind_error(
+            declaration,
+            &format!("the typed declaration cache could not be written ({e})"),
+        );
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.provenance")),
+        &result.provenance,
+    ) {
+        javascript_bind_error(
+            declaration,
+            &format!("the binding provenance could not be written ({e})"),
+        );
+    }
     println!("bound {} JavaScript export{} from `{declaration}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
 }
 fn javascript_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.".to_string())}
