@@ -35,11 +35,22 @@ fn run() {
     assert!(output.rust.contains("FS.Write:.jet/build"), "{}", output.rust);
 }
 
+fn host_executable(name: &str) -> String {
+    std::env::split_paths(&std::env::var_os("PATH").expect("PATH should be set"))
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
+        .unwrap_or_else(|| std::path::PathBuf::from(format!("/bin/{name}")))
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
     #Abilities(abilities: FS.Read, IO) {
         narrowed :: abilities.with("FS.Read")
-        released :: narrowed.without("FS.Read")
+        _released :: narrowed.without("FS.Read")
         print("abilities")
     }
 }
@@ -131,7 +142,9 @@ fn run() {
     let output = jet::compile(&source).expect("authority plan API should compile");
     assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
     assert!(output.rust.contains("jet_process_spec_plan"), "{}", output.rust);
-    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) {
+    let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
+        == jetpack::RuntimePolicy::SandboxLevel::Strong;
+    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) && native_backend {
         "spawned\n"
     } else {
         "refused\n"
@@ -142,6 +155,7 @@ fn run() {
 
 #[test]
 fn authority_process_binds_exact_resource_grants() {
+    let cargo = host_executable("cargo");
     let source = r#"
 use core.process as process
 
@@ -149,28 +163,31 @@ fn run() {
     policy :: Abilities.from_rights([
         "FS.Read:repo",
         "FS.Write:.jet/build",
-        "Exec:/usr/bin/cargo",
+        "Exec:__CARGO__",
     ])
-    spec :: process.cmd(["cargo", "test"]).under(policy)
+    spec :: process.cmd(["__CARGO__", "test"]).under(policy)
     if spec.plan() == {
         .Ok(_) -> print("planned")
         .Err(_) -> print("refused")
     }
 }
-"#;
-    let output = jet::compile(source).expect("exact process grants should compile");
+"#
+    .replace("__CARGO__", &cargo);
+    let output = jet::compile(&source).expect("exact process grants should compile");
     assert!(
         output.rust.contains("JetAuthority::__jet_from_rights"),
         "{}",
         output.rust
     );
     assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
-    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) {
+    let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
+        == jetpack::RuntimePolicy::SandboxLevel::Strong;
+    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) && native_backend {
         "planned\n"
     } else {
         "refused\n"
     };
-    tir_support::assert_tiers_agree("authority_process_exact_grants", source, expected);
+    tir_support::assert_tiers_agree("authority_process_exact_grants", &source, expected);
 }
 
 #[test]
@@ -221,6 +238,7 @@ fn run() {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn authority_process_plan_and_receipt_share_the_policy_digest() {
+    let printf = host_executable("printf");
     let source = r#"
 use core.process as process
 
@@ -228,9 +246,9 @@ fn run() {
     policy :: Abilities.from_rights([
         "FS.Read:repo",
         "FS.Write:.jet/build",
-        "Exec:/usr/bin/printf",
+        "Exec:__PRINTF__",
     ])
-    spec :: process.cmd(["/usr/bin/printf", "receipt"]).under(policy)
+    spec :: process.cmd(["__PRINTF__", "receipt"]).under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
             receipt :: spec.run() ?? panic("run failed")
@@ -240,11 +258,18 @@ fn run() {
         .Err(_) -> print("refused")
     }
 }
-"#;
+"#
+    .replace("__PRINTF__", &printf);
+    let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
+        == jetpack::RuntimePolicy::SandboxLevel::Strong;
     tir_support::assert_tiers_agree(
         "authority_process_receipt_digest",
-        source,
-        "true\ntrue\n",
+        &source,
+        if native_backend {
+            "true\ntrue\n"
+        } else {
+            "refused\n"
+        },
     );
 }
 
@@ -256,14 +281,25 @@ use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    result :: process.cmd(["/usr/bin/printf", "sandboxed"]).under(policy).run_checked()
-    if result == {
-        .Ok(value) -> print(value.output)
-        .Err(_) -> print("denied")
+    spec :: process.cmd(["/usr/bin/printf", "sandboxed"]).under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            print(plan.backend)
+            result :: spec.run_checked()
+            if result == {
+                .Ok(value) -> print(value.output)
+                .Err(_) -> print("denied")
+            }
+        }
+        .Err(_) -> print("refused")
     }
 }
 "#;
-    tir_support::assert_tiers_agree("authority_macos_seatbelt_success", success, "sandboxed\n");
+    tir_support::assert_tiers_agree(
+        "authority_macos_seatbelt_success",
+        success,
+        "macos-seatbelt\nsandboxed\n",
+    );
 
     let hostile = r#"
 use core.process as process
@@ -291,21 +327,32 @@ fn run() {
     spec :: process.cmd(["printf", "sandboxed"]).under(policy)
     if spec.plan() == {
         .Ok(plan) -> {
-            if plan.backend == "linux-bwrap" {
-                result :: spec.run_checked()
-                if result == {
-                    .Ok(value) -> print(value.output)
-                    .Err(_) -> print("denied")
+            if {
+                plan.backend == "linux-bwrap" -> {
+                    result :: spec.run_checked()
+                    if result == {
+                        .Ok(value) -> print(value.output)
+                        .Err(_) -> print("denied")
+                    }
                 }
-            } else {
-                print("wrong-backend")
+                else -> print("wrong-backend")
             }
         }
         .Err(_) -> print("refused")
     }
 }
 "#;
-    tir_support::assert_tiers_agree("authority_linux_bwrap_success", success, "sandboxed\n");
+    let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
+        == jetpack::RuntimePolicy::SandboxLevel::Strong;
+    tir_support::assert_tiers_agree(
+        "authority_linux_bwrap_success",
+        success,
+        if native_backend {
+            "sandboxed\n"
+        } else {
+            "refused\n"
+        },
+    );
 
     let hostile = r#"
 use core.process as process
@@ -319,7 +366,15 @@ fn run() {
     }
 }
 "#;
-    tir_support::assert_tiers_agree("authority_linux_bwrap_host_read", hostile, "blocked\n");
+    tir_support::assert_tiers_agree(
+        "authority_linux_bwrap_host_read",
+        hostile,
+        if native_backend {
+            "blocked\n"
+        } else {
+            "refused\n"
+        },
+    );
 }
 
 #[cfg(target_os = "windows")]

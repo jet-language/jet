@@ -456,6 +456,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
                 | "signal"
                 | "timed_out"
                 | "executable_identity"
+                | "input_digest"
                 | "argv"
                 | "policy_digest"
                 | "backend"

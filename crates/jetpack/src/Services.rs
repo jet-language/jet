@@ -667,7 +667,9 @@ const CATALOG: &[Catalog] = &[
                 "127.0.0.1:1025".to_string(),
             ]
         },
-        readiness: tcp_readiness,
+        readiness: |port| {
+            ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/api/v2/messages"))
+        },
         prepare: prepare_none,
     },
     Catalog {
@@ -5694,6 +5696,23 @@ mod tests {
                         resolved.ready_probe,
                         Some(ReadyProbe::Exec(
                             "curl -fsS http://127.0.0.1:8025/api/v1/info".to_string()
+                        ))
+                    );
+                }
+                "mailhog" => {
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "-ui-bind-addr" && args[1] == "127.0.0.1:8025"
+                    }));
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "-api-bind-addr" && args[1] == "127.0.0.1:8025"
+                    }));
+                    assert!(command.windows(2).any(|args| {
+                        args[0] == "-smtp-bind-addr" && args[1] == "127.0.0.1:1025"
+                    }));
+                    assert_eq!(
+                        resolved.ready_probe,
+                        Some(ReadyProbe::Exec(
+                            "curl -fsS http://127.0.0.1:8025/api/v2/messages".to_string()
                         ))
                     );
                 }

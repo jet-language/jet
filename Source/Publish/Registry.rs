@@ -2443,22 +2443,23 @@ fn copy_artifact_tree(source: &Path, destination: &Path) -> io::Result<()> {
 ///     recorded `public_key` for the package). A mismatch is a hard error
 ///     (E1246) — never silently accept tampered bytes (I1).
 ///   - `require_signed: true` + no signature → hard error (E1247).
-///   - An entry that declares a key differing from the pin is a legitimate key
-///     rotation: a warning (returned as text), never an error — the registry's
-///     git-push auth is the trust root.
+///   - An entry that declares a key differing from the pin is a takeover. Its
+///     signature must verify against the newly declared key; the registry
+///     review receipt is enforced by `Index::validate_takeover`.
 ///
-/// Returns any warnings (rotation notices). `all` is every recorded line for the
-/// package (yanked included), so the pin can be found regardless of yanks.
+/// Returns any retained warnings. `all` is every recorded line for the package
+/// (yanked included), so the pin can be found regardless of yanks.
 pub fn verify_index_entry(
     all: &[IndexEntry],
     entry: &IndexEntry,
     require_signed: bool,
     registry_name: &str,
 ) -> Result<Vec<String>, Diagnostic> {
-    let mut warnings = Vec::new();
+    let warnings = Vec::new();
 
+    let takeover = Index::is_takeover(all, entry);
     if entry.signature.trim().is_empty() {
-        if require_signed {
+        if require_signed || takeover {
             return Err(e1247(registry_name, &entry.name, &entry.version));
         }
         return Ok(warnings); // unsigned and not required — nothing to verify
@@ -2470,20 +2471,15 @@ pub fn verify_index_entry(
         Some(k) => k,
         None => return Err(e1246(&entry.name, &entry.version)),
     };
-    if !crate::Publish::Sign::verify(&pin, &entry.content_hash, &entry.signature)? {
+    let verification_key = if takeover {
+        entry.public_key.trim()
+    } else {
+        pin.as_str()
+    };
+    if !crate::Publish::Sign::verify(verification_key, &entry.content_hash, &entry.signature)? {
         return Err(e1246(&entry.name, &entry.version));
     }
 
-    let declared = entry.public_key.trim();
-    if !declared.is_empty() && declared != pin {
-        warnings.push(format!(
-            "warning: `{}` {} declares a different signing key than the one first pinned for this \
-             package (key rotation). Key rotation is legitimate — the registry's git-push auth is \
-             the trust root — but if you did not expect a new publisher key, verify this release \
-             before using it.",
-            entry.name, entry.version
-        ));
-    }
     Ok(warnings)
 }
 

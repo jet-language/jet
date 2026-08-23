@@ -19,15 +19,17 @@ const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
 const PROCESS_OUTPUT_LIMIT_BYTES: u64 = 1_048_576;
 const DOMAIN_SCORING: &str =
     "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-const TASK_AUTHORITY: &str =
-    "argv=input-root;cwd=scratch;host=ambient;network=unmeasured;external-write=unmeasured";
-const POLICY_PLAN: &str = "manifest-v1+domain-contract-v1";
-const POLICY_LAUNCH_TRANSACTION: &str =
-    "argv=input-root;cwd=scratch;env=JET_CORPUS_JET,JET_CORPUS_JETPACK,JET_CORPUS_TASK";
-const POLICY_DESCENDANTS: &str = "process-group=owned;timeout=kill-reap";
-const POLICY_LIMITS: &str = "wall=120s;output=1048576";
-const POLICY_OUTPUTS: &str = "stdout=exact;stderr=hashed;input=unchanged;scratch=closed";
-const POLICY_RECEIPT: &str = "result-v2;baseline-v2;report-v2";
+const POLICY_CONTRACT: &str = include_str!("agent_workloads/policy.tsv");
+const POLICY_FIELDS: &[&str] = &[
+    "version",
+    "plan",
+    "launch_transaction",
+    "descendants",
+    "limits",
+    "outputs",
+    "receipt",
+    "authority",
+];
 const NATIVE_OS_MATRIX_HEADER: &str = "version\tos\tarch_policy\trequirement\tadapters\treason";
 const EXPECTED_NATIVE_OS_MATRIX: &[(&str, &str, &str, &str, &str)] = &[
     (
@@ -442,7 +444,12 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
+        fs::remove_dir_all(&self.path).unwrap_or_else(|error| {
+            panic!(
+                "scratch cleanup failed for {}: {error}",
+                self.path.display()
+            )
+        });
     }
 }
 
@@ -457,29 +464,39 @@ fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/agent_workloads")
 }
 
+fn policy_field(name: &str) -> &'static str {
+    POLICY_CONTRACT
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix(name)
+                .and_then(|value| value.strip_prefix('='))
+        })
+        .unwrap_or_else(|| panic!("policy contract lacks field {name}"))
+}
+
 fn policy_digest() -> String {
-    let canonical = [
-        "version=1",
-        &format!("plan={POLICY_PLAN}"),
-        &format!("launch_transaction={POLICY_LAUNCH_TRANSACTION}"),
-        &format!("descendants={POLICY_DESCENDANTS}"),
-        &format!("limits={POLICY_LIMITS}"),
-        &format!("outputs={POLICY_OUTPUTS}"),
-        &format!("receipt={POLICY_RECEIPT}"),
-        &format!("authority={TASK_AUTHORITY}"),
-    ]
-    .join("\n");
-    jet::SHA256::sha256_hex(canonical.as_bytes())
+    for field in POLICY_FIELDS {
+        policy_field(field);
+    }
+    jet::SHA256::sha256_hex(POLICY_CONTRACT.trim_end_matches('\n').as_bytes())
 }
 
 fn policy_receipt(digest: &str) -> String {
     format!(
-        "policy\tversion=1\tdigest={digest}\tplan={POLICY_PLAN}\tlaunch_transaction={POLICY_LAUNCH_TRANSACTION}\tdescendants={POLICY_DESCENDANTS}\tlimits={POLICY_LIMITS}\toutputs={POLICY_OUTPUTS}\treceipt={POLICY_RECEIPT}\tauthority={TASK_AUTHORITY}"
+        "policy\tversion={}\tdigest={digest}\tplan={}\tlaunch_transaction={}\tdescendants={}\tlimits={}\toutputs={}\treceipt={}\tauthority={}",
+        policy_field("version"),
+        policy_field("plan"),
+        policy_field("launch_transaction"),
+        policy_field("descendants"),
+        policy_field("limits"),
+        policy_field("outputs"),
+        policy_field("receipt"),
+        policy_field("authority")
     )
 }
 
 fn validate_authority(authority: &str) -> Result<(), String> {
-    if authority == TASK_AUTHORITY {
+    if authority == policy_field("authority") {
         Ok(())
     } else {
         Err(format!("unsupported authority enforcement: {authority}"))
@@ -654,24 +671,42 @@ fn run_bounded(mut command: Command, label: &str, deadline: Duration) -> Bounded
             // helpers. Reap that group on normal completion as well as on
             // timeout/limit failure, or a descendant can race the next run.
             #[cfg(unix)]
-            kill_process_group(child_pid);
+            let group_result = kill_process_group(child_pid);
+            #[cfg(not(unix))]
+            let group_result: Result<(), String> = Ok(());
+            let status = child.wait().unwrap_or(status);
+            if let Err(error) = group_result {
+                panic!("process-group cleanup failed for `{label}`: {error}");
+            }
             break (
-                child.wait().unwrap_or(status),
+                status,
                 false,
                 output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES,
             );
         }
         if output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES {
             #[cfg(unix)]
-            kill_process_group(child.id());
+            let group_result = kill_process_group(child.id());
+            #[cfg(not(unix))]
+            let group_result: Result<(), String> = Ok(());
             let _ = child.kill();
-            break (child.wait().unwrap(), false, true);
+            let status = child.wait().unwrap();
+            if let Err(error) = group_result {
+                panic!("process-group cleanup failed for `{label}`: {error}");
+            }
+            break (status, false, true);
         }
         if started.elapsed() >= deadline {
             #[cfg(unix)]
-            kill_process_group(child.id());
+            let group_result = kill_process_group(child.id());
+            #[cfg(not(unix))]
+            let group_result: Result<(), String> = Ok(());
             let _ = child.kill();
-            break (child.wait().unwrap(), true, false);
+            let status = child.wait().unwrap();
+            if let Err(error) = group_result {
+                panic!("process-group cleanup failed for `{label}`: {error}");
+            }
+            break (status, true, false);
         }
         thread::sleep(Duration::from_millis(5));
     };
@@ -693,18 +728,36 @@ fn output_size(stdout: &Path, stderr: &Path) -> u64 {
 }
 
 #[cfg(unix)]
-fn kill_process_group(pid: u32) {
+fn kill_process_group(pid: u32) -> Result<(), String> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }
     let Ok(pid) = i32::try_from(pid) else {
-        return;
+        return Err("child PID does not fit platform process ID".into());
     };
     // SAFETY: the negative PID targets only the process group created for the
     // bounded child; SIGKILL makes timeout cleanup fail closed.
-    unsafe {
-        let _ = kill(-pid, 9);
+    let result = unsafe { kill(-pid, 9) };
+    if result == 0 {
+        Ok(())
+    } else {
+        let error = std::io::Error::last_os_error();
+        // Linux reports ESRCH for a group that exited between `wait()` and
+        // this cleanup. The absence is already the desired fail-closed state.
+        if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(3) {
+            Ok(())
+        } else {
+            Err(format!("kill(-{pid}, SIGKILL): {error}"))
+        }
     }
+}
+
+fn stderr_receipt(output: &Output) -> String {
+    format!(
+        "stderr_bytes={} stderr_sha256={}",
+        output.stderr.len(),
+        jet::SHA256::sha256_hex(&output.stderr)
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -1135,19 +1188,27 @@ fn recorded_baselines_cover_frozen_tasks() {
 fn policy_digest_covers_authority_and_receipt_contract() {
     let digest = policy_digest();
     let receipt = policy_receipt(&digest);
+    let contract_fields = POLICY_CONTRACT.lines().collect::<Vec<_>>();
+    assert_eq!(contract_fields.len(), POLICY_FIELDS.len());
+    for (line, name) in contract_fields.iter().zip(POLICY_FIELDS) {
+        assert!(
+            line.starts_with(&format!("{name}=")),
+            "policy field drifted: {line}"
+        );
+    }
     for field in [
         format!("digest={digest}"),
-        format!("plan={POLICY_PLAN}"),
-        format!("launch_transaction={POLICY_LAUNCH_TRANSACTION}"),
-        format!("descendants={POLICY_DESCENDANTS}"),
-        format!("limits={POLICY_LIMITS}"),
-        format!("outputs={POLICY_OUTPUTS}"),
-        format!("receipt={POLICY_RECEIPT}"),
-        format!("authority={TASK_AUTHORITY}"),
+        format!("plan={}", policy_field("plan")),
+        format!("launch_transaction={}", policy_field("launch_transaction")),
+        format!("descendants={}", policy_field("descendants")),
+        format!("limits={}", policy_field("limits")),
+        format!("outputs={}", policy_field("outputs")),
+        format!("receipt={}", policy_field("receipt")),
+        format!("authority={}", policy_field("authority")),
     ] {
         assert!(receipt.contains(&field), "policy receipt lost {field}");
     }
-    assert!(validate_authority(TASK_AUTHORITY).is_ok());
+    assert!(validate_authority(policy_field("authority")).is_ok());
     assert!(validate_authority(
         "argv=input-root;cwd=scratch;host=ambient;network=denied;external-write=unmeasured"
     )
@@ -1200,7 +1261,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
         .collect::<BTreeSet<_>>();
     for task in &tasks {
         assert!(ids.insert(task.id.clone()), "duplicate task ID {}", task.id);
-        assert_eq!(task.authority, TASK_AUTHORITY);
+        assert_eq!(task.authority, policy_field("authority"));
         validate_authority(&task.authority).unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(task.adapters, "jet,bash,python,node");
         assert_eq!(
@@ -1391,6 +1452,125 @@ fn structured_data_database_http_jet_adapters_use_production_paths() {
 }
 
 #[test]
+fn mcp_terminal_service_jet_adapters_use_production_paths() {
+    let checks = [
+        (
+            "mcp_resource.jet",
+            [
+                "process.cmd([jet, \"self\", \"lsp\"])",
+                "resources/list",
+                "resources/read",
+                "child.stdin.write",
+                "jet://environment",
+                "-32002",
+                "/agent-secret",
+            ]
+            .as_slice(),
+        ),
+        (
+            "interactive_terminal.jet",
+            [
+                ".terminal(TerminalPolicy",
+                ".spawn()",
+                "terminal_session.sh",
+                "session.resize",
+                "child.wait()",
+                "Name: ",
+                "Hello Ada",
+                "Choice blue",
+                "terminal_closed.sh",
+                "interactive-terminal-closed",
+                ".timeout(",
+            ]
+            .as_slice(),
+        ),
+        (
+            "service_lifecycle.jet",
+            [
+                "JETPACK_FAKE_SYSTEMD_STATE",
+                "\"services\", \"up\"",
+                "\"services\", \"health\"",
+                "\"services\", \"wait\"",
+                "\"services\", \"logs\"",
+                "\"services\", \"down\"",
+                "E1261",
+                "supervisor.error",
+                "phase=failed",
+                "recovery=startup-failed",
+            ]
+            .as_slice(),
+        ),
+    ];
+    for (adapter, needles) in checks {
+        let source = fs::read_to_string(corpus_root().join("adapters").join(adapter)).unwrap();
+        for needle in needles {
+            assert!(
+                source.contains(needle),
+                "{adapter} no longer reaches the production path containing {needle}"
+            );
+        }
+    }
+}
+
+#[test]
+fn structured_data_database_http_production_paths_handle_success_and_hostile_inputs() {
+    let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+    let task_ids = [
+        "structured-data-transform",
+        "structured-data-hostile",
+        "database-access",
+        "database-hostile",
+        "http-api",
+        "http-hostile",
+    ];
+    let mut checked = 0;
+
+    for task in read_tasks()
+        .into_iter()
+        .filter(|task| task_ids.contains(&task.id.as_str()))
+    {
+        let input = corpus_root().join(&task.input);
+        let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
+        let before = input_hashes(&input);
+        let scratch = Scratch::new("jet_agent_1167_production_path");
+        let source = corpus_root()
+            .join("adapters")
+            .join(format!("{}.jet", adapter_stem(&task.id)));
+        let bounded = run_bounded(
+            adapter_command(
+                "jet",
+                &source,
+                &jet_cli,
+                &input,
+                &scratch.path,
+                &task.id,
+            ),
+            "#1167 production path",
+            PROCESS_DEADLINE,
+        );
+
+        assert!(!bounded.timed_out, "{} timed out", task.id);
+        assert!(!bounded.limit_exceeded, "{} hit output limit", task.id);
+        assert_eq!(bounded.output.status.code(), Some(0), "{} failed", task.id);
+        assert_eq!(bounded.output.stdout, expected, "{} output drifted", task.id);
+        assert_eq!(input_hashes(&input), before, "{} changed input", task.id);
+        assert_eq!(
+            scratch_output_violations(
+                "jet",
+                &scratch.path,
+                &source.file_stem().unwrap().to_string_lossy(),
+            ),
+            Vec::<String>::new(),
+            "{} left scratch residue",
+            task.id
+        );
+        checked += 1;
+    }
+
+    assert_eq!(checked, task_ids.len(), "#1167 task set drifted");
+}
+
+#[test]
 fn native_os_matrix_is_frozen_and_names_current_host() {
     let matrix = read_native_os_matrix();
     let actual = matrix
@@ -1558,7 +1738,12 @@ fn production_process_limits_authority_and_descendant_cleanup() {
         let bounded = run_bounded(command, "process policy corpus", PROCESS_DEADLINE);
         assert!(!bounded.timed_out, "Jet process policy fixture timed out");
         assert!(!bounded.limit_exceeded, "Jet process policy fixture hit output limit");
-        assert_eq!(bounded.output.status.code(), Some(0), "{}", String::from_utf8_lossy(&bounded.output.stderr));
+        assert_eq!(
+            bounded.output.status.code(),
+            Some(0),
+            "{}",
+            stderr_receipt(&bounded.output)
+        );
         bounded.output
     }
 
@@ -1765,9 +1950,9 @@ fn equivalent_adapters_complete_declared_tasks() {
             assert_eq!(
                 cold.output.status.code(),
                 Some(0),
-                "{} {adapter} cold exit drifted:\n{}",
+                "{} {adapter} cold exit drifted: {}",
                 task.id,
-                String::from_utf8_lossy(&cold.output.stderr)
+                stderr_receipt(&cold.output)
             );
             assert_eq!(
                 cold.output.stdout, expected,
@@ -1851,7 +2036,7 @@ fn equivalent_adapters_complete_declared_tasks() {
         );
         for result in &measurements {
             println!(
-                "result\ttask={}\tadapter={}\tsuccess=true\tsource_tokens={}\tcold_ns={}\twarm_ns={}\toutput_stable=true\tversion={}\tcold_stderr_bytes={}\tcold_stderr_sha256={}\twarm_stderr_bytes={}\twarm_stderr_sha256={}\tpolicy_digest={}\tlimits={}\tdescendants={}\toutputs={}\treceipt={}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769",
+                "result\ttask={}\tadapter={}\tsuccess=true\tsource_tokens={}\tcold_ns={}\twarm_ns={}\toutput_stable=true\tversion={}\tcold_stderr_bytes={}\tcold_stderr_sha256={}\twarm_stderr_bytes={}\twarm_stderr_sha256={}\tpolicy_digest={}\tlimits={}\tdescendants={}\toutputs={}\treceipt={}\tauthority={}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769",
                 task.id,
                 result.adapter,
                 result.source_tokens,
@@ -1863,10 +2048,11 @@ fn equivalent_adapters_complete_declared_tasks() {
                 result.warm_stderr_bytes,
                 result.warm_stderr_sha256,
                 run_policy_digest,
-                POLICY_LIMITS,
-                POLICY_DESCENDANTS,
-                POLICY_OUTPUTS,
-                POLICY_RECEIPT
+                policy_field("limits"),
+                policy_field("descendants"),
+                policy_field("outputs"),
+                policy_field("receipt"),
+                task.authority
             );
         }
     }
@@ -1921,8 +2107,8 @@ fn llm_digest_first_program() {
     assert!(!bounded.limit_exceeded, "llm digest first program hit output limit");
     assert!(
         bounded.output.status.success(),
-        "llm digest first program failed:\n{}",
-        String::from_utf8_lossy(&bounded.output.stderr)
+        "llm digest first program failed: {}",
+        stderr_receipt(&bounded.output)
     );
     assert_eq!(bounded.output.stdout, expected, "first-program transcript drifted");
 }

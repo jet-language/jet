@@ -172,29 +172,51 @@ impl GateStatus {
 /// The receipt is deliberately outside the package source tree, so a package
 /// author cannot approve their own core publication.
 pub fn require_core_review(repo: &Path, package: &str, version: &str) -> Result<(), Diagnostic> {
+    require_review(repo, package, version, false)
+}
+
+/// A publisher-key change is a package takeover. It uses the same registry
+/// maintainer receipt as a core publication, but the receipt is required for
+/// every tier.
+pub fn require_takeover_review(
+    repo: &Path,
+    package: &str,
+    version: &str,
+) -> Result<(), Diagnostic> {
+    require_review(repo, package, version, true)
+}
+
+fn require_review(
+    repo: &Path,
+    package: &str,
+    version: &str,
+    takeover: bool,
+) -> Result<(), Diagnostic> {
     let path = repo
         .join("reviews")
         .join(package)
         .join(format!("{version}.review"));
-    let text = std::fs::read_to_string(&path).map_err(|_| review_error(package, version, &path))?;
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Err(review_error(package, version, &path, takeover));
+    };
     let mut package_field = None;
     let mut version_field = None;
     let mut reviewer = None;
     let mut decision = None;
     let mut lines = text.lines();
     if lines.next() != Some("jet-registry-core-review-v1") {
-        return Err(review_error(package, version, &path));
+        return Err(review_error(package, version, &path, takeover));
     }
     for line in lines {
         let Some((key, value)) = line.split_once('=') else {
-            return Err(review_error(package, version, &path));
+            return Err(review_error(package, version, &path, takeover));
         };
         match key {
             "package" if package_field.is_none() => package_field = Some(value),
             "version" if version_field.is_none() => version_field = Some(value),
             "reviewer" if reviewer.is_none() => reviewer = Some(value),
             "decision" if decision.is_none() => decision = Some(value),
-            _ => return Err(review_error(package, version, &path)),
+            _ => return Err(review_error(package, version, &path, takeover)),
         }
     }
     let valid = package_field == Some(package)
@@ -204,7 +226,7 @@ pub fn require_core_review(repo: &Path, package: &str, version: &str) -> Result<
     if valid {
         Ok(())
     } else {
-        Err(review_error(package, version, &path))
+        Err(review_error(package, version, &path, takeover))
     }
 }
 
@@ -285,7 +307,21 @@ fn advisory_gate_status(project_root: &Path) -> GateState {
     }
 }
 
-fn review_error(package: &str, version: &str, path: &Path) -> Diagnostic {
+fn review_error(package: &str, version: &str, path: &Path, takeover: bool) -> Diagnostic {
+    if takeover {
+        return Diagnostic::error(
+            "E2105",
+            format!(
+                "package takeover of `{package}` {version} has no approved registry review receipt"
+            ),
+            "changing a package signing key transfers release authority, so a registry maintainer must review the takeover".to_string(),
+            format!(
+                "commit `jet-registry-core-review-v1` receipt `{}` with `decision=approved`, then publish the re-signed release again",
+                path.display()
+            ),
+            None,
+        );
+    }
     Diagnostic::error(
         "E2105",
         format!(

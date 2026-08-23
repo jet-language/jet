@@ -7243,16 +7243,19 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     )
     .unwrap();
 
-    let run = || {
-        jetpack()
+    let run = |fake_sandbox: Option<&str>| {
+        let mut command = jetpack();
+        command
             .args(["build", "--no-color"])
             .current_dir(&proj)
             .env("JETPACK_ROOT", &root)
-            .env("PATH", "/usr/bin:/bin")
-            .output()
-            .unwrap()
+            .env("PATH", "/usr/bin:/bin");
+        if let Some(value) = fake_sandbox {
+            command.env("JETPACK_FAKE_SANDBOX", value);
+        }
+        command.output().unwrap()
     };
-    let first = run();
+    let first = run(None);
     assert!(
         first.status.success(),
         "stderr: {}",
@@ -7278,13 +7281,17 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     make_writable(&entry.out);
     fs::write(Path::new(&entry.out).join("bin/hello"), "tampered\n").unwrap();
 
-    let substituted = run();
+    let substituted = run(Some("unavailable"));
     assert!(
         substituted.status.success(),
         "verified cache substitution must repair the local candidate: {}",
         String::from_utf8_lossy(&substituted.stderr)
     );
     let substituted_stderr = String::from_utf8_lossy(&substituted.stderr);
+    assert!(
+        substituted_stderr.contains("L0205"),
+        "unavailable allow-mode action must record the fallback decision: {substituted_stderr}"
+    );
     assert!(
         substituted_stderr.contains("substituted") && substituted_stderr.contains("1 substituted"),
         "production build must report the verified substitution: {substituted_stderr}"
@@ -7304,7 +7311,7 @@ fn jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable() {
     fs::remove_dir_all(&mirror.path).unwrap();
     fs::write(&mirror.path, "cache substituter unavailable").unwrap();
 
-    let fallback = run();
+    let fallback = run(None);
     assert!(
         fallback.status.success(),
         "source fallback must survive an unavailable substituter: {}",

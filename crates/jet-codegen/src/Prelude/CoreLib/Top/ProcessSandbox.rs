@@ -268,7 +268,10 @@ where
             )?;
             let mut command = Command::new(MACOS_SANDBOX_EXEC);
             command
-                .arg("-f")
+                // Keep the profile alive in argv. A file passed with `-f`
+                // could be deleted after `spawn()` returns but before
+                // sandbox-exec has parsed it, creating a launch race.
+                .arg("-p")
                 .arg(&profile)
                 .arg(&executable)
                 .args(args)
@@ -281,13 +284,10 @@ where
             for (key, value) in env {
                 command.env(key, value);
             }
-            if let Err(error) = configure(&mut command) {
-                let _ = fs::remove_file(profile);
-                return Err(error);
-            }
-            let result = command.spawn();
-            let _ = fs::remove_file(profile);
-            return result.map_err(|error| Error::Io(error.to_string()));
+            configure(&mut command)?;
+            return command
+                .spawn()
+                .map_err(|error| Error::Io(error.to_string()));
         }
 
         #[cfg(target_os = "linux")]
@@ -535,7 +535,7 @@ fn build_profile(
     share_network: bool,
     source_readable: bool,
     source_writable: bool,
-) -> Result<PathBuf, Error> {
+) -> Result<String, Error> {
     let executable = sbpl_path(executable)?;
     let source_dir = sbpl_path(source_dir)?;
     let output_dir = output_dir.map(sbpl_path).transpose()?;
@@ -568,7 +568,7 @@ fn build_profile(
         profile.push_str("(deny network*)\n");
     }
     profile.push_str("(deny device*)\n");
-    write_profile(&profile)
+    Ok(profile)
 }
 
 #[cfg(target_os = "macos")]

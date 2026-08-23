@@ -67,26 +67,11 @@ fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
         jet_std::ProcessStreamMode::Inherit => std::process::Stdio::inherit(),
     }
 }
-fn jet_process_command_base_with_identity(
-    spec: &jet_std::ProcessSpec,
-    executable_identity: Option<&str>,
-) -> Result<std::process::Command, jet_std::IOError> {
-    if spec.cmd.is_empty() {
-        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Resolve,
-            None,
-            None,
-            Some("process command needs at least one word".to_string()),
-        )));
-    }
-    let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
-    command.args(&spec.cmd[1..]);
-    if let Some(cwd) = &spec.cwd {
-        command.current_dir(cwd);
-    }
-    // D-ENV-MUTATE1=A: clone one logical-environment snapshot under its read
-    // lock, then compose ProcessSpec overrides in owned memory. Every launch is
-    // untorn and never rereads the mutable host environment.
+
+// D-ENV-MUTATE1=A: one composed snapshot feeds both std::process and the
+// Windows CreateProcessW backend. Do not let the terminal path grow a second
+// environment policy.
+fn jet_process_environment(spec: &jet_std::ProcessSpec) -> Result<JetEnvEntries, jet_std::IOError> {
     let mut child_env = if spec.env_clear {
         Vec::new()
     } else {
@@ -126,6 +111,27 @@ fn jet_process_command_base_with_identity(
         let name = std::ffi::OsStr::new(name);
         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
+    Ok(child_env)
+}
+
+fn jet_process_command_base_with_identity(
+    spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
+) -> Result<std::process::Command, jet_std::IOError> {
+    if spec.cmd.is_empty() {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
+            None,
+            None,
+            Some("process command needs at least one word".to_string()),
+        )));
+    }
+    let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
+    command.args(&spec.cmd[1..]);
+    if let Some(cwd) = &spec.cwd {
+        command.current_dir(cwd);
+    }
+    let child_env = jet_process_environment(spec)?;
     command.env_clear();
     command.envs(child_env);
     // No `.stdin(...)` call (default) closes the child's stdin —
@@ -204,21 +210,7 @@ fn jet_process_sandbox_policy_scope(
         .unwrap_or_default()
         .lines()
         .collect::<Vec<_>>();
-    let executable_rights = rights
-        .iter()
-        .filter(|right| right.starts_with("Exec:"))
-        .collect::<Vec<_>>();
-    if !executable_rights.is_empty()
-        && !executable_rights
-            .iter()
-            .any(|right| right.strip_prefix("Exec:") == Some(executable_identity))
-    {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Resolve,
-            spec.cmd.first().cloned(),
-            "authority policy does not grant the resolved executable",
-        ));
-    }
+    jet_process_policy_check_executable(spec, executable_identity)?;
     Ok((
         rights.iter().any(|right| *right == "FS.Read:repo"),
         rights.iter().any(|right| *right == "FS.Write:.jet/build"),
@@ -237,7 +229,15 @@ fn jet_process_receipt(
     timed_out: bool,
     output: String,
     errors: String,
+    extra_secret_values: Option<&[String]>,
 ) -> jet_std::ProcessReceipt {
+    let owned_secret_values;
+    let secret_values = if let Some(values) = extra_secret_values {
+        values
+    } else {
+        owned_secret_values = jet_process_policy_secret_values(spec);
+        &owned_secret_values
+    };
     let executable_identity = plan
         .map(|plan| plan.executable_identity.clone())
         .or_else(|| jet_process_resolve_executable(spec).ok())
@@ -276,11 +276,11 @@ fn jet_process_receipt(
         .map(|plan| plan.outputs.clone())
         .unwrap_or_else(|| jet_process_policy_outputs(spec));
     outputs.push(format!("captured-bytes={}", output.len() + errors.len()));
-    let redacted = spec.policy_wire.is_some() || !jet_process_policy_secret_values(spec).is_empty();
+    let redacted = spec.policy_wire.is_some() || !secret_values.is_empty();
     jet_std::ProcessReceipt {
         code,
-        output: jet_process_policy_redact(spec, &output),
-        errors: jet_process_policy_redact(spec, &errors),
+        output: jet_process_redact_text(&output, secret_values),
+        errors: jet_process_redact_text(&errors, secret_values),
         success,
         signal,
         timed_out,
@@ -303,8 +303,29 @@ fn jet_process_child_from_inner(
     spec: &jet_std::ProcessSpec,
     process_group: bool,
     plan: Option<jet_std::ProcessPlan>,
-) -> jet_std::ProcessChild {
-    jet_std::ProcessChild {
+) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    #[cfg(windows)]
+    let job = if spec.detached {
+        None
+    } else {
+        use std::os::windows::io::AsRawHandle;
+        match jet_process_pty::attach_job(child.as_raw_handle()) {
+            Ok(job) => Some(std::rc::Rc::new(job)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    error,
+                ));
+            }
+        }
+    };
+    #[cfg(not(windows))]
+    let job = None;
+    let process_group = process_group || job.is_some();
+    Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(
             child.stdin.take().map(jet_std::ProcessStdin::Pipe),
@@ -326,13 +347,16 @@ fn jet_process_child_from_inner(
         terminal: Err(JetAbsent),
         process_group,
         detached: spec.detached,
-        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
+        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(jet_std::ProcessHandle::Std {
+            child,
+            job,
+        }))),
         timeout_ms: spec.timeout_ms,
         output_limit: spec.output_limit,
         audit_spec: spec.clone(),
         audit_plan: plan,
         started: std::time::Instant::now(),
-    }
+    })
 }
 
 fn jet_process_verify_launch_plan(
@@ -438,7 +462,7 @@ fn jet_process_spec_spawn(
             &environment,
             share_network,
             source_readable,
-            output_writable,
+            false,
             spec.cmd
                 .first()
                 .map(|word| std::ffi::OsStr::new(word.as_str())),
@@ -461,12 +485,12 @@ fn jet_process_spec_spawn(
             },
         )
         .map_err(|error| jet_process_sandbox_error(spec, error))?;
-        return Ok(jet_process_child_from_inner(
+        return jet_process_child_from_inner(
             child,
             spec,
             true,
             launch_plan.clone(),
-        ));
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -507,12 +531,12 @@ fn jet_process_spec_spawn(
     // Ordinary Unix children get the same descendant boundary as terminal
     // sessions. Windows keeps direct-child cleanup until its native job
     // boundary is available.
-    Ok(jet_process_child_from_inner(
+    jet_process_child_from_inner(
         child,
         spec,
         cfg!(unix),
         launch_plan,
-    ))
+    )
 }
 
 #[cfg(unix)]
@@ -590,7 +614,7 @@ fn jet_process_terminal_spawn(
             &environment,
             share_network,
             source_readable,
-            output_writable,
+            false,
             spec.cmd
                 .first()
                 .map(|word| std::ffi::OsStr::new(word.as_str())),
@@ -675,7 +699,10 @@ fn jet_process_terminal_spawn(
         terminal: Ok(jet_std::TerminalSession { master }),
         process_group: true,
         detached: spec.detached,
-        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
+        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(jet_std::ProcessHandle::Std {
+            child,
+            job: None,
+        }))),
         timeout_ms: spec.timeout_ms,
         output_limit: spec.output_limit,
         audit_spec: spec.clone(),
@@ -684,7 +711,78 @@ fn jet_process_terminal_spawn(
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn jet_process_terminal_spawn(
+    spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
+    plan: Option<&jet_std::ProcessPlan>,
+) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    if spec.detached {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "terminal sessions cannot be detached",
+        ));
+    }
+    let policy = spec.terminal.as_ref().expect("terminal spawn needs policy");
+    let environment = jet_process_environment(spec)?;
+    let executable = executable_identity
+        .or_else(|| spec.cmd.first().map(String::as_str))
+        .ok_or_else(|| {
+            jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Resolve,
+                None,
+                None,
+                Some("process command needs at least one word".to_string()),
+            ))
+        })?;
+    let native = jet_process_pty::spawn(
+        jet_process_pty::PtyConfig {
+            cols: policy.size.cols,
+            rows: policy.size.rows,
+            raw: matches!(policy.mode, jet_std::TerminalMode::Raw),
+        },
+        executable,
+        &spec.cmd[1..],
+        spec.cwd.as_deref(),
+        &environment,
+    )
+    .map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
+    })?;
+    let control = std::rc::Rc::new(jet_std::ConPtyControl::new(native.console));
+    Ok(jet_std::ProcessChild {
+        wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
+            jet_std::ProcessStdin::Terminal(native.input),
+        ))),
+        stdout: std::rc::Rc::new(std::cell::RefCell::new(Some(std::io::BufReader::new(
+            jet_std::ProcessReader::Terminal(native.output),
+        )))),
+        stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        terminal: Ok(jet_std::TerminalSession { control }),
+        process_group: true,
+        detached: false,
+        inner: std::rc::Rc::new(std::cell::RefCell::new(Some(
+            jet_std::ProcessHandle::Native {
+                process: native.process,
+                job: std::rc::Rc::new(native.job),
+                pid: native.pid,
+            },
+        ))),
+        timeout_ms: spec.timeout_ms,
+        output_limit: spec.output_limit,
+        audit_spec: spec.clone(),
+        audit_plan: plan.cloned(),
+        started: std::time::Instant::now(),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
 fn jet_process_terminal_spawn(
     spec: &jet_std::ProcessSpec,
     _executable_identity: Option<&str>,
@@ -862,7 +960,7 @@ fn jet_process_spec_run_windows(
         &environment,
         share_network,
         source_readable,
-        output_writable,
+        false,
         spec.timeout_ms,
         spec.output_limit,
     )
@@ -899,6 +997,7 @@ fn jet_process_spec_run_windows(
         result.timed_out,
         output,
         errors,
+        None,
     ))
 }
 
@@ -1003,7 +1102,7 @@ fn jet_process_sandbox_pipeline_spawn(
         &environment,
         share_network,
         source_readable,
-        output_writable,
+        false,
         spec.cmd
             .first()
             .map(|word| std::ffi::OsStr::new(word.as_str())),
@@ -1048,12 +1147,11 @@ fn jet_process_spec_pipeline(
             Some("process.pipeline needs at least one command".to_string()),
         )));
     }
-    #[cfg(target_os = "windows")]
     if specs.iter().any(|spec| spec.policy_wire.is_some()) {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
             Some("process.pipeline".to_string()),
-            "authority-bound Windows pipelines are unavailable; refusing an unsandboxed pipeline",
+            "authority-bound pipelines need one auditable launch transaction; refusing before spawn",
         ));
     }
     let launch_plans = specs
@@ -1226,6 +1324,12 @@ fn jet_process_spec_pipeline(
         ));
     }
     let output_text = output.text;
+    let mut secret_values = specs
+        .iter()
+        .flat_map(jet_process_policy_secret_values)
+        .collect::<Vec<_>>();
+    secret_values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    secret_values.dedup();
     Ok(jet_process_receipt(
         specs.last().expect("nonempty pipeline"),
         launch_plans.last().and_then(Option::as_ref),
@@ -1237,7 +1341,59 @@ fn jet_process_spec_pipeline(
         false,
         output_text,
         errors,
+        Some(&secret_values),
     ))
+}
+
+fn jet_process_inner_id(inner: &jet_std::ProcessHandle) -> u32 {
+    match inner {
+        jet_std::ProcessHandle::Std { child, .. } => child.id(),
+        #[cfg(windows)]
+        jet_std::ProcessHandle::Native { pid, .. } => *pid,
+    }
+}
+
+fn jet_process_inner_try_wait(
+    inner: &mut jet_std::ProcessHandle,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    match inner {
+        jet_std::ProcessHandle::Std { child, .. } => child.try_wait(),
+        #[cfg(windows)]
+        jet_std::ProcessHandle::Native { process, .. } => {
+            use std::os::windows::process::ExitStatusExt;
+            jet_process_pty::try_wait(process)
+                .map(|code| code.map(std::process::ExitStatus::from_raw))
+        }
+    }
+}
+
+fn jet_process_inner_wait(
+    inner: &mut jet_std::ProcessHandle,
+) -> std::io::Result<std::process::ExitStatus> {
+    match inner {
+        jet_std::ProcessHandle::Std { child, .. } => child.wait(),
+        #[cfg(windows)]
+        jet_std::ProcessHandle::Native { process, .. } => {
+            use std::os::windows::process::ExitStatusExt;
+            jet_process_pty::wait(process).map(std::process::ExitStatus::from_raw)
+        }
+    }
+}
+
+fn jet_process_inner_kill(inner: &mut jet_std::ProcessHandle) -> std::io::Result<()> {
+    match inner {
+        jet_std::ProcessHandle::Std { child, job } => {
+            #[cfg(windows)]
+            if let Some(job) = job {
+                return jet_process_pty::terminate(job);
+            }
+            #[cfg(not(windows))]
+            let _ = job;
+            child.kill()
+        }
+        #[cfg(windows)]
+        jet_std::ProcessHandle::Native { job, .. } => jet_process_pty::terminate(job),
+    }
 }
 
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
@@ -1245,7 +1401,7 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
         .inner
         .borrow()
         .as_ref()
-        .map(|c| c.id() as i64)
+        .map(|inner| jet_process_inner_id(inner) as i64)
         .unwrap_or(0)
 }
 fn jet_process_child_wait(
@@ -1271,7 +1427,7 @@ fn jet_process_child_wait(
                 Some("process child wait result is unavailable".to_string()),
             )));
         };
-        if let Some(status) = inner.try_wait().map_err(|error| {
+        if let Some(status) = jet_process_inner_try_wait(inner).map_err(|error| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Close,
                 Some("process".to_string()),
@@ -1281,14 +1437,14 @@ fn jet_process_child_wait(
             break status;
         }
         if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-            jet_process_kill_inner(child, inner).map_err(|error| {
+            jet_process_inner_kill(inner).map_err(|error| {
                 jet_std::IOError::other(
                     jet_std::IOOperation::Close,
                     Some("process".to_string()),
                     error,
                 )
             })?;
-            break inner.wait().map_err(|error| {
+            break jet_process_inner_wait(inner).map_err(|error| {
                 jet_std::IOError::other(
                     jet_std::IOOperation::Close,
                     Some("process".to_string()),
@@ -1298,7 +1454,7 @@ fn jet_process_child_wait(
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-                jet_process_kill_inner(child, inner).map_err(|error| {
+                jet_process_inner_kill(inner).map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Close,
                         Some("process".to_string()),
@@ -1306,7 +1462,7 @@ fn jet_process_child_wait(
                     )
                 })?;
                 timed_out = true;
-                break inner.wait().map_err(|error| {
+                break jet_process_inner_wait(inner).map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Close,
                         Some("process".to_string()),
@@ -1321,19 +1477,19 @@ fn jet_process_child_wait(
         // deadlines wake the wait exactly like channel, timer, and I/O waits.
         jet_scheduler_park_ms("process wait", 10);
     };
-    #[cfg(unix)]
     if child.process_group {
-        if let Some(pid) = child.inner.borrow().as_ref().map(|inner| inner.id()) {
-            let _ = jet_process_pty::signal_group(pid, jet_process_signal_kill());
+        if let Some(inner) = child.inner.borrow_mut().as_mut() {
+            let _ = jet_process_inner_kill(inner);
         }
     }
     let pid = child
         .inner
         .borrow()
         .as_ref()
-        .map(|inner| inner.id() as i64)
+        .map(|inner| jet_process_inner_id(inner) as i64)
         .unwrap_or(0);
     child.inner.borrow_mut().take();
+    *child.stdin.borrow_mut() = None;
     let (output, errors, output_exceeded) = jet_process_collect_output(drains)?;
     if output_exceeded {
         return Err(jet_std::IOError::other(
@@ -1359,6 +1515,7 @@ fn jet_process_child_wait(
         timed_out,
         output,
         errors,
+        None,
     );
     *child.wait_result.borrow_mut() = Some(result.clone());
     Ok(result)
@@ -1371,8 +1528,7 @@ fn jet_process_child_exited(child: &jet_std::ProcessChild) -> Result<bool, jet_s
     let Some(inner) = slot.as_mut() else {
         return Ok(true);
     };
-    inner
-        .try_wait()
+    jet_process_inner_try_wait(inner)
         .map(|status| status.is_some())
         .map_err(|error| {
             jet_std::IOError::other(
@@ -1396,14 +1552,38 @@ fn jet_terminal_session_resize(
     session: &jet_std::TerminalSession,
     size: &jet_std::TerminalSize,
 ) -> Result<(), jet_std::IOError> {
-    jet_process_pty::resize(
-        session.master.as_ref(),
-        jet_process_pty::PtyConfig {
-            cols: size.cols,
-            rows: size.rows,
-            raw: false,
-        },
-    )
+    let result = {
+        #[cfg(unix)]
+        {
+            jet_process_pty::resize(
+                session.master.as_ref(),
+                jet_process_pty::PtyConfig {
+                    cols: size.cols,
+                    rows: size.rows,
+                    raw: false,
+                },
+            )
+        }
+        #[cfg(windows)]
+        {
+            jet_process_pty::resize_console(
+                session.control.raw(),
+                jet_process_pty::PtyConfig {
+                    cols: size.cols,
+                    rows: size.rows,
+                    raw: false,
+                },
+            )
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "terminal resize is unavailable on this target",
+            ))
+        }
+    };
+    result
     .map_err(|error| {
         jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
@@ -1453,7 +1633,12 @@ fn jet_process_signal_interrupt() -> i32 {
     jet_process_pty::SIGINT
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn jet_process_signal_interrupt() -> i32 {
+    2
+}
+
+#[cfg(not(any(unix, windows)))]
 fn jet_process_signal_interrupt() -> i32 {
     0
 }
@@ -1463,7 +1648,12 @@ fn jet_process_signal_terminate() -> i32 {
     jet_process_pty::SIGTERM
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn jet_process_signal_terminate() -> i32 {
+    15
+}
+
+#[cfg(not(any(unix, windows)))]
 fn jet_process_signal_terminate() -> i32 {
     0
 }
@@ -1473,7 +1663,12 @@ fn jet_process_signal_kill() -> i32 {
     jet_process_pty::SIGKILL
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn jet_process_signal_kill() -> i32 {
+    9
+}
+
+#[cfg(not(any(unix, windows)))]
 fn jet_process_signal_kill() -> i32 {
     0
 }
@@ -1485,11 +1680,28 @@ fn jet_process_child_signal(
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
         #[cfg(unix)]
         if child.terminal.is_ok() || child.process_group {
-            if jet_process_pty::signal_group(inner.id(), signal).is_ok() {
+            if jet_process_pty::signal_group(jet_process_inner_id(inner), signal).is_ok() {
                 return Ok(());
             }
         }
-        inner.kill().map_err(|error| {
+        #[cfg(windows)]
+        if signal == jet_process_signal_interrupt() {
+            if let jet_std::ProcessHandle::Native { pid, job, .. } = inner {
+                let input = child.stdin.borrow();
+                let input = input.as_ref().and_then(|input| match input {
+                    jet_std::ProcessStdin::Terminal(input) => Some(input),
+                    jet_std::ProcessStdin::Pipe(_) => None,
+                });
+                return jet_process_pty::interrupt(*pid, job, input).map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                });
+            }
+        }
+        jet_process_inner_kill(inner).map_err(|error| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Close,
                 Some("process".to_string()),
@@ -1498,19 +1710,6 @@ fn jet_process_child_signal(
         })?;
     }
     Ok(())
-}
-
-fn jet_process_kill_inner(
-    child: &jet_std::ProcessChild,
-    inner: &mut std::process::Child,
-) -> std::io::Result<()> {
-    #[cfg(unix)]
-    if child.terminal.is_ok() || child.process_group {
-        if jet_process_pty::signal_group(inner.id(), jet_process_signal_kill()).is_ok() {
-            return Ok(());
-        }
-    }
-    inner.kill()
 }
 
 fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) {
@@ -1528,8 +1727,8 @@ fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) {
     let Some(inner) = slot.as_mut() else {
         return;
     };
-    let _ = jet_process_kill_inner(child, inner);
-    let _ = inner.wait();
+    let _ = jet_process_inner_kill(inner);
+    let _ = jet_process_inner_wait(inner);
 }
 
 struct JetProcessWaitCleanup<'a> {
@@ -1549,6 +1748,33 @@ impl Drop for jet_std::ProcessChild {
         }
     }
 }
+
+fn jet_process_stdin_closed() -> jet_std::IOError {
+    jet_std::IOError::Closed(jet_std::IOContext::new(
+        jet_std::IOOperation::Write,
+        Some("process stdin".to_string()),
+        None,
+        Some("process stdin closed".to_string()),
+    ))
+}
+
+fn jet_process_stdin_error(error: std::io::Error) -> jet_std::IOError {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::NotConnected
+            | std::io::ErrorKind::UnexpectedEof
+    ) {
+        jet_process_stdin_closed()
+    } else {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Write,
+            Some("process stdin".to_string()),
+            error,
+        )
+    }
+}
+
 // `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
 // `loop line in child.stdout.lines() { ... }` (mirrors `FileReader`/`StdinHandle`
@@ -1567,7 +1793,7 @@ fn jet_process_stdin_write(
         let wait_fd = {
             let mut stdin = handle.borrow_mut();
             let Some(stdin) = stdin.as_mut() else {
-                return Ok(());
+                return Err(jet_process_stdin_closed());
             };
             let fd = match stdin {
                 jet_std::ProcessStdin::Pipe(writer) => writer.as_raw_fd(),
@@ -1582,12 +1808,7 @@ fn jet_process_stdin_write(
             })?;
             match std::io::Write::write(stdin, &bytes[offset..]) {
                 Ok(0) => {
-                    return Err(jet_std::IOError::Closed(jet_std::IOContext::new(
-                        jet_std::IOOperation::Write,
-                        Some("process stdin".to_string()),
-                        None,
-                        Some("process stdin closed".to_string()),
-                    )));
+                    return Err(jet_process_stdin_closed());
                 }
                 Ok(written) => {
                     offset += written;
@@ -1596,11 +1817,7 @@ fn jet_process_stdin_write(
                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
                 Err(error) if error.kind() == ErrorKind::WouldBlock => Some(fd),
                 Err(error) => {
-                    return Err(jet_std::IOError::other(
-                        jet_std::IOOperation::Write,
-                        Some("process stdin".to_string()),
-                        error,
-                    ));
+                    return Err(jet_process_stdin_error(error));
                 }
             }
         };
@@ -1645,16 +1862,11 @@ fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
     text: &String,
 ) -> Result<(), jet_std::IOError> {
-    if let Some(stdin) = handle.borrow_mut().as_mut() {
-        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Write,
-                Some("process stdin".to_string()),
-                error,
-            )
-        })?;
-    }
-    Ok(())
+    let mut handle = handle.borrow_mut();
+    let Some(stdin) = handle.as_mut() else {
+        return Err(jet_process_stdin_closed());
+    };
+    std::io::Write::write_all(stdin, text.as_bytes()).map_err(jet_process_stdin_error)
 }
 fn jet_process_child_read_line<R: std::io::Read>(
     reader: &mut Option<std::io::BufReader<R>>,

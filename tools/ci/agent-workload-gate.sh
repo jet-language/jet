@@ -7,6 +7,7 @@ cd "$ROOT"
 
 MATRIX="$ROOT/tests/agent_workloads/native_os_matrix.tsv"
 MANIFEST="$ROOT/tests/agent_workloads/manifest.tsv"
+POLICY_CONTRACT="$ROOT/tests/agent_workloads/policy.tsv"
 BASELINE="${JET_AGENT_WORKLOAD_BASELINE:-$ROOT/tests/agent_workloads/jet_baseline.tsv}"
 REPORT="${JET_AGENT_WORKLOAD_REPORT:-$ROOT/docs/audits/agent-workload-corpus-report.tsv}"
 SCRATCH_ROOT="${JET_AGENT_WORKLOAD_SCRATCH_DIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
@@ -16,13 +17,30 @@ usage() {
   exit 64
 }
 
+hash_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    echo "agent workload gate: no SHA-256 command available" >&2
+    return 1
+  fi
+}
+
 validate_report() {
   local report="$1"
   if [ ! -f "$report" ]; then
     echo "agent workload gate: missing report $report" >&2
     return 1
   fi
-  awk -F '\t' -v baseline="$BASELINE" -v matrix="$MATRIX" -v manifest="$MANIFEST" '
+  if [ ! -f "$POLICY_CONTRACT" ]; then
+    echo "agent workload gate: missing policy contract $POLICY_CONTRACT" >&2
+    return 1
+  fi
+  local policy_digest
+  policy_digest="$(LC_ALL=C awk 'NR > 1 { printf "\n" } { printf "%s", $0 }' "$POLICY_CONTRACT" | hash_stdin)"
+  awk -F '\t' -v baseline="$BASELINE" -v matrix="$MATRIX" -v manifest="$MANIFEST" -v expected_policy_digest="$policy_digest" '
     function fail(message) {
       print "agent workload gate: " message > "/dev/stderr"
       bad = 1
@@ -125,6 +143,7 @@ validate_report() {
         if (!nonnegative_integer($metric)) fail("bad report metric in " task ": column=" metric)
       }
       if ($26 !~ /^[0-9a-f]{64}$/) fail("bad policy digest: " task)
+      else if ($26 != expected_policy_digest) fail("policy digest is not the frozen policy: " task)
       if (report_policy_digest == "") report_policy_digest = $26
       else if ($26 != report_policy_digest) fail("policy digest drifted: " task)
     }

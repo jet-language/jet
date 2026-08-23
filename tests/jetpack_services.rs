@@ -801,6 +801,29 @@ mailpit)
     : > "$(dirname "$database")/.service-running"
     exec sleep 30
     ;;
+MailHog)
+    ui=
+    api=
+    smtp=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -ui-bind-addr) shift; ui=$1 ;;
+            -api-bind-addr) shift; api=$1 ;;
+            -smtp-bind-addr) shift; smtp=$1 ;;
+        esac
+        shift
+    done
+    [ "$ui" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
+    [ "$api" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
+    [ "$smtp" = "127.0.0.1:1025" ]
+    : > .service-running
+    exec sleep 30
+    ;;
+blackfire)
+    [ "${1:-}" = "agent:start" ]
+    : > .service-running
+    exec sleep 30
+    ;;
 nginx)
     prefix=
     config=
@@ -863,6 +886,11 @@ curl)
             [ "$url" = "http://127.0.0.1:${port}/api/v1/info" ]
             [ -f .jet/services/mailpit/data/.service-running ]
             ;;
+        */api/v2/messages)
+            port=$(cat .jet/services/mailhog/ports)
+            [ "$url" = "http://127.0.0.1:${port}/api/v2/messages" ]
+            [ -f .jet/services/mailhog/data/.service-running ]
+            ;;
         *)
             healthy=1
             matched=0
@@ -901,6 +929,8 @@ esac
         "mariadbd",
         "minio",
         "mailpit",
+        "MailHog",
+        "blackfire",
         "nginx",
         "pg_isready",
         "redis-cli",
@@ -957,6 +987,9 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         "nginx",
         "minio",
         "mailpit",
+        "mail",
+        "mailhog",
+        "blackfire",
     ] {
         let plan = DevServicePlan {
             name: name.to_string(),
@@ -982,7 +1015,8 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
             .spawn()
             .unwrap();
 
-        let service_dir = proj.path.join(".jet/services").join(name);
+        let state_name = if name == "mail" { "mailpit" } else { name };
+        let service_dir = proj.path.join(".jet/services").join(state_name);
         wait_for_file_contains(&service_dir.join("pid"), "pid=");
         assert!(
             jetpack::Services::wait_healthy_with_env(
@@ -999,7 +1033,10 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
             "redis" => assert!(data_dir.join(".service-running").is_file()),
             "postgres" => assert!(data_dir.join("PG_VERSION").is_file()),
             "mysql" | "mariadb" => assert!(data_dir.join("mysql").is_dir()),
-            "minio" | "mailpit" => {
+            "minio" | "mailpit" | "mail" => {
+                assert!(data_dir.join(".service-running").is_file())
+            }
+            "mailhog" | "blackfire" => {
                 assert!(data_dir.join(".service-running").is_file())
             }
             "nginx" => {
@@ -1027,6 +1064,42 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         );
         wait_for_missing(&service_dir.join("pid"));
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_adminer_preset_fails_closed_without_php_projection() {
+    let proj = Scratch::new("adminer-owner-gate");
+    let tools = Scratch::new("adminer-owner-gate-tools");
+    let fake = fake_systemd();
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = format!(
+        "{}:{}",
+        fake.bin.display(),
+        current_path.to_string_lossy()
+    );
+    let worker = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "production_catalog_service_worker",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("JETPACK_CATALOG_PROJECT", &proj.path)
+        .env("JETPACK_CATALOG_TOOLS", &tools.path)
+        .env("JETPACK_CATALOG_SYSTEMD_BIN", &fake.bin)
+        .env("JETPACK_CATALOG_NAME", "adminer")
+        .env("JETPACK_SERVICE_SUPERVISOR", "1")
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+
+    assert!(!worker.status.success(), "Adminer must stay owner-gated");
+    let stderr = String::from_utf8_lossy(&worker.stderr);
+    assert!(stderr.contains("owner-gated"), "{stderr}");
+    let service_dir = proj.path.join(".jet/services/adminer");
+    assert!(!service_dir.join("pid").exists());
+    assert!(!service_dir.join("lifecycle").exists());
 }
 
 #[cfg(target_os = "linux")]

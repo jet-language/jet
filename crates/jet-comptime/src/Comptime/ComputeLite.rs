@@ -1154,6 +1154,14 @@ fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnos
     } else {
         None
     };
+    let vulkan = if device == JetComputeDevice::Vulkan {
+        Some(std::sync::Arc::new(
+            jet_compute_vulkan::stream_new()
+                .map_err(|_| unsupported("Vulkan compute stream", span))?,
+        ))
+    } else {
+        None
+    };
     Ok(JetComputeStream {
         id: match field("id")? {
             CtValue::Int(n) if *n > 0 => *n,
@@ -1161,6 +1169,7 @@ fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnos
         },
         device,
         cuda,
+        vulkan,
     })
 }
 
@@ -1747,7 +1756,9 @@ mod backend_tests {
             assert_eq!(result.last_placement.backend, VULKAN_BACKEND);
 
             let unary = jet_compute_unary("sqrt", &result).unwrap();
-            assert_eq!(jet_compute_tensor_values(&unary), vec![2.0, 6.0_f64.sqrt()]);
+            let unary_values = jet_compute_tensor_values(&unary);
+            assert_eq!(unary_values[0], 2.0);
+            assert!((unary_values[1] - 6.0_f32.sqrt() as f64).abs() <= 1e-6);
 
             let left = jet_compute_on_device(
                 &f32_tensor(vec![1, 2], vec![1.0, 2.0]),
@@ -1800,6 +1811,7 @@ mod backend_tests {
             assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0, 6.0]);
             assert_eq!(downloaded.last_transfer.unwrap().bytes, 8);
             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Vulkan).unwrap();
+            assert!(stream.vulkan.is_some());
             jet_compute_stream_sync(&stream).unwrap();
         } else {
             assert!(matches!(

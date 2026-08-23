@@ -307,6 +307,12 @@ live acceptance, and documentation. Work order is binding.
   output `private-untrusted`; the current consumer gets a private lease, but
   the output is never promoted to the shared broker or published to a shared
   cache.
+- Under the default `allow` policy, an executable action emits L0205 at its
+  action boundary, then Store resolution tries verified reuse and trusted
+  substitution before any local child. A successful substitute is reported
+  as `substituted` and never claims a local sandbox; when no verified result
+  exists, the local action refuses with E1275 before launch. There is no
+  advisory-only or silently-degraded execution path.
 - macOS native Seatbelt profile (`sandbox-exec`) plus source/output,
   environment, network, device, and declared-process restrictions; the actual
   backend and policy receipt are recorded, and executable actions fail before

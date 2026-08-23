@@ -994,6 +994,12 @@ mod jet_process_windows_sandbox {
                 if kept < count {
                     exceeded = true;
                     limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                    // Stop draining once the shared budget is exhausted. The
+                    // parent observes `limit_hit`, terminates the Job Object,
+                    // and joins this reader; continuing here would let an
+                    // untrusted child turn an output-limit failure into an
+                    // unbounded parent allocation.
+                    break;
                 }
             }
             Ok((bytes, exceeded))
@@ -1286,10 +1292,11 @@ mod jet_process_windows_sandbox {
             timeout_ms.map(|timeout| Instant::now() + Duration::from_millis(timeout.max(0) as u64));
         let mut timed_out = false;
         let mut wait_error = None;
-        let mut terminated = false;
+        let mut process_done = false;
         loop {
             let result = unsafe { WaitForSingleObject(process.raw(), 50) };
             if result == 0 {
+                process_done = true;
                 break;
             }
             if result == WAIT_FAILED {
@@ -1297,26 +1304,34 @@ mod jet_process_windows_sandbox {
                 break;
             }
             if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-                terminated = job.terminate().is_ok();
                 break;
             }
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 timed_out = true;
-                terminated = job.terminate().is_ok();
                 break;
             }
         }
-        if timed_out || output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-            let _ = unsafe { WaitForSingleObject(process.raw(), INFINITE) };
-        }
-        let terminate_error = if wait_error.is_some() {
-            let _ = job.terminate();
-            None
-        } else if terminated {
+        // Always close the process tree, including after the leader exits: a
+        // descendant can keep the stdio pipes open. If TerminateJobObject
+        // itself fails, dropping the handle invokes the Job Object's
+        // kill-on-close rule before waiting, so this path cannot wait forever
+        // on an escaped child.
+        let mut job = Some(job);
+        let terminate_error = if process_done {
+            drop(job.take());
             None
         } else {
-            job.terminate().err()
+            match job.as_ref().expect("job guard exists").terminate() {
+                Ok(()) => None,
+                Err(error) => {
+                    drop(job.take());
+                    Some(error)
+                }
+            }
         };
+        if !process_done && unsafe { WaitForSingleObject(process.raw(), INFINITE) } == WAIT_FAILED {
+            wait_error.get_or_insert_with(io::Error::last_os_error);
+        }
         let mut exit_code = 1;
         let exit_error = if unsafe { GetExitCodeProcess(process.raw(), &mut exit_code) } == 0 {
             Some(io::Error::last_os_error())

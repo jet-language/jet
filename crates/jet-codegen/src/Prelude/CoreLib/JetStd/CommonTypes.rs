@@ -48,16 +48,62 @@
         }
     }
 
+    #[cfg(windows)]
+    #[derive(Debug)]
+    pub(crate) struct ConPtyControl {
+        handle: usize,
+    }
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        #[link_name = "ClosePseudoConsole"]
+        fn close_pseudo_console(handle: *mut std::ffi::c_void);
+    }
+
+    #[cfg(windows)]
+    impl ConPtyControl {
+        pub(crate) fn new(handle: usize) -> Self {
+            Self { handle }
+        }
+
+        pub(crate) fn raw(&self) -> usize {
+            self.handle
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for ConPtyControl {
+        fn drop(&mut self) {
+            if self.handle != 0 {
+                // SAFETY: the backend transfers one live HPCON into this
+                // owner, which closes it exactly once here.
+                unsafe { close_pseudo_console(self.handle as *mut std::ffi::c_void) };
+            }
+        }
+    }
+
     #[derive(Clone, Debug)]
     pub struct TerminalSession {
-        // The master stays shared by the child stream handles and resize. The
-        // public Jet value remains an opaque, cloneable session handle.
+        // Unix resize uses the PTY master. Windows resize uses the owned HPCON;
+        // keeping the control handle separate avoids holding an output-pipe
+        // clone open after the child exits.
+        #[cfg(unix)]
         pub(crate) master: std::rc::Rc<std::fs::File>,
+        #[cfg(windows)]
+        pub(crate) control: std::rc::Rc<ConPtyControl>,
     }
 
     impl PartialEq for TerminalSession {
         fn eq(&self, other: &Self) -> bool {
-            std::rc::Rc::ptr_eq(&self.master, &other.master)
+            #[cfg(unix)]
+            {
+                std::rc::Rc::ptr_eq(&self.master, &other.master)
+            }
+            #[cfg(windows)]
+            {
+                std::rc::Rc::ptr_eq(&self.control, &other.control)
+            }
         }
     }
 
@@ -431,9 +477,23 @@
         pub outputs: Vec<String>,
     }
 
+    #[derive(Debug)]
+    pub(crate) enum ProcessHandle {
+        Std {
+            child: std::process::Child,
+            job: Option<std::rc::Rc<std::fs::File>>,
+        },
+        #[cfg(windows)]
+        Native {
+            process: std::fs::File,
+            job: std::rc::Rc<std::fs::File>,
+            pid: u32,
+        },
+    }
+
     #[derive(Clone, Debug)]
     pub struct ProcessChild {
-        pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
+        pub inner: std::rc::Rc<std::cell::RefCell<Option<ProcessHandle>>>,
         pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessReceipt>>>,
         pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:

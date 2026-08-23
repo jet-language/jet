@@ -3,8 +3,8 @@
 //! Tier B (SHA-256 content checksum) is the always-on integrity floor (c122).
 //! Tier A adds an *author* signature: `jet registry publish` signs the package's
 //! `content_hash` with the publisher's Ed25519 key and pins the public key into
-//! the registry index on first publish (TOFU). Fetchers verify the signature
-//! against the pinned key.
+//! the registry index on first publish (TOFU). A reviewed takeover can declare
+//! a new key. Fetchers verify each signature against its applicable key.
 //!
 //! The Ed25519 primitive is already implemented in the hidden FFI bridge
 //! (`crates/jet-driver/src/Prelude/Crypto.rs`, `ed25519-dalek` per
@@ -232,7 +232,7 @@ pub fn e1248(path: &Path) -> Diagnostic {
             path.display()
         ),
         "overwriting it would orphan every package you've published under the old key — consumers \
-         who pinned it (TOFU) would see a key-rotation warning on your next publish."
+         who pinned it (TOFU) would require a reviewed, re-signed takeover release."
             .to_string(),
         "use `jet registry keygen --force` if you're sure (e.g. the old key was compromised), or back it \
          up first with `jet registry key backup`."

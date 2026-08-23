@@ -528,7 +528,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // c146 (D-PKGSIGN1): tier-A author signing. Auto-keygen silently on first
     // publish, then sign the content hash; `--no-sign` opts out (tier-B checksum
     // still applies unconditionally). The public key is TOFU-pinned into the
-    // index on the FIRST published version of a package and never rewritten.
+    // index on the first version and repeated only for a reviewed takeover.
     let (public_key, signature) = if no_sign {
         status!("  signing: skipped (--no-sign); tier-B checksum still applies.");
         (String::new(), String::new())
@@ -552,12 +552,12 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 );
             }),
         };
-        // TOFU: record the public key only if this package has none pinned yet.
-        let already_pinned = jet::Publish::Index::pinned_public_key(&existing_entries).is_some();
-        let pub_field = if already_pinned {
-            String::new()
-        } else {
-            jet::Publish::Sign::read_public_key(reg).unwrap_or_default()
+        // TOFU: ordinary releases omit the already-pinned key. A changed key
+        // is explicit metadata so the registry can treat it as a takeover.
+        let local_public_key = jet::Publish::Sign::read_public_key(reg).unwrap_or_default();
+        let pub_field = match jet::Publish::Index::pinned_public_key(&existing_entries) {
+            Some(pinned) if pinned == local_public_key.trim() => String::new(),
+            _ => local_public_key,
         };
         status!("  signing: signed content hash with the `{}` key.", reg);
         (pub_field, sig)
@@ -648,6 +648,16 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         public_key,
         signature,
     };
+    if let Err(diagnostic) =
+        jet::Publish::Index::validate_takeover(repo, &existing_entries, &entry)
+    {
+        fail_publish_checkout(&checkout, || {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+            );
+        });
+    }
     if let Err(e) = jet::Publish::Index::write_index_entry(repo, &entry) {
         fail_publish_checkout(&checkout, || {
             let diagnostic = if e.kind() == std::io::ErrorKind::AlreadyExists {

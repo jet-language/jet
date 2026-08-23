@@ -97,9 +97,44 @@ owner-ratified threshold decision is recorded in this checkout. The owner must
 ratify both values, or replace them, before #1912 closes. The ratified decision
 must update this section and the constants together.
 
+## Maintainer liveness and takeover (#1913)
+
+### Derived plan
+
+No plan was recorded on card #1913. This plan comes from the card body and its
+exit criteria:
+
+1. expose the signed maintainer liveness state in package detail projections;
+2. treat a changed package signing key as a takeover;
+3. require the registry maintainer review receipt before the takeover enters
+   the index;
+4. verify the new maintainer's signature over the release content hash;
+5. test both refused and accepted takeover paths;
+6. raise the exact takeover rule for owner ratification.
+
+### Provisional mechanical rule
+
+An index entry with a non-empty `public_key` different from the package's first
+pinned key is a takeover. The new key must sign `content_hash`, and
+`reviews/<package>/<version>.review` must contain an approved registry review
+receipt. The rule applies on publish and on fetch. The old warning-only key
+rotation path is retired.
+
+### Owner calls
+
+The mechanical rule above is not owner-ratified in this checkout. The owner
+must ratify or replace:
+
+- whether every changed package key is a takeover, including emergency key
+  recovery;
+- whether the existing core review receipt is the right review evidence for a
+  takeover, or whether takeover receipts need a separate format and explicit
+  old/new key binding.
+
 ## User surfaces
 
 Registry resolution writes `tier` and `gate-status` into the lock. `jet fetch`
 and `jet update` print the tier and gate status for every Jet registry package.
 `jet inspect info` prints the same fields for a package record. JSON discovery
-records carry `tier` and `gate_status` as well.
+records carry `tier` and `gate_status` as well. Package hovers show the tier
+and maintainer liveness state from the local discovery record.

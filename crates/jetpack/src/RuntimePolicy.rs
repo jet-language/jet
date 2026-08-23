@@ -260,6 +260,43 @@ pub struct SandboxStatus {
     pub reason: String,
 }
 
+/// Validate the shape of a persisted child-boundary receipt before presenting
+/// it as an isolation claim. The producer checksum proves record integrity;
+/// this check proves that the recorded class and policy describe one of the
+/// native backends this release can actually enforce.
+pub(crate) fn sandbox_receipt_is_truthful(class: &str, policy: &str) -> bool {
+    if class == "non-executing" {
+        return policy == "no child launched"
+            || policy.starts_with("no child launched (")
+            || policy.starts_with("trusted substitution (");
+    }
+    if !matches!(
+        class,
+        "linux-bwrap" | "macos-seatbelt" | "windows-appcontainer"
+    ) {
+        return false;
+    }
+    let mut fields = std::collections::BTreeSet::new();
+    for field in policy.split(';') {
+        let Some((name, value)) = field.split_once('=') else {
+            continue;
+        };
+        if value.is_empty() || !fields.insert(name) {
+            return false;
+        }
+    }
+    [
+        "filesystem",
+        "process",
+        "network",
+        "environment",
+        "devices",
+        "resources",
+    ]
+    .into_iter()
+    .all(|name| fields.contains(name))
+}
+
 pub fn sandbox_policy_path() -> PathBuf {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -404,13 +441,27 @@ pub fn enforce_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32> {
             Err(2)
         }
         SandboxPolicy::AllowFallback => {
-            // The action boundary owns the decision. Non-executing reuse and
-            // trusted substitution may proceed; an executable action reports
-            // E1275 from its provider/backend before launch. A preflight
-            // warning here would be advisory noise and could imply a fallback
-            // that the production path never performs.
+            warn_sandbox_fallback(theme);
             Ok(())
         }
+    }
+}
+
+/// Report the allow-mode capability loss at an executable-action boundary.
+/// This is a lint only: the Store may still satisfy the action from a
+/// verified substitute, but a local child must fail with E1275 when no
+/// substitute is available.
+pub(crate) fn warn_sandbox_fallback(theme: &Theme) {
+    let status = detect_sandbox();
+    if status.level == SandboxLevel::Fallback
+        && read_sandbox_policy() == SandboxPolicy::AllowFallback
+    {
+        theme.warning_coded(
+            "L0205",
+            "build sandboxing is unavailable; local executable actions will be refused after substitution/remote resolution",
+            &status.reason,
+            "provide a trusted substitute or approved remote builder, or enable the native sandbox",
+        );
     }
 }
 
@@ -802,5 +853,26 @@ mod tests {
                 assert!(!status.reason.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn sandbox_receipts_require_a_native_backend_and_complete_policy() {
+        assert!(sandbox_receipt_is_truthful(
+            "linux-bwrap",
+            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB"
+        ));
+        assert!(sandbox_receipt_is_truthful(
+            "non-executing",
+            "no child launched (rlib already present)"
+        ));
+        assert!(!sandbox_receipt_is_truthful(
+            "linux-userns",
+            "filesystem=private-workspace-readwrite;process=private-pid;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB"
+        ));
+        assert!(!sandbox_receipt_is_truthful(
+            "linux-bwrap",
+            "filesystem=private-workspace-readwrite"
+        ));
+        assert!(!sandbox_receipt_is_truthful("linux-bwrap", "not-enforced"));
     }
 }

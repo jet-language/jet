@@ -1486,6 +1486,15 @@ The final `ProcessReceipt` carries the same policy facts and digest.
 argv values, stdout, and stderr. Its `authority` field shows the exact grants
 after redaction. Its `redacted` field is `true` when the receipt applies the
 authority redaction policy. The receipt does not expose the host environment.
+An authority-bound non-detached spec must use `.Capture` for both stdout and
+stderr. `.Stream` and `.Inherit` refuse during planning, before spawn, because
+their live descriptors would bypass the receipt redactor. Detached output is
+discarded and is recorded as such in the plan and receipt.
+Authority-bound terminal sessions also refuse before spawn; the ordinary
+terminal API remains available for unbound process specs.
+Authority-bound pipelines refuse before spawn until their stages can share one
+auditable launch transaction. Ordinary pipeline receipts redact known secret
+values from every stage in the combined output and errors.
 
 On Linux and macOS, the consumer enters the shipped #398 native child boundary
 (Bubblewrap or Seatbelt). The child gets a canonical read-only workspace,

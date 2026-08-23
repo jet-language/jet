@@ -156,6 +156,11 @@ fn package_hover(record: &PackageRecord) -> String {
         }
     ));
     out.push_str(&format!("platforms: {}\n", record.platforms.join(", ")));
+    out.push_str(&format!("tier: {}\n", record.tier));
+    out.push_str(&format!(
+        "maintainer liveness: {}\n",
+        record.maintainer_liveness()
+    ));
     out.push_str(&format!("source: local discovery index\n\n{}", record.docs));
     out
 }

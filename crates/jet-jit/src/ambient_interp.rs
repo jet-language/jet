@@ -34,6 +34,12 @@ mod keep_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
 
+// I9: the interpreter marshals the same workspace authority relation as AOT
+// and resident JIT. It must not reconstruct the default grant list here.
+mod authority_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
+}
+
 trait JetShow {
     fn jet_show(&self) -> String;
 }
@@ -674,14 +680,59 @@ pub(crate) mod process_prelude {
             }
         }
 
+        #[cfg(windows)]
+        #[derive(Debug)]
+        pub(crate) struct ConPtyControl {
+            handle: usize,
+        }
+
+        #[cfg(windows)]
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            #[link_name = "ClosePseudoConsole"]
+            fn close_pseudo_console(handle: *mut std::ffi::c_void);
+        }
+
+        #[cfg(windows)]
+        impl ConPtyControl {
+            pub(crate) fn new(handle: usize) -> Self {
+                Self { handle }
+            }
+
+            pub(crate) fn raw(&self) -> usize {
+                self.handle
+            }
+        }
+
+        #[cfg(windows)]
+        impl Drop for ConPtyControl {
+            fn drop(&mut self) {
+                if self.handle != 0 {
+                    // SAFETY: the backend transfers one live HPCON into this
+                    // owner, which closes it exactly once here.
+                    unsafe { close_pseudo_console(self.handle as *mut std::ffi::c_void) };
+                }
+            }
+        }
+
         #[derive(Clone, Debug)]
         pub struct TerminalSession {
+            #[cfg(unix)]
             pub master: std::rc::Rc<std::fs::File>,
+            #[cfg(windows)]
+            pub control: std::rc::Rc<ConPtyControl>,
         }
 
         impl PartialEq for TerminalSession {
             fn eq(&self, other: &Self) -> bool {
-                std::rc::Rc::ptr_eq(&self.master, &other.master)
+                #[cfg(unix)]
+                {
+                    std::rc::Rc::ptr_eq(&self.master, &other.master)
+                }
+                #[cfg(windows)]
+                {
+                    std::rc::Rc::ptr_eq(&self.control, &other.control)
+                }
             }
         }
 
@@ -741,9 +792,23 @@ pub(crate) mod process_prelude {
             pub outputs: Vec<String>,
         }
 
+        #[derive(Debug)]
+        pub(crate) enum ProcessHandle {
+            Std {
+                child: std::process::Child,
+                job: Option<std::rc::Rc<std::fs::File>>,
+            },
+            #[cfg(windows)]
+            Native {
+                process: std::fs::File,
+                job: std::rc::Rc<std::fs::File>,
+                pid: u32,
+            },
+        }
+
         #[derive(Clone, Debug)]
         pub struct ProcessChild {
-            pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
+            pub inner: std::rc::Rc<std::cell::RefCell<Option<ProcessHandle>>>,
             pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
             pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
             pub stdout:
@@ -3814,7 +3879,12 @@ pub fn ambient_core_call(
                 type_name: "Abilities".to_string(),
                 fields: vec![(
                     "rights".to_string(),
-                    CtValue::List(vec![CtValue::Str("FS.Read".to_string())]),
+                    CtValue::List(
+                        authority_semantics::jet_authority_workspace_rights()
+                            .into_iter()
+                            .map(CtValue::Str)
+                            .collect(),
+                    ),
                 )],
             }))
         }

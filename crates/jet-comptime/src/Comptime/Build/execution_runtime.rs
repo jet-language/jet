@@ -2142,6 +2142,175 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn shared_hostile_corpus_runs_through_hermetic_executor() {
+        use crate::Comptime::Build::{ActionSpec, BuildCapability, BuildContext, TargetSpec};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let capability = native_sandbox_status();
+        let corpus = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+        ));
+        let cases: Vec<_> = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let fields: Vec<_> = line.split('\t').collect();
+                assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+                (fields[0], fields[1], fields[2], fields[3])
+            })
+            .collect();
+        assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("bash"))
+        .find(|candidate| candidate.is_file())
+        .expect("bash is required for the hostile corpus");
+        let link_tool = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("ln"))
+        .find(|candidate| candidate.is_file())
+        .expect("ln is required for the hostile corpus");
+        let shell_quote =
+            |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+
+        for (case_id, _category, _attempt, expected) in cases {
+            assert_eq!(expected, "blocked-or-unsupported");
+            let root = std::env::temp_dir().join(format!(
+                "jet-hermetic-executor-hostile-{case_id}-{}-{}",
+                std::process::id(),
+                REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let host_secret = root.with_file_name(format!(
+                "jet-hermetic-executor-hostile-{case_id}-{}-secret",
+                std::process::id()
+            ));
+            let host_marker = root.with_file_name(format!(
+                "jet-hermetic-executor-hostile-{case_id}-{}-marker",
+                std::process::id()
+            ));
+            let fill_name = format!(
+                "/tmp/jet-hermetic-executor-hostile-fill-{}-{case_id}",
+                std::process::id()
+            );
+            fs::create_dir_all(&root).unwrap();
+            fs::write(&host_secret, "host-only-secret").unwrap();
+
+            let mut network_thread = None;
+            let command = match case_id {
+                "host-read" => format!(
+                    "if test -r {}; then printf leaked > status; else printf blocked > status; fi",
+                    shell_quote(&host_secret)
+                ),
+                "host-write" => format!(
+                    "if printf escaped > {}; then printf escaped > status; else printf blocked > status; fi",
+                    shell_quote(&host_marker)
+                ),
+                "source-symlink" => format!(
+                    "if {} -s {} link && test -r link; then printf leaked > status; else printf blocked > status; fi",
+                    shell_quote(&link_tool),
+                    shell_quote(&host_secret)
+                ),
+                "output-symlink" => format!(
+                    "if {} -s {} link && printf escaped > link; then printf escaped > status; else printf blocked > status; fi",
+                    shell_quote(&link_tool),
+                    shell_quote(&host_marker)
+                ),
+                "network-exfiltration" => {
+                    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                    listener.set_nonblocking(true).unwrap();
+                    let port = listener.local_addr().unwrap().port();
+                    network_thread = Some(thread::spawn(move || {
+                        let deadline = Instant::now() + Duration::from_millis(750);
+                        loop {
+                            match listener.accept() {
+                                Ok(_) => return true,
+                                Err(error)
+                                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                                {
+                                    if Instant::now() >= deadline {
+                                        return false;
+                                    }
+                                    thread::sleep(Duration::from_millis(5));
+                                }
+                                Err(_) => return false,
+                            }
+                        }
+                    }));
+                    format!(
+                        "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > status; else printf blocked > status; fi"
+                    )
+                }
+                "child-process" => format!(
+                    "(printf escaped > {}) & child=$!; wait \"$child\"; if test -e {}; then printf escaped > status; else printf blocked > status; fi",
+                    shell_quote(&host_marker),
+                    shell_quote(&host_marker)
+                ),
+                "tmpfs-exhaustion" => format!(
+                    "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > status; else printf blocked > status; fi"
+                ),
+                other => panic!("unmapped hostile corpus case {other}"),
+            };
+
+            let mut context = BuildContext::new();
+            let action = context
+                .action(
+                    format!("hostile-{case_id}"),
+                    ActionSpec::cached(vec![
+                        shell.to_string_lossy().into_owned(),
+                        "-c".to_string(),
+                        command,
+                    ])
+                    .with_outputs(["status"])
+                    .with_cap(BuildCapability::Exec),
+                )
+                .unwrap();
+            let target = context
+                .add_executable(
+                    format!("hostile-target-{case_id}"),
+                    TargetSpec::new().with_action(action),
+                )
+                .unwrap();
+            let plan = context.plan_with_default(target).unwrap();
+            let grants = [BuildCapability::Exec].into_iter().collect();
+            let result = execute_build_plan(&plan, &root, &grants);
+
+            if capability.available {
+                result.unwrap_or_else(|error| {
+                    panic!("{case_id} hermetic executor lost enforcement: {error:?}")
+                });
+                assert_eq!(
+                    fs::read_to_string(root.join("status")).unwrap().trim(),
+                    "blocked",
+                    "{case_id} escaped through the hermetic BuildPlan executor"
+                );
+            } else {
+                assert!(
+                    matches!(&result, Err(BuildExecutionError::SandboxUnavailable)),
+                    "unsupported backend must refuse {case_id} before launch: {result:?}"
+                );
+            }
+            assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+            if let Some(network_thread) = network_thread {
+                assert!(
+                    !network_thread.join().unwrap(),
+                    "{case_id} reached the network"
+                );
+            }
+            fs::remove_file(&host_secret).ok();
+            fs::remove_file(&host_marker).ok();
+            fs::remove_file(&fill_name).ok();
+            fs::remove_dir_all(&root).ok();
+        }
+    }
+
     #[test]
     fn remote_output_restore_rolls_back_until_committed() {
         let root = std::env::temp_dir().join(format!(

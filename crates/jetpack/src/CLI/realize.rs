@@ -13,6 +13,7 @@ use crate::Services;
 use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
+use crate::RuntimePolicy;
 use std::path::{Path, PathBuf};
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
@@ -207,6 +208,7 @@ pub(super) fn realize_ref_outcome(
     // metadata before Store realization can reach the provider.
     match Provider::core_build_identity(spec, table, &ctx) {
         Ok(Some(identity)) => {
+            RuntimePolicy::warn_sandbox_fallback(theme);
             if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
                 .is_err()
             {
@@ -397,6 +399,7 @@ pub(super) fn realize_adapter(
         }
     };
     if let ModuleEval::AdapterRecipe::Build(recipe) = &plan.recipe {
+        RuntimePolicy::warn_sandbox_fallback(theme);
         let identity = Provider::adapter_action_identity(
             plan,
             recipe,

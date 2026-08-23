@@ -3864,11 +3864,31 @@ mod jet_compute_vulkan {
             },
         )?)
     }
+
+    pub struct StreamHandle {
+        context: Context,
+    }
+
+    pub fn stream_new() -> Result<StreamHandle, JetComputeError> {
+        let api = Api::load()?;
+        Ok(StreamHandle {
+            context: Context::new(api)?,
+        })
+    }
+
+    pub fn stream_sync(stream: &StreamHandle) -> Result<(), JetComputeError> {
+        check(
+            unsafe { (stream.context.api.device_wait_idle)(stream.context.device) },
+            "stream synchronization",
+        )
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
 mod jet_compute_vulkan {
     use super::JetComputeError;
+
+    pub struct StreamHandle;
 
     fn unavailable<T>() -> Result<T, JetComputeError> {
         Err(JetComputeError::Unsupported(
@@ -3892,6 +3912,8 @@ mod jet_compute_vulkan {
     pub fn mse_jvp(_: &[f32], _: &[f32], _: &[f32], _: &[f32]) -> Result<Vec<f32>, JetComputeError> { unavailable() }
     pub fn sgd(_: &[f32], _: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
     pub fn scale(_: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
+    pub fn stream_new() -> Result<StreamHandle, JetComputeError> { unavailable() }
+    pub fn stream_sync(_: &StreamHandle) -> Result<(), JetComputeError> { unavailable() }
 }
 // JET_VETTED_UNSAFE_END: jet_compute_vulkan
 
@@ -7620,6 +7642,7 @@ pub struct JetComputeStream {
     id: i64,
     device: JetComputeDevice,
     cuda: Option<std::sync::Arc<jet_compute_cuda::StreamHandle>>,
+    vulkan: Option<std::sync::Arc<jet_compute_vulkan::StreamHandle>>,
 }
 
 impl std::fmt::Debug for JetComputeStream {
@@ -7724,10 +7747,16 @@ fn jet_compute_stream_new_on_device(
     } else {
         None
     };
+    let vulkan = if receipt.selected == JetComputeDevice::Vulkan {
+        Some(std::sync::Arc::new(jet_compute_vulkan::stream_new()?))
+    } else {
+        None
+    };
     Ok(JetComputeStream {
         id: NEXT_STREAM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         device: receipt.selected,
         cuda,
+        vulkan,
     })
 }
 
@@ -7751,10 +7780,13 @@ fn jet_compute_stream_sync(stream: &JetComputeStream) -> Result<(), JetComputeEr
             };
             jet_compute_cuda::stream_sync(cuda)?;
         }
-        JetComputeDevice::Vulkan if !jet_compute_vulkan::available() => {
-            return Err(JetComputeError::Device(
-                "Vulkan device was lost before stream synchronization".to_string(),
-            ));
+        JetComputeDevice::Vulkan => {
+            let Some(vulkan) = &stream.vulkan else {
+                return Err(JetComputeError::Device(
+                    "Vulkan stream has no live device context".to_string(),
+                ));
+            };
+            jet_compute_vulkan::stream_sync(vulkan)?;
         }
         JetComputeDevice::WebGpu if !jet_compute_webgpu::available() => {
             return Err(JetComputeError::Device(

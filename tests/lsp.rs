@@ -2034,7 +2034,9 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     send_msg(&mut stdin, &package_hover_req);
     let package_hover_resp = read_msg(&mut stdout);
     assert!(
-        package_hover_resp.contains("postgres_16") && package_hover_resp.contains("16.4"),
+        package_hover_resp.contains("postgres_16")
+            && package_hover_resp.contains("16.4")
+            && package_hover_resp.contains("maintainer liveness: not-applicable"),
         "package discovery hover missing: {package_hover_resp}"
     );
 

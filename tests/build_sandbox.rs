@@ -308,8 +308,15 @@ fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
     assert!(report
         .sandbox_policy
         .contains("source-readonly,output-readwrite"));
-    assert!(report.sandbox_policy.contains("network=denied"));
-    assert!(report.sandbox_policy.contains("job-kill-on-close"));
+    for policy in [
+        "process=appcontainer+job-kill-on-close+active-process=256",
+        "network=denied",
+        "environment=clear+declared",
+        "devices=appcontainer-default-deny",
+        "resources=memory-2GiB+active-process-256",
+    ] {
+        assert!(report.sandbox_policy.contains(policy), "{policy}");
+    }
     assert_eq!(
         std::fs::read_to_string(out.join("ok")).unwrap().trim(),
         "ok"
@@ -357,6 +364,55 @@ fn native_windows_appcontainer_blocks_sibling_write_before_publication() {
         !out.join("ok").exists(),
         "failed sandbox stage was published"
     );
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn unavailable_windows_appcontainer_refuses_before_recipe_tool_launch() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("windows-unavailable");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    let marker = base.join("host-marker");
+    std::fs::create_dir_all(&src).unwrap();
+
+    let previous = std::env::var_os("JETPACK_FAKE_SANDBOX");
+    std::env::set_var("JETPACK_FAKE_SANDBOX", "unavailable");
+    let mut tools = HashMap::new();
+    tools.insert("cmd".to_string(), windows_command_interpreter());
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![BuildStep::Exec {
+            tool: "cmd".to_string(),
+            args: vec![
+                "/C".to_string(),
+                format!(
+                    "echo launched>\"{}\" & echo launched>\"%JET_BUILD_OUTPUT%\\marker\"",
+                    marker.display()
+                ),
+            ],
+        }],
+    };
+    let result = Recipe::run(&recipe, &ctx, None);
+    match previous {
+        Some(value) => std::env::set_var("JETPACK_FAKE_SANDBOX", value),
+        None => std::env::remove_var("JETPACK_FAKE_SANDBOX"),
+    }
+    let error = result.expect_err("an unavailable AppContainer backend must fail closed");
+    assert_eq!(error.code, "E1275");
+    assert!(
+        !marker.exists(),
+        "the recipe tool launched without AppContainer"
+    );
+    assert!(!out.join("marker").exists());
     std::fs::remove_dir_all(&base).ok();
 }
 
@@ -898,14 +954,31 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
             "hostile corpus lacks category {category}"
         );
     }
+    let sandbox_shell = std::env::split_paths(
+        &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+    )
+    .map(|directory| directory.join("bash"))
+    .find(|candidate| candidate.is_file())
+    .or_else(|| {
+        std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("sh"))
+        .find(|candidate| candidate.is_file())
+    })
+    .expect("a shell is required for the hostile corpus");
 
-    for (case_id, _category, _attempt, _result) in cases {
+    for (case_id, _category, _attempt, expected) in cases {
         let base = scratch(&format!("hostile-{case_id}"));
         let src = base.join("src");
         let out = base.join("out");
         let cache = base.join("cache");
         let host_secret = base.join("host-secret");
         let host_marker = base.join("host-marker");
+        let fill_path = PathBuf::from(format!(
+            "/tmp/jet-build-hostile-fill-{}-{case_id}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(&host_secret, "host-only-secret").unwrap();
         if case_id == "source-symlink" {
@@ -924,7 +997,7 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
             ),
             "source-symlink" => "if [ -r \"$PWD/link\" ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi".to_string(),
             "output-symlink" => format!(
-                "if {} -s {} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi",
+                "if {} -s {} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi",
                 shell_quote(&host_tool("ln")),
                 shell_quote(&host_marker)
             ),
@@ -958,14 +1031,15 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
                 )
             }
             "child-process" => format!(
-                "(printf escaped > {}) & printf complete > \"$JET_BUILD_OUTPUT/status\"",
+                "(printf escaped > {}) & child=$!; wait \"$child\"; if [ -e {} ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi",
+                shell_quote(&host_marker),
                 shell_quote(&host_marker)
             ),
-            "tmpfs-exhaustion" => "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> /tmp/jet-build-hostile-fill; then printf blocked > \"$JET_BUILD_OUTPUT/status\"; exit 0; fi; i=$((i + 1)); done; printf escaped > \"$JET_BUILD_OUTPUT/status\"; exit 70".to_string(),
+            "tmpfs-exhaustion" => format!("i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {}; then printf blocked > \"$JET_BUILD_OUTPUT/status\"; break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi", shell_quote(&fill_path)),
             other => panic!("unmapped hostile corpus case {other}"),
         };
         let mut tools = HashMap::new();
-        tools.insert("sh".to_string(), host_tool("sh"));
+        tools.insert("sh".to_string(), sandbox_shell.clone());
         let ctx = BuildContext {
             source_dir: &src,
             output_root: &out,
@@ -980,21 +1054,26 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
             }],
         };
         let result = Recipe::run(&recipe, &ctx, None);
-        if let Some(error) = result.as_ref().err() {
-            assert!(
-                ["E1237", "E1238", "E1275"].contains(&error.code.as_str()),
-                "{case_id} returned an unrelated diagnostic: {}",
+        match result {
+            Ok(report) => {
+                assert_ne!(report.sandbox_class, "non-executing");
+                assert!(report.sandbox_policy.contains("filesystem="));
+                assert!(report.sandbox_policy.contains("process="));
+                assert!(report.sandbox_policy.contains("network="));
+                assert!(report.sandbox_policy.contains("environment="));
+                assert!(report.sandbox_policy.contains("devices="));
+                assert!(report.sandbox_policy.contains("resources="));
+                assert_eq!(
+                    std::fs::read_to_string(out.join("status")).unwrap().trim(),
+                    "blocked",
+                    "{case_id} corpus result must prove the attempt was blocked"
+                );
+            }
+            Err(error) => assert!(
+                ["E1237", "E1275"].contains(&error.code.as_str()),
+                "{case_id} returned an executable failure instead of blocked/unsupported: {}",
                 error.code
-            );
-        }
-        if let Ok(report) = result {
-            assert_ne!(report.sandbox_class, "non-executing");
-            assert!(report.sandbox_policy.contains("filesystem="));
-            assert!(report.sandbox_policy.contains("process="));
-            assert!(report.sandbox_policy.contains("network="));
-            assert!(report.sandbox_policy.contains("environment="));
-            assert!(report.sandbox_policy.contains("devices="));
-            assert!(report.sandbox_policy.contains("resources="));
+            ),
         }
         if case_id == "child-process" {
             thread::sleep(Duration::from_millis(100));
@@ -1013,8 +1092,9 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
             assert_ne!(status, "leaked");
             assert_ne!(status, "escaped");
         }
-        std::fs::remove_file("/tmp/jet-build-hostile-fill").ok();
+        std::fs::remove_file(&fill_path).ok();
         std::fs::remove_dir_all(&base).ok();
+        assert_eq!(expected, "blocked-or-unsupported");
     }
 }
 
@@ -1043,6 +1123,7 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
     std::fs::write(&host_secret, "host-only-secret").unwrap();
     let source_link = base.join("link");
     std::os::unix::fs::symlink(&host_secret, &source_link).unwrap();
+    let agent_fill_path = format!("/tmp/jet-agent-hostile-fill-{}", std::process::id());
 
     let mut network_thread = None;
     let commands: Vec<(&str, String)> = cases
@@ -1095,7 +1176,7 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
                     "(printf escaped > {}) & printf blocked",
                     shell_quote(&host_marker)
                 ),
-                "tmpfs-exhaustion" => "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> /tmp/jet-agent-hostile-fill; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped".to_string(),
+                "tmpfs-exhaustion" => format!("i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {}; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped", shell_quote(std::path::Path::new(&agent_fill_path))),
                 other => panic!("unmapped hostile corpus case {other}"),
             };
             (*case_id, command)
@@ -1159,7 +1240,7 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
         "agent corpus modified the host secret"
     );
     assert!(!host_marker.exists(), "agent corpus wrote the host marker");
-    std::fs::remove_file("/tmp/jet-agent-hostile-fill").ok();
+    std::fs::remove_file(&agent_fill_path).ok();
     std::fs::remove_dir_all(&base).ok();
     std::fs::remove_file(&host_secret).ok();
     std::fs::remove_file(&host_marker).ok();

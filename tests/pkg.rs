@@ -168,14 +168,6 @@ fn install_closed_status_crypto_helper(home: &Path) {
     fs::write(release.join(format!("{crate_name}.sha256")), manifest).unwrap();
 }
 
-fn install_cached_crypto_helper(home: &Path) {
-    let source = jet::Publish::Sign::ensure_bridge_helper().unwrap();
-    let (rlib, helper) = isolated_crypto_helper_paths(home);
-    fs::create_dir_all(helper.parent().unwrap()).unwrap();
-    fs::write(rlib, b"test cache sentinel").unwrap();
-    fs::copy(source, helper).unwrap();
-}
-
 /// Init an empty bare git repo standing in for a registry index. Returns its
 /// `file://` URL.
 fn bare_registry(dir: &Path) -> String {
@@ -7096,71 +7088,67 @@ fn require_signed_unsigned_entry_e1247() {
 }
 
 #[test]
-fn key_rotation_warns_not_errors() {
-    // c146: a version that declares a different public key than the pin is a
-    // legitimate key rotation — a warning, never a hard error. The signature
-    // still verifies against the pinned key (the real signer).
+fn takeover_requires_review_and_resigning() {
+    // #1913: a changed package key is a takeover. The new key must sign the
+    // release and the registry must carry an approved maintainer review.
     if !have_cargo() {
-        eprintln!("note: skipping key_rotation (cargo not found)");
+        eprintln!("note: skipping takeover (cargo not found)");
         return;
     }
 
-    if std::env::var_os("JET_PKG_KEY_ROTATION_CHILD").is_some() {
+    let tmp = tmp_dir("takeover");
+    let keys = tmp.join("keys");
+    with_keys(&keys, || {
         let (seed_a, _pa, pub_a) = jet::Publish::Sign::keygen("jet", false).unwrap();
         let original_seed = fs::read(&seed_a).unwrap();
-        let (_seed_b, _pb, pub_b) = jet::Publish::Sign::keygen("other", false).unwrap();
+        let (seed_b, _pb, pub_b) = jet::Publish::Sign::keygen("other", false).unwrap();
         assert_ne!(pub_a, pub_b, "the two keys must differ");
 
         let ch1 = "sha256-v1v1v1";
         let ch2 = "sha256-v2v2v2";
         let sig1 = jet::Publish::Sign::sign(&seed_a, ch1).unwrap();
-        // v2 is really signed by A, but its line declares key B (simulating a
-        // hand-rewritten rotation record).
-        let sig2 = jet::Publish::Sign::sign(&seed_a, ch2).unwrap();
+        let old_key_sig = jet::Publish::Sign::sign(&seed_a, ch2).unwrap();
+        let new_key_sig = jet::Publish::Sign::sign(&seed_b, ch2).unwrap();
 
         let v1 = signed_entry("textkit", "1.0.0", ch1, &pub_a, &sig1);
-        let v2 = signed_entry("textkit", "2.0.0", ch2, &pub_b, &sig2);
-        let all = vec![v1, v2.clone()];
+        let v2_old_key = signed_entry("textkit", "2.0.0", ch2, &pub_b, &old_key_sig);
+        let v2 = signed_entry("textkit", "2.0.0", ch2, &pub_b, &new_key_sig);
+        let repo = tmp.join("registry");
+        fs::create_dir_all(&repo).unwrap();
+        jet::Publish::Index::write_index_entry(&repo, &v1).unwrap();
 
-        // pin = pub_a (first). v2's signature (by A) verifies against the pin;
-        // its declared key (B) differs → a warning, not an error.
-        let warnings = jet::Publish::verify_index_entry(&all, &v2, false, "jet")
-            .expect("key rotation must warn, not error");
+        let missing_review = jet::Publish::Index::write_index_entry(&repo, &v2)
+            .expect_err("takeover without review must be refused");
         assert!(
-            !warnings.is_empty() && warnings[0].contains("rotation"),
-            "rotation must produce a key-rotation warning, got {warnings:?}"
+            missing_review.to_string().contains("no approved registry review"),
+            "missing review must be named: {missing_review}"
         );
-        assert_eq!(fs::read(seed_a).unwrap(), original_seed);
-        println!("JET_PKG_KEY_ROTATION_OK");
-        return;
-    }
 
-    let tmp = tmp_dir("key_rotate");
-    let home = tmp.join("home");
-    let keys = tmp.join("keys");
-    fs::create_dir_all(&home).unwrap();
-    install_cached_crypto_helper(&home);
-
-    let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "key_rotation_warns_not_errors", "--nocapture"])
-        .env("JET_PKG_KEY_ROTATION_CHILD", "1")
-        .env("HOME", &home)
-        .env("JET_KEYS_DIR", &keys)
-        .output()
+        let review = repo.join("reviews/textkit/2.0.0.review");
+        fs::create_dir_all(review.parent().unwrap()).unwrap();
+        fs::write(
+            review,
+            "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n",
+        )
         .unwrap();
 
-    fs::remove_dir_all(&tmp).unwrap();
-    assert!(
-        output.status.success(),
-        "rotation child failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("JET_PKG_KEY_ROTATION_OK"),
-        "rotation child omitted success marker:\n{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+        let wrong_signature = jet::Publish::Index::write_index_entry(&repo, &v2_old_key)
+            .expect_err("takeover signed by the old key must be refused");
+        assert!(
+            wrong_signature
+                .to_string()
+                .contains("signature verification failed"),
+            "wrong signer must be named: {wrong_signature}"
+        );
+        jet::Publish::Index::write_index_entry(&repo, &v2)
+            .expect("reviewed takeover signed by the new key must pass");
+        let all = jet::Publish::Index::read_entries(&repo, "textkit").unwrap();
+        jet::Publish::verify_index_entry(&all, &v2, false, "jet")
+            .expect("reviewed takeover signature must verify");
+        assert_eq!(fs::read(seed_a).unwrap(), original_seed);
+        fs::remove_dir_all(repo).unwrap();
+    });
+    fs::remove_dir_all(tmp).unwrap();
 }
 
 #[test]

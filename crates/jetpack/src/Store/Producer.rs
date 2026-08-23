@@ -405,6 +405,26 @@ fn validate_adapter_hook_producer(
     }
     let producer_policy = producer.facts.get("build.sandbox_policy");
     let plan_policy = producer.plan.facts().get("adapter.build.sandbox_policy");
+    if !recorded_sandbox.is_some_and(|class| {
+        producer_policy
+            .is_some_and(|policy| crate::RuntimePolicy::sandbox_receipt_is_truthful(class, policy))
+    }) {
+        return Err(hook_fact_mismatch(
+            "build.sandbox",
+            "a native backend with a complete policy receipt",
+            recorded_sandbox,
+        ));
+    }
+    if !plan_policy.is_some_and(|policy| {
+        recorded_sandbox
+            .is_some_and(|class| crate::RuntimePolicy::sandbox_receipt_is_truthful(class, policy))
+    }) {
+        return Err(hook_fact_mismatch(
+            "adapter.build.sandbox_policy",
+            "a complete native policy receipt",
+            plan_policy.map(String::as_str),
+        ));
+    }
     if producer_policy.is_none() || producer_policy != plan_policy {
         return Err(hook_fact_mismatch(
             "build.sandbox_policy",

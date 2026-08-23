@@ -15,10 +15,11 @@
 //! `content_hash` / `fingerprint` are the exact fields already on
 //! `Lock::LockedPackage` — the index does not invent new hash names.
 
+use crate::Diagnostics::Diagnostic;
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 use super::Tier::{GateStatus, RegistryTier};
 
@@ -40,9 +41,9 @@ pub struct IndexEntry {
     /// D-REGCURATE1=C: the gate result recorded with the package version.
     pub gate_status: GateStatus,
     /// c146 (D-PKGSIGN1) TOFU pin: the publisher's hex Ed25519 public key.
-    /// Written **once**, on the first published version of a package; empty on
-    /// later versions (which are checked against the pin). A later version that
-    /// *does* carry a differing key signals a key rotation (a fetch-time warning).
+    /// Written on the first published version of a package and again when a
+    /// package takeover declares a new maintainer key. Later versions leave it
+    /// empty and use the pinned key.
     pub public_key: String,
     /// c146: base64 Ed25519 signature over `content_hash`. Empty when the
     /// publish was `--no-sign`.
@@ -109,6 +110,29 @@ pub fn pinned_public_key(entries: &[IndexEntry]) -> Option<String> {
         .map(|e| e.public_key.trim())
         .find(|k| !k.is_empty())
         .map(|k| k.to_string())
+}
+
+/// A non-empty key different from the first package key is a maintainer
+/// takeover, not an ordinary key rotation.
+pub fn is_takeover(entries: &[IndexEntry], candidate: &IndexEntry) -> bool {
+    !candidate.public_key.trim().is_empty()
+        && pinned_public_key(entries).is_some_and(|pinned| pinned != candidate.public_key.trim())
+}
+
+/// Enforce the review and re-signing gates before a takeover reaches the
+/// immutable index.
+pub fn validate_takeover(
+    repo: &Path,
+    entries: &[IndexEntry],
+    candidate: &IndexEntry,
+) -> Result<(), Diagnostic> {
+    if !is_takeover(entries, candidate) {
+        return Ok(());
+    }
+    super::Tier::require_takeover_review(repo, &candidate.name, &candidate.version)?;
+    let mut all = entries.to_vec();
+    all.push(candidate.clone());
+    super::Registry::verify_index_entry(&all, candidate, true, "registry").map(|_| ())
 }
 
 /// `<repo>/index/<name>/<name>.jsonl`.
@@ -208,6 +232,7 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
             Err(error) => return Err(error),
         };
+        let mut existing_entries = Vec::new();
         for existing in text
             .lines()
             .filter(|line| !line.trim().is_empty())
@@ -228,7 +253,14 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
                     format!("registry version {} {} is immutable", entry.name, entry.version),
                 ));
             }
+            existing_entries.push(existing);
         }
+        validate_takeover(repo, &existing_entries, entry).map_err(|diagnostic| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{}: {}", diagnostic.code, diagnostic.what),
+            )
+        })?;
         if !text.is_empty() && !text.ends_with('\n') {
             text.push('\n');
         }

@@ -233,15 +233,24 @@ fn run() {{
         timeout_script = jet_string_path(&timeout_script),
         output_script = jet_string_path(&output_script),
     );
-    let started = std::time::Instant::now();
+    // Compile once, then time only the already-built production binary. Measuring
+    // `build_and_run` here also measures rustc and makes the enforcement check
+    // fail on a cold cache before the child even starts.
     let (code, stdout, stderr) = build_and_run(&dir, "process_limits", &src, &[], None);
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(stdout.contains("true\nlimit:refused\n"), "{stdout}");
+    let started = std::time::Instant::now();
+    let rerun = Command::new(dir.join("process_limits"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
     assert!(
         started.elapsed() < std::time::Duration::from_secs(2),
         "output limit waited for the child instead of terminating it: {:?}",
         started.elapsed()
     );
+    assert_eq!(rerun.status.code(), Some(0));
+    assert_eq!(rerun.stdout, b"true\nlimit:refused\n");
 
     for pid_file in [&timeout_pid, &output_pid] {
         let pid = fs::read_to_string(pid_file).unwrap();
@@ -315,6 +324,166 @@ fn run() {
         compiled.rust.contains("posix_openpt"),
         "the Unix terminal path must include the native PTY backend"
     );
+}
+
+/// D-PROCESS-SESSION1=A (#1181): the Unix backend is a real bidirectional
+/// terminal, not a pair of pipes. Prove tty identity, input, ANSI bytes, and
+/// the requested window size through the shipped ProcessSpec path.
+#[cfg(unix)]
+#[test]
+fn core_process_terminal_is_tty_bidirectional_and_preserves_control_bytes() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_terminal_bytes_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let probe = dir.join("terminal_probe.sh");
+    write_executable(
+        &probe,
+        "#!/bin/sh
+if [ ! -t 0 ] || [ ! -t 1 ]; then exit 41; fi
+printf 'ready\\n'
+IFS= read -r line
+printf 'input:%s\\n' \"$line\"
+printf '\\033[31mcontrol\\033[0m\\n'
+stty size
+",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    policy :: TerminalPolicy{{
+        size: TerminalSize{{ cols: 100, rows: 30 }},
+        mode: .Raw
+    }}
+    child :: process.cmd(["{probe}"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
+    session :: child.terminal ?? panic("missing terminal session")
+    session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("resize failed")
+    child.stdin.write("typed\\n") ?? panic("terminal write failed")
+    result :: child.wait() ?? panic("terminal wait failed")
+    print(result.success)
+    print(result.output)
+    if child.stdin.write("late") == {{
+        .Ok(_) -> {{ print("closed:accepted") }}
+        .Err(_) -> {{ print("closed:typed-error") }}
+    }}
+}}
+"#,
+        probe = jet_string_path(&probe)
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_bytes", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.starts_with("true\nready\ninput:typed\n"), "{stdout:?}");
+    assert!(stdout.contains("\x1b[31mcontrol\x1b[0m"), "ANSI bytes lost: {stdout:?}");
+    assert!(stdout.contains("30 100"), "resize lost: {stdout:?}");
+    assert!(stdout.ends_with("closed:typed-error\n"), "{stdout:?}");
+}
+
+/// D-PROCESS-SESSION1=A (#1181): terminal lifecycle controls target the Unix
+/// session process group. Each child leaves a descendant PID behind so the
+/// host test can prove interrupt, terminate, kill, timeout, and drop reap it.
+#[cfg(unix)]
+#[test]
+fn core_process_terminal_controls_reap_the_full_process_tree() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_terminal_tree_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("tree.sh");
+    let interrupt_pid = dir.join("interrupt.pid");
+    let terminate_pid = dir.join("terminate.pid");
+    let kill_pid = dir.join("kill.pid");
+    let timeout_pid = dir.join("timeout.pid");
+    let drop_pid = dir.join("drop.pid");
+    write_executable(
+        &script,
+        "#!/bin/sh
+sleep 30 &
+printf '%s\\n' \"$!\" > \"$1\"
+trap 'exit 130' INT
+trap 'exit 143' TERM
+while :; do sleep 1; done
+",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+use core.time as time
+
+fn dropped(path: String) {{
+    child :: process.cmd(["{script}", path]).terminal().spawn() ?? panic("drop spawn failed")
+    time.sleep(100ms)
+}}
+
+fn run() {{
+    interrupt :: process.cmd(["{script}", "{interrupt_pid}"]).terminal().spawn() ?? panic("interrupt spawn failed")
+    time.sleep(100ms)
+    interrupt.interrupt() ?? panic("interrupt failed")
+    interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
+    print(interrupt_result.success)
+
+    terminate :: process.cmd(["{script}", "{terminate_pid}"]).terminal().spawn() ?? panic("terminate spawn failed")
+    time.sleep(100ms)
+    terminate.terminate() ?? panic("terminate failed")
+    terminate_result :: terminate.wait() ?? panic("terminate wait failed")
+    print(terminate_result.success)
+
+    kill :: process.cmd(["{script}", "{kill_pid}"]).terminal().spawn() ?? panic("kill spawn failed")
+    time.sleep(100ms)
+    kill.kill() ?? panic("kill failed")
+    kill_result :: kill.wait() ?? panic("kill wait failed")
+    print(kill_result.success)
+
+    timeout :: Duration.milliseconds(100) ?? panic("timeout duration failed")
+    timed :: process.cmd(["{script}", "{timeout_pid}"]).terminal().timeout(timeout).run() ?? panic("timeout run failed")
+    print(timed.timed_out)
+
+    dropped("{drop_pid}")
+    print("drop returned")
+}}
+"#,
+        script = jet_string_path(&script),
+        interrupt_pid = jet_string_path(&interrupt_pid),
+        terminate_pid = jet_string_path(&terminate_pid),
+        kill_pid = jet_string_path(&kill_pid),
+        timeout_pid = jet_string_path(&timeout_pid),
+        drop_pid = jet_string_path(&drop_pid),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_tree", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "false\nfalse\nfalse\ntrue\ndrop returned\n");
+
+    for pid_file in [
+        interrupt_pid,
+        terminate_pid,
+        kill_pid,
+        timeout_pid,
+        drop_pid,
+    ] {
+        let pid = fs::read_to_string(&pid_file).unwrap();
+        let pid = pid.trim();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            let alive = Command::new("kill")
+                .args(["-0", pid])
+                .status()
+                .unwrap()
+                .success();
+            if !alive {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = Command::new("kill").args(["-9", pid]).status();
+                panic!("terminal descendant {pid} survived {:?}", pid_file);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
 }
 
 /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the beginner and expert

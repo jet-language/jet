@@ -683,12 +683,35 @@ mod tests {
             build_sandbox_outcome(
                 1,
                 0,
-                &[("linux-bwrap".into(), "filesystem=source-readonly".into(),)],
+                &[(
+                    "linux-bwrap".into(),
+                    "filesystem=source-readonly;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB".into(),
+                )],
             ),
-            "enforced via linux-bwrap (filesystem=source-readonly)"
+            "enforced via linux-bwrap (filesystem=source-readonly;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB)"
         );
         assert_eq!(
             build_sandbox_outcome(1, 0, &[]),
+            "sandbox receipt missing for 1 built output(s)"
+        );
+    }
+
+    #[test]
+    fn sandbox_claim_rejects_unknown_or_incomplete_receipts() {
+        assert_eq!(
+            build_sandbox_outcome(
+                1,
+                0,
+                &[("linux-userns".into(), "not-enforced".into())],
+            ),
+            "sandbox receipt missing for 1 built output(s)"
+        );
+        assert_eq!(
+            build_sandbox_outcome(
+                1,
+                0,
+                &[("linux-bwrap".into(), "filesystem=source-readonly".into())],
+            ),
             "sandbox receipt missing for 1 built output(s)"
         );
     }
@@ -799,10 +822,11 @@ fn report_select_error(theme: &Theme, d: &crate::Diagnostics::Diagnostic) -> i32
 
 fn sandbox_receipt(entry: &Store::StoreEntry) -> Option<(String, String)> {
     let producer = Store::ProducerRecord::decode(&entry.producer_record).ok()?;
-    Some((
+    let receipt = (
         producer.facts.get("build.sandbox")?.clone(),
         producer.facts.get("build.sandbox_policy")?.clone(),
-    ))
+    );
+    crate::RuntimePolicy::sandbox_receipt_is_truthful(&receipt.0, &receipt.1).then_some(receipt)
 }
 
 fn build_sandbox_outcome(
@@ -811,6 +835,12 @@ fn build_sandbox_outcome(
     receipts: &[(String, String)],
 ) -> String {
     if built > 0 {
+        let receipts = receipts
+            .iter()
+            .filter(|(class, policy)| {
+                crate::RuntimePolicy::sandbox_receipt_is_truthful(class, policy)
+            })
+            .collect::<Vec<_>>();
         if receipts.len() < built {
             return format!(
                 "sandbox receipt missing for {} built output(s)",

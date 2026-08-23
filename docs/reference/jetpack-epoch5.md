@@ -515,6 +515,9 @@ The catalog also includes MinIO (`minio`, port `9000`), Mailpit (`mailpit`, with
 Blackfire. Their package, executable, port, argument vector, and readiness facts
 come from the same registry used by host supervision, image projection, and
 discovery; no second service runner or shell-string preset field is involved.
+MailHog binds its UI/API to loopback port `8025`, SMTP to `1025`, and checks
+`/api/v2/messages`; Blackfire uses bounded process readiness. MinIO checks
+`/minio/health/live`, and Mailpit checks `/api/v1/info`.
 Adminer is catalog-listed with the same typed facts, but its current nixpkgs
 output is a PHP source artifact rather than a runnable executable. It remains
 owner-gated until Jet has a ratified PHP runtime/source projection for that row.

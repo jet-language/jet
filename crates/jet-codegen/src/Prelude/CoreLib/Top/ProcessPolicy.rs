@@ -104,6 +104,8 @@ fn jet_process_policy_environment(spec: &jet_std::ProcessSpec) -> String {
 }
 
 fn jet_process_backend_limits() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    let limits = vec!["private-tmpfs-bytes=67108864".to_string()];
     #[cfg(target_os = "windows")]
     let mut limits = Vec::new();
     #[cfg(target_os = "windows")]
@@ -112,7 +114,13 @@ fn jet_process_backend_limits() -> Vec<String> {
         "active-processes=256".to_string(),
         "memory-bytes=2147483648".to_string(),
     ]);
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    let limits = Vec::new();
+    #[cfg(all(
+        not(target_os = "linux"),
+        not(target_os = "macos"),
+        not(target_os = "windows")
+    ))]
     let limits = Vec::new();
     limits
 }
@@ -209,6 +217,43 @@ fn jet_process_policy_check(spec: &jet_std::ProcessSpec) -> Result<(), jet_std::
             ),
         ));
     }
+    // A live stream, inherited descriptor, or terminal session bypasses the
+    // receipt redactor.
+    // Keep the authority path fail-closed until a streaming audit transport
+    // can carry the same secret-redaction contract as captured output.
+    if spec.terminal.is_some()
+        || (!spec.detached
+            && (spec.stdout != jet_std::ProcessStreamMode::Capture
+                || spec.stderr != jet_std::ProcessStreamMode::Capture))
+    {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn",
+        ));
+    }
+    Ok(())
+}
+
+fn jet_process_policy_check_executable(
+    spec: &jet_std::ProcessSpec,
+    executable_identity: &str,
+) -> Result<(), jet_std::IOError> {
+    let executable_rights = jet_process_policy_rights(spec)
+        .into_iter()
+        .filter(|right| right.starts_with("Exec:"))
+        .collect::<Vec<_>>();
+    if !executable_rights.is_empty()
+        && !executable_rights
+            .iter()
+            .any(|right| right.strip_prefix("Exec:") == Some(executable_identity))
+    {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority policy does not grant the resolved executable",
+        ));
+    }
     Ok(())
 }
 
@@ -244,7 +289,19 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         ("secrets", "deny"),
         ("devices", "deny"),
         ("inherited-handles", "deny"),
-        ("environment", if spec.env_clear { "explicit-only" } else { "inherited" }),
+        // Authority-bound native launches always clear the host environment;
+        // the sandbox adapter receives only the explicit env_set/env_remove
+        // projection even when the caller did not spell env_clear(). Keep the
+        // digest honest about enforced authority. Unbound ProcessSpec retains
+        // its ordinary inherited-environment meaning.
+        (
+            "environment",
+            if spec.policy_wire.is_some() || spec.env_clear {
+                "explicit-only"
+            } else {
+                "inherited"
+            },
+        ),
         ("cwd", cwd.as_str()),
         ("timeout-ms", timeout_ms.as_str()),
         ("output-limit", output_limit.as_str()),
@@ -404,6 +461,7 @@ fn jet_process_spec_plan(
     }
     let executable_identity = jet_process_resolve_executable(spec)?;
     jet_process_policy_check(spec)?;
+    jet_process_policy_check_executable(spec, &executable_identity)?;
     let backend = jet_process_isolation_backend().unwrap_or("unavailable");
     let plan = jet_std::ProcessPlan {
         executable_identity,

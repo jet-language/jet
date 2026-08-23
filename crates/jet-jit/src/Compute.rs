@@ -464,6 +464,7 @@ mod semantics {
             assert_eq!(downloaded.last_transfer.unwrap().bytes, 8);
 
             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Vulkan).unwrap();
+            assert!(stream.vulkan.is_some());
             jet_compute_stream_sync(&stream).unwrap();
 
             let unsupported = jet_compute_det(&vulkan).unwrap_err();

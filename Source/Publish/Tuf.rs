@@ -188,6 +188,11 @@ pub fn verify_registry_package(
             "sparse package metadata disagrees with its immutable index projection",
         )));
     }
+    for entry in &metadata.entries {
+        if Index::is_takeover(&metadata.entries, entry) {
+            super::Tier::require_takeover_review(repo, &entry.name, &entry.version)?;
+        }
+    }
     if !metadata
         .entries
         .iter()
