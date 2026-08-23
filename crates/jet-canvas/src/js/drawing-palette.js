@@ -319,6 +319,25 @@
       });
   }
 
+  function eventDispatcherActions(doc = latestDoc) {
+    const dispatchers = doc && doc.facts && doc.facts.blueprint && doc.facts.blueprint.event_dispatchers;
+    if (!Array.isArray(dispatchers)) return [];
+    return dispatchers.map((fact, index) => ({
+      title: (fact.receiver || "Event") + " · " + String(fact.kind || "event").replace(/_/g, " "),
+      detail: fact.source || fact.receiver_type || "checked core.event source",
+      group: "Events",
+      kind: "canvas.event_dispatcher",
+      action_id: "canvas.event:" + (fact.source_span ? fact.source_span.start + ":" + fact.source_span.end : index),
+      signature: fact.receiver_type || "",
+      available: true,
+      run: () => {
+        if (fact.source_span) setSourceHash(fact.source_span);
+        setViewMode("code");
+        showToast("Event source selected");
+      }
+    }));
+  }
+
   function graphHasFailureRail(graph) {
     const returns = graph && graph.function && String(graph.function.returns || "");
     return returns.includes("?");
@@ -428,6 +447,7 @@
     if (group.includes("flow") || group.includes("execution")) return "Execution";
     if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
     if (group.includes("interface") || group.includes("trait")) return "Interfaces";
+    if (group.includes("event")) return "Events";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
     return "Execution";
   }
@@ -480,9 +500,9 @@
       const reason = disabled ? availability.reason : "";
       return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
-    const categories = ["Execution", "Variables", "Interfaces", "Project", "Core", "Commands"].map((category) => {
+    const categories = ["Execution", "Variables", "Events", "Interfaces", "Project", "Core", "Commands"].map((category) => {
       const limit = largePalette
-        ? ({ Execution: 16, Variables: 16, Interfaces: 16, Project: 12, Core: 24, Commands: 16 }[category] || 16)
+        ? ({ Execution: 16, Variables: 16, Events: 24, Interfaces: 16, Project: 12, Core: 24, Commands: 16 }[category] || 16)
         : category === "Core" ? 1000 : category === "Project" ? 32 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";

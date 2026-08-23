@@ -458,6 +458,11 @@ fn palette_insert_core_fn() {
 }
 
 #[test]
+fn library_panel() {
+    run_canvas_scenario("library-panel");
+}
+
+#[test]
 fn palette_insert_catalog_sweep() {
     run_canvas_scenario("palette-insert-catalog-sweep");
 }
@@ -585,6 +590,11 @@ fn details_collection_nested_editors() {
 #[test]
 fn traits_panel_authoring() {
     run_canvas_scenario("traits-panel-authoring");
+}
+
+#[test]
+fn events_panel_authoring() {
+    run_canvas_scenario("events-panel-authoring");
 }
 
 #[test]

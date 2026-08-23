@@ -844,9 +844,13 @@
     if (!root.children.length || !leaves.length) return null;
     const baseEditable = Boolean(inlineId || variable.source === "input" || expr) && !!applyOp;
     const operation = applyOp ? Object.assign({}, applyOp, {
-      run: (values, fields, context) => applyOp.run(Object.assign({}, values, {
-        [valueKey]: replaceNestedValueSources(source, leaves, values)
-      }), fields, context)
+      run: (values, fields, context) => {
+        const nextValue = replaceNestedValueSources(source, leaves, values);
+        if (applyOp.id === "variable-local" && values.name !== variable.name && nextValue !== source) {
+          throw new Error("Apply the name and value changes separately");
+        }
+        return applyOp.run(Object.assign({}, values, { [valueKey]: nextValue }), fields, context);
+      }
     }) : null;
     const sourceSpan = expr && expr.source_span;
     return leaves.map((leaf) => {
@@ -977,10 +981,12 @@
           : null;
       }
     } : null;
+    const valueFields = valueDetailFields(graph, variable, initExpr, null, isParam ? signatureOp : localOp);
+    const valueOperation = valueFields[0] && valueFields[0].apply_op;
     return [
-      { key: "name", id: "variable-name-input", label: "Name", kind: "expression", type: "Identifier", source: variable.name, value: variable.name, editable: isParam || variable.source === "local", apply_op: isParam ? signatureOp : variable.source === "local" ? localOp : null },
-      { key: "type", id: "variable-type-input", label: "Type", kind: "expression", type: "Type", source: variable.type, value: variable.type, editable: isParam, apply_op: isParam ? signatureOp : null },
-      ...valueDetailFields(graph, variable, initExpr, null, isParam ? signatureOp : localOp)
+      { key: "name", id: "variable-name-input", label: "Name", kind: "expression", type: "Identifier", source: variable.name, value: variable.name, editable: isParam || variable.source === "local", apply_op: valueOperation || (isParam ? signatureOp : variable.source === "local" ? localOp : null) },
+      { key: "type", id: "variable-type-input", label: "Type", kind: "expression", type: "Type", source: variable.type, value: variable.type, editable: isParam, apply_op: isParam ? valueOperation || signatureOp : null },
+      ...valueFields
     ];
   }
 
@@ -1034,9 +1040,17 @@
       updateDetails(graph, graph.nodes.find((n) => n.node_id === graph.entry_node), [], []);
       return;
     }
+    const selectionKey = "variable:" + variable.name;
+    const sameRevision = detailsEditorState
+      && detailsEditorState.selectionKey === selectionKey
+      && detailsEditorState.revision === (latestDoc && latestDoc.revision);
+    const hasPendingEdit = sameRevision && detailsEditorState.controls.some((record) =>
+      detailEditorSource(record.field, record.control) !== record.initial
+    );
+    if (hasPendingEdit) return;
     const color = colorForType(variable.type);
     details.style.setProperty("--node-accent", color);
-    const state = beginDetailsEditor("variable:" + variable.name);
+    const state = beginDetailsEditor(selectionKey);
     clearDom(details);
     const hero = document.createElement("div");
     hero.className = "details-hero";
@@ -1440,7 +1454,28 @@
       const pasteChips = document.createElement("div");
       pasteChips.className = "details-chips";
       pasteChips.setAttribute("data-paste-renames", "true");
-      for (const rename of pasteRenameChips) appendText(pasteChips, "span", "details-chip", "rename " + rename.from + " → " + rename.to);
+      if (pasteRenameChips.length > 3) {
+        const summary = appendButton(
+          pasteChips,
+          "",
+          `${pasteRenameChips.length} bindings renamed — ${pasteRenameChipsExpanded ? "hide" : "review"}`,
+          "details-chip",
+          { "data-paste-renames-summary": "true" },
+        );
+        summary.addEventListener("click", togglePasteRenameChips);
+      }
+      if (pasteRenameChips.length <= 3 || pasteRenameChipsExpanded) {
+        for (const rename of pasteRenameChips) {
+          const chip = appendButton(
+            pasteChips,
+            "",
+            "rename " + rename.from + " → " + rename.to,
+            "details-chip",
+            { "data-paste-rename-to": rename.to },
+          );
+          chip.addEventListener("click", () => beginPasteRename(rename.to));
+        }
+      }
       hero.appendChild(pasteChips);
     }
     const quickActions = document.createElement("div");
@@ -1724,8 +1759,8 @@
     if (!compatibility.exact) return compatibility;
     const wire = wireIntoPin(graph, input);
     const replacement = sourceExprForOutputPin(out);
-    if (wire && replacement) return { ok: true, label: "Rewire source", color: compatibility.color };
-    return { ok: true, label: "Connect " + (input.type || "Value"), color: compatibility.color };
+    if (wire && replacement) return { ok: true, exact: true, label: "Rewire source", color: compatibility.color };
+    return { ok: true, exact: true, label: "Connect " + (input.type || "Value"), color: compatibility.color };
   }
 
   function drawCompatibleDropTargets(graph, fromPin, context) {

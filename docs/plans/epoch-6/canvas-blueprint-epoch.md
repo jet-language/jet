@@ -43,7 +43,7 @@ machinery.
 | Function/Macro libraries | ordinary Jet modules + jetpack packages | palette already lists; browsing UX (M3) |
 | Blueprint namespaces (editor perf + visibility) | Jet modules + import surface | palette scoping (M4) |
 | Interfaces panel | Jet traits (projection shipped #316) | surface panel shipped #380 |
-| Event dispatchers | core.event (projection shipped #311) | surface panel UI (M3) |
+| Event dispatchers | core.event (projection shipped #311) | shipped: Events panel, source jumps, checked core.event actions, and browser proof (#870) |
 | Call In Editor | `jet run` / `#Test` + Canvas run HUD (#317) | verify interactively (M1) |
 | Variable metadata (instance-editable, tooltips, categories) | doc comments + ratified `#Meta` typed fields (D-CANVASMETA1=B) — implementation remains partial | metadata implementation (M3) |
 | Reparenting | traits/composition; no BP-style inheritance to repair | not applicable |

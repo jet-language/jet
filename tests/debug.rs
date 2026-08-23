@@ -134,6 +134,26 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     assert!(next.contains(&format!("\"id\":\"{}\"", session_id)), "{next}");
     assert!(next.contains("\"debug_overlay\":\"running\""), "{next}");
 
+    let invalid_continuation = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"teleport\"]}}",
+        revision, session_id
+    );
+    let invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &invalid_continuation,
+        &sessions,
+    )
+    .expect_err("Canvas must reject an unsupported continuation command");
+    assert!(invalid.contains("\"kind\":\"unsupported\""), "{invalid}");
+    let after_invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &next_request,
+        &sessions,
+    )
+    .expect("a rejected command must leave the live session usable");
+    assert!(after_invalid.contains(&format!("\"id\":\"{}\"", session_id)), "{after_invalid}");
+    assert!(after_invalid.contains("\"state\":\"running\""), "{after_invalid}");
+
     let stop_request = format!(
         "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"stop\":true}}",
         revision, session_id

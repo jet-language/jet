@@ -557,7 +557,15 @@
     }
     if (!editingText && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "v") {
       ev.preventDefault();
-      pasteSelection();
+      if (ev.shiftKey) pasteAsStaged();
+      else pasteSelection();
+      return;
+    }
+    if (!editingText && ev.key === "F2" && pasteRenameChips.length) {
+      ev.preventDefault();
+      const selected = currentGraphOrNull()?.nodes?.find((node) =>
+        node.kind === "binding" && node.node_id === selectedNodeId && pasteRenameChips.some((rename) => rename.to === node.title));
+      beginPasteRename((selected && selected.title) || pasteRenameChips[0].to);
       return;
     }
     if (!editingText && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "d") {

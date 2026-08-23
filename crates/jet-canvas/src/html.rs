@@ -97,6 +97,28 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .graph-list, .search-results, .project-list, .variable-list { display: grid; gap: 6px; }
 .project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
 .project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.library-panel { gap: 8px; }
+.library-search { width: 100%; }
+.library-list { display: grid; gap: 7px; }
+.library-module { display: grid; gap: 7px; padding: 7px; border: 1px solid #29415d; background: #0c1724; border-radius: 5px; }
+.library-module summary { min-height: 25px; }
+.library-module-body { display: grid; gap: 6px; }
+.library-module-summary { margin: 0; color: #91a8c5; font-size: 10px; line-height: 1.4; }
+.library-entry-row { display: grid; gap: 3px; }
+.library-entry { width: 100%; display: grid; gap: 3px; min-width: 0; padding: 7px 8px; text-align: left; border-color: #2d4a68; background: #101d2b; }
+.library-entry:hover, .library-entry:focus-visible { border-color: #35c2ff; background: #142b40; }
+.library-entry:disabled { opacity: .58; cursor: not-allowed; }
+.library-entry-name { overflow: hidden; color: #eaf5ff; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.library-entry-signature { overflow: hidden; color: #9fc1e5; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.library-entry-meta { display: flex; gap: 6px; flex-wrap: wrap; color: #7895b8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.library-entry-meta small { color: #7895b8; overflow-wrap: anywhere; }
+.library-entry-state { color: #65d4ff; text-transform: uppercase; letter-spacing: .06em; }
+.library-entry-reason { color: #f6c177 !important; }
+.library-packages { display: grid; gap: 6px; padding-top: 7px; border-top: 1px solid #22364d; }
+.library-packages h4 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.library-package { display: grid; gap: 2px; padding: 6px 7px; border: 1px solid #263b54; background: #0f1a27; border-radius: 4px; }
+.library-package b { color: #eaf5ff; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.library-package small { color: #87a4c8; overflow-wrap: anywhere; }
 .status-grid { display: grid; gap: 6px; }
 .status-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 4px; }
 .status-card b { color: #eef7ff; font-size: 12px; }

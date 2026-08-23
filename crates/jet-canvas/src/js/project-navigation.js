@@ -7,8 +7,8 @@
       state.id = "canvas-state";
       state.setAttribute("role", "status");
       state.setAttribute("aria-live", "polite");
-      state.style.cssText = "position:absolute;z-index:28;left:50%;top:12px;transform:translateX(-50%);display:none;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;width:min(520px,calc(100% - 24px));padding:10px 12px;border:1px solid #365a7f;border-radius:7px;background:rgba(7,16,28,.96);box-shadow:0 18px 52px rgba(0,0,0,.48);color:#c9dcf2";
-      state.innerHTML = "<div><b id=\"canvas-state-title\" style=\"display:block;color:#f8fbff\"></b><span id=\"canvas-state-detail\" style=\"display:block;margin-top:3px;color:#9fb9d8;line-height:1.35\"></span></div><div id=\"canvas-state-actions\" style=\"display:flex;gap:6px;flex-wrap:wrap;justify-content:end\"></div>";
+      state.style.cssText = "position:absolute;z-index:28;left:50%;top:12px;transform:translateX(-50%);display:none;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;width:min(520px,calc(100% - 24px));padding:10px 12px;border:1px solid #365a7f;border-radius:7px;background:rgba(7,16,28,.96);box-shadow:0 18px 52px rgba(0,0,0,.48);color:#c9dcf2;pointer-events:none";
+      state.innerHTML = "<div><b id=\"canvas-state-title\" style=\"display:block;color:#f8fbff\"></b><span id=\"canvas-state-detail\" style=\"display:block;margin-top:3px;color:#9fb9d8;line-height:1.35\"></span></div><div id=\"canvas-state-actions\" style=\"display:flex;gap:6px;flex-wrap:wrap;justify-content:end;pointer-events:auto\"></div>";
       stage.appendChild(state);
     }
     const statusbar = document.getElementById("statusbar");
@@ -215,6 +215,9 @@
   let graphStripKey = null;
   let variablesListKey = null;
   let traitsPanelKey = null;
+  let libraryPanelKey = null;
+  let librarySearchQuery = "";
+  let eventsPanelKey = null;
 
   function graphNavigationKey(doc) {
     return `${doc && doc.source_id || ""}:${doc && doc.revision || ""}:${selectedGraphId || ""}`;
@@ -349,6 +352,195 @@
     return method && method.required !== false && !method.default;
   }
 
+  function libraryEntryTitle(action) {
+    const title = String(action && action.title || action && action.callee || "member");
+    const separator = title.indexOf(" · ");
+    return separator >= 0 ? title.slice(0, separator) : title;
+  }
+
+  function libraryModulePath(action) {
+    return String(action && action.module_path || (action && action.kind === "canvas.core_catalog" ? "core" : "project"));
+  }
+
+  function libraryEntriesFor(doc) {
+    if (!doc || actionEntriesRevision !== doc.revision) return [];
+    return actionEntries.filter((action) => action && (
+      action.kind === "canvas.core_catalog"
+      || action.kind === "canvas.action"
+    ));
+  }
+
+  function libraryPackageRows(project) {
+    const rows = [];
+    const seen = new Set();
+    for (const pkg of project && project.packages || []) {
+      const key = String(pkg.name || pkg.path || "package");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        name: key,
+        detail: [pkg.path, pkg.version].filter(Boolean).join(" · ") || "package facts",
+        members: Array.isArray(pkg.members) ? pkg.members.length : 0,
+        dependencies: Array.isArray(pkg.deps) ? pkg.deps.length : 0
+      });
+    }
+    return rows;
+  }
+
+  function syncLibraryPanel(doc) {
+    const canvasPanel = document.getElementById("canvas-panel");
+    if (!canvasPanel || !doc) return;
+    const key = `${doc.source_id || ""}:${doc.revision || ""}:${actionEntriesRevision || ""}:${actionEntries.length}:${librarySearchQuery}`;
+    if (libraryPanelKey === key) return;
+    libraryPanelKey = key;
+    let panel = canvasPanel.querySelector("[data-canvas-library]");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.setAttribute("data-canvas-library", "true");
+      canvasPanel.appendChild(panel);
+    }
+    clearDom(panel);
+
+    const section = document.createElement("section");
+    section.className = "project-section library-panel";
+    const head = appendText(section, "div", "lane-head", "");
+    appendText(head, "h3", "", "Library");
+    const entries = libraryEntriesFor(doc);
+    const query = librarySearchQuery.trim();
+    const matches = query ? entries.filter((action) => actionMatchesQuery(action, query)) : entries;
+    const count = appendText(head, "span", "lane-meta", entries.length ? `${matches.length}/${entries.length}` : "loading");
+    count.setAttribute("data-library-count", "true");
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "search library-search";
+    search.placeholder = "Search modules and members";
+    search.value = librarySearchQuery;
+    search.setAttribute("data-library-search", "true");
+    search.setAttribute("aria-label", "Search library modules and members");
+    search.addEventListener("input", () => {
+      const cursor = search.selectionStart;
+      librarySearchQuery = search.value;
+      libraryPanelKey = null;
+      syncLibraryPanel(latestDoc);
+      const next = panel.querySelector("[data-library-search]");
+      if (next) {
+        next.focus();
+        if (Number.isFinite(cursor)) next.setSelectionRange(cursor, cursor);
+      }
+    });
+    section.appendChild(search);
+
+    const description = appendText(
+      section,
+      "div",
+      "tag",
+      entries.length
+        ? "Checked Core modules and ordinary Jet project functions. Select an entry to insert source."
+        : (actionEntriesRevision === doc.revision ? "No source-backed library entries are available." : "Refreshing the library from the current checked source…")
+    );
+    description.setAttribute("data-library-status", "true");
+
+    const list = document.createElement("div");
+    list.className = "library-list";
+    section.appendChild(list);
+    const groups = new Map();
+    for (const action of matches) {
+      const modulePath = libraryModulePath(action);
+      if (!groups.has(modulePath)) groups.set(modulePath, []);
+      groups.get(modulePath).push(action);
+    }
+    const modulePaths = Array.from(groups.keys()).sort((left, right) => left.localeCompare(right));
+    modulePaths.forEach((modulePath, moduleIndex) => {
+      const module = document.createElement("details");
+      module.className = "library-module";
+      module.setAttribute("data-library-module", modulePath);
+      module.open = !!query || moduleIndex === 0;
+      const summary = document.createElement("summary");
+      appendText(summary, "span", "library-module-name", modulePath);
+      appendText(summary, "span", "count", String(groups.get(modulePath).length));
+      module.appendChild(summary);
+      const body = document.createElement("div");
+      body.className = "library-module-body";
+      const moduleSummary = groups.get(modulePath).find((action) => action.summary);
+      if (moduleSummary) appendText(body, "p", "library-module-summary", moduleSummary.summary);
+      for (const action of groups.get(modulePath).sort((left, right) => libraryEntryTitle(left).localeCompare(libraryEntryTitle(right)))) {
+        const availability = actionAvailability(action, currentGraphOrNull());
+        const row = document.createElement("div");
+        row.className = "library-entry-row";
+        row.setAttribute("data-library-entry", action.action_id || action.callee || libraryEntryTitle(action));
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "library-entry";
+        button.setAttribute("data-library-action", action.action_id || action.callee || libraryEntryTitle(action));
+        button.setAttribute("data-library-module", modulePath);
+        button.disabled = !availability.available;
+        button.title = availability.available
+          ? (action.stageable ? (action.stage_reason || "Stage until a compatible input is connected.") : "Insert checked Jet source")
+          : availability.reason;
+        appendText(button, "span", "library-entry-name", libraryEntryTitle(action));
+        appendText(button, "code", "library-entry-signature", action.signature || action.insert_callee || action.callee || "member");
+        button.addEventListener("click", () => runLibraryAction(action));
+        row.appendChild(button);
+        const meta = appendText(row, "div", "library-entry-meta", "");
+        appendText(meta, "span", "library-entry-state", action.stageable ? "staged until wired" : availability.available ? "checked source" : "unavailable");
+        const inputPins = (action.pins || []).filter((pin) => pin.direction === "input").map((pin) => `${pin.name || "arg"}: ${pin.type || "Value"}`).join(", ");
+        if (inputPins) appendText(meta, "small", "library-entry-pins", inputPins);
+        appendText(meta, "small", "library-entry-source", action.source || (action.kind === "canvas.core_catalog" ? "docs/reference/core-library.md" : modulePath));
+        if (!availability.available) appendText(meta, "small", "library-entry-reason", availability.reason);
+        body.appendChild(row);
+      }
+      module.appendChild(body);
+      list.appendChild(module);
+    });
+    if (!modulePaths.length) appendText(list, "div", "tag", query ? "No library entries match this search." : "Library entries will appear after the checked action query completes.");
+    section.appendChild(list);
+
+    const packages = libraryPackageRows(latestProject);
+    if (packages.length) {
+      const packageSection = document.createElement("section");
+      packageSection.className = "library-packages";
+      const packageHead = appendText(packageSection, "div", "lane-head", "");
+      appendText(packageHead, "h4", "", "Packages");
+      appendText(packageHead, "span", "lane-meta", String(packages.length));
+      for (const pkg of packages) {
+        const packageRow = appendText(packageSection, "div", "library-package", "");
+        appendText(packageRow, "b", "", pkg.name);
+        appendText(packageRow, "small", "", `${pkg.detail} · ${pkg.members} modules · ${pkg.dependencies} deps`);
+      }
+      section.appendChild(packageSection);
+    }
+    panel.appendChild(section);
+
+    const moduleState = modulePaths.map((modulePath) => ({
+      path: modulePath,
+      entries: groups.get(modulePath).map((action) => ({
+        action_id: action.action_id || "",
+        title: libraryEntryTitle(action),
+        signature: action.signature || action.insert_callee || action.callee || "",
+        source: action.source || "",
+        source_span: action.source_span || null,
+        pins: action.pins || [],
+        available: actionAvailability(action, currentGraphOrNull()).available,
+        stageable: !!action.stageable
+      }))
+    }));
+    window.__jetCanvasLibraryPanel = {
+      rendered: true,
+      source: "canvas.query.actions",
+      revision: doc.revision || "",
+      query,
+      moduleCount: modulePaths.length,
+      actionCount: matches.length,
+      totalActionCount: entries.length,
+      availableCount: matches.filter((action) => actionAvailability(action, currentGraphOrNull()).available).length,
+      stagedCount: matches.filter((action) => action.stageable).length,
+      unavailableCount: matches.filter((action) => !actionAvailability(action, currentGraphOrNull()).available).length,
+      modules: moduleState,
+      packages: packages.length
+    };
+  }
+
   function syncTraitsPanel(doc) {
     const canvasPanel = document.getElementById("canvas-panel");
     if (!canvasPanel) return;
@@ -453,6 +645,72 @@
       requiredMethodCount,
       implementedMethodCount,
       traits: stateTraits,
+      revision: doc && doc.revision || ""
+    };
+  }
+
+  function eventFactLabel(fact) {
+    return String(fact && fact.kind || "event fact")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function syncEventsPanel(doc) {
+    const canvasPanel = document.getElementById("canvas-panel");
+    if (!canvasPanel) return;
+    const key = `${doc && doc.source_id || ""}:${doc && doc.revision || ""}`;
+    if (eventsPanelKey === key) return;
+    eventsPanelKey = key;
+    let panel = canvasPanel.querySelector("[data-canvas-events]");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.setAttribute("data-canvas-events", "true");
+      canvasPanel.appendChild(panel);
+    }
+    const blueprint = doc && doc.facts && doc.facts.blueprint;
+    const dispatchers = Array.isArray(blueprint && blueprint.event_dispatchers)
+      ? blueprint.event_dispatchers.filter((fact) => fact && fact.kind)
+      : [];
+    const jumps = [];
+    const jumpButton = (span, label) => {
+      if (!span || !Number.isFinite(span.start)) return "";
+      const index = jumps.push({ span, label }) - 1;
+      return `<button type="button" data-event-jump="${index}">${escapeHtml(label || "Open source")}</button>`;
+    };
+    const stateEvents = dispatchers.map((fact) => ({
+      kind: fact.kind,
+      source: fact.source || "",
+      receiver: fact.receiver || "",
+      receiverType: fact.receiver_type || "",
+      scope: fact.scope || "",
+      sourceSpan: fact.source_span || null,
+      factSource: fact.fact_source || ""
+    }));
+    const rows = dispatchers.map((fact) => {
+      const type = fact.receiver_type || (fact.kind.endsWith("create") ? "new event value" : "checked event call");
+      const scope = fact.scope ? `scope ${fact.scope}` : "scope from source";
+      return `<div class="signature-board" data-event-kind="${escapeAttr(fact.kind)}"><div class="signature-head"><div><span class="sig-eyebrow">${escapeHtml(eventFactLabel(fact))}</span><b>${escapeHtml(fact.receiver || fact.kind)}</b><code>${escapeHtml(type)}</code></div>${jumpButton(fact.source_span, "Open source")}</div><div class="lane-meta">${escapeHtml(scope)} · source-backed · ${escapeHtml(fact.lifetime || "EventScope-owned")}</div><code>${escapeHtml(fact.source || "")}</code></div>`;
+    }).join("");
+    panel.innerHTML = `<section class="project-section"><div class="lane-head"><h3>Events</h3><span class="lane-meta">${dispatchers.length}</span></div><div class="edit-grid"><button type="button" data-event-actions>Open event actions</button></div>${rows || "<div class=\"tag\">no core.event calls</div>"}</section>`;
+    panel.querySelectorAll("[data-event-jump]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = jumps[Number(button.getAttribute("data-event-jump"))];
+        if (!target) return;
+        setSourceHash(target.span);
+        setViewMode("code");
+        showToast(target.label + " selected");
+      });
+    });
+    panel.querySelectorAll("[data-event-actions]").forEach((button) => {
+      button.addEventListener("click", () => {
+        openGraphActionPalette(window.innerWidth / 2 - 210, 72, "core.event");
+      });
+    });
+    window.__jetCanvasEventsPanel = {
+      rendered: true,
+      dispatcherCount: dispatchers.length,
+      eventCount: new Set(dispatchers.map((fact) => fact.receiver || fact.kind)).size,
+      events: stateEvents,
       revision: doc && doc.revision || ""
     };
   }
@@ -914,6 +1172,7 @@
     ];
     actions.push(...variableActionsForGraph(graph));
     actions.push(...traitMethodActions(latestDoc));
+    actions.push(...eventDispatcherActions(latestDoc));
     for (const item of palette.concat(actionEntries)) {
       actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, stageable: item.stageable, stage_reason_code: item.stage_reason_code, stage_reason: item.stage_reason, receiver_type: item.receiver_type, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
     }
@@ -1042,15 +1301,22 @@
     if (debugState.key === key && debugState.revision === doc.revision) return;
     const previous = debugState;
     try {
-      debugState = JSON.parse(localStorage.getItem(key) || "null") || { breakpoints: [], watches: [] };
+      const stored = JSON.parse(localStorage.getItem(key) || "null");
+      debugState = stored && typeof stored === "object" ? stored : { breakpoints: [], watches: [] };
     } catch (_) {
       debugState = { breakpoints: [], watches: [] };
     }
     debugState.key = key;
     debugState.revision = doc.revision;
-    debugState.breakpoints = debugState.breakpoints || [];
-    debugState.staleBreakpoints = debugState.breakpoints.filter((b) => b.revision && b.revision !== doc.revision);
-    debugState.watches = debugState.watches || [];
+    const storedBreakpoints = Array.isArray(debugState.breakpoints) ? debugState.breakpoints : [];
+    const storedWatches = Array.isArray(debugState.watches) ? debugState.watches : [];
+    debugState.breakpoints = storedBreakpoints.filter((b) => b && typeof b === "object").slice(0, 128);
+    debugState.staleBreakpoints = debugState.breakpoints.filter((b) => b.revision !== doc.revision);
+    debugState.watches = storedWatches.filter((watch) => typeof watch === "string" && watch.trim()).slice(0, 32);
+    const discarded = storedBreakpoints.length > debugState.breakpoints.length || storedWatches.length > debugState.watches.length;
+    if (discarded && (!previous || previous.revision !== doc.revision)) {
+      showToast("Debug state was bounded; source was kept", { isError: true });
+    }
     if (debugState.staleBreakpoints.length && (!previous || previous.revision !== doc.revision)) {
       showToast(debugState.staleBreakpoints.length + " breakpoint" + (debugState.staleBreakpoints.length === 1 ? " is" : "s are") + " stale; source was kept", { isError: true });
     }
@@ -1072,16 +1338,16 @@
 
   function nodeBreakpoint(node) {
     const anchor = spanAnchor(node && node.source_span);
-    return (debugState.breakpoints || []).find((b) => b.anchor === anchor);
+    return (debugState.breakpoints || []).find((b) => b.revision === (latestDoc && latestDoc.revision) && b.anchor === anchor);
   }
 
   function toggleBreakpoint(node) {
     if (!latestDoc || !node || !node.source_span) return;
     loadDebugState(latestDoc);
     const anchor = spanAnchor(node.source_span);
-    const before = debugState.breakpoints.length;
-    debugState.breakpoints = debugState.breakpoints.filter((b) => b.anchor !== anchor);
-    if (debugState.breakpoints.length === before) {
+    const current = debugState.breakpoints.some((b) => b.revision === latestDoc.revision && b.anchor === anchor);
+    debugState.breakpoints = debugState.breakpoints.filter((b) => !(b.revision === latestDoc.revision && b.anchor === anchor));
+    if (!current) {
       debugState.breakpoints.push({ anchor, source_span: node.source_span, node_id: node.node_id, revision: latestDoc.revision });
       showToast("Breakpoint anchored to source span");
     } else {
@@ -1092,11 +1358,51 @@
   }
 
   function addWatch(name) {
-    if (!name) return;
+    if (!latestDoc || !name) return;
     loadDebugState(latestDoc);
-    if (!debugState.watches.includes(name)) debugState.watches.push(name);
+    if (!debugState.watches.includes(name)) {
+      if (debugState.watches.length >= 32) {
+        showToast("Watch limit reached; source was kept", { isError: true });
+        return;
+      }
+      debugState.watches.push(name);
+    }
     saveDebugState();
     showToast("Watch added: " + name);
+  }
+
+  function debugSessionSnapshot(id = debugSessionId, info = debugSessionInfo, doc = latestDoc) {
+    if (!id || !doc) return null;
+    return {
+      id,
+      revision: doc.revision,
+      sourceId: currentCanvasSourceId(),
+      tier: info && info.tier
+    };
+  }
+
+  function releaseDebugSession(snapshot, report = false) {
+    if (!snapshot || !snapshot.id || !snapshot.revision) return Promise.resolve();
+    const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
+    const body = { schema_version: 1, revision: snapshot.revision, session_id: snapshot.id, stop: true };
+    if (snapshot.sourceId) body.source_id = snapshot.sourceId;
+    if (snapshot.tier) body.tier = snapshot.tier;
+    return fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then((response) => response.json().catch(() => ({})).then((json) => ({ ok: response.ok, json })))
+      .then((result) => {
+        if (report && !result.ok) showToast((result.json && result.json.message) || "Debug stop rejected", { isError: true });
+      })
+      .catch(() => {
+        if (report) showToast("Debug session disconnected; source was kept", { isError: true });
+      });
+  }
+
+  function clearDebugClientState() {
+    debugSessionId = null;
+    debugSessionInfo = null;
+    debugOverlay = null;
+    syncDebugSessionPicker();
+    syncDebugActive();
   }
 
   function syncDebugSessionPicker() {
@@ -1115,6 +1421,7 @@
     if (!latestDoc) return;
     loadDebugState(latestDoc);
     const requestGeneration = ++debugRequestGeneration;
+    const requestedSession = debugSessionSnapshot();
     const requestedRevision = latestDoc.revision;
     const requestedSourceId = currentCanvasSourceId();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
@@ -1123,12 +1430,12 @@
       revision: requestedRevision,
       commands,
       breakpoint_spans: (debugState.breakpoints || [])
-        .filter((b) => !b.revision || b.revision === requestedRevision)
+        .filter((b) => b.revision === requestedRevision)
         .map((b) => b.anchor),
       watches: debugState.watches || []
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
-    if (debugSessionId) body.session_id = debugSessionId;
+    if (requestedSession) body.session_id = requestedSession.id;
     if (debugSessionInfo && debugSessionInfo.tier) body.tier = debugSessionInfo.tier;
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
@@ -1144,20 +1451,18 @@
             || (responseSourceId && responseSourceId !== currentCanvasSourceId())
           ))
         )) {
-          debugSessionId = null;
-          debugSessionInfo = null;
-          debugOverlay = null;
-          syncDebugSessionPicker();
-          syncDebugActive();
+          releaseDebugSession(requestedSession);
+          clearDebugClientState();
           showToast("Debug result is stale; current source was kept", { isError: true });
           return;
         }
         if (!result.ok) {
-          debugSessionId = null;
-          debugSessionInfo = null;
-          debugOverlay = null;
-          syncDebugSessionPicker();
-          syncDebugActive();
+          const kind = result.json && result.json.kind;
+          const keepSession = requestedSession && ["bad_request", "schema", "unsupported", "limit"].includes(kind);
+          if (!keepSession) {
+            releaseDebugSession(requestedSession);
+            clearDebugClientState();
+          }
           showToast((result.json.message || "Debug rejected").split("\n")[0], { isError: true });
           return;
         }
@@ -1177,38 +1482,18 @@
       })
       .catch(() => {
         if (requestGeneration !== debugRequestGeneration) return;
-        debugSessionId = null;
-        debugSessionInfo = null;
-        debugOverlay = null;
-        syncDebugSessionPicker();
-        syncDebugActive();
+        releaseDebugSession(requestedSession);
+        clearDebugClientState();
         showToast("Debug session disconnected; source was kept", { isError: true });
       });
   }
 
   function stopDebug() {
-    const id = debugSessionId;
     const doc = latestDoc;
-    const tier = debugSessionInfo && debugSessionInfo.tier;
-    const requestedSourceId = currentCanvasSourceId();
-    const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
+    const session = debugSessionSnapshot();
     debugRequestGeneration++;
-    debugSessionId = null;
-    debugSessionInfo = null;
-    debugOverlay = null;
-    syncDebugSessionPicker();
-    syncDebugActive();
-    if (id && doc) {
-      const body = { schema_version: 1, revision: doc.revision, session_id: id, stop: true };
-      if (requestedSourceId) body.source_id = requestedSourceId;
-      if (tier) body.tier = tier;
-      fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-        .then((response) => response.json().then((json) => ({ ok: response.ok, json })))
-        .then((result) => {
-          if (!result.ok) showToast((result.json && result.json.message) || "Debug stop rejected", { isError: true });
-        })
-        .catch(() => showToast("Debug session disconnected; source was kept", { isError: true }));
-    }
+    clearDebugClientState();
+    if (session && doc) releaseDebugSession(session, true);
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);
   }

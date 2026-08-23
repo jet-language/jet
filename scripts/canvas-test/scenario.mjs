@@ -1217,6 +1217,25 @@ async function elementCenter(ctx, expression, label) {
   return result;
 }
 
+async function assertLiveDetailsControls(ctx, label) {
+  const result = await ctx.driver.evaluate(`(() => {
+    const controls = [...document.querySelectorAll("#details [data-details-input]")];
+    const applyButtons = [...document.querySelectorAll("#details [data-field-apply]")];
+    const dead = controls.filter((input) => !input.closest("[data-details-field]")
+      || !input.dataset.detailsApplyOp
+      || !applyButtons.some((button) => button.dataset.fieldApply === input.dataset.detailsApplyOp));
+    return {
+      controls: controls.length,
+      applyButtons: applyButtons.length,
+      dead: dead.map((input) => input.dataset.detailsPath || input.dataset.detailsInput || "unknown")
+    };
+  })()`);
+  if (!result || result.dead.length || !result.applyButtons) {
+    throw new Error(`${label} Details control has no live apply operation: ${JSON.stringify(result)}`);
+  }
+  return result;
+}
+
 async function clickElement(ctx, expression, label) {
   const point = await elementCenter(ctx, expression, label);
   if (ctx.driver.pageSession) {
@@ -1909,7 +1928,7 @@ export const scenarios = {
     await ctx.driver.evaluate("window.__jetCanvasTest.copySelection()");
     const stagedBefore = (await ctx.state()).stagedRegistry?.length || 0;
     const sourceBeforeStagedPaste = await ctx.source();
-    await ctx.driver.evaluate("window.__jetCanvasTest.pasteAsStaged()");
+    await ctx.driver.shortcut(["Control", "Shift", "v"]);
     await ctx.waitFor(async () => ((await ctx.state()).stagedRegistry?.length || 0) > stagedBefore, "explicit staged paste");
     if (await ctx.source() !== sourceBeforeStagedPaste) throw new Error("paste as staged changed source bytes");
     const stagedToast = await ctx.driver.evaluate("document.getElementById('toast').textContent");
@@ -1928,7 +1947,8 @@ export const scenarios = {
     await ctx.waitFor(async () => {
       const current = await ctx.state();
       return (await ctx.source()).includes("total_copy :=")
-        && current.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy");
+        && current.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy")
+        && Object.values(current.nodeBounds || {}).some((node) => node.title === "total_copy");
     }, "renamed source paste");
     state = await ctx.state();
     if (!state.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy")) {
@@ -1936,6 +1956,20 @@ export const scenarios = {
     }
     const chips = await ctx.driver.evaluate("!!document.querySelector('[data-paste-renames]')");
     if (!chips) throw new Error("source paste rename chip was not rendered in Details");
+    const renameChip = await ctx.driver.evaluate(`(() => {
+      const chip = document.querySelector('[data-paste-rename-to="total_copy"]');
+      if (!chip) return false;
+      chip.click();
+      return true;
+    })()`);
+    if (!renameChip) throw new Error("source paste rename chip was not interactive");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("document.activeElement?.id === 'rename-to'"), "rename chip editor");
+    await ctx.driver.press("Escape");
+
+    await ctx.driver.click(center(reloadedTotal).x, center(reloadedTotal).y);
+    await ctx.driver.press("F2");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("document.activeElement?.id === 'rename-to'"), "rename chip F2 editor");
+    await ctx.driver.press("Escape");
 
     await ctx.undo();
     if ((await ctx.source()).includes("total_copy :=")) throw new Error("undo did not remove pasted source clone");
@@ -1983,6 +2017,105 @@ export const scenarios = {
     await ctx.expectSourceContains("use core.math as math");
     await ctx.expectSourceContains("math.abs");
     await ctx.screenshot("core-abs-inserted");
+  },
+
+  "library-panel": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+      const panel = window.__jetCanvasLibraryPanel || null;
+      return !!panel && panel.rendered && panel.actionCount > 0 && !!document.querySelector('[data-canvas-library]');
+    })()`), "library panel projection");
+    const initial = await ctx.driver.evaluate(`(() => {
+      const panel = window.__jetCanvasLibraryPanel || {};
+      return {
+        panel,
+        modules: Array.from(document.querySelectorAll('[data-library-module]')).map((module) => module.getAttribute('data-library-module')),
+        source: document.querySelector('[data-library-status]')?.textContent || ''
+      };
+    })()`);
+    if (!initial.modules.includes("core.event") || !initial.modules.includes("core.math")) {
+      throw new Error(`library panel omitted Core modules: ${JSON.stringify(initial)}`);
+    }
+    if (!initial.panel.modules.some((module) => module.entries.some((entry) => entry.title === "scope" && entry.signature.includes("scope")))) {
+      throw new Error(`library panel omitted typed event scope metadata: ${JSON.stringify(initial.panel)}`);
+    }
+
+    const before = await ctx.source();
+    await ctx.driver.evaluate(`(() => {
+      const search = document.querySelector('[data-library-search]');
+      search.value = 'abs';
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+      const button = document.querySelector('[data-library-action="canvas.core_catalog:core.math:abs"]');
+      return !!button && !button.disabled && button.closest('[data-library-entry]');
+    })()`), "available library entry");
+    const clicked = await ctx.driver.evaluate(`(() => {
+      const button = document.querySelector('[data-library-action="canvas.core_catalog:core.math:abs"]');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!clicked) throw new Error("available library entry was not interactive");
+    try {
+      await ctx.waitFor(async () => {
+        const source = await ctx.source();
+        return source.includes("use core.math as math") && source.includes("canvas_value :: math.abs(1)");
+      }, "library source transaction");
+    } catch (error) {
+      const diagnostic = await ctx.driver.evaluate(`(() => ({
+        source: window.__jetCanvasTest?.source?.() || null,
+        tx: window.__jetCanvasLastTx || null,
+        result: window.__jetCanvasLastTxResult || null,
+        state: window.__jetCanvasCanvasState || null,
+        toast: document.getElementById('toast')?.textContent || ''
+      }))()`);
+      throw new Error(`${error.message}: ${JSON.stringify(diagnostic)}`);
+    }
+    const created = await ctx.source();
+    const inserted = await ctx.graph();
+    const insertedState = await ctx.driver.evaluate(`(() => {
+      const state = window.__jetCanvasTest || {};
+      return {
+        library: state.libraryPanel || null,
+        nodes: Object.values(state.nodeBounds || {}).filter((node) => String(node.title || '').includes('abs') || String(node.title || '').includes('canvas_value'))
+      };
+    })()`);
+    if (!insertedState.library || insertedState.library.revision !== inserted.revision || !insertedState.nodes.length) {
+      throw new Error(`library insert lost graph provenance: ${JSON.stringify(insertedState)}`);
+    }
+
+    await ctx.undo();
+    if (await ctx.source() !== before) throw new Error("library undo did not restore exact source");
+    await ctx.redo();
+    if (await ctx.source() !== created) throw new Error("library redo did not restore exact source");
+    await ctx.openCanvas();
+    if (await ctx.source() !== created) throw new Error("library reload changed source");
+
+    const current = await ctx.graph();
+    const run = (current.graphs || []).find((graph) => graph.title === "run");
+    if (!run) throw new Error("library scenario lost run graph after reload");
+    const stale = await ctx.transaction({
+      schema_version: 1,
+      op: "insert_call",
+      revision: "sha256-stale",
+      graph_id: run.graph_id,
+      callee: "math.abs",
+      args: ["1"],
+      bind: "stale_library_value"
+    });
+    if (stale.ok || await ctx.source() !== created) throw new Error(`stale library edit was accepted: ${JSON.stringify(stale)}`);
+
+    const invalid = await ctx.transaction({
+      schema_version: 1,
+      op: "insert_call",
+      revision: current.revision,
+      graph_id: run.graph_id,
+      callee: "math.abs",
+      args: ['"wrong"'],
+      bind: "bad_library_value"
+    });
+    if (invalid.ok || await ctx.source() !== created) throw new Error(`ill-typed library edit was accepted: ${JSON.stringify(invalid)}`);
   },
 
   "palette-insert-catalog-sweep": async (ctx) => {
@@ -2060,6 +2193,7 @@ export const scenarios = {
 
   "data-pin-drag-to-wire": async (ctx) => {
     await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
     await ctx.replaceSource(`fn run() {
     source :: 4
     other :: 9
@@ -2116,6 +2250,7 @@ export const scenarios = {
 
   "data-pin-type-gate": async (ctx) => {
     await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
     await ctx.replaceSource(`enum ParseError {
     Empty
 }
@@ -3116,8 +3251,12 @@ fn use_helper() Int -> {
     }
     await ctx.openCanvas();
     if (!(await ctx.source()).includes("compute()")) throw new Error("project rename did not update entry source");
-    const other = await ctx.driver.evaluate(`fetch("/canvas/graph?source_id=other.jet", { cache: "no-store" }).then((r) => r.json())`);
-    if (!other.ok || !other.source_text.includes("compute()")) throw new Error("project rename did not update reference source");
+    let other = null;
+    await ctx.waitFor(async () => {
+      other = await ctx.driver.evaluate(`fetch("/canvas/graph?source_id=other.jet", { cache: "no-store" }).then((r) => r.json())`);
+      return other.protocol === "jet.canvas.graph" && other.source_text.includes("compute()");
+    }, "project rename reference source");
+    if (other.protocol !== "jet.canvas.graph" || !other.source_text.includes("compute()")) throw new Error("project rename did not update reference source");
     const stale = await ctx.driver.evaluate(`fetch("/canvas/project/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(request))} }).then((r) => r.json().then((json) => ({ ok: r.ok, json })))`);
     if (stale.ok || stale.json.kind !== "conflict") throw new Error(`stale project rename was accepted: ${JSON.stringify(stale)}`);
   },
@@ -3330,8 +3469,14 @@ fn run() {
     await ctx.openCanvas();
     await ctx.replaceSource(`fn edit() {
     matrix :: [[1, 2], [3, 4]]
+    settings :: Point{x: 4, y: [5, 6]}
     lookup :: ["first": 7, "second": 8]
-    print(matrix[0][0])
+    print(1)
+}
+
+struct Point {
+    x: Int
+    y: [Int]
 }
 
 fn run() {
@@ -3364,6 +3509,7 @@ fn run() {
       await ctx.waitFor(async () => (await ctx.state()).selectedVariableName === name, `${name} collection selected`);
       await exposeDetails();
       await ctx.waitFor(async () => await ctx.driver.evaluate(`document.querySelectorAll('[data-details-input][data-details-nested="true"]').length > 0`), `${name} nested Details controls`);
+      await assertLiveDetailsControls(ctx, `${name} collection`);
     };
 
     const setNested = async (path, value) => {
@@ -3400,12 +3546,44 @@ fn run() {
     const beforeMap = await ctx.source();
     await setNested("value[0].value", "10");
     await clickElement(ctx, `document.getElementById("apply-variable-details")`, "map nested apply");
-    await ctx.waitFor(async () => (await ctx.source()).includes('lookup :: ["first": 10, "second": 8]'), "map nested apply");
+    await ctx.waitFor(async () => {
+      const source = await ctx.source();
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      const state = await ctx.state();
+      if (result && result.ok === false) throw new Error(`map nested apply refused: ${JSON.stringify(result)}`);
+      return source.includes('lookup :: ["first": 10, "second": 8]')
+        && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
+    }, "map nested apply");
     const afterMap = await ctx.source();
     const undoneMap = await ctx.undo();
     if (undoneMap !== beforeMap) throw new Error("collection map undo did not restore exact source");
     const redoneMap = await ctx.redo();
     if (redoneMap !== afterMap) throw new Error("collection map redo did not restore exact source");
+
+    await selectVariable("settings");
+    const structSurface = await ctx.driver.evaluate(`({
+      paths: [...document.querySelectorAll('#details [data-details-input]')].map((input) => input.dataset.detailsPath || ""),
+      nested: document.querySelectorAll('#details [data-details-input][data-details-nested="true"]').length
+    })`);
+    if (!structSurface.paths.includes("value.x") || !structSurface.paths.includes("value.y[0]") || structSurface.nested < 3) {
+      throw new Error(`struct Details surface is incomplete: ${JSON.stringify(structSurface)}`);
+    }
+    const beforeStruct = await ctx.source();
+    await setNested("value.x", "9");
+    await setNested("value.y[1]", "7");
+    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "struct nested apply");
+    await ctx.waitFor(async () => {
+      const source = await ctx.source();
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      const state = await ctx.state();
+      return source.includes("settings :: Point{x: 9, y: [5, 7]}")
+        && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
+    }, "struct nested apply");
+    const afterStruct = await ctx.source();
+    const undoneStruct = await ctx.undo();
+    if (undoneStruct !== beforeStruct) throw new Error("struct nested undo did not restore exact source");
+    const redoneStruct = await ctx.redo();
+    if (redoneStruct !== afterStruct) throw new Error("struct nested redo did not restore exact source");
 
     await selectVariable("matrix");
     const beforeEscape = await ctx.source();
@@ -3425,12 +3603,24 @@ fn run() {
 
     await setNested("value[0][1]", "11");
     await ctx.driver.evaluate(`document.getElementById("toolbar-search").focus()`);
-    await ctx.waitFor(async () => (await ctx.source()).includes("matrix :: [[1, 11], [3, 4]]"), "nested blur apply");
+    await ctx.waitFor(async () => {
+      const source = await ctx.source();
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      const state = await ctx.state();
+      return source.includes("matrix :: [[1, 11], [3, 4]]")
+        && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
+    }, "nested blur apply");
     const beforeMatrixApply = await ctx.source();
     await selectVariable("matrix");
     await setNested("value[1][0]", "12");
     await clickElement(ctx, `document.getElementById("apply-variable-details")`, "matrix nested apply");
-    await ctx.waitFor(async () => (await ctx.source()).includes("matrix :: [[1, 11], [12, 4]]"), "nested matrix apply");
+    await ctx.waitFor(async () => {
+      const source = await ctx.source();
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      const state = await ctx.state();
+      return source.includes("matrix :: [[1, 11], [12, 4]]")
+        && result && result.changed === true && result.source_text === source && state && state.undoDepth >= 1;
+    }, "nested matrix apply");
     const afterMatrixApply = await ctx.source();
     const undoneMatrix = await ctx.undo();
     if (undoneMatrix !== beforeMatrixApply) throw new Error("nested matrix undo did not restore exact source");
@@ -3445,11 +3635,11 @@ fn run() {
 
     const beforeInvalid = await ctx.source();
     await setNested("value[0][0]", "not-an-int");
-    await clickElement(ctx, `document.getElementById("apply-variable-details")`, "nested validation refusal");
+    await ctx.driver.evaluate(`document.getElementById("toolbar-search").focus()`);
     await ctx.waitFor(async () => {
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       return result && result.ok === false;
-    }, "nested validation refusal");
+    }, "nested validation refusal on blur");
     const invalidState = await ctx.driver.evaluate("window.__jetCanvasDetailsState || null");
     if (!invalidState || invalidState.phase !== "refused" || !invalidState.reason) {
       throw new Error(`nested validation refusal was not visible: ${JSON.stringify(invalidState)}`);
@@ -3574,6 +3764,108 @@ fn run() {
       return state && state.implementationCount === 1 && state.implementedMethodCount === 1;
     }, "traits panel reload");
     if (await ctx.source() !== created) throw new Error("trait implementation reload changed source");
+  },
+
+  "events-panel-authoring": async (ctx) => {
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
+    const originalSource = `use core.event as event
+
+fn dev() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+    clicked.on(scope, n -> print("clicked {n}"))
+    clicked.once(scope, n -> print("once {n}"))
+    print(clicked.emit(1).summary())
+    scope.cancel()
+}
+    `;
+    await ctx.replaceSource(originalSource);
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("dock-graphs")`, "open Canvas events panel");
+    await ctx.waitFor(async () => {
+      const panel = await ctx.driver.evaluate(`document.querySelector("[data-canvas-events]")?.textContent || ""`);
+      const state = await ctx.driver.evaluate("window.__jetCanvasEventsPanel || null");
+      return panel.includes("Events") && panel.includes("Event Stream Create") && state && state.dispatcherCount === 6;
+    }, "events panel projection");
+    const initial = await ctx.driver.evaluate("window.__jetCanvasEventsPanel");
+    const savedOriginal = await ctx.source();
+    if (!initial.events.some((event) => event.receiverType === "Event<Int>" && event.scope === "scope")) {
+      throw new Error(`events panel lost checked type or scope provenance: ${JSON.stringify(initial)}`);
+    }
+    await clickElement(ctx, `document.querySelector('[data-event-jump]')`, "event source jump");
+    await ctx.waitFor(async () => String(await ctx.driver.evaluate("location.hash")).startsWith("#span-"), "event source navigation");
+
+    await ctx.driver.evaluate(`window.__jetCanvasTest.openGraphActionPalette("core.event")`);
+    await ctx.expectMenu("core.event");
+    const coreEventAction = await ctx.driver.evaluate(`(() => Array.from(document.querySelectorAll("#context-menu [data-menu-action]")).some((button) => button.textContent.includes("new") || button.textContent.includes("scope")))()`);
+    if (!coreEventAction) throw new Error("core.event creation actions were not offered");
+    await ctx.driver.press("Escape");
+    await clickElement(ctx, `document.querySelector('[data-event-actions]')`, "open event panel actions");
+    await ctx.expectMenu("core.event");
+    await ctx.driver.press("Escape");
+
+    const changedSource = originalSource
+      .replace("event.new<Int>()", "event.new<String>()")
+      .replace("clicked.emit(1)", 'clicked.emit("one")');
+    const graphBeforeEdit = await ctx.graph();
+    const edit = await ctx.uiTransaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: graphBeforeEdit.revision,
+      source: changedSource,
+      source_edit: "events_panel_edit"
+    });
+    if (!edit.ok) throw new Error(`event source edit failed: ${JSON.stringify(edit)}`);
+    await ctx.waitFor(async () => {
+      const state = await ctx.driver.evaluate("window.__jetCanvasEventsPanel || null");
+      return state && state.events.some((event) => event.receiverType === "Event<String>") && state.revision === (await ctx.graph()).revision;
+    }, "events panel edit projection");
+    const edited = await ctx.source();
+    if (!edited.includes("event.new<String>()") || !edited.includes('clicked.emit("one")')) {
+      throw new Error(`event edit did not preserve canonical source meaning: ${edited}`);
+    }
+
+    await ctx.undo();
+    if (await ctx.source() !== savedOriginal) {
+      throw new Error("event panel undo did not restore exact source");
+    }
+    const undone = await ctx.driver.evaluate("window.__jetCanvasEventsPanel");
+    if (!undone.events.some((event) => event.receiverType === "Event<Int>")) {
+      throw new Error(`event panel undo projection is stale: ${JSON.stringify(undone)}`);
+    }
+    await ctx.redo();
+    if (await ctx.source() !== edited) throw new Error("event panel redo did not restore exact source");
+
+    const beforeInvalid = await ctx.source();
+    const invalid = await ctx.transaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: (await ctx.graph()).revision,
+      source: beforeInvalid.replace("event.new<String>()", "event.new<String>(\"bad\")")
+    });
+    if (invalid.ok) throw new Error("ill-typed event edit unexpectedly succeeded");
+    await ctx.waitFor(async () => {
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      return result && result.ok === false;
+    }, "ill-typed event edit refusal");
+    if (await ctx.source() !== beforeInvalid) throw new Error("ill-typed event edit changed source");
+
+    const stale = await ctx.transaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: "sha256-stale",
+      source: beforeInvalid
+    });
+    if (stale.ok) throw new Error("stale event edit unexpectedly succeeded");
+    if (await ctx.source() !== beforeInvalid) throw new Error("stale event edit changed source");
+
+    await ctx.openCanvas();
+    await ctx.waitFor(async () => {
+      const state = await ctx.driver.evaluate("window.__jetCanvasEventsPanel || null");
+      return state && state.events.some((event) => event.receiverType === "Event<String>");
+    }, "events panel reload");
+    if (await ctx.source() !== edited) throw new Error("event panel reload changed source");
   },
 
   "fallible-context": async (ctx) => {

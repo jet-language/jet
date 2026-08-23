@@ -369,9 +369,11 @@ fn canvas_blueprint_facts_json(
         .workspace_overlay_policy()
         .map(jet_semindex::workspace_overlay_policy_json)
         .unwrap_or_else(|| "null".to_string());
+    let event_dispatchers = event_dispatcher_facts(src, index).join(",");
     format!(
-        "{{\"runtime_events\":{},\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
+        "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
+        event_dispatchers,
         interfaces.join(","),
         task_flows,
         outputs,
@@ -705,6 +707,232 @@ pub(super) fn trait_method_signature(src: &str, m: &AST::TraitMethodSig) -> Stri
         String::new()
     };
     format!("fn {}({}){}{}{}", m.name, params, ret, provenance, effects)
+}
+
+fn event_dispatcher_facts(src: &str, index: &SemIndex) -> Vec<String> {
+    let aliases = event_module_aliases(src);
+    index
+        .call_edges()
+        .iter()
+        .filter_map(|call| {
+            let call_source_span = event_call_span(src, call.call_span).unwrap_or(call.call_span);
+            let source = src
+                .get(call_source_span.start..call_source_span.end)
+                .unwrap_or(&call.callee);
+            let constructor = event_constructor_kind(
+                src,
+                call.call_span,
+                call.callee.as_str(),
+                source,
+                &aliases,
+            );
+            let receiver = event_receiver(src, index, call.call_span);
+            let kind = constructor.or_else(|| {
+                let receiver_type = receiver.as_ref().map(|(_, ty, _)| ty.as_str())?;
+                event_method_kind(receiver_type, call.callee.as_str())
+            })?;
+            let scope = event_scope_argument(index, call_source_span);
+            let receiver_type = constructor_type(call.callee.as_str(), source)
+                .or_else(|| receiver.as_ref().map(|(_, ty, _)| ty.clone()));
+            let receiver_name = receiver.as_ref().map(|(name, _, _)| name.as_str());
+            let receiver_span = receiver.as_ref().map(|(_, _, span)| span_json(*span));
+            let scope_name = scope.as_ref().map(|(name, _)| name.as_str());
+            let scope_span = scope.as_ref().map(|(_, span)| span_json(*span));
+            Some(format!(
+                "{{\"kind\":{},\"source\":{},\"source_span\":{},\"receiver\":{},\"receiver_source_span\":{},\"receiver_type\":{},\"scope\":{},\"scope_source_span\":{},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}",
+                json_str(kind),
+                json_str(source),
+                span_json(call_source_span),
+                receiver_name.map(json_str).unwrap_or_else(|| "null".to_string()),
+                receiver_span.unwrap_or_else(|| "null".to_string()),
+                receiver_type
+                    .as_deref()
+                    .map(json_str)
+                    .unwrap_or_else(|| "null".to_string()),
+                scope_name.map(json_str).unwrap_or_else(|| "null".to_string()),
+                scope_span.unwrap_or_else(|| "null".to_string()),
+            ))
+        })
+        .collect()
+}
+
+fn event_module_aliases(src: &str) -> Vec<String> {
+    let mut aliases = vec!["event".to_string()];
+    for line in src.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("use core.event") else {
+            continue;
+        };
+        if let Some(alias) = rest
+            .split_whitespace()
+            .position(|part| part == "as")
+            .and_then(|position| rest.split_whitespace().nth(position + 1))
+        {
+            aliases.push(alias.to_string());
+        }
+    }
+    aliases.sort();
+    aliases.dedup();
+    aliases
+}
+
+fn event_constructor_kind(
+    src: &str,
+    call_span: SourceSpan,
+    callee: &str,
+    _source: &str,
+    aliases: &[String],
+) -> Option<&'static str> {
+    let before = src.get(..call_span.start.min(src.len()))?.trim_end();
+    if !aliases.iter().any(|alias| before.ends_with(&format!("{alias}."))) {
+        return None;
+    }
+    match callee {
+        "new" => Some("event_stream_create"),
+        "with_policy" => Some("event_stream_create_with_policy"),
+        "async_result" => Some("async_event_create"),
+        "hook" => Some("hook_create"),
+        "decision_hook" => Some("decision_hook_create"),
+        "scope" => Some("event_scope_create"),
+        "policy_sync" => Some("event_policy_sync"),
+        _ => None,
+    }
+}
+
+fn constructor_type(callee: &str, source: &str) -> Option<String> {
+    let type_args = source
+        .find('<')
+        .and_then(|start| source[start + 1..].find('>').map(|end| &source[start + 1..start + 1 + end]))
+        .map(str::trim)
+        .filter(|args| !args.is_empty());
+    match callee {
+        "new" | "with_policy" => type_args.map(|args| format!("Event<{args}>")),
+        "async_result" => type_args.map(|args| format!("AsyncEvent<{args}>")),
+        "hook" => type_args.map(|args| format!("Hook<{args}>")),
+        "decision_hook" => type_args.map(|args| format!("DecisionHook<{args}>")),
+        "scope" => Some("EventScope".to_string()),
+        "policy_sync" => Some("EventPolicy".to_string()),
+        _ => None,
+    }
+}
+
+fn event_call_span(src: &str, callee_span: SourceSpan) -> Option<SourceSpan> {
+    let tail = src.get(callee_span.end..)?;
+    let open_offset = tail.find('(')?;
+    let open = callee_span.end + open_offset;
+    let bytes = src.as_bytes();
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, byte) in bytes.iter().enumerate().skip(open) {
+        let ch = *byte as char;
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = true;
+            continue;
+        }
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(SourceSpan {
+                    start: callee_span.start,
+                    end: offset + 1,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn event_receiver(
+    src: &str,
+    index: &SemIndex,
+    call_span: SourceSpan,
+) -> Option<(String, String, SourceSpan)> {
+    let reference = index
+        .references()
+        .iter()
+        .filter(|reference| reference.span.end <= call_span.start)
+        .filter(|reference| {
+            src.get(reference.span.end..call_span.start)
+                .is_some_and(|between| between.trim() == ".")
+        })
+        .max_by_key(|reference| reference.span.end)?;
+    let target = reference.target.as_ref()?;
+    let definition = index.definitions().iter().find(|definition| {
+        definition.module_path == target.module_path && definition.def_span == target.def_span
+    })?;
+    let ty = match &definition.kind {
+        SymbolKind::Local { ty: Some(ty), .. } | SymbolKind::Param { ty } => ty.clone(),
+        _ => return None,
+    };
+    Some((reference.name.clone(), ty, reference.span))
+}
+
+fn event_scope_argument(index: &SemIndex, call_span: SourceSpan) -> Option<(String, SourceSpan)> {
+    index
+        .references()
+        .iter()
+        .filter(|reference| {
+            reference.span.start >= call_span.start && reference.span.end <= call_span.end
+        })
+        .filter_map(|reference| {
+            let target = reference.target.as_ref()?;
+            let definition = index.definitions().iter().find(|definition| {
+                definition.module_path == target.module_path && definition.def_span == target.def_span
+            })?;
+            matches!(&definition.kind, SymbolKind::Local { ty: Some(ty), .. } if ty == "EventScope")
+                .then(|| (reference.name.clone(), reference.span))
+        })
+        .min_by_key(|(_, span)| span.start)
+}
+
+fn event_method_kind(receiver_type: &str, method: &str) -> Option<&'static str> {
+    let kind = match (receiver_type, method) {
+        (ty, "on") if is_event_handler_type(ty) => "event_subscribe",
+        (ty, "once") if is_event_handler_type(ty) => "event_subscribe_once",
+        (ty, "on_priority") if is_event_handler_type(ty) => "event_subscribe_priority",
+        (ty, "emit") if ty.starts_with("Event<") => "event_emit",
+        (ty, "emit_async") if ty.starts_with("AsyncEvent<") => "event_emit_async",
+        (ty, "close") if ty.starts_with("AsyncEvent<") => "event_close",
+        (ty, "listener_count") if is_event_handler_type(ty) => "event_listener_count",
+        (ty, "queued_count") if ty.starts_with("AsyncEvent<") => "event_queued_count",
+        (ty, "running_count") if ty.starts_with("AsyncEvent<") => "event_running_count",
+        (ty, "blocked_count") if ty.starts_with("AsyncEvent<") => "event_pending_count",
+        (ty, "run") if ty.starts_with("Hook<") => "hook_run",
+        (ty, "run") if ty.starts_with("DecisionHook<") => "decision_hook_run",
+        ("EventScope", "cancel") => "event_scope_cancel",
+        ("EventScope", "active_count") => "event_scope_active_count",
+        ("Subscription", "unsubscribe") => "event_unsubscribe",
+        ("Subscription", "is_active") => "event_subscription_active",
+        ("EventTrace", "summary") => "event_trace_summary",
+        ("EventTrace", "delivered" | "queued" | "dropped") => "event_trace_count",
+        (ty, "accepted") if ty.starts_with("DispatchReport<") => "event_report_accepted",
+        (ty, "delivered_handlers") if ty.starts_with("DispatchReport<") => "event_report_delivered",
+        (ty, "state") if ty.starts_with("DispatchReport<") => "event_report_state",
+        (ty, "failures") if ty.starts_with("DispatchReport<") => "event_report_failures",
+        (ty, "trace") if ty.starts_with("DispatchReport<") => "event_report_trace",
+        _ => return None,
+    };
+    Some(kind)
+}
+
+fn is_event_handler_type(ty: &str) -> bool {
+    ty.starts_with("Event<")
+        || ty.starts_with("AsyncEvent<")
+        || ty.starts_with("Hook<")
+        || ty.starts_with("DecisionHook<")
 }
 
 fn trait_param_signature(src: &str, p: &AST::Param) -> String {

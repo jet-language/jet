@@ -782,8 +782,10 @@
   }
 
   function drawGraph(doc) {
+    if (document.getElementById("execute-command-authority")) return;
     const source = doc.source_text || "";
     const reprojected = lastDrawnSource !== null && lastDrawnSource !== source;
+    const previousDebugSession = debugSessionSnapshot();
     lastDrawnSource = source;
     latestDoc = doc;
     if (debugOverlay && (
@@ -792,11 +794,8 @@
       || (debugOverlay.debug_overlay === "running" && !debugSessionId)
     )) {
       debugRequestGeneration++;
-      debugSessionId = null;
-      debugSessionInfo = null;
-      debugOverlay = null;
-      syncDebugSessionPicker();
-      syncDebugActive();
+      releaseDebugSession(previousDebugSession);
+      clearDebugClientState();
     }
     loadDebugState(doc);
     const sourceGraph = currentGraph(doc);
@@ -823,6 +822,8 @@
     syncGraphStrip(doc);
     syncVariablesList(graph);
     syncTraitsPanel(doc);
+    syncLibraryPanel(doc);
+    syncEventsPanel(doc);
     fit();
     const size = cssSize();
     drawGrid(size);
@@ -1041,6 +1042,7 @@
       hoveredNodeDescription: hoverNode ? nodeDescription(hoverNode, graph) : "",
       graphTitle: graph.title || graph.graph_id,
       review: typeof reviewTestState === "function" ? reviewTestState() : null,
+      libraryPanel: window.__jetCanvasLibraryPanel || null,
       selectedNodeIds: Array.from(selectedNodeIds),
       pasteRenameChips: pasteRenameChips.map((rename) => Object.assign({}, rename)),
       savedNodePositions: JSON.parse(JSON.stringify((editorState.nodePositions || {})[graph.graph_id] || {})),
@@ -1081,6 +1083,7 @@
           module_path: entry.module_path || "",
           signature: entry.signature || "",
           summary: entry.summary || "",
+          source: entry.source || "",
           pure: !!entry.pure,
           rank: Number(entry.rank || 0),
           rank_terms: entry.rank_terms || [],

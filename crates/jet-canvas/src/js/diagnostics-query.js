@@ -1,5 +1,7 @@
 
 // Toasts, diagnostics, drawers, source control, proof data, search, and viewport state.
+  let sourceControlLoadToken = 0;
+
   function showToast(text, opts = {}) {
     const message = String(text || "");
     const isError = !!opts.isError || /^Error \[[A-Z0-9]+\]:/.test(message) || message.includes("\n Why:") || message.includes("\n Fix:");
@@ -602,12 +604,14 @@
   }
 
   function loadSourceControl() {
+    const loadToken = ++sourceControlLoadToken;
     const requestedSourceId = currentCanvasSourceId();
     const requestedRevision = latestDoc && latestDoc.revision;
     const requestedProjectRevision = latestProject && latestProject.project_revision;
     return fetch(sourceControlUrl, { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
+        if (loadToken !== sourceControlLoadToken) return null;
         const sourceRevision = sourceControlRevision(doc, requestedSourceId);
         const stale = currentCanvasSourceId() !== requestedSourceId
           || (latestProject && latestProject.project_revision !== requestedProjectRevision)

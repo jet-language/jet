@@ -1363,8 +1363,13 @@ pub fn debug_session_json_for_file_with_sessions(
         ));
     }
 
-    let projection =
-        project_file(path).map_err(|diags| debug_diagnostics_error(path, &src, &diags))?;
+    let projection = match project_file(path) {
+        Ok(projection) => projection,
+        Err(diags) => {
+            sessions.discard(&execution.id);
+            return Err(debug_diagnostics_error(path, &src, &diags));
+        }
+    };
     let source_id = json_string_field(&projection.json, "source_id").unwrap_or_else(|| {
         path.file_name()
             .map(|name| name.to_string_lossy().into_owned())

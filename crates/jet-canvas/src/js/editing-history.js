@@ -384,8 +384,8 @@
     return names;
   }
 
-  function cloneRenames(src, snippet) {
-    const used = sourceIdentifiers(src);
+  function cloneRenames(src, snippet, scopeSource = src) {
+    const used = sourceIdentifiers(scopeSource);
     const renames = [];
     for (const from of sourceBindingNames(snippet)) {
       let suffix = 1;
@@ -482,13 +482,10 @@
       if (span.start < start || span.end > end) return null;
     }
     if (!/^\s*(if|loop|return|break|next|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|::|\())/m.test(snippet)) return null;
-    const renames = cloneRenames(src, snippet);
-    const text = renameSourceIdentifiers(snippet, renames);
     return {
-      text: text.endsWith("\n") ? text : text + "\n",
+      text: snippet.endsWith("\n") ? snippet : snippet + "\n",
       title: nodes.map((n) => n.title || n.kind).join(", "),
-      insert_after: Math.min(end, graphSourceInsertOffset(graph)),
-      renames
+      insert_after: Math.min(end, graphSourceInsertOffset(graph))
     };
   }
 
@@ -527,9 +524,66 @@
     }
     clipboardState = payload;
     window.__jetCanvasClipboard = payload.source ? "source" : "staged";
+    window.__jetCanvasClipboardText = payload.source ? payload.source.text : "";
+    pasteRenameChipsExpanded = false;
+    if (payload.source && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(payload.source.text).catch(() => {});
+    }
     pasteRenameChips = [];
     showToast("Copied selection");
     return true;
+  }
+
+  function graphScopeSource(graph, src) {
+    if (!graph || !graph.source_span) return src;
+    return src.slice(graph.source_span.start, graph.source_span.end);
+  }
+
+  function nativeClipboardPayload(text, graph) {
+    const source = String(text || "");
+    return {
+      graph_id: graph.graph_id,
+      source_id: latestDoc && latestDoc.source_id || null,
+      revision: latestDoc && latestDoc.revision || null,
+      source: {
+        text: source,
+        title: "clipboard",
+        insert_after: graphSourceInsertOffset(graph)
+      },
+      staged: [],
+      fallback_nodes: [],
+      comments: []
+    };
+  }
+
+  function readNativeClipboard() {
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
+      showToast("Nothing copied");
+      return Promise.resolve(false);
+    }
+    return navigator.clipboard.readText().then((text) => {
+      if (!String(text || "").trim()) {
+        showToast("Nothing copied");
+        return false;
+      }
+      const graph = currentGraphOrNull();
+      if (!graph || !latestDoc) return false;
+      clipboardState = nativeClipboardPayload(text, graph);
+      window.__jetCanvasClipboard = "source";
+      window.__jetCanvasClipboardText = String(text);
+      return true;
+    }).catch(() => {
+      showToast("Clipboard read was unavailable", { isError: true });
+      return false;
+    });
+  }
+
+  function sourcePasteHasUnresolvedInput(result) {
+    const diagnostics = result && result.json && Array.isArray(result.json.diagnostics) ? result.json.diagnostics : [];
+    return diagnostics.some((diagnostic) => {
+      const text = [diagnostic.code, diagnostic.what, diagnostic.message, diagnostic.rendered].filter(Boolean).join(" ");
+      return diagnostic.code === "E0107" || /nothing named|unresolved input|unknown name/i.test(text);
+    });
   }
 
   function clipboardIsFresh() {
@@ -557,16 +611,22 @@
     const insert = Number.isFinite(requestedInsert)
       ? Math.max(0, Math.min(requestedInsert, graphSourceInsertOffset(graph)))
       : graphSourceInsertOffset(graph);
-    const text = payload.source.text.replace(/\s*$/, "\n");
+    const renames = cloneRenames(src, payload.source.text, graphScopeSource(graph, src));
+    const text = renameSourceIdentifiers(payload.source.text, renames).replace(/\s*$/, "\n");
     const next = src.slice(0, insert) + text + src.slice(insert);
-    const firstRename = (payload.source.renames || [])[0];
-    pasteRenameChips = (payload.source.renames || []).map((rename) => Object.assign({}, rename));
+    const firstRename = renames[0];
+    pasteRenameChips = renames.map((rename) => Object.assign({}, rename));
+    pasteRenameChipsExpanded = false;
     pendingInsertPlacement = { graph_id: graph.graph_id, title: firstRename && firstRename.to || payload.source.title.split(", ")[0] || "", x: point.x + 24, y: point.y + 24 };
     const request = postTransaction({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source: next, source_edit: "paste_clone" });
     if (request && typeof request.then === "function") request.then((result) => {
       if (!result || result.ok === false) {
         pendingInsertPlacement = null;
         pasteRenameChips = [];
+        pasteRenameChipsExpanded = false;
+        if (sourcePasteHasUnresolvedInput(result) && (payload.fallback_nodes || []).length) {
+          pasteStagedPayload(payload, graph, point);
+        }
       }
     });
     return true;
@@ -603,8 +663,7 @@
 
   function pasteAsStaged() {
     if (!clipboardState) {
-      showToast("Nothing copied");
-      return false;
+      return readNativeClipboard().then((read) => read ? pasteAsStaged() : false);
     }
     if (!clipboardIsFresh()) return false;
     const graph = currentGraphOrNull();
@@ -614,8 +673,7 @@
 
   function pasteSelection() {
     if (!clipboardState) {
-      showToast("Nothing copied");
-      return false;
+      return readNativeClipboard().then((read) => read ? pasteSelection() : false);
     }
     if (!clipboardIsFresh()) return false;
     const graph = currentGraphOrNull();
@@ -630,6 +688,38 @@
 
   function duplicateSelection() {
     if (copySelection()) pasteSelection();
+  }
+
+  function beginPasteRename(to, retry) {
+    const graph = currentGraphOrNull();
+    const node = graph && (graph.nodes || []).find((candidate) => candidate.kind === "binding" && candidate.title === to);
+    if (!node) {
+      if (!retry && pasteRenameChips.some((rename) => rename.to === to)) {
+        const reload = loadGraph();
+        if (reload && typeof reload.then === "function") return reload.then(() => beginPasteRename(to, true));
+      }
+      showToast("Pasted binding is no longer in this graph", { isError: true });
+      return false;
+    }
+    selectedVariableName = null;
+    selectedNodeIds = new Set([node.node_id]);
+    selectedNodeId = node.node_id;
+    selectionExplicitlyCleared = false;
+    if (node.source_span) setSourceHash(node.source_span);
+    drawGraph(latestDoc);
+    requestAnimationFrame(() => {
+      const input = document.getElementById("rename-to");
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+    return true;
+  }
+
+  function togglePasteRenameChips() {
+    pasteRenameChipsExpanded = !pasteRenameChipsExpanded;
+    if (latestDoc) drawGraph(latestDoc);
   }
 
   function deleteLocalSelection() {

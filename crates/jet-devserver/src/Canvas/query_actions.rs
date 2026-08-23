@@ -437,42 +437,70 @@ pub(super) fn canvas_project_preview_rename(
         validate_project_rename_overlay(&project, &plan.changes)
             .map_err(|error| query_error("check", &error))?;
 
+        let definitions = context
+            .sources
+            .iter()
+            .flat_map(|source| {
+                source
+                    .index
+                    .definitions()
+                    .iter()
+                    .filter(|definition| definition.name == symbol)
+                    .map(move |definition| (source, definition))
+            })
+            .collect::<Vec<_>>();
         let mut results = Vec::new();
         let mut seen = HashSet::new();
-        for site in &plan.sites {
-            let Some(source) = context
-                .sources
-                .iter()
-                .find(|source| source.source_id == site.rel)
-            else {
-                return Err(query_error(
-                    "stale",
-                    "Canvas rename site is not in the projected project",
-                ));
-            };
-            let node = (source.path == selected_path)
-                .then(|| node_for_span(&projection, site.span))
-                .flatten();
-            let key = format!("{}|{}|{}", site.rel, site.span.start, site.span.end);
-            if !seen.insert(key) {
-                continue;
-            }
-            let mut result = query_result_json(
-                &site.kind,
-                &site.title,
-                &site.symbol,
-                &site.module_path,
-                site.span,
-                node.as_ref(),
-                &source.source,
+        for (source, definition) in &definitions {
+            push_project_result(
+                &mut results,
+                &mut seen,
+                "definition",
+                &definition.name,
+                &definition.name,
+                &definition.module_path,
+                definition.def_span,
+                source,
+                Some(&projection),
+                &context.selected_path,
             );
-            result.pop();
-            result.push_str(&format!(
-                ",\"source_id\":{},\"revision\":{}}}",
-                json_str(&source.source_id),
-                json_str(&source.revision),
-            ));
-            results.push(result);
+        }
+        for source in &context.sources {
+            for reference in source.index.references() {
+                if reference.name != symbol
+                    || !module_belongs_to(
+                        &context.project_root,
+                        &source.path,
+                        &reference.module_path,
+                    )
+                    || !reference_targets(reference, &definitions)
+                {
+                    continue;
+                }
+                let owner = context
+                    .sources
+                    .iter()
+                    .find(|candidate| {
+                        module_belongs_to(
+                            &context.project_root,
+                            &candidate.path,
+                            &reference.module_path,
+                        )
+                    })
+                    .unwrap_or(source);
+                push_project_result(
+                    &mut results,
+                    &mut seen,
+                    "reference",
+                    &reference.name,
+                    &reference.name,
+                    &reference.module_path,
+                    reference.span,
+                    owner,
+                    Some(&projection),
+                    &context.selected_path,
+                );
+            }
         }
         let (results, truncated) = bounded_project_results(results);
         let files = plan

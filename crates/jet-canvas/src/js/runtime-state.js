@@ -113,6 +113,7 @@
   let selectedNodeIds = new Set();
   let selectionExplicitlyCleared = false;
   let pasteRenameChips = [];
+  let pasteRenameChipsExpanded = false;
   let view = { x: 64, y: 42, zoom: 1 };
   let drag = null;
   let lastPointer = { x: 240, y: 140 };

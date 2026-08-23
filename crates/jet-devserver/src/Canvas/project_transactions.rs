@@ -20,18 +20,8 @@ use super::validation_json::{
     json_string_field, json_usize_field, required_project_string, validate_ident_for_project,
 };
 
-pub(super) struct ProjectRenameSite {
-    pub(super) rel: String,
-    pub(super) kind: String,
-    pub(super) title: String,
-    pub(super) symbol: String,
-    pub(super) module_path: String,
-    pub(super) span: SourceSpan,
-}
-
 pub(super) struct ProjectRenamePlan {
     pub(super) changes: Vec<ProjectChange>,
-    pub(super) sites: Vec<ProjectRenameSite>,
 }
 
 struct ProjectRenameSource {
@@ -134,8 +124,7 @@ pub(super) fn prepare_project_rename(
             )
         })?;
     let anchor = selected_rename_anchor(ctx, selected, from)?;
-    let mut sites = Vec::new();
-    let mut edits_by_source = BTreeMap::<String, Vec<(SourceSpan, String, String, String)>>::new();
+    let mut edits_by_source = BTreeMap::<String, Vec<SourceSpan>>::new();
     let mut seen = HashSet::new();
 
     for source in &sources {
@@ -146,17 +135,7 @@ pub(super) fn prepare_project_rename(
             {
                 continue;
             }
-            add_project_rename_site(
-                &mut sites,
-                &mut edits_by_source,
-                &mut seen,
-                source,
-                "definition",
-                &definition.name,
-                &definition.module_path,
-                definition.def_span,
-                to,
-            );
+            add_project_rename_edit(&mut edits_by_source, &mut seen, source, definition.def_span);
         }
         for reference in source.index.references() {
             if reference.name != from
@@ -165,21 +144,11 @@ pub(super) fn prepare_project_rename(
             {
                 continue;
             }
-            add_project_rename_site(
-                &mut sites,
-                &mut edits_by_source,
-                &mut seen,
-                source,
-                "reference",
-                &reference.name,
-                &reference.module_path,
-                reference.span,
-                to,
-            );
+            add_project_rename_edit(&mut edits_by_source, &mut seen, source, reference.span);
         }
     }
 
-    if sites.is_empty() {
+    if edits_by_source.is_empty() {
         return Err(ProjectRenameError::new(
             "not_found",
             "Canvas rename found no semantic definition or reference sites",
@@ -194,7 +163,7 @@ pub(super) fn prepare_project_rename(
             .expect("rename edit source came from project source set");
         let text_edits = edits
             .iter()
-            .map(|(span, _, _, _)| edit(*span, to))
+            .map(|span| edit(*span, to))
             .collect::<Vec<_>>();
         let after = FixEngine::apply_edits(&source.source, &text_edits).map_err(|_| {
             ProjectRenameError::new("overlap", "Canvas project rename edits overlapped")
@@ -216,7 +185,7 @@ pub(super) fn prepare_project_rename(
         }
     }
 
-    Ok(ProjectRenamePlan { changes, sites })
+    Ok(ProjectRenamePlan { changes })
 }
 
 pub(super) fn apply_project_rename(
@@ -343,34 +312,19 @@ fn selected_rename_anchor(
     }
 }
 
-fn add_project_rename_site(
-    sites: &mut Vec<ProjectRenameSite>,
-    edits_by_source: &mut BTreeMap<String, Vec<(SourceSpan, String, String, String)>>,
+fn add_project_rename_edit(
+    edits_by_source: &mut BTreeMap<String, Vec<SourceSpan>>,
     seen: &mut HashSet<(String, usize, usize)>,
     source: &ProjectRenameSource,
-    kind: &str,
-    title: &str,
-    module_path: &str,
     span: SourceSpan,
-    to: &str,
 ) {
     if !seen.insert((source.source_id.clone(), span.start, span.end)) {
         return;
     }
-    sites.push(ProjectRenameSite {
-        rel: source.source_id.clone(),
-        kind: kind.to_string(),
-        title: title.to_string(),
-        symbol: title.to_string(),
-        module_path: module_path.to_string(),
-        span,
-    });
-    edits_by_source.entry(source.source_id.clone()).or_default().push((
-        span,
-        kind.to_string(),
-        title.to_string(),
-        to.to_string(),
-    ));
+    edits_by_source
+        .entry(source.source_id.clone())
+        .or_default()
+        .push(span);
 }
 
 fn definition_matches_anchor(definition: &SymbolDef, anchor: &DefinitionAnchor) -> bool {

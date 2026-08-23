@@ -175,6 +175,22 @@
     }
   }
 
+  function runLibraryAction(item) {
+    if (!latestDoc || !selectedGraphId) return Promise.resolve({ ok: false, changed: false, code: "no_graph" });
+    const availability = actionAvailability(item, currentGraphOrNull());
+    if (!availability.available) {
+      setCanvasState("error", "Library entry unavailable", `${availability.reason} Source was not changed.`);
+      return Promise.resolve({ ok: false, changed: false, code: availability.code, message: availability.reason });
+    }
+    if (item.stageable) return runPalette(item);
+    const body = transactionForPaletteInsert(item, null, viewportCenterGraphPoint());
+    if (!body) {
+      setCanvasState("error", "Library entry needs a compatible source action", "The checked action was kept visible. Source was not changed.");
+      return Promise.resolve({ ok: false, changed: false, code: "missing_insert_descriptor" });
+    }
+    return postTransaction(body);
+  }
+
   function postTransaction(body) {
     if (!body) return showToast("Action needs a source transaction");
     const inlinePlan = typeof inlineEditPlan === "function" ? inlineEditPlan(body) : null;
@@ -222,7 +238,10 @@
               { label: "Retry", primary: true, run: () => postTransaction(body) }
             ]);
             setSaveState("source unchanged", "error");
-            if (body.op === "replace_source" && body.source_edit === "paste_clone") pasteRenameChips = [];
+            if (body.op === "replace_source" && body.source_edit === "paste_clone") {
+              pasteRenameChips = [];
+              pasteRenameChipsExpanded = false;
+            }
             showToast(result.json.message || "Edit rejected", { isError: true });
           }
           return { ok: false, json: result.json };
@@ -265,8 +284,16 @@
           searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
           renderSearchResults();
         }
-        if (!(body.op === "replace_source" && body.source_edit === "paste_clone")) pasteRenameChips = [];
+        if (!(body.op === "replace_source" && body.source_edit === "paste_clone")) {
+          pasteRenameChips = [];
+          pasteRenameChipsExpanded = false;
+        }
         if (latestDoc && result.json.revision) {
+          if (result.json.revision !== latestDoc.revision) {
+            releaseDebugSession(debugSessionSnapshot());
+            debugRequestGeneration++;
+            clearDebugClientState();
+          }
           latestDoc = Object.assign({}, latestDoc, {
             revision: result.json.revision,
             source_text: result.json.source_text || latestDoc.source_text
@@ -312,6 +339,11 @@
           return;
         }
         if (latestDoc && result.json.revision) {
+          if (result.json.revision !== latestDoc.revision) {
+            releaseDebugSession(debugSessionSnapshot());
+            debugRequestGeneration++;
+            clearDebugClientState();
+          }
           latestDoc = Object.assign({}, latestDoc, {
             revision: result.json.revision,
             source_text: result.json.source_text || latestDoc.source_text
@@ -320,6 +352,8 @@
         clearSourceDraft();
         searchState.stale = true;
         renderSearchResults();
+        pasteRenameChips = [];
+        pasteRenameChipsExpanded = false;
         if (redoEntry) pushHistory(redoStack, redoEntry);
         if (undoEntry) pushHistory(undoStack, undoEntry);
         persistHistory();
@@ -363,6 +397,7 @@
     const requestedSourceId = typeof sourceId === "string" ? (sourceId || null) : selectedSourceId;
     const previousSourceId = selectedSourceId;
     const previousRevision = latestDoc && latestDoc.revision;
+    const previousDebugSession = debugSessionSnapshot();
     setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", latestDoc ? [
       { label: "Show source", run: openSourceRecovery },
       { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
@@ -389,6 +424,7 @@
         const firstLoad = !latestDoc;
         const sourceChanged = previousSourceId !== requestedSourceId;
         const revisionChanged = !!previousRevision && previousRevision !== doc.revision;
+        if (sourceChanged || revisionChanged) releaseDebugSession(previousDebugSession);
         if (sourceChanged) {
           selectedSourceId = requestedSourceId;
           selectedVariableName = null;
@@ -399,10 +435,7 @@
           selectedNodeIds = new Set();
           selectionExplicitlyCleared = false;
           debugRequestGeneration++;
-          debugSessionId = null;
-          debugSessionInfo = null;
-          debugOverlay = null;
-          syncDebugActive();
+          clearDebugClientState();
           searchState.results = [];
           searchState.spans = [];
           searchState.active = -1;
@@ -415,10 +448,7 @@
           if (typeof renderSearchResults === "function") renderSearchResults();
         } else if (revisionChanged) {
           debugRequestGeneration++;
-          debugSessionId = null;
-          debugSessionInfo = null;
-          debugOverlay = null;
-          syncDebugActive();
+          clearDebugClientState();
           searchState.stale = true;
           if (typeof renderSearchResults === "function") renderSearchResults();
         }
@@ -506,6 +536,7 @@
           source_span: action.source_span || null,
           signature: action.signature || "",
           summary: action.summary || "",
+          source: action.source || "",
           command: action.command || [],
           authority: action.authority || [],
           writes: action.writes || "none",
@@ -529,6 +560,7 @@
         actionEntries = canvasActions;
         actionEntriesRevision = loadRevision;
         if (canvasActions.some((action) => action.kind === "canvas.core_catalog")) coreCatalogLoaded = true;
+        if (latestDoc && latestDoc.revision === loadRevision) syncLibraryPanel(latestDoc);
         if (latestDoc && latestDoc.revision === loadRevision && !document.getElementById("execute-command-authority") && !canvasActionsSkipRedraw) drawGraph(latestDoc);
         return actionEntries;
       })
@@ -577,6 +609,7 @@
               rank_terms: member.rank_terms || [],
               signature: member.signature || "",
               summary: member.summary || module.summary || "",
+              source: member.source || "",
               available: member.available !== false,
               stageable: !!member.stageable,
               stage_reason_code: member.stage_reason_code || "",
@@ -595,6 +628,10 @@
         mergeActionEntries(entries);
         if (!query) coreCatalogLoaded = true;
         window.__jetCanvasCoreCatalogPalette = entries.length;
+        if (latestDoc) {
+          if (!actionEntriesRevision) actionEntriesRevision = latestDoc.revision;
+          syncLibraryPanel(latestDoc);
+        }
         return actionEntries;
       })
       .catch(() => actionEntries)

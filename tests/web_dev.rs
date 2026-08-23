@@ -1559,6 +1559,24 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     assert!(body.contains("\"state\":\"running\""), "{body}");
     assert!(!body.contains("\"active_line\":null"), "{body}");
 
+    let invalid = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"teleport\"]}}",
+        revision, session
+    );
+    let (status, body) =
+        http_post(port, "/canvas/debug", &invalid).expect("reject invalid debug command");
+    assert_eq!(status, 409, "invalid response: {}", String::from_utf8_lossy(&body));
+    assert!(String::from_utf8_lossy(&body).contains("\"kind\":\"unsupported\""));
+
+    let after_invalid = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        revision, session
+    );
+    let (status, body) = http_post(port, "/canvas/debug", &after_invalid)
+        .expect("resume after invalid debug command");
+    assert_eq!(status, 200, "resume response: {}", String::from_utf8_lossy(&body));
+    assert!(String::from_utf8_lossy(&body).contains("\"state\":\"running\""));
+
     let finish = format!(
         "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"c\"]}}",
         revision, session

@@ -346,6 +346,12 @@ fn run() {
     clicked.once(scope, (n) -> { print("once {n}") })
     clicked.on_priority(scope, 10, (n) -> { print("priority {n}") })
     print(clicked.emit(1).summary())
+    before_save :: event.hook<Int, String>("allow")
+    before_save.on(scope, n -> "seen {n}")
+    print(before_save.run(5, "fallback"))
+    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    before_publish.on(scope, n -> HookDecision.Continue)
+    print(before_publish.run(7))
     jobs :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
     jobs.on(scope, (n) -> { print("job {n}") })
     report :: jobs.emit_async(2).join() ?? panic("report")
@@ -459,6 +465,23 @@ fn first_node_id_containing(graph: &str, needle: &str) -> String {
 
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
     haystack.match_indices(needle).count()
+}
+
+fn json_quote(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn json_field(haystack: &str, field: &str) -> String {
@@ -2639,6 +2662,62 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
 }
 
 #[test]
+fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let example = fs::read_to_string(repo.join("examples/features/ui/events.jet"))
+        .expect("read events Canvas example");
+    let path = write_fixture("library_events_example", &example);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("project events example");
+    let source = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let actions_request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let actions = jet::Canvas::query_json_for_file(&path, &actions_request)
+        .expect("query library actions for events example");
+    for field in [
+        "\"action_id\":\"canvas.core_catalog:core.event:scope\"",
+        "\"module_path\":\"core.event\"",
+        "\"callee\":\"event.scope\"",
+        "\"insert_op\":\"insert_call\"",
+        "\"engine\":\"checked-tir+jit\"",
+        "\"writes\":\"source_transaction_only\"",
+        "\"source\":\"docs/reference/core-library.md\"",
+    ] {
+        assert!(actions.contains(field), "library action missing {field}: {actions}");
+    }
+
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"scope_from_library\"}}",
+        revision, graph_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &insert).expect("insert library action");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("scope_from_library :: event.scope()"), "{after}");
+    assert_eq!(jet::format_source(&after).expect("format library edit"), after);
+    let projected = jet::Canvas::graph_json_for_file(&path).expect("reproject library edit");
+    assert!(projected.contains("scope_from_library"), "{projected}");
+    assert!(projected.contains("\"source_span\""), "library node lost provenance: {projected}");
+
+    let bad_revision = jet::Canvas::source_revision(&after);
+    let bad = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[\"1\"],\"bind\":\"bad_scope\"}}",
+        bad_revision, graph_id
+    );
+    assert!(jet::Canvas::apply_transaction_json(&path, &bad).is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), after, "ill-typed library edit wrote source");
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"sha256-stale\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"stale_scope\"}}",
+        graph_id
+    );
+    assert!(jet::Canvas::apply_transaction_json(&path, &stale).is_err());
+    assert_eq!(fs::read_to_string(&path).unwrap(), after, "stale library edit wrote source");
+}
+
+#[test]
 fn canvas_core_catalog_classifies_every_action_for_palette_placement() {
     let path = write_fixture("core_catalog_statuses", "fn run() {\n    print(\"core\")\n}\n");
     let source = fs::read_to_string(&path).unwrap();
@@ -4257,6 +4336,7 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "facts",
         "facts.blueprint",
         "runtime_events",
+        "event_dispatchers",
         "executed, payload-free",
         "interfaces",
         "task_flows",
@@ -4368,6 +4448,8 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(html.contains("<svg viewBox=\"0 0 24 24\""), "{html}");
     assert!(html.contains("id=\"trust-summary\""), "{html}");
     assert!(html.contains("id=\"trust-summary\" class=\"project-section dev-only"), "{html}");
+    assert!(html.contains(".library-panel"), "{html}");
+    assert!(html.contains(".library-entry"), "{html}");
     assert!(!html.contains("source-truth"), "{html}");
     assert!(!html.contains("Source truth"), "{html}");
     assert!(!html.contains(">Trust<"), "{html}");
@@ -4387,6 +4469,18 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("Command result is stale; current source was kept"), "{js}");
     assert!(js.contains("Debug result is stale; current source was kept"), "{js}");
     assert!(js.contains("Debug session disconnected; source was kept"), "{js}");
+    assert!(
+        js.contains("function releaseDebugSession"),
+        "debug cleanup must be source-bound: {js}"
+    );
+    assert!(
+        js.contains(".filter((b) => b.revision === requestedRevision)"),
+        "stale breakpoints must not reach the server: {js}"
+    );
+    assert!(
+        js.contains("Debug state was bounded; source was kept"),
+        "debug state bounds must be disclosed: {js}"
+    );
     assert!(js.contains("debugSessionId"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("function nodeDescriptorForAction"), "{js}");
@@ -4407,6 +4501,18 @@ fn canvas_editor_shell_matches_round3_contract() {
     );
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
     assert!(js.contains("function syncTraitsPanel"), "{js}");
+    assert!(js.contains("function syncEventsPanel"), "{js}");
+    assert!(js.contains("data-canvas-events"), "{js}");
+    assert!(js.contains("event_dispatchers"), "{js}");
+    assert!(js.contains("function eventDispatcherActions"), "{js}");
+    assert!(js.contains("Open event actions"), "{js}");
+    assert!(js.contains("\"Events\""), "{js}");
+    assert!(js.contains("function syncLibraryPanel"), "{js}");
+    assert!(js.contains("data-canvas-library"), "{js}");
+    assert!(js.contains("data-library-search"), "{js}");
+    assert!(js.contains("data-library-action"), "{js}");
+    assert!(js.contains("function runLibraryAction"), "{js}");
+    assert!(js.contains("transactionForPaletteInsert(item, null"), "{js}");
     assert!(js.contains("data-canvas-traits"), "{js}");
     assert!(js.contains("data-trait-create"), "{js}");
     assert!(js.contains("function traitMethodActions"), "{js}");
@@ -4421,6 +4527,18 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("function renderExecConvergencePreview"), "{js}");
     assert!(js.contains("strategy: \"extract\""), "{js}");
     assert!(js.contains("const accepted = result && result.changed === true"), "{js}");
+}
+
+#[test]
+fn canvas_debug_browser_state_is_revision_bound() {
+    let js = jet::Canvas::canvas_js();
+    assert!(js.contains("function releaseDebugSession"), "{js}");
+    assert!(
+        js.contains(".filter((b) => b.revision === requestedRevision)"),
+        "{js}"
+    );
+    assert!(js.contains("source was kept"), "{js}");
+    assert!(js.contains("Debug state was bounded; source was kept"), "{js}");
 }
 
 #[test]
@@ -4821,12 +4939,90 @@ fn canvas_projects_async_task_rail() {
 }
 
 #[test]
-fn canvas_does_not_masquerade_static_event_calls_as_runtime_facts() {
+fn canvas_projects_event_dispatchers_without_masquerading_runtime_facts() {
     let path = write_fixture("event_dispatchers", CANVAS_EVENT_DISPATCHER_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     assert!(graph.contains("\"runtime_events\":null"), "{graph}");
-    assert!(!graph.contains("semindex_checked_call"), "{graph}");
-    assert!(!graph.contains("event_stream_create"), "{graph}");
+    for field in [
+        "\"event_dispatchers\"",
+        "\"kind\":\"event_scope_create\"",
+        "\"kind\":\"event_stream_create\"",
+        "\"kind\":\"event_subscribe\"",
+        "\"kind\":\"event_subscribe_once\"",
+        "\"kind\":\"event_subscribe_priority\"",
+        "\"kind\":\"event_emit\"",
+        "\"kind\":\"hook_create\"",
+        "\"kind\":\"hook_run\"",
+        "\"kind\":\"decision_hook_create\"",
+        "\"kind\":\"decision_hook_run\"",
+        "\"kind\":\"async_event_create\"",
+        "\"kind\":\"event_emit_async\"",
+        "\"kind\":\"event_queued_count\"",
+        "\"kind\":\"event_close\"",
+        "\"kind\":\"event_scope_cancel\"",
+        "\"receiver_type\":\"Event<Int>\"",
+        "\"receiver_type\":\"AsyncEvent<Int, String>\"",
+        "\"scope\":\"scope\"",
+        "\"fact_source\":\"semindex_checked_call\"",
+        "\"lifetime\":\"EventScope-owned\"",
+        "\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"]",
+        "\"semantics\":\"core.event_source_truth\"",
+    ] {
+        assert!(graph.contains(field), "event dispatcher graph missing {field}: {graph}");
+    }
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_subscribe\""),
+        2,
+        "unrelated Resource.on must not become an event fact: {graph}"
+    );
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_close\""),
+        1,
+        "unrelated Resource.close must not become an event fact: {graph}"
+    );
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"event_scope_cancel\""),
+        1,
+        "unrelated Resource.cancel must not become an event fact: {graph}"
+    );
+}
+
+#[test]
+fn canvas_event_dispatcher_edits_are_checked_and_stale_or_invalid_edits_keep_source() {
+    let path = write_fixture("event_dispatcher_edits", CANVAS_EVENT_DISPATCHER_FIXTURE);
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let invalid = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":{},\"source\":{}}}",
+        json_quote(&revision),
+        json_quote(&before.replace("event.new<Int>()", "event.new<Int>(\"bad\")")),
+    );
+    let invalid_out = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
+    assert!(invalid_out.contains("\"ok\":false"), "{invalid_out}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"sha256-stale\",\"source\":{}}}",
+        json_quote(&before.replace("event.new<Int>()", "event.new<String>()")),
+    );
+    let stale_out = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
+    assert!(stale_out.contains("\"kind\":\"conflict\""), "{stale_out}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    let changed_source = before
+        .replace("event.new<Int>()", "event.new<String>()")
+        .replace("clicked.emit(1)", "clicked.emit(\"one\")");
+    let valid = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":{},\"source\":{}}}",
+        json_quote(&revision),
+        json_quote(&changed_source),
+    );
+    let valid_out = jet::Canvas::apply_transaction_json(&path, &valid).expect("checked event edit");
+    assert!(valid_out.contains("\"changed\":true"), "{valid_out}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("event.new<String>()"), "{after}");
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("reprojected event graph");
+    assert!(graph.contains("\"receiver_type\":\"Event<String>\""), "{graph}");
 }
 
 #[test]

@@ -136,6 +136,14 @@ program meaning, plus an optional live Event projection:
   `Event`/`AsyncEvent`/`DecisionHook` observations: subscriptions, queue and
   backpressure counts, priority, failures, and lifecycle. Source calls that did
   not execute never appear.
+- `event_dispatchers`: checked source facts for `core.event` constructors and
+  Event/AsyncEvent/Hook/DecisionHook/Subscription/EventScope calls. Each fact
+  carries the source span and source text, the resolved receiver type, and the
+  source-backed subscription scope when one exists. These facts are ordinary
+  Jet source truth; they never populate `runtime_events` and do not claim that
+  a source call executed. The Events panel exposes source jumps and the
+  existing checked `core.event` action palette for creating another ordinary
+  call.
 - `interfaces`: source-authored trait and trait-impl facts for Canvas interface
   views and create-impl transactions. Compiler-generated derives stay out of
   this source-authoring surface. Each fact carries its module scope, associated
@@ -168,6 +176,11 @@ binding/assignment/get nodes and their typed pins. The right **Details** panel
 uses `graph.function` for editable function inputs/output, `inline_exprs` for
 editable local initializer values, and existing rename/signature/inline-edit
 transactions for writes.
+
+Details renders an editable control only when the field has a live source
+operation. A child edit rebuilds its parent expression, then uses the checked
+`edit_inline_expr` transaction. Validation, stale revision refusal, Escape,
+blur, undo, and redo keep the original source when an edit is not valid.
 
 Each node carries `node_id`, `kind`, `archetype`, `title`, `source_span`,
 `layout`, `badges`, and `edit_affordances`. `archetype` is one of `value`,
@@ -289,6 +302,12 @@ frames, and 128 trace entries. Stale revisions, missing sessions, runtime
 disconnects, and unsupported debugger boundaries return a structured Canvas
 diagnostic. Source edits are never part of this endpoint and remain intact on
 every failure.
+
+Canvas sends only breakpoint anchors for the current source revision. When a
+source reload, source switch, stale response, or runtime disconnect abandons a
+live session, it sends a bounded stop request for that exact source, revision,
+and tier. A failed cleanup does not clear or rewrite source; the server's live
+session cap bounds any unreachable session.
 
 Unsupported interpreter/native boundaries return Jet diagnostics through the
 same protocol. They never expose rustc output.
@@ -427,6 +446,15 @@ Canvas action boundary: package behavior runs through Jet's existing checked
 front end, executable TIR, and JIT preview path. Canvas does not get a separate
 runtime, compiler, or graph asset store. An action may return a source
 transaction or preview, but it never writes files directly.
+
+The Canvas Library panel is a read-only view over the existing `actions` query.
+It groups checked `canvas.core_catalog` and ordinary `canvas.action` entries by
+`module_path`, shows each entry's signature, documentation source, typed pins,
+and availability reason, and uses the same `insert_call` transaction as the
+action palette for edits. Package facts shown beside the library come from the
+existing `/canvas/project` projection. The panel does not invent module names,
+parse source, or write a graph-side representation; a stale, rejected, or
+ill-typed transaction leaves ordinary Jet source unchanged.
 
 The `core_catalog` query is browse-only. Core entries in the actions palette are
 source-backed insert candidates when `available:true`: they carry module path,
