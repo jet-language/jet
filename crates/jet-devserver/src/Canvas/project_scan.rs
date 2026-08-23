@@ -70,8 +70,10 @@ fn project_file_with_runtime_on_compiler_stack(
     resolver
         .revalidate_file(&checked)
         .map_err(|error| vec![error.diagnostic()])?;
+    let source_id = rel_path(&project_context_for_entry(path).project_root, path);
     Ok(project_checked(
         path,
+        &source_id,
         &src,
         &bundle,
         &facts,
@@ -122,7 +124,13 @@ struct WorkspaceBoundary {
 }
 
 pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
-    let entry_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    // WebHost keeps the CLI entry as the user supplied relative path. The
+    // authority inventory is rooted at a canonical directory, so carry the
+    // same absolute parent through every project read before computing
+    // project-relative ids. Keep the file name unresolved: a source symlink
+    // must still be rejected by AuthorityResolver::checked_file.
+    let entry_path = absolute_entry_path(path);
+    let entry_dir = entry_path.parent().unwrap_or_else(|| Path::new("."));
     let workspace_boundary = find_workspace_boundary(entry_dir);
     let workspace_root = workspace_boundary
         .as_ref()
@@ -171,18 +179,18 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         .to_path_buf();
     let (files, collection_diagnostic) = collect_project_files(
         &project_root,
-        path,
+        &entry_path,
         manifest_root.as_deref(),
         ecosystem_root.as_deref(),
         workspace_root.as_deref(),
     );
     let parts = jet_driver::ProjectParts::scan(&project_root);
     let project_revision = project_revision_from_files(&files);
-    let package_diagnostic = jet_semindex::package_facts_for_entry(path)
+    let package_diagnostic = jet_semindex::package_facts_for_entry(&entry_path)
         .err()
-        .map(|error| jet_semindex::package_facts_diagnostic(path, &error));
+        .map(|error| jet_semindex::package_facts_diagnostic(&entry_path, &error));
     ProjectContext {
-        entry_path: path.to_path_buf(),
+        entry_path,
         project_root,
         manifest_root,
         ecosystem_root,
@@ -202,6 +210,22 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
                 .and_then(|boundary| boundary.diagnostic.clone())
         }),
     }
+}
+
+fn absolute_entry_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let base = fs::canonicalize(parent)
+        .or_else(|_| std::env::current_dir().map(|cwd| cwd.join(parent)))
+        .unwrap_or_else(|_| parent.to_path_buf());
+    path.file_name()
+        .map(|name| base.join(name))
+        .unwrap_or(base)
 }
 
 fn find_workspace_boundary(start: &Path) -> Option<WorkspaceBoundary> {

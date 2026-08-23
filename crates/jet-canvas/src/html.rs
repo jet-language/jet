@@ -307,9 +307,12 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .action-result.is-disabled:hover, .action-result.is-disabled:focus-visible { border-color: #3f4856; background: #151922; }
 .action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
-#first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; }
+#first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; pointer-events: none; }
 #first-run-tour.is-open { display: grid; }
 #first-run-tour b { color: #f8fbff; }
+#first-run-tour button { pointer-events: auto; }
+.canvas-tour-target { outline: 2px solid #f6d365; outline-offset: 3px; box-shadow: 0 0 0 5px rgba(246,211,101,.14), 0 0 26px rgba(246,211,101,.24); }
+#first-run-tour button:focus-visible { outline: 2px solid #f6d365; outline-offset: 2px; }
 #run-hud { position: absolute; right: 12px; top: 100px; z-index: 12; display: none; min-width: 190px; padding: 8px 10px; border: 1px solid #31506d; border-radius: 6px; background: rgba(8,16,27,.88); color: #9fb9d8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #run-hud.is-running { display: block; border-color: #facc15; color: #fef3c7; }
 .lod-node { opacity: .88; }
@@ -459,7 +462,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
 </div>
 <div id="context-menu" role="menu"></div>
-<div id="first-run-tour" role="dialog" aria-label="Canvas first run">
+<div id="first-run-tour" role="dialog" aria-modal="false" aria-label="Canvas first run" aria-describedby="tour-detail">
   <b>Canvas edits Jet source.</b>
   <span>Use Code, Split, or Graph, then right-click or drag from a pin and release on empty space.</span>
   <button id="tour-dismiss">Dismiss</button>

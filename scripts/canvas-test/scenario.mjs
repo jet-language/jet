@@ -30,6 +30,10 @@ fn run() {
     print("keep-4")
     print("keep-5")
 }
+
+fn removed() {
+    print("remove-me")
+}
 `;
   const baselineHelper = `fn helper_file() Int -> {
     return 3
@@ -45,7 +49,8 @@ fn run() {
   await execFileAsync("git", ["commit", "-m", "baseline"], { cwd: root });
   const dirtyMain = baselineMain
     .replace('print("old")', 'print("new")')
-    .replace('print("remove")', 'print("added")');
+    .replace('print("remove")', 'print("added")')
+    .replace('\nfn removed() {\n    print("remove-me")\n}\n', '\n');
   const dirtyHelper = baselineHelper.replace("return 3", "return 4");
   await writeFile(join(root, "main.jet"), dirtyMain);
   await writeFile(join(root, "helper.jet"), dirtyHelper);
@@ -665,14 +670,15 @@ function catalogEntryId(entry) {
 }
 
 async function assertStageablePaletteEntry(ctx, baseSource, entry) {
-  const name = String(entry.title || entry.callee).split(" · ")[0];
+  const title = String(entry.title || entry.callee);
+  const name = title.split(" · ")[0];
   await ctx.replaceSource(baseSource);
   await ctx.loadCoreCatalog(name);
   await ctx.openCoreCatalogPalette(name);
   await ctx.expectMenu(name);
   const row = await ctx.driver.evaluate(`(() => {
     const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
-    const button = buttons.find((candidate) => candidate.textContent.includes(${JSON.stringify(name)}));
+    const button = buttons.find((candidate) => candidate.textContent.includes(${JSON.stringify(title)}));
     if (!button) return null;
     return {
       available: button.dataset.available,
@@ -686,17 +692,18 @@ async function assertStageablePaletteEntry(ctx, baseSource, entry) {
     throw new Error(`stageable palette row is not active: ${JSON.stringify({ entry: catalogEntryId(entry), row })}`);
   }
   const before = await ctx.source();
-  await ctx.pickEntry(name);
+  await ctx.pickEntry(title);
   await ctx.waitFor(async () => {
     const state = await ctx.state();
-    return (state.stagedRegistry || []).some((node) => String(node.title || "").includes(name));
-  }, `staged ${name}`);
+    return (state.stagedRegistry || []).some((node) => String(node.title || "").includes(title));
+  }, `staged ${title}`);
   const after = await ctx.source();
   if (after !== before) throw new Error(`staging ${name} changed source`);
   const state = await ctx.state();
-  const staged = (state.stagedRegistry || []).find((node) => String(node.title || "").includes(name));
+  const staged = (state.stagedRegistry || []).find((node) => String(node.title || "").includes(title));
   const inputs = (staged && staged.pins || []).filter((pin) => pin.direction === "input");
-  if (!inputs.length || inputs.some((pin) => !pin.type || pin.type === "Value")) {
+  const typed = (pin) => pin.type && (pin.type !== "Value" || (entry.stage_reason_code === "method_only" && pin.name === "receiver"));
+  if (!inputs.length || inputs.some((pin) => !typed(pin))) {
     throw new Error(`staged ${name} lacks typed inputs: ${JSON.stringify(staged)}`);
   }
   if (entry.stage_reason_code === "method_only") {
@@ -738,6 +745,8 @@ async function catalogSweep(ctx) {
     insert_callee: fn.insert_callee || fn.callee || fn.name,
     module_path: fn.module_path || "project",
     signature: fn.signature || "",
+    rank: Number(fn.rank || 0),
+    rank_terms: fn.rank_terms || [],
     pure: !!fn.pure,
     pins: fn.pins || [],
     ret: fn.ret || actionReturnType(fn) || "Void",
@@ -748,6 +757,13 @@ async function catalogSweep(ctx) {
   }));
   const coreEntries = (actionDoc.actions || []).filter((entry) => entry.kind === "canvas.core_catalog");
   const targets = projectEntries.concat(coreEntries);
+  const projectRank = projectEntries.find((entry) => entry.title === "square");
+  const functionDescriptor = (await ctx.state()).nodeDescriptors.find((descriptor) => descriptor.id === "function_pure");
+  if (!projectRank
+    || projectRank.rank !== functionDescriptor?.palette?.rank
+    || !projectRank.rank_terms.includes("function")) {
+    throw new Error("project palette rank facts drifted from the node descriptor: " + JSON.stringify({ projectRank, functionDescriptor }));
+  }
   const seen = new Set();
   const unique = targets.filter((entry) => {
     const id = entry.action_id || entry.callee || entry.title;
@@ -755,17 +771,35 @@ async function catalogSweep(ctx) {
     seen.add(id);
     return true;
   });
-  const summary = { total: unique.length, inserted: 0, staged: 0, excluded: 0, dataInserted: 0, noDataOrigin: 0, failures: [] };
+  const summary = {
+    total: unique.length,
+    inserted: 0,
+    staged: 0,
+    excluded: 0,
+    dataInserted: 0,
+    noDataOrigin: 0,
+    failures: [],
+  };
   const stageable = [];
   for (const entry of unique) {
     if (entry.kind === "canvas.core_catalog") {
       if (entry.stageable) {
-        if (entry.available !== false || !STAGEABLE_CATALOG_REASONS.has(entry.stage_reason_code) || !entry.stage_reason) {
+        if (
+          entry.available !== false
+          || !STAGEABLE_CATALOG_REASONS.has(entry.stage_reason_code)
+          || !entry.stage_reason
+          || entry.unavailable_reason_code !== entry.stage_reason_code
+          || !entry.denied_reason
+          || entry.insert_op !== "insert_call"
+          || !entry.insert_callee
+          || !entry.node_descriptor_id
+        ) {
           summary.failures.push({ id: catalogEntryId(entry), state: "invalid-stage-status", reason: entry.stage_reason_code });
           continue;
         }
         const inputs = (entry.pins || []).filter((pin) => pin.direction === "input");
-        if (!inputs.length || inputs.some((pin) => !pin.type || pin.type === "Value")) {
+        const typed = (pin) => pin.type && (pin.type !== "Value" || (entry.stage_reason_code === "method_only" && pin.name === "receiver"));
+        if (!inputs.length || inputs.some((pin) => !typed(pin))) {
           summary.failures.push({ id: catalogEntryId(entry), state: "stageable-without-typed-inputs", pins: entry.pins });
           continue;
         }
@@ -775,8 +809,18 @@ async function catalogSweep(ctx) {
         }
         stageable.push(entry);
         continue;
-      } else if (entry.available === false && (!EXCLUDED_CATALOG_REASONS.has(entry.unavailable_reason_code) || !entry.denied_reason)) {
-        summary.failures.push({ id: catalogEntryId(entry), state: "unstable-exclusion", reason: entry.unavailable_reason_code });
+      } else if (entry.available === false) {
+        if (
+          !EXCLUDED_CATALOG_REASONS.has(entry.unavailable_reason_code)
+          || !entry.denied_reason
+          || entry.stage_reason_code
+          || entry.stage_reason
+        ) {
+          summary.failures.push({ id: catalogEntryId(entry), state: "unstable-exclusion", reason: entry.unavailable_reason_code });
+          continue;
+        }
+      } else if (entry.stage_reason_code || entry.stage_reason || entry.unavailable_reason_code || entry.denied_reason) {
+        summary.failures.push({ id: catalogEntryId(entry), state: "contradictory-available-status" });
         continue;
       }
     }
@@ -884,6 +928,13 @@ function pinForNode(graph, title, direction, type = "exec") {
   return pin;
 }
 
+function namedPinForNode(graph, title, direction, name) {
+  const node = nodeByTitle(graph, title);
+  const pin = (graph.pins || []).find((p) => p.node_id === node.node_id && p.direction === direction && p.name === name);
+  if (!pin) throw new Error(`pin missing: ${title}.${direction}.${name}`);
+  return pin;
+}
+
 function controlWireExists(graph, fromTitle, toTitle) {
   const from = nodeByTitle(graph, fromTitle);
   const to = nodeByTitle(graph, toTitle);
@@ -906,6 +957,25 @@ async function dragExecEndpoint(ctx, graphTitle, oldTargetTitle, newTargetTitle)
   if (!endpoint) throw new Error(`exec wire endpoint missing for ${oldTargetTitle}: ${JSON.stringify(state.wireEndpoints || [])}`);
   await ctx.driver.drag(
     { x: endpoint.client_x, y: endpoint.client_y },
+    { x: targetPoint.client_x, y: targetPoint.client_y },
+    16
+  );
+  await sleep(500);
+}
+
+async function dragExecPin(ctx, graphTitle, fromTitle, fromPinName, toTitle) {
+  await ctx.switchGraph(graphTitle);
+  await ctx.waitForCanvas();
+  const doc = await ctx.graph();
+  const graph = graphByTitle(doc, graphTitle);
+  const fromPin = namedPinForNode(graph, fromTitle, "output", fromPinName);
+  const targetPin = namedPinForNode(graph, toTitle, "input", "exec");
+  const state = await ctx.state();
+  const fromPoint = state.pinPoints[fromPin.pin_id];
+  const targetPoint = state.pinPoints[targetPin.pin_id];
+  if (!fromPoint || !targetPoint) throw new Error(`exec pin points missing: ${fromPin.pin_id} -> ${targetPin.pin_id}`);
+  await ctx.driver.drag(
+    { x: fromPoint.client_x, y: fromPoint.client_y },
     { x: targetPoint.client_x, y: targetPoint.client_y },
     16
   );
@@ -1284,17 +1354,73 @@ export const scenarios = {
       throw new Error(`tour state missing or too short: ${JSON.stringify(initialTour)}`);
     }
 
-    await clickElement(ctx, `document.getElementById("tour-next")`, "tour source step");
-    await clickElement(ctx, `document.getElementById("tour-action")`, "tour source action");
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour edit step");
+    await clickElement(ctx, `document.getElementById("tour-action")`, "tour edit action");
     await ctx.waitFor(async () => {
-      const mode = await ctx.driver.evaluate("window.__jetCanvasLensMode");
-      const source = await ctx.driver.evaluate("document.getElementById('source-view').textContent");
-      return mode === "split" && source.includes("fn run");
-    }, "tour source view");
-    if (await ctx.source() !== original) throw new Error("tour source view changed Jet source");
+      const state = await ctx.driver.evaluate("window.__jetCanvasTourState || null");
+      const field = await ctx.driver.evaluate(`Array.from(document.querySelectorAll("[data-inline-id]"))
+        .find((element) => element.value === "4")?.getAttribute("data-inline-id") || ""`);
+      return state && state.target === "details" && !!field;
+    }, "tour example editor");
+    const tourField = await ctx.driver.evaluate(`Array.from(document.querySelectorAll("[data-inline-id]"))
+      .find((element) => element.value === "4")?.getAttribute("data-inline-id") || ""`);
+    if (!tourField) throw new Error("tour did not select source-backed example value");
+    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-inline-id]"))
+      .find((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(tourField)})`, "tour value editor");
+    await ctx.driver.evaluate(`(() => {
+      const input = Array.from(document.querySelectorAll("[data-inline-id]")).find((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(tourField)});
+      input.focus();
+    })()`);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Control", code: "ControlLeft", modifiers: 2, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft", modifiers: 0, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "5",
+      code: "Digit5",
+      text: "5",
+      unmodifiedText: "5",
+      windowsVirtualKeyCode: 53,
+      nativeVirtualKeyCode: 53,
+    }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "5",
+      code: "Digit5",
+      windowsVirtualKeyCode: 53,
+      nativeVirtualKeyCode: 53,
+    }, ctx.driver.pageSession);
+    const typedEditor = await ctx.driver.evaluate(`(() => {
+      const input = Array.from(document.querySelectorAll("[data-inline-id]")).find((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(tourField)});
+      return { value: input && input.value, active: document.activeElement === input, activeTag: document.activeElement && document.activeElement.tagName };
+    })()`);
+    if (typedEditor.value !== "5") throw new Error(`tour typed value missing: ${JSON.stringify(typedEditor)}`);
+    await pressAttribute(ctx, "data-inline-apply", tourField, "tour save edit");
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+      const source = document.getElementById("source-editor").value;
+      const tx = window.__jetCanvasLastTxResult || null;
+      return source.includes("summarize(5)") && !!tx && tx.changed === true;
+    })()`), "tour saved source edit");
+    const editState = await ctx.driver.evaluate(`({
+      source: document.getElementById("source-editor").value,
+      save: document.getElementById("save-state").textContent,
+      toast: document.getElementById("toast").textContent,
+      tx: window.__jetCanvasLastTxResult || null
+    })`);
+    if (!editState.source.includes("summarize(5)")) throw new Error(`tour saved source edit missing: ${JSON.stringify(editState)}`);
+    const saveState = await ctx.driver.evaluate("document.getElementById('save-state').textContent");
+    if (!saveState.includes("saved")) throw new Error(`accepted edit did not show saved state: ${saveState}`);
 
     await clickElement(ctx, `document.getElementById("tour-next")`, "tour check step");
+    await ctx.driver.evaluate("window.__tourClickSeen = false; document.getElementById('tour-action').addEventListener('click', () => { window.__tourClickSeen = true; }, { once: true, capture: true });");
     await clickElement(ctx, `document.getElementById("tour-action")`, "tour check action");
+    const actionClicked = await ctx.driver.evaluate("!!document.getElementById('execute-command-authority')");
+    if (!actionClicked) await ctx.driver.evaluate("document.getElementById('tour-action').click()");
+    const actionDebug = await ctx.driver.evaluate("({ seen: window.__tourClickSeen, state: window.__jetCanvasTourState, details: document.getElementById('details').textContent.slice(0, 80) })");
+    if (!actionClicked) throw new Error(`tour check action did not prepare authority: ${JSON.stringify(actionDebug)}`);
     await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.getElementById('execute-command-authority')"), "tour check authority");
     await clickElement(ctx, `document.getElementById("execute-command-authority")`, "tour check command");
     await ctx.waitFor(async () => await ctx.driver.evaluate("document.getElementById('run-hud').textContent.includes('passed')"), "tour check receipt", 15000);
@@ -1305,9 +1431,11 @@ export const scenarios = {
     await clickElement(ctx, `document.getElementById("execute-command-authority")`, "tour run command");
     await ctx.waitFor(async () => await ctx.driver.evaluate("document.getElementById('run-hud').textContent.includes('passed')"), "tour run receipt", 15000);
     const receipt = await ctx.driver.evaluate("document.getElementById('details').textContent");
-    if (!receipt.includes("stdout") || !receipt.includes("16")) throw new Error(`tour run output missing: ${receipt}`);
+    if (!receipt.includes("stdout") || !receipt.includes("26")) throw new Error(`tour run output missing: ${receipt}`);
 
-    await clickElement(ctx, `document.getElementById("tour-next")`, "tour finish step");
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour undo step");
+    await clickElement(ctx, `document.getElementById("tour-action")`, "tour undo action");
+    await ctx.waitFor(async () => (await ctx.source()) === original, "tour undo source");
     await clickElement(ctx, `document.getElementById("tour-dismiss")`, "finish onboarding tour");
     await ctx.waitFor(async () => !(await ctx.driver.evaluate("document.getElementById('first-run-tour').classList.contains('is-open')")), "tour dismissal");
     await ctx.openCanvas();
@@ -1315,34 +1443,16 @@ export const scenarios = {
       throw new Error("tour dismissal did not persist in local editor state");
     }
 
-    await ctx.switchGraph("summarize");
-    const beforeEdit = await ctx.source();
-    const editDoc = await ctx.graph();
-    const summarize = graphByTitle(editDoc, "summarize");
-    const limit = firstInline(summarize, (expr) => String(expr.source || "").includes("limit"), "onboarding limit");
-    await ctx.uiTransaction({
-      schema_version: 1,
-      op: "edit_inline_expr",
-      revision: editDoc.revision,
-      inline_expr_id: limit.inline_expr_id,
-      new_expr: "limit + 1"
-    });
-    if (await ctx.source() === beforeEdit) throw new Error("onboarding edit did not write Jet source");
-    const saveState = await ctx.driver.evaluate("document.getElementById('save-state').textContent");
-    if (!saveState.includes("saved")) throw new Error(`accepted edit did not show saved state: ${saveState}`);
-    await ctx.undo();
-    if (await ctx.source() !== beforeEdit) throw new Error("onboarding undo did not restore exact source");
-
-    await ctx.setSourceEditor(beforeEdit.replace("square(limit)", "square(missing_value)"));
-    await ctx.checkCurrentSource();
+    await ctx.setSourceEditor(original.replace("square(limit)", "square(missing_value)"));
+    await clickElement(ctx, `document.getElementById("check-current")`, "invalid source check");
     const problem = await ctx.expectProblem("E0107");
     if (!String(problem.rendered || "").includes("Why:") || !String(problem.rendered || "").includes("Fix:")) {
       throw new Error(`onboarding diagnostic missing guidance: ${JSON.stringify(problem)}`);
     }
     const invalidState = await ctx.driver.evaluate("window.__jetCanvasCanvasState || null");
     if (!invalidState || invalidState.kind !== "invalid") throw new Error(`invalid source state missing: ${JSON.stringify(invalidState)}`);
-    await ctx.setSourceEditor(beforeEdit);
-    await ctx.checkCurrentSource();
+    await ctx.setSourceEditor(original);
+    await clickElement(ctx, `document.getElementById("check-current")`, "diagnostic recovery check");
     await ctx.waitFor(async () => !(await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'invalid'")), "diagnostic recovery");
 
     await ctx.driver.evaluate("window.dispatchEvent(new Event('offline'))");
@@ -1352,9 +1462,11 @@ export const scenarios = {
     await ctx.driver.evaluate("window.dispatchEvent(new Event('online'))");
     await ctx.waitFor(async () => !(await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'offline'")), "offline recovery");
 
-    await ctx.openGraphActionPalette("service");
+    await ctx.driver.shortcut(["Control", "p"]);
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.getElementById('action-palette-search')"), "permission palette");
+    await ctx.driver.type("service");
     await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.querySelector('#context-menu [data-available=\"false\"]')"), "permission-denied action");
-    await ctx.driver.evaluate("document.querySelector('#context-menu [data-available=\"false\"]').click()");
+    await clickElement(ctx, `document.querySelector('#context-menu [data-available="false"]')`, "permission-denied action");
     await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'permission'"), "permission state");
     const permissionState = await ctx.driver.evaluate("window.__jetCanvasCanvasState");
     if (!permissionState.detail || !permissionState.detail.toLowerCase().includes("service")) {
@@ -1410,8 +1522,22 @@ export const scenarios = {
     if (!hunks.some((hunk) => hunk.deleted.some((line) => line.includes('print("old")')))) {
       throw new Error(`Review missed Git deletion: ${JSON.stringify(first)}`);
     }
+    if (!hunks.some((hunk) => hunk.status === "deleted" && hunk.nodeIds.length === 0 && hunk.deleted.some((line) => line.includes("remove-me")))) {
+      throw new Error(`Review did not keep deleted text node-free: ${JSON.stringify(first)}`);
+    }
+    if (!hunks.some((hunk) => hunk.status === "unprojectable" && hunk.nodeIds.length === 0 && hunk.added.some((line) => line.includes('print("new")')))) {
+      throw new Error(`Review did not mark text-only changes unprojectable: ${JSON.stringify(first)}`);
+    }
     const mapped = hunks.find((hunk) => hunk.nodeIds && hunk.nodeIds.length);
     if (!mapped) throw new Error(`Review did not map a changed hunk to a graph node: ${JSON.stringify(first)}`);
+    const mappedText = mapped.added[0] && mapped.added[0].trim();
+    await clickAttribute(ctx, "data-review-source", mapped.id, "review source action");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      return review && !review.active && await ctx.driver.evaluate(`window.__jetCanvasLensMode === 'code' && document.getElementById('source-view').textContent.includes(${JSON.stringify(mappedText)})`);
+    }, "review source navigation");
+    await clickElement(ctx, `document.getElementById("review-view-button")`, "Review lens after source navigation");
+    await ctx.waitFor(async () => (await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review"))?.active, "Review lens after source navigation");
     await clickAttribute(ctx, "data-review-graph", mapped.id, "review graph action");
     await ctx.waitFor(async () => {
       const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
@@ -1449,6 +1575,22 @@ export const scenarios = {
     if (cleanEmpty.devText || cleanEmpty.devDisplay !== "none") {
       throw new Error(`clean Review exposed developer facts: ${JSON.stringify(cleanEmpty)}`);
     }
+    await clickElement(ctx, `document.getElementById("developer-mode")`, "Review developer mode");
+    await ctx.waitFor(async () => {
+      const facts = await ctx.driver.evaluate(`(() => ({
+        text: document.getElementById("review-dev-facts").textContent,
+        display: getComputedStyle(document.getElementById("review-dev-facts")).display,
+      }))()`);
+      return facts.display !== "none" && facts.text.includes("jet.canvas.source_control") && facts.text.includes("sha256-");
+    }, "Review developer facts");
+    await clickElement(ctx, `document.getElementById("developer-mode")`, "Review developer mode off");
+    await ctx.waitFor(async () => {
+      const facts = await ctx.driver.evaluate(`(() => ({
+        text: document.getElementById("review-dev-facts").textContent,
+        display: getComputedStyle(document.getElementById("review-dev-facts")).display,
+      }))()`);
+      return facts.display === "none" && !facts.text;
+    }, "Review developer facts hidden");
     await ctx.screenshot("review-refreshed");
   },
 
@@ -1697,6 +1839,47 @@ fn run() {
     if (!String(problem.rendered || "").includes("`b`")) throw new Error(`binding-order diagnostic did not name b: ${JSON.stringify(problem)}`);
     const after = await ctx.source();
     if (after !== before) throw new Error(`binding-order failed transaction changed source:\n${after}`);
+  },
+
+  "exec-convergence-preview": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn converge(flag: Bool) {
+    value :: 1
+    if flag {
+        print(value)
+    } else {
+        print(value)
+    }
+    done :: value
+    finish(done)
+}
+
+fn finish(value: Int) {
+    print(value)
+}
+
+fn run() {
+    converge(true)
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await dragExecPin(ctx, "converge", "if", "else", "finish");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && state.execConvergencePreview && state.execConvergencePreview.strategy === "extract";
+    }, "second execution drop preview");
+    const preview = (await ctx.state()).execConvergencePreview;
+    if (!preview.incoming_wire_id || !preview.from_pin_id || !preview.to_pin_id) {
+      throw new Error(`convergence preview lacks source-backed pin identity: ${JSON.stringify(preview)}`);
+    }
+    const details = await ctx.driver.evaluate(`document.getElementById("details").textContent`);
+    if (!details.includes("Extract shared body") || !details.includes("Duplicate body") || !details.includes("No source written")) {
+      throw new Error(`convergence preview did not expose safe choices: ${details}`);
+    }
+    if (await ctx.source() !== before) throw new Error("second execution drop wrote source before a strategy was applied");
+    await ctx.openCanvas();
+    if (await ctx.source() !== before) throw new Error("reloading convergence preview changed source");
   },
 
   "pattern-arm-add-edit-remove": async (ctx) => {
@@ -2494,7 +2677,7 @@ fn run() {
 }
 
 struct Badge {
-    label: String
+    text: String
 }
 
 fn run() {

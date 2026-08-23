@@ -48,6 +48,7 @@
     if (!before || !after || before === after) return;
     pushHistory(undoStack, { before, after, label: transactionUndoLabel(body), op: body && body.op || "edit" });
     redoStack = [];
+    persistHistory();
   }
 
   function projectStateKey(doc) {
@@ -56,6 +57,42 @@
 
   function sourceDraftKey(doc) {
     return "jet.canvas.source-draft:" + ((doc && doc.source_id) || "source");
+  }
+
+  function historyKey(doc) {
+    return "jet.canvas.history:" + ((doc && doc.source_id) || "source");
+  }
+
+  function persistHistory(doc = latestDoc) {
+    if (!doc) return;
+    try {
+      localStorage.setItem(historyKey(doc), JSON.stringify({
+        undo: undoStack.slice(-UNDO_DEPTH),
+        redo: redoStack.slice(-UNDO_DEPTH)
+      }));
+    } catch (_) {}
+  }
+
+  function loadHistory(doc) {
+    undoStack = [];
+    redoStack = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem(historyKey(doc)) || "null");
+      const valid = (entry) => entry && typeof entry.before === "string" && typeof entry.after === "string";
+      undoStack = Array.isArray(stored && stored.undo) ? stored.undo.filter(valid).slice(-UNDO_DEPTH) : [];
+      redoStack = Array.isArray(stored && stored.redo) ? stored.redo.filter(valid).slice(-UNDO_DEPTH) : [];
+      const source = String(doc && doc.source_text || "");
+      const undoMatches = undoStack.length > 0 && undoStack[undoStack.length - 1].after === source;
+      const redoMatches = redoStack.length > 0 && redoStack[redoStack.length - 1].before === source;
+      if ((undoStack.length || redoStack.length) && !undoMatches && !redoMatches) {
+        undoStack = [];
+        redoStack = [];
+        localStorage.removeItem(historyKey(doc));
+      }
+    } catch (_) {
+      undoStack = [];
+      redoStack = [];
+    }
   }
 
   function readSourceDraft(doc) {
@@ -219,10 +256,27 @@
     if (pins.length) return pins;
     const descriptor = nodeDescriptorForAction(action);
     if (descriptor && descriptor.archetype === "control") {
-      return [
-        { pin_id: id + ":pin:input:exec", node_id: id, direction: "input", name: "exec", type: "exec", source_span: null },
-        { pin_id: id + ":pin:output:then", node_id: id, direction: "output", name: "then", type: "exec", source_span: null }
-      ];
+      const outputs = descriptor.id === "loop"
+        ? [["body", "loop_body"], ["done", "loop_done"]]
+        : descriptor.id === "branch" || descriptor.id === "dispatch"
+          ? [["then", null], ["else", "else"]]
+          : [["then", null]];
+      return [{
+        pin_id: id + ":pin:input:exec",
+        node_id: id,
+        direction: "input",
+        name: "exec",
+        type: "exec",
+        source_span: null
+      }].concat(outputs.map(([name, role]) => ({
+        pin_id: `${id}:pin:output:${name}`,
+        node_id: id,
+        direction: "output",
+        name,
+        type: "exec",
+        role,
+        source_span: null
+      })));
     }
     const ret = action.ret || action.type || actionReturnType(action) || "Void";
     const list = [];
@@ -440,6 +494,18 @@
     return (editorState.stagedNodes || []).find((node) => node.node_id === pin.node_id) || null;
   }
 
+  function finishStagedMaterialization(stagedId, request) {
+    if (!request || typeof request.then !== "function") return;
+    request.then(() => {
+      const result = window.__jetCanvasLastTxResult;
+      const accepted = result && (Object.prototype.hasOwnProperty.call(result, "changed") || result.protocol === "jet.canvas.action");
+      if (!accepted || !stagedNodeForPin({ node_id: stagedId })) return;
+      removeStagedNode(stagedId);
+      window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
+      if (latestDoc) drawGraph(latestDoc);
+    });
+  }
+
   function materializeStagedConnection(fromPin, toPin, graph) {
     const fromStage = stagedNodeForPin(fromPin);
     const toStage = stagedNodeForPin(toPin);
@@ -458,9 +524,8 @@
     const descriptor = nodeDescriptorForAction(staged.action);
     if (descriptor && descriptor.transaction && descriptor.transaction !== "insert_call" && descriptor.transaction !== "edit_inline_expr") {
       pendingInsertPlacement = { graph_id: selectedGraphId, title: staged.title, x: nodeX(staged), y: nodeY(staged) };
-      removeStagedNode(staged.node_id);
-      postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
-      window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
+      const request = postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
+      finishStagedMaterialization(staged.node_id, request);
       return true;
     }
     const tx = transactionForPaletteInsert(staged.action, realPin, { x: nodeX(staged), y: nodeY(staged) });
@@ -468,9 +533,8 @@
       showToast("Staged node needs a saved insertion path");
       return true;
     }
-    removeStagedNode(staged.node_id);
-    postTransaction(tx);
-    window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
+    const request = postTransaction(tx);
+    finishStagedMaterialization(staged.node_id, request);
     return true;
   }
 

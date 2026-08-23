@@ -107,7 +107,7 @@
     if (!isExecPin(pin)) return pinName(pin);
     if (pin.pattern_source) return pin.pattern_source;
     const count = pinsForNode(graph, node, pin.direction, true).length;
-    return count > 1 ? pinName(pin) : "";
+    return count > 1 || pin.role === "early_return" ? pinName(pin) : "";
   }
 
   function drawPinHoverTooltip(pin) {
@@ -453,6 +453,7 @@
 
   function renderActionPalette() {
     if (!contextMenuState) return;
+    const palettePerfStart = window.__jetCanvasPerfDebug ? performance.now() : 0;
     const query = contextMenuState.query || "";
     const matches = contextMenuState.actions
       .map((action) => Object.assign({ __score: actionFuzzyScore(action, query) }, action))
@@ -475,7 +476,7 @@
       return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
     const categories = ["Execution", "Variables", "Interfaces", "Project", "Core", "Commands"].map((category) => {
-      const limit = category === "Core" ? 1000 : category === "Project" ? 500 : category === "Variables" ? 200 : 64;
+      const limit = category === "Core" ? 1000 : category === "Project" ? 32 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
       let body = "<div class=\"action-empty\">No actions</div>";
@@ -542,6 +543,9 @@
         }
       });
     });
+    if (palettePerfStart) {
+      (window.__jetCanvasPalettePerf ||= []).push({ query, ms: performance.now() - palettePerfStart, actions: contextMenuState.actions.length, matches: matches.length });
+    }
   }
 
   function openActionPalette(x, y, title, actions, opts = {}) {
@@ -591,6 +595,8 @@
       signature: entry.signature,
       summary: entry.summary,
       pure: entry.pure,
+      rank: entry.rank,
+      rank_terms: entry.rank_terms,
       pins: entry.pins,
       ret: entry.ret,
       action_id: entry.action_id,

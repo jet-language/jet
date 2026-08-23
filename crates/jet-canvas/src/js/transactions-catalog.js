@@ -178,10 +178,13 @@
     if (!body) return showToast("Action needs a source transaction");
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
+    const request = Object.assign({}, body);
+    const sourceId = currentCanvasSourceId();
+    if (!request.source_id && sourceId) request.source_id = sourceId;
     setSaveState("saving", "draft");
-    window.__jetCanvasLastTx = body;
+    window.__jetCanvasLastTx = request;
     window.__jetCanvasLastTxResult = null;
-    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         if (!result.ok) {
@@ -203,12 +206,14 @@
           searchState.active = -1;
           searchState.impact = null;
           searchState.diff = { text: result.json.diff || "clean" };
+          searchState.stale = false;
           renderSearchResults();
           showToast("Canvas action preview validated");
           return;
         }
         if (result.json.changed && beforeSource && result.json.source_text) {
           recordUndoEntry(body, beforeSource, result.json.source_text);
+          searchState.stale = true;
           searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
           renderSearchResults();
         }
@@ -239,13 +244,19 @@
   function restoreSource(source, redoEntry, undoEntry, action) {
     if (!latestDoc || !source) return;
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
-    window.__jetCanvasLastTx = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
+    const request = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
+    const sourceId = currentCanvasSourceId();
+    if (sourceId) request.source_id = sourceId;
+    window.__jetCanvasLastTx = request;
     window.__jetCanvasLastTxResult = null;
-    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" }) })
+    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         window.__jetCanvasLastTxResult = result.json;
         if (!result.ok) {
+          if (redoEntry) pushHistory(undoStack, redoEntry);
+          if (undoEntry) pushHistory(redoStack, undoEntry);
+          persistHistory();
           if (!acceptDiagnosticsPayload(result.json, "Undo")) showToast(result.json.message || "Undo rejected");
           return;
         }
@@ -256,8 +267,11 @@
           });
         }
         clearSourceDraft();
+        searchState.stale = true;
+        renderSearchResults();
         if (redoEntry) pushHistory(redoStack, redoEntry);
         if (undoEntry) pushHistory(undoStack, undoEntry);
+        persistHistory();
         clearDiagnosticsForRevision(result.json.revision);
         showToast((action || "Restore") + ": " + ((redoEntry || undoEntry || {}).label || "source"));
         loadSourceControl();
@@ -297,6 +311,7 @@
     window.__jetCanvasGraphLoadGeneration = loadToken;
     const requestedSourceId = typeof sourceId === "string" ? (sourceId || null) : selectedSourceId;
     const previousSourceId = selectedSourceId;
+    const previousRevision = latestDoc && latestDoc.revision;
     setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", latestDoc ? [
       { label: "Show source", run: openSourceRecovery },
       { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
@@ -321,6 +336,7 @@
         }
         const doc = result.doc;
         const sourceChanged = previousSourceId !== requestedSourceId;
+        const revisionChanged = !!previousRevision && previousRevision !== doc.revision;
         if (sourceChanged) {
           selectedSourceId = requestedSourceId;
           selectedVariableName = null;
@@ -337,12 +353,17 @@
           searchState.impact = null;
           searchState.truncated = false;
           searchState.resultLimit = 0;
+          searchState.stale = false;
+          if (typeof renderSearchResults === "function") renderSearchResults();
+        } else if (revisionChanged) {
+          searchState.stale = true;
           if (typeof renderSearchResults === "function") renderSearchResults();
         }
         latestDoc = doc;
         if (sourceChanged) clearDiagnosticsForRevision(doc.revision);
         else clearStaleDiagnostics(doc);
         loadEditorState(doc);
+        loadHistory(doc);
         loadDetailToggles(doc);
         applyPendingInsertPlacement(doc);
         sourceView.textContent = doc.source_text || "";
@@ -389,7 +410,7 @@
   function loadCanvasActions() {
     if (!latestDoc) return Promise.resolve(actionEntries);
     const loadRevision = latestDoc.revision;
-    const loadSourceId = latestDoc.source_id || selectedSourceId;
+    const loadSourceId = currentCanvasSourceId();
     if (canvasActionsLoading) {
       if (canvasActionsLoadingRevision === loadRevision) return canvasActionsLoading;
       return canvasActionsLoading.then(() => loadCanvasActions());
@@ -402,7 +423,7 @@
     })
       .then((r) => r.json())
       .then((doc) => {
-        if (!latestDoc || latestDoc.revision !== loadRevision || (latestDoc.source_id || selectedSourceId) !== loadSourceId) return actionEntries;
+        if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
         if (!doc || !doc.actions) return;
         const projectFunctions = (doc.project_functions || []).map((fn) => withNodeDescriptor({
           title: fn.name || fn.callee,

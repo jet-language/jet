@@ -110,7 +110,7 @@ Top-level fields:
 |---|---|
 | `protocol` | Literal `jet.canvas.graph`. |
 | `schema_version` | Integer schema version. Current value: `1`. |
-| `source_id` | Display path for the source file that was projected. |
+| `source_id` | Project-relative display path for the source file that was projected. Every graph response uses this same id, including a graph selected from the project file rail. |
 | `revision` | Stable source hash. Edit transactions must echo this. |
 | `fmt_fingerprint` | Hash of the formatter-normalized source. Used to detect formatter drift. |
 | `source_text` | Current source text. Canvas uses this for local undo/redo; clients may ignore it. |
@@ -174,6 +174,13 @@ labeled output row per source arm; editable arms also carry
 `source_span`, `append_op:"remove_multi_input_element"`, and `element_index`.
 A v1 pin span is anchored to its owning source node when the compiler does not
 yet expose a narrower pin-specific span.
+
+Loop execution outputs use `role:"loop_body"` and `role:"loop_done"` with
+names `body` and `done`. Early-return outputs use `role:"early_return"` and
+name `return`. These pins use the owning source node span, so rewire and
+preview actions retain source provenance. A second compatible execution drop
+is a client preview. It does not add a semantic wire or write source until a
+checked convergence transaction exists.
 
 Shared Canvas comment hints persist as ordinary source comments:
 
@@ -253,6 +260,7 @@ Required common fields:
 | `schema_version` | Integer edit schema version. Current value: `1`. |
 | `op` | Transaction name. |
 | `revision` | Source revision from the graph document. |
+| `source_id` | Optional project-relative `.jet` path from `jet.canvas.project.files`; when present, the transaction applies to that selected source file. |
 
 Current transactions:
 

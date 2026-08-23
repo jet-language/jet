@@ -250,15 +250,29 @@ pub(super) fn add_execution_overlay(g: &mut GraphBuilder) {
 
     for node in &exec_nodes {
         if node.kind != "entry" {
-            ensure_exec_pin(g, &node.id, "exec", "input", node.span);
+            ensure_exec_pin(g, &node.id, "exec", "input", node.span, None);
         }
         if node_has_arm_pins(g, &node.id) {
-            ensure_exec_pin(g, &node.id, "else", "output", node.span);
-        } else if node.kind == "branch" || (node.kind == "function" && node.archetype == "control") {
-            ensure_exec_pin(g, &node.id, "then", "output", node.span);
-            ensure_exec_pin(g, &node.id, "else", "output", node.span);
+            ensure_exec_pin(g, &node.id, "else", "output", node.span, Some("else"));
+        } else if node.kind == "loop" {
+            ensure_exec_pin(g, &node.id, "body", "output", node.span, Some("loop_body"));
+            ensure_exec_pin(g, &node.id, "done", "output", node.span, Some("loop_done"));
+        } else if node.kind == "return" {
+            ensure_exec_pin(
+                g,
+                &node.id,
+                "return",
+                "output",
+                node.span,
+                Some("early_return"),
+            );
+        } else if node.kind == "branch"
+            || (node.kind == "function" && node.archetype == "control")
+        {
+            ensure_exec_pin(g, &node.id, "then", "output", node.span, None);
+            ensure_exec_pin(g, &node.id, "else", "output", node.span, Some("else"));
         } else if node.kind != "return" {
-            ensure_exec_pin(g, &node.id, "then", "output", node.span);
+            ensure_exec_pin(g, &node.id, "then", "output", node.span, None);
         }
     }
 
@@ -293,7 +307,9 @@ fn primary_exec_output(g: &GraphBuilder, node_id: &str) -> String {
             pin.node_id == node_id
                 && pin.direction == "output"
                 && pin.ty == "exec"
-                && pin.role.as_deref() == Some("arm")
+                && (pin.role.as_deref() == Some("arm")
+                    || pin.role.as_deref() == Some("loop_body")
+                    || pin.name == "then")
         })
         .map(|pin| pin.id.clone())
         .unwrap_or_else(|| format!("{node_id}:output:then"))
@@ -403,6 +419,7 @@ fn ensure_exec_pin(
     name: &str,
     direction: &str,
     span: SourceSpan,
+    role: Option<&str>,
 ) -> String {
     let id = format!("{node_id}:{direction}:{name}");
     if !g.pins.iter().any(|pin| pin.id == id) {
@@ -412,7 +429,7 @@ fn ensure_exec_pin(
             name: name.to_string(),
             direction: direction.to_string(),
             ty: "exec".to_string(),
-            role: None,
+            role: role.map(str::to_string),
             pattern_source: None,
             ability: "control".to_string(),
             fallible: false,

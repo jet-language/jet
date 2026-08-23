@@ -1,5 +1,72 @@
 
 // Pointer, keyboard, toolbar, lens, and debug event handlers.
+
+  function exactBodyHelperForExecTarget(graph, target) {
+    const node = nodeForPin(graph, target);
+    const helperId = node && (node.exact_body_helper_id || node.execution_helper_id);
+    if (!helperId || !latestDoc) return null;
+    const helper = (latestDoc.graphs || []).find((candidate) => candidate.graph_id === helperId);
+    return helper ? { name: helper.title, graph_id: helper.graph_id } : null;
+  }
+
+  function closeExecConvergencePreview() {
+    window.__jetCanvasExecConvergencePreview = null;
+    window.__jetCanvasLastConnectionPlan = null;
+    if (latestDoc) drawGraph(latestDoc);
+  }
+
+  function renderExecConvergencePreview() {
+    const preview = window.__jetCanvasExecConvergencePreview;
+    if (!preview || !latestDoc || preview.revision !== latestDoc.revision) {
+      if (preview) window.__jetCanvasExecConvergencePreview = null;
+      return;
+    }
+    const helper = preview.helper || null;
+    const strategy = preview.strategy || "extract";
+    const helperOption = helper
+      ? `<label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="helper"${strategy === "helper" ? " checked" : ""}> Reuse exact-body helper</span><code>${escapeHtml(helper.name)}</code><small>The existing helper body matches this branch exactly.</small></label>`
+      : `<div class="inline-row"><b>Reuse exact-body helper</b><span class="tag">No exact-body helper found. Keep the source unchanged while you choose another strategy.</span></div>`;
+    details.innerHTML = `
+      <div class="details-hero">
+        <div class="details-titleline"><span class="node-glyph">⇄</span><div class="details-title"><p class="title">Execution convergence preview</p><div class="kind">No source written</div></div></div>
+        <span>A second execution path reaches an input that already has a control connection. Choose how the shared body should converge.</span>
+        <div class="details-chips"><span class="details-chip">preview only</span><span class="details-chip">revision ${escapeHtml(String(preview.revision).slice(0, 18))}</span></div>
+      </div>
+      <div class="pin-list">
+        <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="extract"${strategy === "extract" ? " checked" : ""}> Extract shared body (recommended)</span><small>One canonical helper body can serve both labeled execution paths.</small></label>
+        ${helperOption}
+        <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="duplicate"${strategy === "duplicate" ? " checked" : ""}> Duplicate body</span><small><b>Warning:</b> copied source can drift. This choice is explicit and is not applied from this preview.</small></label>
+      </div>
+      <div class="edit-grid"><button id="close-exec-convergence-preview">Close preview</button><span class="tag">Source and undo history are unchanged.</span></div>`;
+    setDrawer("details");
+    details.querySelectorAll("[data-exec-convergence-strategy]").forEach((input) => {
+      input.addEventListener("change", () => {
+        preview.strategy = input.getAttribute("data-exec-convergence-strategy") || "extract";
+        window.__jetCanvasExecConvergencePreview = preview;
+        renderExecConvergencePreview();
+      });
+    });
+    const close = document.getElementById("close-exec-convergence-preview");
+    if (close) close.addEventListener("click", closeExecConvergencePreview);
+  }
+
+  function openExecConvergencePreview(graph, fromPin, target) {
+    const input = fromPin.direction === "input" ? fromPin : target;
+    const helper = exactBodyHelperForExecTarget(graph, input);
+    window.__jetCanvasExecConvergencePreview = {
+      graph_id: graph.graph_id,
+      revision: latestDoc && latestDoc.revision,
+      from_pin_id: fromPin.pin_id,
+      to_pin_id: target.pin_id,
+      incoming_wire_id: (graph.wires || []).find((wire) => wire.wire_kind === "control" && wire.to_pin === input.pin_id)?.wire_id || null,
+      strategy: "extract",
+      helper
+    };
+    window.__jetCanvasLastConnectionPlan = { ok: true, label: "Execution convergence preview", color: "#7dd3fc" };
+    renderExecConvergencePreview();
+    showToast("Execution convergence preview: source unchanged");
+  }
+
   canvas.addEventListener("click", function (ev) {
     if (window.__jetCanvasNoopClick) return;
     const rect = canvas.getBoundingClientRect();

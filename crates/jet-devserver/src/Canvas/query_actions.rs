@@ -667,15 +667,17 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         if def.module_path.starts_with("core.") {
             continue;
         }
-        if !projection.callable_exports.iter().any(|export| {
+        let Some(export) = projection.callable_exports.iter().find(|export| {
             export.module_path == def.module_path && export.span == def.def_span
-        }) {
+        }) else {
             continue;
-        }
+        };
+        let pure = !call_has_effects(&index, &def.name);
         project_functions.push(project_function_catalog_json(
             def,
             params,
             ret.as_deref(),
+            &export.callee,
             &index,
         ));
         if def.name == "run" {
@@ -685,7 +687,8 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
             def,
             params,
             ret.as_deref(),
-            !call_has_effects(&index, &def.name),
+            pure,
+            &export.callee,
             &authority,
         ));
     }
@@ -775,10 +778,12 @@ fn core_catalog_action_json(
     let pins = core_member_pins_json(&params, receiver_type);
     let status = core_member_status_json(member);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
+    let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
+        rank_fields,
         json_str(&format!("{} · {}", member.name, module_path)),
         json_str(module_path),
         json_str(&callee),
@@ -974,7 +979,7 @@ fn core_member_direct_exclusion(
             "Use this as a type or constructor surface, not a direct call.".to_string(),
         ));
     }
-    if module_path == "core.crypto.expert" {
+    if core_member_requires_unsafe(module_path, &member.name) {
         return Some((
             "needs_unsafe_region",
             "Needs an #Unsafe region before Canvas can insert it.".to_string(),
@@ -1013,6 +1018,37 @@ fn core_member_direct_exclusion(
         ));
     }
     None
+}
+
+fn core_member_requires_unsafe(module_path: &str, member: &str) -> bool {
+    match module_path {
+        "core.crypto.expert" => true,
+        "core.crypto.vault" => member != "get",
+        "core.mem" => matches!(member, "from_addr" | "volatile_read" | "volatile_write"),
+        "core.sys" => matches!(
+            member,
+            "fork"
+                | "setuid"
+                | "setgid"
+                | "setpgid"
+                | "setpgrp"
+                | "setsid"
+                | "initgroups"
+                | "kill"
+                | "wait"
+                | "waitpid"
+                | "pipe"
+                | "close_fd"
+                | "mkfifo"
+                | "umask"
+                | "getpriority"
+                | "setpriority"
+                | "utime"
+                | "atexit"
+                | "stop"
+        ),
+        _ => false,
+    }
 }
 
 fn core_module_has_canvas_defaults(module_path: &str) -> bool {
@@ -1399,11 +1435,12 @@ fn project_function_catalog_json(
     def: &jet_semindex::SymbolDef,
     params: &[(String, String)],
     ret: Option<&str>,
+    callee: &str,
     index: &SemIndex,
 ) -> String {
     let pure = !call_has_effects(index, &def.name);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
-    let callee = &def.qualified_name;
+    let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     let default_args = params
         .iter()
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
@@ -1421,12 +1458,13 @@ fn project_function_catalog_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{name},\"signature\":{signature},\"callee\":{callee},\"insert_callee\":{insert_callee},\"node_descriptor_id\":{descriptor},\"module_path\":{module},\"pure\":{pure},\"ret\":{ret},\"pins\":[{pins}],\"default_args\":[{defaults}],\"available\":true,\"source_span\":{span},\"insert_op\":\"insert_call\"}}",
+        "{{\"name\":{name},\"signature\":{signature},\"callee\":{callee},\"insert_callee\":{insert_callee},\"node_descriptor_id\":{descriptor}{rank_fields},\"module_path\":{module},\"pure\":{pure},\"ret\":{ret},\"pins\":[{pins}],\"default_args\":[{defaults}],\"available\":true,\"source_span\":{span},\"insert_op\":\"insert_call\"}}",
         name = json_str(&def.name),
         signature = json_str(&function_signature_from_parts(&def.name, params, ret)),
         callee = json_str(callee),
         insert_callee = json_str(callee),
         descriptor = json_str(descriptor_id),
+        rank_fields = rank_fields,
         module = json_str(&def.module_path),
         pure = if pure { "true" } else { "false" },
         ret = json_str(ret.unwrap_or("Void")),
@@ -1447,6 +1485,7 @@ fn function_signature_from_parts(
         .collect::<Vec<_>>()
         .join(", ");
     let ret = ret
+        .filter(|ty| *ty != "!")
         .map(|ty| format!(" {ty}"))
         .unwrap_or_default();
     format!("fn {name}({params}){ret}")
@@ -1480,10 +1519,12 @@ fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
     let pins = core_member_pins_json(&params, receiver_type);
     let status = core_member_status_json(member);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
+    let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     format!(
-        "{{\"name\":{},\"node_descriptor_id\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"name\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
         json_str(descriptor_id),
+        rank_fields,
         json_str(&member.signature),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
@@ -1555,11 +1596,12 @@ fn canvas_action_json(
     params: &[(String, String)],
     ret: Option<&str>,
     pure: bool,
+    callee: &str,
     authority: &CanvasAuthority,
 ) -> String {
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
-    let action_id = format!("canvas.action:{}:{}", def.module_path, def.qualified_name);
-    let callee = &def.qualified_name;
+    let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
+    let action_id = format!("canvas.action:{}:{callee}", def.module_path);
     let default_args = params
         .iter()
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
@@ -1577,9 +1619,10 @@ fn canvas_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":{},\"insert_op\":\"insert_call\",\"pure\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":{},\"insert_op\":\"insert_call\",\"pure\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
+        rank_fields,
         json_str(&def.name),
         json_str(callee),
         json_str(callee),
@@ -1605,6 +1648,7 @@ fn canvas_builtin_action_json(
     authority: &CanvasAuthority,
 ) -> String {
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", false);
+    let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     let action_id = format!("canvas.action:builtin:{callee}");
     let pins = params
         .iter()
@@ -1623,9 +1667,10 @@ fn canvas_builtin_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
+        rank_fields,
         json_str(title),
         json_str(callee),
         json_str(&authority.grant),
@@ -1753,10 +1798,13 @@ fn canvas_structural_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
     ]
     .into_iter()
     .map(|(name, title, transaction)| {
+        let descriptor_id = node_catalog::insert_descriptor_id(transaction, false);
+        let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
         format!(
-            "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.structural\",\"title\":{},\"op\":{},\"engine\":\"source-transaction\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false}}",
+            "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.structural\",\"title\":{},\"op\":{},\"engine\":\"source-transaction\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false}}",
             json_str(&format!("canvas.structural:{name}")),
-            json_str(node_catalog::insert_descriptor_id(transaction, false)),
+            json_str(descriptor_id),
+            rank_fields,
             json_str(title),
             json_str(transaction),
             json_str(&authority.grant),

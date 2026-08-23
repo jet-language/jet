@@ -23,6 +23,7 @@ use super::validation_json::{json_str, span_json};
 
 pub(super) fn project_checked(
     path: &Path,
+    source_id: &str,
     src: &str,
     bundle: &AST::ProgramBundle,
     facts: &SemIndexEffectFacts,
@@ -49,6 +50,7 @@ pub(super) fn project_checked(
             &index,
             &facts.name_ledger,
             module_idx,
+            bundle.entry,
             &module.display,
             &module.source,
             &module.items,
@@ -65,7 +67,7 @@ pub(super) fn project_checked(
     let json = format!(
         "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
-        json_str(&path.display().to_string()),
+        json_str(source_id),
         json_str(&source_revision(src)),
         json_str(&source_revision(&fmt)),
         json_str(src),
@@ -100,6 +102,12 @@ fn canvas_callable_exports(
         .declarations()
         .filter(|declaration| declaration.kind == "function")
         .filter(|declaration| {
+            bundle
+                .modules
+                .get(declaration.module)
+                .is_some_and(|module| !is_foreign_module(&module.display))
+        })
+        .filter(|declaration| {
             facts
                 .name_ledger
                 .visible(bundle.entry, declaration.module, &declaration.name)
@@ -111,9 +119,59 @@ fn canvas_callable_exports(
                 .map(|module| CanvasCallableExport {
                     module_path: module.display.clone(),
                     span: declaration.span.into(),
+                    callee: canvas_callable_callee(bundle, declaration),
                 })
         })
         .collect()
+}
+
+fn is_foreign_module(display: &str) -> bool {
+    display
+        .split_once('.')
+        .and_then(|(root, _)| AST::ForeignLanguage::from_root(root))
+        .is_some()
+}
+
+fn canvas_callable_callee(
+    bundle: &AST::ProgramBundle,
+    declaration: &jet_foundation::Names::NameDeclaration,
+) -> String {
+    let leaf = declaration
+        .name
+        .rsplit_once('.')
+        .map_or(declaration.name.as_str(), |(_, leaf)| leaf);
+    if declaration.module == bundle.entry {
+        return declaration.name.clone();
+    }
+
+    if let Some(alias) = bundle.name_ledger.aliases().find(|alias| {
+        alias.module == bundle.entry
+            && alias.target_module == Some(declaration.module)
+            && alias
+                .target
+                .rsplit_once('.')
+                .map_or(alias.target.as_str(), |(_, target_leaf)| target_leaf)
+                == leaf
+    }) {
+        return alias.name.clone();
+    }
+
+    let module_alias = bundle
+        .modules
+        .get(declaration.module)
+        .map(|module| module.alias.as_str())
+        .unwrap_or(leaf);
+    let prefix = bundle
+        .name_ledger
+        .aliases()
+        .find(|alias| {
+            alias.module == bundle.entry
+                && alias.target_module == Some(declaration.module)
+                && alias.target == module_alias
+        })
+        .map(|alias| alias.name.as_str())
+        .unwrap_or(module_alias);
+    format!("{prefix}.{leaf}")
 }
 
 fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {
@@ -170,6 +228,7 @@ fn collect_item_graphs(
     index: &SemIndex,
     ledger: &jet_foundation::Names::NameLedger,
     module_idx: usize,
+    entry_module_idx: usize,
     module_display: &str,
     module_src: &str,
     items: &[Item],
@@ -195,11 +254,13 @@ fn collect_item_graphs(
                     id: i.id.clone(),
                     span: i.span,
                 }));
-                anchors.push(GraphEditAnchor {
-                    graph_id: graph.graph_id.clone(),
-                    insert_offset: insert_offset(entry_src, f),
-                    fallible: function_is_fallible(f),
-                });
+                if module_idx == entry_module_idx {
+                    anchors.push(GraphEditAnchor {
+                        graph_id: graph.graph_id.clone(),
+                        insert_offset: insert_offset(entry_src, f),
+                        fallible: function_is_fallible(f),
+                    });
+                }
                 collect_node_refs(&graph, node_refs);
                 out.push(graph_to_json(&graph, f, module_src, visibility));
             }
@@ -215,11 +276,13 @@ fn collect_item_graphs(
                         id: i.id.clone(),
                         span: i.span,
                     }));
-                    anchors.push(GraphEditAnchor {
-                        graph_id: graph.graph_id.clone(),
-                        insert_offset: insert_offset(entry_src, method),
-                        fallible: function_is_fallible(method),
-                    });
+                    if module_idx == entry_module_idx {
+                        anchors.push(GraphEditAnchor {
+                            graph_id: graph.graph_id.clone(),
+                            insert_offset: insert_offset(entry_src, method),
+                            fallible: function_is_fallible(method),
+                        });
+                    }
                     collect_node_refs(&graph, node_refs);
                     out.push(graph_to_json(&graph, method, module_src, visibility));
                 }
@@ -236,11 +299,13 @@ fn collect_item_graphs(
                         id: e.id.clone(),
                         span: e.span,
                     }));
-                    anchors.push(GraphEditAnchor {
-                        graph_id: graph.graph_id.clone(),
-                        insert_offset: insert_offset(entry_src, method),
-                        fallible: function_is_fallible(method),
-                    });
+                    if module_idx == entry_module_idx {
+                        anchors.push(GraphEditAnchor {
+                            graph_id: graph.graph_id.clone(),
+                            insert_offset: insert_offset(entry_src, method),
+                            fallible: function_is_fallible(method),
+                        });
+                    }
                     collect_node_refs(&graph, node_refs);
                     out.push(graph_to_json(&graph, method, module_src, visibility));
                 }
@@ -253,6 +318,7 @@ fn collect_item_graphs(
                         index,
                         ledger,
                         module_idx,
+                        entry_module_idx,
                         module_display,
                         module_src,
                         body,

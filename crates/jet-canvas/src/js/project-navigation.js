@@ -75,12 +75,47 @@
 
   const TOUR_STEPS = [
     { title: "Read the graph", detail: "Files, functions, and variables live in the left rail. Select a node to inspect its source-backed details. The graph is a view of Jet source, not a second file.", target: "left-drawer" },
-    { title: "Edit, then save", detail: "Use the palette or an inline value. Accepted edits are checked, formatted, and written to Jet source immediately. Code and Split keep the source in reach.", action: "Open source", target: "jet-canvas-view" },
+    { title: "Edit, then save", detail: "Canvas selects the example value in Inspector. Change it, then Apply; the checked, formatted result is written to Jet source immediately.", action: "Open example editor", target: "details" },
     { title: "Check and fix", detail: "Check runs Jet diagnostics. Problems stay in the panel with what, why, and fix text. Rejected edits leave the last valid source intact.", action: "Check source", target: "check-current" },
     { title: "Run and inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare run", target: "run-current" },
-    { title: "Undo and keep control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Finish tour", target: "undo-edit" }
+    { title: "Undo and keep control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Undo last edit", target: "undo-edit" }
   ];
   let tourStep = 0;
+
+  function clearTourTarget() {
+    document.querySelectorAll(".canvas-tour-target").forEach((element) => {
+      element.classList.remove("canvas-tour-target");
+    });
+  }
+
+  function prepareTourEdit() {
+    if (!latestDoc) return;
+    const graph = (latestDoc.graphs || []).find((candidate) => candidate.title === "run") || currentGraph(latestDoc);
+    const expr = graph && (graph.inline_exprs || []).find((candidate) => String(candidate.source || "").trim() === "4");
+    const node = graph && expr && (graph.nodes || []).find((candidate) => candidate.node_id === expr.node_id);
+    if (!graph || !expr || !node) {
+      setViewMode("split");
+      showToast("Open Inspector on the example value to edit it");
+      return;
+    }
+    detailToggles.types = true;
+    syncDetailToggles();
+    if (selectedGraphId !== graph.graph_id) switchGraph(graph.graph_id, { nodeId: node.node_id });
+    else {
+      selectedVariableName = null;
+      selectedNodeId = node.node_id;
+      selectedNodeIds = new Set([node.node_id]);
+      drawGraph(latestDoc);
+    }
+    setDrawer("details");
+    window.requestAnimationFrame(() => {
+      const field = Array.from(details.querySelectorAll("[data-inline-id]")).find((candidate) => candidate.getAttribute("data-inline-id") === expr.inline_expr_id);
+      if (field) {
+        field.focus();
+        if (typeof field.select === "function") field.select();
+      }
+    });
+  }
 
   function renderTour() {
     const tour = document.getElementById("first-run-tour");
@@ -88,6 +123,7 @@
     const dismissed = !!editorState.tourDismissed;
     tourStep = Math.max(0, Math.min(TOUR_STEPS.length - 1, Number(editorState.tourStep) || 0));
     const step = TOUR_STEPS[tourStep];
+    clearTourTarget();
     const progress = document.getElementById("tour-progress");
     const title = document.getElementById("tour-title");
     const detail = document.getElementById("tour-detail");
@@ -106,6 +142,10 @@
     tour.dataset.tourStep = String(tourStep);
     tour.setAttribute("aria-hidden", dismissed ? "true" : "false");
     tour.classList.toggle("is-open", !dismissed);
+    if (!dismissed && step.target) {
+      const target = document.getElementById(step.target);
+      if (target) target.classList.add("canvas-tour-target");
+    }
     window.__jetCanvasTourState = { step: tourStep, total: TOUR_STEPS.length, title: step.title, target: step.target, dismissed };
   }
 
@@ -142,10 +182,13 @@
   function runTourAction() {
     const step = TOUR_STEPS[tourStep];
     if (!step) return;
-    if (step.action === "Open source") setViewMode("split");
+    if (step.action === "Open example editor") prepareTourEdit();
     else if (step.action === "Check source") showCheckAuthority();
     else if (step.action === "Prepare run") runCurrentGraph();
-    else if (step.action === "Finish tour") finishTour();
+    else if (step.action === "Undo last edit") {
+      const restore = undoTransaction();
+      if (restore && typeof restore.then === "function") restore.then(renderTour);
+    }
     renderTour();
   }
 
@@ -217,14 +260,15 @@
     const addVar = (name, type, source, editable, defaultSource, nodeId, meta) => {
       if (!name) return;
       const prev = vars.get(name) || {};
+      const keepsDefinition = source === "input" || source === "local";
       vars.set(name, {
         name,
         type: type || prev.type || "Value",
         source: source || prev.source || "local",
         editable: editable || prev.editable || false,
-        defaultSource: defaultSource !== undefined ? defaultSource : prev.defaultSource || "",
-        nodeId: nodeId || prev.nodeId || "",
-        meta: meta !== undefined ? meta : prev.meta || null
+        defaultSource: keepsDefinition && defaultSource ? defaultSource : prev.defaultSource || "",
+        nodeId: prev.nodeId || nodeId || "",
+        meta: meta || prev.meta || null
       });
     };
     for (const param of (graph.function && graph.function.params) || []) {
@@ -506,15 +550,27 @@
     });
   }
 
+  let projectLoadGeneration = 0;
   function loadProject() {
+    const loadToken = ++projectLoadGeneration;
+    const requestedSourceId = currentCanvasSourceId();
     const projectUrl = window.__JET_CANVAS_PROJECT__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/project");
     return fetch(projectUrl, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("project request failed (" + r.status + ")");
+        return r.json();
+      })
       .then((project) => {
+        if (loadToken !== projectLoadGeneration || currentCanvasSourceId() !== requestedSourceId) return latestProject;
         syncProjectRail(project);
         return project;
       })
       .catch(() => {
+        if (loadToken !== projectLoadGeneration) return latestProject;
+        if (latestProject) {
+          if (projectMode) projectMode.textContent = "project unavailable · showing last project";
+          return latestProject;
+        }
         if (projectRail) projectRail.innerHTML = "<div class=\"tag\">project unavailable</div>";
         return null;
       });
@@ -1025,7 +1081,7 @@
     if (!latestDoc) return;
     loadDebugState(latestDoc);
     const requestedRevision = latestDoc.revision;
-    const requestedSourceId = selectedSourceId || latestDoc.source_id || null;
+    const requestedSourceId = currentCanvasSourceId();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
     const body = {
       schema_version: 1,
@@ -1038,7 +1094,7 @@
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
-        if (latestDoc && (latestDoc.revision !== requestedRevision || (selectedSourceId || latestDoc.source_id || null) !== requestedSourceId)) {
+        if (latestDoc && (latestDoc.revision !== requestedRevision || currentCanvasSourceId() !== requestedSourceId)) {
           showToast("Debug result is stale; current source was kept", { isError: true });
           return;
         }

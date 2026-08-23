@@ -49,6 +49,30 @@
     return { start, end: newline < 0 ? source.length : newline };
   }
 
+  // Canvas graph spans are UTF-8 byte offsets; browser strings use UTF-16
+  // offsets. Convert once before comparing a Git line span with a graph node.
+  function reviewByteOffsetToTextOffset(source, byteOffset) {
+    const target = Math.max(0, Number(byteOffset) || 0);
+    let bytes = 0;
+    for (let offset = 0; offset < source.length;) {
+      if (bytes >= target) return offset;
+      const codePoint = source.codePointAt(offset);
+      const width = codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
+      if (bytes + width > target) return offset;
+      bytes += width;
+      offset += codePoint > 0xffff ? 2 : 1;
+    }
+    return source.length;
+  }
+
+  function reviewTextSpan(source, span) {
+    if (!span) return null;
+    return {
+      start: reviewByteOffsetToTextOffset(source, span.start),
+      end: reviewByteOffsetToTextOffset(source, span.end)
+    };
+  }
+
   function reviewSpansOverlap(left, right) {
     if (!left || !right) return false;
     if (left.start === left.end) return left.start >= right.start && left.start <= right.end;
@@ -172,7 +196,10 @@
   function reviewCurrentNodesFor(file) {
     if (!latestDoc || !file || !reviewPathsMatch(reviewCurrentSourcePath(), file.path)) return [];
     if (file.revision && latestDoc.revision && file.revision !== latestDoc.revision) return [];
-    return (latestDoc.graphs || []).flatMap((graph) => graph.nodes || []);
+    const source = latestDoc.source_text || "";
+    return (latestDoc.graphs || []).flatMap((graph) => graph.nodes || []).map((node) =>
+      node.source_span ? Object.assign({}, node, { source_span: reviewTextSpan(source, node.source_span) }) : node
+    );
   }
 
   function reviewCandidates(nodes, span) {
@@ -192,10 +219,6 @@
       } else {
         row.status = "deleted";
       }
-    }
-    if (!nodeIds.size && hunk.kind === "deleted") {
-      const anchor = reviewLineSpan(source, hunk.newStart, hunk.newStart);
-      reviewCandidates(nodes, anchor).forEach((node) => nodeIds.add(node.node_id));
     }
     hunk.nodeIds = Array.from(nodeIds);
     hunk.status = hunk.nodeIds.length ? hunk.kind : hunk.kind === "deleted" ? "deleted" : "unprojectable";
@@ -228,6 +251,18 @@
       if (hunk) return { file, hunk };
     }
     return null;
+  }
+
+  function reviewDeveloperFacts(doc, file) {
+    if (!developerMode) return "";
+    const facts = [
+      doc && doc.protocol,
+      doc && doc.project_revision,
+      doc && doc.revision,
+      latestProject && latestProject.project_revision,
+      file && file.revision
+    ].filter(Boolean);
+    return Array.from(new Set(facts)).join(" · ");
   }
 
   function reviewTestState() {
@@ -322,7 +357,7 @@
       : hunk.status === "deleted"
         ? "Deleted text has no current graph span."
         : "Text remains visible. Canvas has no current graph span for this hunk.";
-    return `<article class="review-hunk${active}" data-review-hunk="${escapeAttr(hunk.id)}"><header class="review-hunk-head"><div class="review-hunk-title"><span class="review-status ${reviewStatusClass(hunk.status)}">${escapeHtml(reviewStatusLabel(hunk.status))}</span><code>${escapeHtml(title)}</code></div><div class="review-hunk-actions"><button type="button" data-review-source="${escapeAttr(hunk.id)}">Source</button><button type="button" data-review-graph="${escapeAttr(hunk.id)}"${graphDisabled ? " disabled" : ""}>Graph</button></div></header><div class="review-lines">${(hunk.rows || []).map(reviewLineHtml).join("")}</div><div class="review-map">${mapping}</div></article>`;
+    return `<article class="review-hunk${active}" data-review-hunk="${escapeAttr(hunk.id)}" data-review-status="${escapeAttr(hunk.status)}"><header class="review-hunk-head"><div class="review-hunk-title"><span class="review-status ${reviewStatusClass(hunk.status)}">${escapeHtml(reviewStatusLabel(hunk.status))}</span><code>${escapeHtml(title)}</code></div><div class="review-hunk-actions"><button type="button" data-review-source="${escapeAttr(hunk.id)}">Source</button><button type="button" data-review-graph="${escapeAttr(hunk.id)}"${graphDisabled ? " disabled" : ""}>Graph</button></div></header><div class="review-lines">${(hunk.rows || []).map(reviewLineHtml).join("")}</div><div class="review-map">${mapping}</div></article>`;
   }
 
   function reviewRenderFile(file) {
@@ -341,7 +376,7 @@
 
   function reviewRenderEmpty(title, message, state) {
     reviewState.renderedFiles = [];
-    if (reviewDevFacts) reviewDevFacts.textContent = "";
+    if (reviewDevFacts) reviewDevFacts.textContent = reviewDeveloperFacts(reviewState.sourceControl, null);
     reviewFileList.innerHTML = `<div class="tag">No changed files.</div>`;
     reviewContent.innerHTML = `<div class="review-empty" data-review-empty="${escapeAttr(state || "empty")}"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>`;
     reviewSummary.innerHTML = `<div class="review-stat"><b>0</b><span>hunks</span></div>`;
@@ -389,9 +424,7 @@
     reviewRenderFile(selected);
     const selectedHunk = reviewHunkById(reviewState.selectedHunkId);
     if (reviewDevFacts) {
-      const facts = developerMode ? [doc.protocol || "jet.canvas.source_control", doc.project_revision || doc.revision || ""] : [];
-      if (developerMode && selected && selected.revision) facts.push(selected.revision);
-      reviewDevFacts.textContent = facts.filter(Boolean).join(" · ");
+      reviewDevFacts.textContent = reviewDeveloperFacts(doc, selected);
     }
     syncReviewTestState();
     if (selectedHunk && viewMode !== "review" && latestDoc) drawGraph(latestDoc);
@@ -588,3 +621,6 @@
     if (hunk) reviewSelectHunk(hunk.getAttribute("data-review-hunk"));
   });
   if (reviewRefreshButton) reviewRefreshButton.addEventListener("click", reviewRefresh);
+  if (developerModeButton) developerModeButton.addEventListener("click", () => {
+    if (viewMode === "review") renderReview();
+  });

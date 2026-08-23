@@ -70,7 +70,14 @@
 
   function localInitExpr(graph, variable) {
     if (!graph || !variable || !variable.nodeId) return null;
-    return (graph.inline_exprs || []).find((expr) => expr.node_id === variable.nodeId && (expr.role === "init" || expr.role === "value")) || null;
+    const inline = (graph.inline_exprs || []).find((expr) => expr.node_id === variable.nodeId && (expr.role === "init" || expr.role === "value"));
+    if (inline) return inline;
+    const valuePin = (graph.pins || []).find((pin) => pin.node_id === variable.nodeId && pin.direction === "input" && !isExecPin(pin));
+    const valueWire = valuePin && (graph.wires || []).find((wire) => wire.to_pin === valuePin.pin_id && wire.wire_kind === "data");
+    const sourcePin = valueWire && (graph.pins || []).find((pin) => pin.pin_id === valueWire.from_pin);
+    return sourcePin
+      ? (graph.inline_exprs || []).find((expr) => expr.node_id === sourcePin.node_id && (expr.role === "init" || expr.role === "value")) || null
+      : null;
   }
 
   function signatureWithVariable(graph, variable, next) {
@@ -211,8 +218,10 @@
     const apply = document.getElementById("apply-variable-details");
     if (!apply) return;
     apply.addEventListener("click", () => {
-      const nextName = document.getElementById("variable-name-input").value.trim();
-      const nextType = document.getElementById("variable-type-input").value.trim() || variable.type;
+      const nameInput = document.getElementById("variable-name-input");
+      const typeInput = document.getElementById("variable-type-input");
+      const nextName = (nameInput ? nameInput.value : variable.name).trim();
+      const nextType = (typeInput ? typeInput.value : variable.type).trim() || variable.type;
       const valueControl = details.querySelector('[data-details-input="value"]');
       const nextDefault = detailExpressionFromElement(valueControl);
       if (isParam) {
@@ -693,6 +702,13 @@
     return (graph.wires || []).find((w) => w.to_pin === pin.pin_id && w.source_span);
   }
 
+  function isSecondExecDrop(graph, fromPin, target) {
+    if (!graph || !fromPin || !target || fromPin.pin_id === target.pin_id) return false;
+    if (!isExecPin(fromPin) || !isExecPin(target) || fromPin.direction === target.direction) return false;
+    const input = fromPin.direction === "input" ? fromPin : target;
+    return (graph.wires || []).some((wire) => wire.wire_kind === "control" && wire.to_pin === input.pin_id);
+  }
+
   function inlineForPin(graph, pin) {
     if (!graph || !pin || !pin.source_span) return null;
     return (graph.inline_exprs || []).find((e) => e.source_span && spansOverlap(e.source_span, pin.source_span));
@@ -711,6 +727,13 @@
   }
 
   function completeConnection(fromPin, target, graph) {
+    if (!drag?.rewire
+      && isSecondExecDrop(graph, fromPin, target)
+      && !stagedNodeForPin(fromPin)
+      && !stagedNodeForPin(target)) {
+      openExecConvergencePreview(graph, fromPin, target);
+      return true;
+    }
     if (materializeStagedConnection(fromPin, target, graph)) return true;
     if (drag && drag.rewire && target && drag.rewire.wire && drag.rewire.wire.wire_kind === "control" && isExecPin(target)) {
       return completeExecRewire(drag.rewire, target, graph);

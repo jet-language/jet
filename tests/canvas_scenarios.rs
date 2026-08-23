@@ -483,6 +483,11 @@ fn exec_rewire_binding_order_diagnostic() {
 }
 
 #[test]
+fn exec_convergence_preview() {
+    run_canvas_scenario("exec-convergence-preview");
+}
+
+#[test]
 fn pattern_arm_add_edit_remove() {
     run_canvas_scenario("pattern-arm-add-edit-remove");
 }

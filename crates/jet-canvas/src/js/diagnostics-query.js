@@ -430,7 +430,23 @@
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         if (!result.ok) {
-          showToast(result.json.message || "Canvas query rejected");
+          searchState.stale = true;
+          renderSearchResults();
+          const stale = result.json && ["conflict", "stale"].includes(result.json.kind);
+          const message = result.json && result.json.message || "Canvas query rejected";
+          setCanvasState(
+            stale ? "stale" : "error",
+            stale ? "Search results are stale" : "Search unavailable",
+            stale
+              ? "The project changed. Canvas kept the current source and previous results; reload, then search again."
+              : "Canvas kept the current source and previous results. Retry when the query service is available.",
+            [
+              { label: "Show source", run: openSourceRecovery },
+              { label: "Retry", primary: true, run: () => postQuery(body) }
+            ]
+          );
+          setSaveState("source unchanged", "error");
+          showToast(message, { isError: true });
           return null;
         }
         if (latestDoc && (
@@ -439,22 +455,49 @@
           || (queryProjectRevision && (!latestProject || latestProject.project_revision !== queryProjectRevision))
           || (queryProjectRevision && result.json.project_revision !== queryProjectRevision)
         )) {
-          showToast("Canvas query result is stale; reload the current source");
+          searchState.stale = true;
+          renderSearchResults();
+          setCanvasState("stale", "Search results are stale", "The source or project changed while Canvas searched. Previous results stay visible; search again for the current revision.", [
+            { label: "Show source", run: openSourceRecovery },
+            { label: "Retry", primary: true, run: () => postQuery(body) }
+          ]);
+          setSaveState("source unchanged", "error");
+          showToast("Canvas query result is stale; reload the current source", { isError: true });
           return null;
         }
         searchState.results = result.json.results || [];
+        searchState.stale = false;
         syncSearchSpans();
         searchState.active = searchState.results.length ? 0 : -1;
         searchState.diff = result.json.diff || null;
         searchState.impact = result.json.impact || null;
         searchState.truncated = result.json.truncated === true;
         searchState.resultLimit = result.json.result_limit || 0;
+        if (window.__jetCanvasCanvasState && ["stale", "offline", "error"].includes(window.__jetCanvasCanvasState.kind)) {
+          clearCanvasState();
+        }
         renderSearchResults();
         if (searchState.results[0]) selectQueryResult(searchState.results[0], false);
         if (latestDoc) drawGraph(latestDoc);
         return result.json;
       })
-      .catch((e) => { showToast(String(e)); return null; });
+      .catch((e) => {
+        searchState.stale = true;
+        renderSearchResults();
+        const offline = navigator.onLine === false;
+        setCanvasState(
+          offline ? "offline" : "error",
+          offline ? "Search is offline" : "Search unavailable",
+          "Canvas kept the current source and previous results. Reconnect or retry when the query service is available.",
+          [
+            { label: "Show source", run: openSourceRecovery },
+            { label: "Retry", primary: true, run: () => postQuery(body) }
+          ]
+        );
+        setSaveState("source unchanged", "error");
+        showToast(String(e), { isError: true });
+        return null;
+      });
   }
 
   function renderSearchResults() {
@@ -470,9 +513,12 @@
     const limit = searchState.truncated || allResults.length > visibleResults.length
       ? `<div class="tag">Showing first ${visibleResults.length} of ${searchState.resultLimit || allResults.length} results; narrow search</div>`
       : "";
+    const stale = searchState.stale
+      ? `<div class="tag">Search results are stale; reload the current source and search again.</div>`
+      : "";
     const diff = searchState.diff && searchState.diff.text ? `<div class="inline-row"><b>Preview diff</b><code>${escapeHtml(searchState.diff.text)}</code></div>` : "";
     const impact = searchState.impact && searchState.impact.found ? `<div class="pin-row"><b>Impact</b><br><span class="tag">${(searchState.impact.references || []).length} refs / ${(searchState.impact.call_sites || []).length} calls</span></div>` : "";
-    searchResults.innerHTML = rows || diff || impact || limit ? limit + rows + diff + impact : "<div class=\"tag\">no matches</div>";
+    searchResults.innerHTML = stale + (rows || diff || impact || limit ? limit + rows + diff + impact : "<div class=\"tag\">no matches</div>");
     searchResults.querySelectorAll("[data-search-hit]").forEach((button) => {
       button.addEventListener("click", () => {
         const index = Number(button.getAttribute("data-search-hit"));
@@ -558,6 +604,7 @@
       searchState.spans = [];
       searchState.active = -1;
       searchState.impact = null;
+      searchState.stale = false;
       searchState.diff = { text: diff || "clean" };
       renderSearchResults();
       showToast(doc.dirty ? "Source diff loaded" : "Source clean");
@@ -568,6 +615,10 @@
 
   function selectQueryResult(result, fitView) {
     if (!result) return;
+    if (searchState.stale) {
+      showToast("Search result is stale; search again for the current revision", { isError: true });
+      return;
+    }
     const sourceId = currentCanvasSourceId();
     if (result.source_id && result.source_id !== sourceId) {
       const results = searchState.results;
@@ -601,7 +652,7 @@
   function runCanvasSearch() {
     const query = canvasSearch.value.trim();
     if (!query) {
-      searchState = { results: [], spans: [], active: -1, diff: null, impact: null, truncated: false, resultLimit: 0 };
+      searchState = { results: [], spans: [], active: -1, diff: null, impact: null, truncated: false, resultLimit: 0, stale: false };
       renderSearchResults();
       if (latestDoc) drawGraph(latestDoc);
       return;

@@ -166,8 +166,16 @@ broken feel — replace it.
 
 - Exec pins are UNLABELED when a node has one exec-in and/or one exec-out —
   the arrow already says it. Label exec outs only when there are 2+ (then /
-  else, match arms, loop body/done).
+  else, match arms, loop body/done). An early-return output keeps the
+  `return` label because the label identifies an exit, even when it is the
+  only output.
 - No "exec", no "then" text on single-exec nodes. Data pins keep names.
+
+Canvas assigns source-backed execution output roles. Loop outputs use
+`role:"loop_body"` and `role:"loop_done"`; early-return outputs use
+`role:"early_return"`. A second compatible execution drop opens a no-write
+convergence preview. Extract is selected first, an exact-body helper appears
+only when one exists, and duplication carries an explicit warning.
 
 ## Node states (gated on D-CANVASSTATE1 — do not build until ratified)
 

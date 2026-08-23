@@ -460,6 +460,21 @@ pub(in crate::Canvas) fn insert_descriptor_id(transaction: &str, pure: bool) -> 
     descriptor.id
 }
 
+/// Return descriptor-owned palette ranking facts for an action payload.
+/// The action endpoint must not copy a second rank table; the node descriptor
+/// is the one source for both the browser palette and source transactions.
+pub(in crate::Canvas) fn palette_rank_fields(id: &str) -> String {
+    let descriptor = descriptor_for_id(id);
+    let terms = descriptor
+        .palette
+        .rank_terms
+        .iter()
+        .map(|term| json_str(term))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(",\"rank\":{},\"rank_terms\":[{}]", descriptor.palette.rank, terms)
+}
+
 pub(in crate::Canvas) fn catalog_json() -> String {
     validate_catalog().unwrap_or_else(|message| panic!("invalid Canvas node catalog: {message}"));
     format!(

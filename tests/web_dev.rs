@@ -961,6 +961,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("__JET_CANVAS_PROOF__"));
     assert!(js.contains("__jetCanvasProofRail"));
     assert!(js.contains("function postQuery"));
+    assert!(js.contains("Search results are stale"));
+    assert!(js.contains("searchState.stale = true"));
+    assert!(js.contains("Search is offline"));
+    assert!(js.contains("Search result is stale; search again for the current revision"));
     assert!(js.contains("loadCanvasActions"));
     assert!(js.contains("openCoreCatalogPalette"));
     assert!(js.contains("__JET_CANVAS_CORE_CATALOG__"));
@@ -1399,6 +1403,17 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/query", &helper_query).expect("POST helper query");
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&helper_query_body).contains("\"protocol\":\"jet.canvas.query\""));
+
+    let helper_edit = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    print(\\\"edited helper\\\")\\n}}\\n\"}}",
+        helper_revision
+    );
+    let (status, helper_edit_body) =
+        http_post(port, "/canvas/transaction", &helper_edit).expect("POST helper transaction");
+    assert_eq!(status, 200, "helper transaction: {}", String::from_utf8_lossy(&helper_edit_body));
+    assert!(String::from_utf8_lossy(&helper_edit_body).contains("\"changed\":true"));
+    assert!(fs::read_to_string(dir.join("helper.jet")).unwrap().contains("edited helper"));
+    assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC);
 
     let (status, catalog) =
         http_get(port, "/canvas/core-catalog?query=http").expect("GET Canvas core catalog");

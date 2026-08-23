@@ -158,9 +158,11 @@ The Canvas onboarding tour slice uses
 `examples/features/tooling/canvas_blueprint_demo.jet` as its source-backed
 project and `tests/canvas_scenarios.rs::canvas_onboarding_tour` as its real
 browser proof. The tour teaches graph reading, source editing, checking,
-running, inspection, and undo. Its state is local editor state; Jet source
-remains the semantic truth. Loading, empty, invalid, offline, and permission
-states keep source recovery or retry actions visible.
+running, inspection, and undo. Its edit step selects the example's
+source-backed value in Inspector; Apply and Undo travel through the normal
+source transaction path. Its state is local editor state; Jet source remains
+the semantic truth. Loading, empty, invalid, offline, and permission states
+keep source recovery or retry actions visible.
 
 ### M6 — Beyond parity (only after M1–M5)
 

@@ -90,6 +90,7 @@ pub(super) struct NodeQueryRef {
 pub(super) struct CanvasCallableExport {
     pub(super) module_path: String,
     pub(super) span: SourceSpan,
+    pub(super) callee: String,
 }
 
 #[derive(Debug, Clone)]
@@ -888,7 +889,16 @@ fn run_jet_command(entry: &Path, args: &[&str]) -> Result<std::process::Output, 
 
 /// Apply one versioned Canvas edit transaction and write ordinary Jet source.
 pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, String> {
-    jet_driver::run_compiler_work(|| apply_transaction_json_on_compiler_stack(path, request))
+    let path = match json_string_field(request, "source_id") {
+        Some(source_id) => project_path_for_source_id(path, &source_id).ok_or_else(|| {
+            edit_error(
+                "not_found",
+                "Canvas source_id must name a projected Jet source file",
+            )
+        })?,
+        None => path.to_path_buf(),
+    };
+    jet_driver::run_compiler_work(|| apply_transaction_json_on_compiler_stack(&path, request))
 }
 
 fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {

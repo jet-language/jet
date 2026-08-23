@@ -91,6 +91,12 @@
       const pos = ranked.get(node.node_id);
       if (pos) autoNodeOffsets.set(node.node_id, { x: pos.x - rawNodeX(node), y: pos.y - rawNodeY(node) });
     }
+    if (graph.nodes.length >= 180) {
+      // ponytail: large graphs trust ranked columns; full overlap healing is O(n²),
+      // add a spatial index only if measured crowded layouts regress.
+      autoLayoutKey = key;
+      return;
+    }
     const placed = [];
     for (const node of graph.nodes.slice().sort((a, b) => nodeY(a) - nodeY(b) || nodeX(a) - nodeX(b))) {
       const size = nodeSize(graph, node);
@@ -773,6 +779,9 @@
     loadDebugState(doc);
     const sourceGraph = currentGraph(doc);
     if (!sourceGraph) return;
+    if (window.__jetCanvasExecConvergencePreview && window.__jetCanvasExecConvergencePreview.revision !== doc.revision) {
+      window.__jetCanvasExecConvergencePreview = null;
+    }
     const graph = graphWithViewState(sourceGraph);
     if (reprojected) {
       hoverPin = null;
@@ -906,7 +915,9 @@
       }
     }
     const selectedNode = nodes.get(selectedNodeId);
-    if (selectedVariableName) {
+    if (window.__jetCanvasExecConvergencePreview && typeof renderExecConvergencePreview === "function") {
+      renderExecConvergencePreview();
+    } else if (selectedVariableName) {
       renderVariableDetails(graph, selectedVariableName);
     } else {
       updateDetails(graph, selectedNode, graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
@@ -971,6 +982,7 @@
       virtualizationStats: Object.assign({}, window.__jetCanvasVirtualizationStats || {}),
       sourceText: doc.source_text || "",
       doc: latestDoc,
+      execConvergencePreview: window.__jetCanvasExecConvergencePreview || null,
       nodeDescriptors: latestDoc.node_descriptors || [],
       descriptorConsumption: graph.nodes.map((node) => {
         const descriptor = nodeDescriptor(node);

@@ -363,7 +363,7 @@ const CANVAS_TRAIT_INTERFACE_FIXTURE: &str = r#"trait Drawable {
 }
 
 struct Badge {
-    label: String
+    text: String
 }
 
 fn run() {
@@ -628,6 +628,67 @@ fn canvas_graph_json_is_stable_and_typed() {
     assert_eq!(
         json, again,
         "Canvas layout/projection must be deterministic"
+    );
+}
+
+#[test]
+fn canvas_projects_labeled_execution_outputs_for_loops_and_early_returns() {
+    let path = write_fixture(
+        "multi_exec_outputs",
+        r#"fn paths(limit: Int) Int -> {
+    loop i in 0..<limit {
+        if i == 1 {
+            return i
+        } else {
+            print(i)
+        }
+    }
+    return 0
+}
+
+fn run() {
+    print(paths(3))
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("multi-exec graph");
+    let paths = graph_object_for_title(&graph, "paths");
+    for field in [
+        "\"name\":\"body\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"loop_body\"",
+        "\"name\":\"done\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"loop_done\"",
+        "\"name\":\"return\",\"direction\":\"output\",\"type\":\"exec\",\"role\":\"early_return\"",
+    ] {
+        assert!(
+            paths.contains(field),
+            "paths graph missing {field}: {paths}"
+        );
+    }
+    let pins = json_top_level_objects(json_array_field(paths, "pins"));
+    for (name, role) in [
+        ("body", "loop_body"),
+        ("done", "loop_done"),
+        ("return", "early_return"),
+    ] {
+        let pin = pins
+            .iter()
+            .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+            .unwrap_or_else(|| panic!("missing {name} pin: {paths}"));
+        assert!(
+            pin.contains(&format!("\"role\":\"{role}\"")),
+            "pin role drift: {pin}"
+        );
+        assert!(
+            pin.contains("\"source_span\":{\"start\":"),
+            "pin provenance missing: {pin}"
+        );
+    }
+    assert!(
+        paths.contains("\"name\":\"then\""),
+        "branch then output missing: {paths}"
+    );
+    assert!(
+        paths.contains("\"name\":\"else\""),
+        "branch else output missing: {paths}"
     );
 }
 
@@ -1871,7 +1932,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"action_id\":\"canvas.command:service.start\"",
         "\"available\":false",
         "\"denied_reason\":\"no env service selected\"",
-        ] {
+    ] {
         assert!(actions.contains(field), "actions missing {field}");
     }
 
@@ -2022,6 +2083,74 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
 }
 
 #[test]
+fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
+    let dir = temp_dir("actions_exports");
+    fs::create_dir_all(dir.join(".jet/bindings/js")).unwrap();
+    let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::JS)
+        .expect("JavaScript binder descriptor")
+        .stamp();
+    fs::write(
+        dir.join(".jet/bindings/js/plotly.jet"),
+        format!(
+            "// jet-ffi-descriptor={descriptor}\npub fn println() Int -> {{\n    return 1\n}}\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("helper.jet"),
+        "pub fn square(n: Int) Int -> {\n    return n * n\n}\n",
+    )
+    .unwrap();
+    let path = dir.join("main.jet");
+    let src = "use \"./helper\" as helper\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(helper.square(2))\n}\n";
+    fs::write(&path, src).unwrap();
+
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        jet::Canvas::source_revision(src)
+    );
+    let actions = jet::Canvas::query_json_for_file(&path, &request).expect("actions query");
+    assert!(
+        actions.contains("\"callee\":\"helper.square\""),
+        "imported action must use the entry-facing callee: {actions}"
+    );
+    assert!(
+        actions.contains("\"rank\":74") && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"),
+        "project action must carry descriptor-owned ranking facts: {actions}"
+    );
+    assert!(
+        !actions.contains("\"module_path\":\"js.plotly\"")
+            && !actions.contains("\"name\":\"println\""),
+        "foreign binding functions must not leak into the project palette: {actions}"
+    );
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("actions graph");
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"helper.square\",\"args\":[\"1\"]}}",
+        jet::Canvas::source_revision(src),
+        graph_id
+    );
+    let inserted = jet::Canvas::apply_transaction_json(&path, &insert)
+        .expect("imported action insert");
+    assert!(inserted.contains("\"changed\":true"), "{inserted}");
+    let changed = fs::read_to_string(&path).unwrap();
+    assert!(changed.contains("helper.square(1)"), "{changed}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after insert");
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let before_invalid = changed.clone();
+    let invalid = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"println\",\"args\":[\"1\"]}}",
+        jet::Canvas::source_revision(&changed),
+        graph_id
+    );
+    let error = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
+    assert!(error.contains("diagnostic") || error.contains("E"), "{error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
+}
+
+#[test]
 fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() {
     let path = write_fixture("core_catalog", "fn run() {\n    print(\"core\")\n}\n");
     let src = fs::read_to_string(&path).unwrap();
@@ -2099,6 +2228,90 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         args_catalog.contains("Use this as a method on an ArgsSpec value."),
         "{args_catalog}"
     );
+}
+
+#[test]
+fn canvas_core_catalog_classifies_every_action_for_palette_placement() {
+    let path = write_fixture("core_catalog_statuses", "fn run() {\n    print(\"core\")\n}\n");
+    let source = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let catalog_request = format!(
+        "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"\"}}",
+        revision
+    );
+    let catalog = jet::Canvas::query_json_for_file(&path, &catalog_request).expect("core catalog");
+    let mut catalog_ids = HashSet::new();
+    for module in json_top_level_objects(json_array_field(&catalog, "modules")) {
+        let path = json_field(module, "path");
+        for member in json_top_level_objects(json_array_field(module, "members")) {
+            catalog_ids.insert(format!(
+                "canvas.core_catalog:{path}:{}",
+                json_field(member, "name")
+            ));
+        }
+    }
+
+    let actions_request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let actions = jet::Canvas::query_json_for_file(&path, &actions_request).expect("core actions");
+    let core_actions = json_top_level_objects(json_array_field(&actions, "actions"))
+        .into_iter()
+        .filter(|action| action.contains("\"kind\":\"canvas.core_catalog\""))
+        .collect::<Vec<_>>();
+    let action_ids = core_actions
+        .iter()
+        .map(|action| json_field(action, "action_id"))
+        .collect::<HashSet<_>>();
+    assert_eq!(catalog_ids, action_ids, "catalog/action coverage drift");
+
+    let stageable_reasons = ["needs_canvas_defaults", "method_only"];
+    let excluded_reasons = [
+        "needs_unsafe_region",
+        "type_member",
+        "type_only",
+        "value_only",
+        "needs_signature",
+        "not_direct_call",
+    ];
+    for action in core_actions {
+        let available = action.contains("\"available\":true");
+        let stageable = action.contains("\"stageable\":true");
+        let stage_reason = json_field(action, "stage_reason_code");
+        if stageable {
+            assert!(!available, "stageable action is available: {action}");
+            assert!(stageable_reasons.contains(&stage_reason.as_str()), "unstable stage reason: {action}");
+            assert_eq!(json_field(action, "unavailable_reason_code"), stage_reason, "stage status drift: {action}");
+            assert!(!json_field(action, "denied_reason").is_empty(), "staged action lacks reason: {action}");
+            assert_eq!(json_field(action, "insert_op"), "insert_call", "staged action lacks insertion path: {action}");
+            assert!(!json_field(action, "insert_callee").is_empty(), "staged action lacks callee: {action}");
+            let inputs = json_top_level_objects(json_array_field(action, "pins"))
+                .into_iter()
+                .filter(|pin| pin.contains("\"direction\":\"input\""))
+                .collect::<Vec<_>>();
+            assert!(!inputs.is_empty(), "staged action lacks inputs: {action}");
+            assert!(inputs.iter().all(|pin| {
+                let ty = json_field(pin, "type");
+                !ty.is_empty()
+                    && (ty != "Value"
+                        || (stage_reason == "method_only" && pin.contains("\"name\":\"receiver\"")))
+            }), "staged action has untyped input: {action}");
+            if stage_reason == "method_only" {
+                let receiver_type = json_field(action, "receiver_type");
+                assert!(inputs.iter().any(|pin| {
+                    pin.contains("\"name\":\"receiver\"") && json_field(pin, "type") == receiver_type
+                }), "staged method lacks typed receiver: {action}");
+            }
+        } else if !available {
+            let reason = json_field(action, "unavailable_reason_code");
+            assert!(excluded_reasons.contains(&reason.as_str()), "unstable exclusion: {action}");
+            assert!(!json_field(action, "denied_reason").is_empty(), "excluded action lacks reason: {action}");
+            assert!(stage_reason.is_empty(), "excluded action carries stage status: {action}");
+        } else {
+            assert!(stage_reason.is_empty(), "available action carries stage status: {action}");
+        }
+    }
 }
 
 #[test]
@@ -3412,7 +3625,7 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
 
     let graph = jet::Canvas::graph_json_for_entry_source(&entry, Some("helper.jet"))
         .expect("helper graph");
-    assert!(graph.contains("\"source_id\""), "{graph}");
+    assert!(graph.contains("\"source_id\":\"helper.jet\""), "{graph}");
     assert!(graph.contains("helper.jet"), "{graph}");
     assert!(graph.contains("\"title\":\"helper\""), "{graph}");
     assert!(!graph.contains("\"title\":\"run\""), "{graph}");
@@ -3436,6 +3649,17 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     assert!(receipt.contains("\"source_id\":\"helper.jet\""), "{receipt}");
     assert!(receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"), "{receipt}");
     assert!(receipt.contains(&format!("\"revision\":\"{}\"", revision)), "{receipt}");
+
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"source\":\"fn helper() Int -> {{\\n    return 8\\n}}\\n\"}}",
+        revision
+    );
+    let edited = jet::Canvas::apply_transaction_json(&entry, &edit)
+        .expect("selected helper source transaction");
+    assert!(edited.contains("\"protocol\":\"jet.canvas.edit\""), "{edited}");
+    assert!(edited.contains("\"changed\":true"), "{edited}");
+    assert!(fs::read_to_string(&helper).unwrap().contains("return 8"));
+    assert!(fs::read_to_string(&entry).unwrap().contains("print(\"main\")"));
 
     let missing = jet::Canvas::graph_json_for_entry_source(&entry, Some("missing.jet"))
         .expect_err("bad source_id should be rejected");

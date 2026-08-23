@@ -89,7 +89,7 @@
   let selectedSourceId = null;
   let debugOverlay = null;
   let debugState = { breakpoints: [], watches: [] };
-  let searchState = { results: [], spans: [], active: -1, diff: null, impact: null };
+  let searchState = { results: [], spans: [], active: -1, diff: null, impact: null, stale: false };
   let diagnosticsState = { baseRevision: null, diagnosticRevision: null, entries: [], dismissed: new Set() };
   let scm = null;
   let proofDoc = null;
@@ -131,8 +131,15 @@
   let contextMenuState = null;
   let contextMenuOpenedAt = 0;
   let pendingInsertPlacement = null;
+  let nodeDescriptorCacheRevision = null;
+  let nodeDescriptorCache = new Map();
   function nodeDescriptorById(id) {
-    return id && latestDoc && (latestDoc.node_descriptors || []).find((descriptor) => descriptor.id === id) || null;
+    if (!id || !latestDoc) return null;
+    if (nodeDescriptorCacheRevision !== latestDoc.revision) {
+      nodeDescriptorCacheRevision = latestDoc.revision;
+      nodeDescriptorCache = new Map((latestDoc.node_descriptors || []).map((descriptor) => [descriptor.id, descriptor]));
+    }
+    return nodeDescriptorCache.get(id) || null;
   }
   function nodeDescriptor(node) {
     return nodeDescriptorById(node && node.node_descriptor_id);

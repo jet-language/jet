@@ -5316,6 +5316,17 @@ full edit parity without this path.
 drilldown to diagnostics, commands, source revisions, build/run/proof state,
 provenance, and stale-proof reasons. Badges alone are insufficient.
 
+**D-CANVAS-MULTIEXEC1=E**: Canvas projects every source-backed execution
+construct with its labeled execution outputs. Switch and pattern arms keep
+their arm labels, loops expose `body` and `done`, and early returns expose
+`return`. A second compatible execution drop opens one no-write convergence
+preview with extract selected by default. The preview may offer an exact-body
+helper only when the helper matches the source body, and it must warn before
+the user selects duplication. A staged node still materializes on its first
+compatible spine connection through one canonical insertion transaction.
+Stale or rejected source keeps the preview recoverable and never writes a
+semantically different Jet construct.
+
 **D-VERIFY-SCHED1=C / D-VERIFY-CACHE1=C / D-VERIFY-TIER1=C**: `scripts/agent/verify-full.sh`
 is a repo scheduler, not plain `cargo test`: it emits timings, uses bounded
 parallelism/serial groups, uses `cargo-nextest` when available with a cargo
