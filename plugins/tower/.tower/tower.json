@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 43146,
+    "rev": 43151,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,7 +32,7 @@
         "radar:e4"
       ]
     },
-    "completionCursor": "2026-08-23T22:56:17.944Z"
+    "completionCursor": "2026-08-23T23:52:50.347Z"
   },
   "epochs": [
     {
@@ -118030,8 +118030,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T13:33:58.730Z",
-      "updated": "2026-08-23T01:09:16.310Z",
-      "updatedBy": "mse5"
+      "updated": "2026-08-23T23:52:47.866Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0v6buo8",
@@ -189802,6 +189802,173 @@
       "created": "2026-08-23T16:34:21.264Z",
       "outcome": "D",
       "ratifiedAt": "2026-08-23"
+    },
+    {
+      "id": "D-JPK-SECRETCOMPOSE1",
+      "cardId": "c0gq3vxb",
+      "group": "safety",
+      "title": "Compose secret values from named inputs",
+      "gist": "Choose whether Jet composes secrets and when it resolves the inputs.",
+      "lesson": "Secret composition builds a value from named secrets and literal text. A template is a pattern with placeholders. Store-time composition resolves it during a write. Read-time composition resolves it when code asks for the value. Store-time data can become stale after rotation. Read-time data stays current but repeats work. Missing inputs must fail without revealing values. The vault stores flat name/value pairs and reads one name. This choice changes source surface and audit record. References: docs/research/2026-07-24-devenv-parity.md:199 and crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:10-14,147-149.",
+      "explainer": "",
+      "story": "Maya runs a service with separate DB_HOST, DB_USER, and DB_PASSWORD names. She wants DB_URL for a local tool, but rotation must not leave an old assembled value in the vault. The owner must choose whether Jet owns that dependency graph or Maya writes the assembly in ordinary Jet code.",
+      "inWild": "env.dev {\n    secrets: [\"DB_HOST\", \"DB_USER\", \"DB_PASSWORD\"]\n}\n\nfn connect() -[Secret]> {\n    let url = Secret.compose(\n        template: \"postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app\",\n        from: [\"DB_HOST\", \"DB_USER\", \"DB_PASSWORD\"],\n    )\n    core.http.connect(url)\n}\n\nrotate: DB_PASSWORD\nnext read: DB_URL uses the new named input\nmissing: E1263 names DB_PASSWORD only",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "No composition",
+          "detail": "Keep secrets as a name list. Jet adds no composed-secret surface. The user reads each part with core.crypto.vault.get and assembles the result in normal code. This keeps the vault flat and leaves composition policy with the application. References: crates/jet-foundation/src/Syntax/jetpack_config.rs:1-5, crates/jetpack/src/CLI/realize.rs:623-626, and crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:142-149.",
+          "technical": "A declared missing name fails activation with E1263. An undeclared read keeps the current Option behavior and returns no value. Composition happens in user code at read time. Jet encrypts only the named parts through crates/jetpack/src/Secrets.rs:303-357. It does not store a composed value. There is no composition audit event. Any application audit event names the output and input names only. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "env.dev {\n    secrets: [\"DB_HOST\", \"DB_USER\", \"DB_PASSWORD\"]\n}\nfn database_url() -[Secret]> {\n    let host = core.crypto.vault.get(\"DB_HOST\")\n    let user = core.crypto.vault.get(\"DB_USER\")\n    let password = core.crypto.vault.get(\"DB_PASSWORD\")\n    // assemble DB_URL here\n}\nmissing declared input: E1263 no secret named DB_PASSWORD\noutput: name only, never a secret value"
+        },
+        {
+          "key": "B",
+          "name": "Materialize at store time",
+          "detail": "Add a command that resolves named inputs and writes the result as a normal vault entry. The user reads DB_URL through the same existing secret path. This is simple to inspect as one stored name, but rotation leaves DB_URL stale until the user composes it again. References: crates/jetpack/src/Secrets.rs:360-371,303-357 and crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:10-14,147-149.",
+          "technical": "The compose command fails before writing if any input is absent. It reports E1263 with the missing input name and leaves the store unchanged. Resolution happens once at compose time. The composed pair is encrypted in .jet/secrets.age with the other pairs. A later source rotation does not change DB_URL. The audit event records compose DB_URL from DB_HOST, DB_USER, and DB_PASSWORD at a store revision. It records names only. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "jetpack secrets compose DB_URL --template DB_URL_TEMPLATE --from DB_HOST,DB_USER,DB_PASSWORD\ntemplate: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app\nresult: stored encrypted entry named DB_URL\nmissing input: E1263 no secret named DB_PASSWORD\nrotation: DB_URL keeps its old assembled value until compose runs again\naudit: compose DB_URL from [DB_HOST, DB_USER, DB_PASSWORD]"
+        },
+        {
+          "key": "C",
+          "name": "Compose in the read API",
+          "detail": "Add a core.crypto.vault.compose call that takes a template and explicit input names. The caller keeps control of the final read, while Jet supplies one shared composition rule. This avoids stale stored results, but each caller repeats the template and dependency list. References: crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:142-149 and crates/jet-foundation/src/Syntax/core_calls.rs:258-271.",
+          "technical": "A missing input returns no composed result and reports E1263 with that input name when the caller requires the result. Resolution happens on every read. Jet stores only the source pairs and derives the composed value in memory. Each read audit event names DB_URL and its input names. Rotation changes the next read. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "fn database_url() -[Secret]> {\n    core.crypto.vault.compose(\n        template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app\n        from: [DB_HOST, DB_USER, DB_PASSWORD]\n    )\n}\nmissing input: E1263 no secret named DB_PASSWORD\nstorage: source names only\naudit: read DB_URL from [DB_HOST, DB_USER, DB_PASSWORD]"
+        },
+        {
+          "key": "D",
+          "name": "Declare a read-time composition",
+          "detail": "Extend the environment secret declaration with a named template and its input names. Code still calls core.crypto.vault.get for DB_URL, so beginners get one named secret and experts can inspect the dependency list. Activation can validate the graph before any value read. References: docs/research/2026-07-24-devenv-parity.md:199, crates/jet-foundation/src/Syntax/jetpack_config.rs:1-5, and crates/jetpack/src/CLI/services_secrets_config.rs:21-44,488-490.",
+          "technical": "The compiler checks template shape, input names, duplicate names, and cycles. Activation checks that every referenced input exists. A missing input fails closed with E1263 naming the missing input. Resolution happens on every get read. Jet encrypts only source pairs and derives DB_URL in memory. The plan and each read audit event name DB_URL and the sorted input names. Rotation changes the next read. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "env.dev {\n    secrets: {\n        DB_URL: compose(\n            template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app\n            from: [DB_HOST, DB_USER, DB_PASSWORD]\n        )\n    }\n}\nfn connect() -[Secret]> {\n    core.crypto.vault.get(DB_URL)\n}\nmissing input at activation: E1263 no secret named DB_PASSWORD\nstorage: source names only\naudit: DB_URL from [DB_HOST, DB_USER, DB_PASSWORD]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Docker Compose",
+          "note": "Docker Compose interpolates named inputs when it evaluates a configuration. That resembles read-time declaration, but it does not define encrypted vault storage or Jet activation.",
+          "code": "DATABASE_URL: template(DB_USER, DB_PASSWORD, DB_HOST)"
+        },
+        {
+          "lang": "Kubernetes",
+          "note": "Kubernetes commonly keeps secret references separate and lets the application assemble a connection string. That resembles no composition and keeps dependency policy in application code.",
+          "code": "valueFrom: secretKeyRef name=app key=DB_PASSWORD"
+        }
+      ],
+      "rec": "D",
+      "recommendation": {
+        "why": "D gives beginners one named read and gives experts an explicit dependency list. It fails closed before activation, reflects rotation on the next read, and records names without values.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A pushes the same template and missing-input rules into every application. It also gives activation no shared dependency graph or composition audit event."
+          },
+          {
+            "key": "B",
+            "reason": "B leaves a stored composed entry stale after any source rotation. The user must remember a second compose action before the result changes."
+          },
+          {
+            "key": "C",
+            "reason": "C shares the read mechanism but repeats templates and input lists at every call site. Activation cannot know dependencies unless source declarations repeat them."
+          }
+        ],
+        "tradeoff": "D changes the current name-list shape and makes dependency names part of project source. It accepts that visible policy because it keeps values encrypted, keeps rotation current, and gives activation one auditable graph."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The draft compares no composition, store-time materialization, imperative read-time composition, and declarative read-time composition. It covers missing inputs, storage, rotation, and name-only audit records.",
+        "boilOcean": "The breadth pass tested command-only composition, automatic environment variables, and encrypted template files. Those choices either hide dependencies or add a second source of truth.",
+        "hybrid": "The synthesis pass combines D declarative dependency graph with C read-time derivation. It keeps one named read while preserving explicit expert control over inputs.",
+        "cooperative": "Cooperative review strengthened each option on its own terms. A protects simplicity, B gives materialized portability, C gives call-site control, and D gives shared activation policy.",
+        "adversarial": "Adversarial review tested missing inputs, source rotation, stale stored results, template cycles, audit leakage, and repeated declarations. D keeps names visible and values out of every error and audit path."
+      },
+      "checkInstructions": "After ratification, implement only the selected surface and update criterion 4. Keep all diagnostics and audit records name-only.",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-23T23:17:06.984Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-08-23"
+    },
+    {
+      "id": "D-JPK-SECRETMETA1",
+      "cardId": "c0gq3vxb",
+      "group": "safety",
+      "title": "Define secret metadata and activation rules",
+      "gist": "Choose which metadata a secret carries and what activation checks.",
+      "lesson": "Secret metadata describes a secret name without storing its value. Required means activation must have an entry. Optional means absence is allowed. Allowed environments limit where code may request the name. Rotation policy states when a value needs review. A compiler can check declarations and metadata shapes. It cannot prove an encrypted store contains a value because the vault opens at runtime. This choice sets the source contract and missing-secret response. References: crates/jetpack/src/CLI/services_secrets_config.rs:21-44,488-490 and crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:142-149.",
+      "explainer": "",
+      "story": "Leon shares one env.jet across laptop, CI, and production. CI needs API_KEY, but a local preview does not. Today every listed name is checked the same way at activation. Leon needs metadata that keeps optional local work alive without allowing a required CI run to start with a missing secret.",
+      "inWild": "env.ci {\n    secrets: {\n        API_KEY: {\n            required: true\n            description: \"CI credential\"\n            allowed_environments: [\"ci\", \"prod\"]\n            rotation: max_age(90d)\n            default: none\n            generate: none\n        }\n        PREVIEW_TOKEN: {\n            required: false\n            description: \"local preview token\"\n            allowed_environments: [\"dev\"]\n            rotation: none\n            default: none\n            generate: none\n        }\n    }\n}\ncheck: schema valid\nactivate: E1263 required secret named API_KEY is missing for environment ci\noutput: names only, never secret values",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep names only",
+          "detail": "Keep the current secrets name list. Every listed entry remains required at activation. The compiler checks list syntax, but it cannot check local store presence before a run. Missing API_KEY shows E1263 at activation, not check time. No description, optional flag, allowed environment list, rotation policy, default, or generator policy exists. References: crates/jet-foundation/src/Syntax/jetpack_config.rs:1-5, crates/jetpack/src/CLI/realize.rs:623-626, and crates/jetpack/src/CLI/services_secrets_config.rs:21-44,488-490.",
+          "technical": "validate_declared_secrets calls Secrets.get for each name and returns E1263 on the first absent entry. The current get path returns an Option after reading the encrypted store. The compiler sees names only. Activation remains the only missing-entry check. The error names API_KEY and contains no secret value. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "env.dev {\n    secrets: [\"API_KEY\"]\n}\ncheck: syntax only\nactivate: E1263 no secret named API_KEY\ntiming: activation only\noutput: name only, never a secret value"
+        },
+        {
+          "key": "B",
+          "name": "Declare a full typed schema",
+          "detail": "Make each secret a typed declaration in env source. Carry description, required or optional status, allowed environments, rotation policy, per-profile default, and generator recipe. The compiler checks field types, duplicate names, environment labels, policy conflicts, and generator shape. Activation checks the selected environment and required store entries. Missing API_KEY shows E1263 at activation with the name only. References: crates/jetpack/src/CLI/realize.rs:623-626, crates/jetpack/src/CLI/services_secrets_config.rs:21-44,488-490, and crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:142-149.",
+          "technical": "A known active profile lets the compiler reject an invalid allowed-environment rule. A dynamic profile defers that check to activation. Required false permits absence. Rotation can warn or fail at activation according to the declared policy. The compiler still cannot prove local ciphertext contains API_KEY. Reuse E1263 for a missing required entry and name the environment. Errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "env.ci {\n    secrets: {\n        API_KEY: {\n            required: true\n            description: \"CI credential\"\n            allowed_environments: [\"ci\", \"prod\"]\n            rotation: max_age(90d)\n            default: none\n            generate: none\n        }\n    }\n}\ncheck: schema and static profile rules pass\nactivate: E1263 required secret named API_KEY is missing for environment ci\noutput: name only, never a secret value"
+        },
+        {
+          "key": "C",
+          "name": "Add activation metadata beside the name list",
+          "detail": "Keep the env source as a name list. Add a typed metadata command that writes non-secret records to .jet/secrets.meta. Activation reads required status, allowed environments, rotation, descriptions, defaults, and generator recipes from that record. The compiler still sees names only. Missing API_KEY shows E1263 at activation with the name only. References: crates/jetpack/src/Secrets.rs:29-42,252-306, and crates/jetpack/src/CLI/services_secrets_config.rs:21-44,488-490.",
+          "technical": "The metadata record becomes a second project input beside .jet/secrets.age. Activation checks its fields and then checks required store entries. The compiler does not cross-check the metadata file, so mismatches appear at activation. A missing required entry reports E1263 with API_KEY and the active environment. Descriptions and rotation state can appear in names-only inspection. Metadata files, errors, logs, fixtures, snapshots, and ballot text contain no secret values.",
+          "code": "env.ci {\n    secrets: [\"API_KEY\", \"PREVIEW_TOKEN\"]\n}\njetpack secrets metadata set API_KEY --required --allowed-environment ci --rotation 90d --description \"CI credential\" --default-profile none --generate none\nfile: .jet/secrets.meta\nactivate: E1263 required secret named API_KEY is missing for environment ci\noutput: name only, never a secret value"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kubernetes",
+          "note": "Kubernetes commonly declares a secret name and key separately from the workload. Availability is checked when the workload starts, which resembles activation metadata more than compiler proof.",
+          "code": "valueFrom: secretKeyRef name=app key=API_KEY"
+        },
+        {
+          "lang": "SecretSpec parity note",
+          "note": "The parity note names required, default, description, and generated value as the missing Jet metadata surface. This ballot adds allowed environments and rotation because activation needs policy boundaries.",
+          "code": "required: true\ndescription: CI credential\ndefault: none\ngenerate: none"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "B puts policy beside the name that uses it. The compiler can catch malformed declarations and profile conflicts before a run. Activation still fails closed for a missing required name and uses a name-only E1263.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A cannot express optional local secrets, allowed environments, rotation policy, or per-profile generation. Every listed name stays required and every store check waits for activation."
+          },
+          {
+            "key": "C",
+            "reason": "C gives activation useful policy but hides it from the compiler and creates a second project input. A stale or mismatched metadata record is found only when activation starts."
+          }
+        ],
+        "tradeoff": "B changes the current name list into a typed source schema and keeps local store presence as an activation check. It accepts that boundary because ciphertext is not available to the compiler and all missing-secret output stays name-only."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The draft compares the current name-only model, a full source schema, and activation metadata beside the name list. It covers compiler checks, activation timing, and name-only missing errors.",
+        "boilOcean": "The breadth pass tested inferred requiredness, environment variables as metadata, and a global policy file. Those choices hide ownership or weaken the link between a name and its rule.",
+        "hybrid": "The synthesis pass combines B's source schema with C's activation checks for local store presence. It keeps static policy visible while preserving the runtime trust boundary.",
+        "cooperative": "Cooperative review strengthened each option on its own terms. A preserves the current surface, B gives static policy checks, and C keeps source syntax small with runtime metadata.",
+        "adversarial": "Adversarial review tested missing required names, optional local names, profile mismatch, stale metadata, rotation, generated policy, and value leakage. B keeps policy visible and errors name-only."
+      },
+      "checkInstructions": "After ratification, implement only the selected metadata model and update criterion 5. Register or reuse the missing-required diagnostic. Keep every error and log name-only.",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-23T23:19:01.426Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-23"
     }
   ],
   "questions": [
@@ -191629,6 +191796,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-23T23:52:50.347Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-23T23:52:50.347Z"
+    },
+    {
+      "at": "2026-08-23T23:52:47.866Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-SECRETMETA1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-23T23:52:38.901Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-SECRETCOMPOSE1",
+      "note": "D"
+    },
+    {
+      "at": "2026-08-23T23:19:01.426Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JPK-SECRETMETA1",
+      "note": "Define secret metadata and activation rules"
+    },
+    {
+      "at": "2026-08-23T23:17:06.984Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JPK-SECRETCOMPOSE1",
+      "note": "Compose secret values from named inputs"
+    },
     {
       "at": "2026-08-23T23:06:52.942Z",
       "by": "Main",
@@ -195093,41 +195295,6 @@
       "action": "card.update",
       "ref": "c0ayuct3",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-23T02:47:17.767Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p7jo42",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T02:47:16.795Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T02:47:15.852Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04rv5on",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T02:47:15.140Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04rv5on",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T02:47:14.808Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04rv5on",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
