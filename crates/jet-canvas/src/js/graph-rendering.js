@@ -558,7 +558,7 @@
       return;
     }
     const selected = selectedNodeIds.has(node.node_id);
-    const active = debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_node_id === node.node_id;
+    const active = debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const diagnostics = nodeDiagnostics(node);
     const breakpoint = nodeBreakpoint(node);
@@ -777,6 +777,18 @@
     const reprojected = lastDrawnSource !== null && lastDrawnSource !== source;
     lastDrawnSource = source;
     latestDoc = doc;
+    if (debugOverlay && (
+      debugOverlay.revision !== doc.revision
+      || debugOverlay.source_id !== currentCanvasSourceId()
+      || (debugOverlay.debug_overlay === "running" && !debugSessionId)
+    )) {
+      debugRequestGeneration++;
+      debugSessionId = null;
+      debugSessionInfo = null;
+      debugOverlay = null;
+      syncDebugSessionPicker();
+      syncDebugActive();
+    }
     loadDebugState(doc);
     const sourceGraph = currentGraph(doc);
     if (!sourceGraph) return;
@@ -837,7 +849,7 @@
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
       if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
-      const activeWire = debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_wire_id === wire.wire_id;
+      const activeWire = debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_wire_id === wire.wire_id;
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       rememberWireEndpoint(wire, from, to);
       drawWire(wire, from, to, activeWire, selectedWire);

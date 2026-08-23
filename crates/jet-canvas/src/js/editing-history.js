@@ -423,6 +423,13 @@
         i = stop;
         continue;
       }
+      if (ch === "/" && src[i + 1] === "*") {
+        const end = src.indexOf("*/", i + 2);
+        const stop = end < 0 ? src.length : end + 2;
+        out += src.slice(i, stop);
+        i = stop;
+        continue;
+      }
       if (!isIdentifierStart(ch)) {
         out += ch;
         i += 1;
@@ -554,7 +561,13 @@
     const firstRename = (payload.source.renames || [])[0];
     pasteRenameChips = (payload.source.renames || []).map((rename) => Object.assign({}, rename));
     pendingInsertPlacement = { graph_id: graph.graph_id, title: firstRename && firstRename.to || payload.source.title.split(", ")[0] || "", x: point.x + 24, y: point.y + 24 };
-    postTransaction({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source: next, source_edit: "paste_clone" });
+    const request = postTransaction({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source: next, source_edit: "paste_clone" });
+    if (request && typeof request.then === "function") request.then((result) => {
+      if (!result || result.ok === false) {
+        pendingInsertPlacement = null;
+        pasteRenameChips = [];
+      }
+    });
     return true;
   }
 
@@ -562,9 +575,12 @@
     const pasted = [];
     const commentIds = [];
     const baseNodes = payload.staged.length ? payload.staged : payload.fallback_nodes;
+    if (baseNodes.some((item) => !item.action || !nodeDescriptorForAction(item.action)?.palette?.insertable)) {
+      showToast("Selection cannot be pasted as staged; choose a stageable node", { isError: true });
+      return false;
+    }
     for (const item of baseNodes) {
       const action = item.action;
-      if (!action) continue;
       const node = createStagedNodeFromAction(action, { x: point.x + 24 + pasted.length * 24, y: point.y + 24 + pasted.length * 18 });
       if (node) pasted.push(node.node_id);
     }
@@ -906,7 +922,7 @@
   }
 
   function syncDebugActive() {
-    document.body.classList.toggle("is-debug-active", !!(debugOverlay && debugOverlay.debug_overlay === "running"));
+    document.body.classList.toggle("is-debug-active", !!(debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running"));
     if (typeof syncDebugSessionPicker === "function") syncDebugSessionPicker();
   }
 
@@ -1005,15 +1021,14 @@
       requires_confirmation: false,
       available: true
     };
-    const render = () => renderCommandAuthority(actionEntries.find((entry) => entry.action_id === "canvas.command:check") || fallback);
+    const current = actionEntriesRevision === latestDoc.revision
+      ? actionEntries.find((entry) => entry.action_id === "canvas.command:check")
+      : null;
+    renderCommandAuthority(current || fallback);
     if (typeof loadCanvasActions === "function") {
       const actions = loadCanvasActions();
-      if (actions && typeof actions.then === "function") {
-        actions.then(render, render);
-        return;
-      }
+      if (actions && typeof actions.catch === "function") actions.catch(() => {});
     }
-    render();
   }
 
   function setDeveloperMode(on) {

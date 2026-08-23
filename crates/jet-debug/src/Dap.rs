@@ -394,7 +394,10 @@ fn parse_dap_request(body: &str) -> Result<JSONValue, &'static str> {
     if command.is_empty() {
         return Err("command must not be empty");
     }
-    if !matches!(json_get(&message, "arguments"), None | Some(JSONValue::Object(_))) {
+    if !matches!(
+        json_get(&message, "arguments"),
+        None | Some(JSONValue::Object(_))
+    ) {
         return Err("arguments must be an object");
     }
     Ok(message)
@@ -463,7 +466,10 @@ mod tests {
             r#"{"seq":1,"type":"request","command":"initialize","arguments":[]}"#,
             r#"["not","a","request"]"#,
         ] {
-            assert!(parse_dap_request(raw).is_err(), "accepted hostile DAP: {raw}");
+            assert!(
+                parse_dap_request(raw).is_err(),
+                "accepted hostile DAP: {raw}"
+            );
         }
     }
 
@@ -476,7 +482,10 @@ mod tests {
             r#"{"breakpoints":[{"line":"2"}]}"#,
         ] {
             let args = parse_json(raw).unwrap();
-            assert!(breakpoint_lines(Some(&args)).is_err(), "accepted hostile line: {raw}");
+            assert!(
+                breakpoint_lines(Some(&args)).is_err(),
+                "accepted hostile line: {raw}"
+            );
         }
         let args = parse_json(r#"{"breakpoints":[{"line":2},{"line":9}]}"#).unwrap();
         assert_eq!(breakpoint_lines(Some(&args)).unwrap(), vec![2, 9]);

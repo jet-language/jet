@@ -132,8 +132,9 @@ program meaning, plus an optional live Event projection:
   `Event`/`AsyncEvent`/`DecisionHook` observations: subscriptions, queue and
   backpressure counts, priority, failures, and lifecycle. Source calls that did
   not execute never appear.
-- `interfaces`: trait and trait-impl facts for Canvas interface views and
-  create-impl transactions. Each fact carries its module scope, associated
+- `interfaces`: source-authored trait and trait-impl facts for Canvas interface
+  views and create-impl transactions. Compiler-generated derives stay out of
+  this source-authoring surface. Each fact carries its module scope, associated
   types, canonical method signatures, required/default status, effect row, and
   source span. The Traits panel exposes source jumps and a checked
   implementation action for traits without associated-type choices; it does
@@ -243,6 +244,7 @@ Request fields:
 | `source_id` | Optional project-relative `.jet` source selected in the Canvas file rail. The revision, breakpoints, values, and execution state apply to this file. |
 | `revision` | Source revision from the graph document. |
 | `session_id` | Returned by a running response and required to continue or stop that source- and revision-bound session. Omit it to start a session. |
+| `tier` | Optional execution tier. The canonical values are `jet-dev-interpreter` for the executing `jet dev` session and `native-lldb` for a compiled debug artifact. A continuation must keep the session's tier. |
 | `commands` | Debugger commands using the `jet debug` vocabulary: `step`, `next`, `continue`, `finish`, `locals`, `print`, `backtrace`. |
 | `breakpoint_spans` | Local source-span anchors encoded as `start:end`. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
@@ -252,7 +254,7 @@ Request fields:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span"},"overlay":{"debug_overlay":"running","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"]}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"]}}
 ```
 
 The first request creates a live source-level session. A later request sends
@@ -263,6 +265,12 @@ session has no active source or graph IDs, so Canvas never pulses without a
 live session. The response includes `tier` so a compiled run can project its
 native lldb/DAP session through the same protocol while `jet dev` projects its
 executing tier's own session.
+
+`native-lldb` compiles the current source with the debugger line map, then
+uses the native lldb adapter with the same bounded replay history. If the
+native toolchain or debugger is unavailable, the request returns a structured
+diagnostic and leaves the source unchanged; it never falls back to the
+interpreter while claiming a native tier.
 
 Breakpoints that no longer map to the current source are returned with
 `"state":"stale"`; they are not silently moved. Session state is bounded to

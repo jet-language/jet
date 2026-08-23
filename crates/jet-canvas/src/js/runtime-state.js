@@ -123,6 +123,7 @@
   let renderedCommentRegions = [];
   let hoverDiagnostic = null;
   let pendingPin = null;
+  let pendingPinContext = null;
   let spaceDown = false;
   let viewMode = "graph";
   let sourceEditMode = false;

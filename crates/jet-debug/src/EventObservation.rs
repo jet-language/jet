@@ -11,8 +11,8 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     if snapshot.len() > MAX_SNAPSHOT_BYTES {
         return Err("runtime observation exceeds the 1 MiB debugger limit".to_string());
     }
-    let root = parse_json(snapshot)
-        .map_err(|()| "runtime observation is not valid JSON".to_string())?;
+    let root =
+        parse_json(snapshot).map_err(|()| "runtime observation is not valid JSON".to_string())?;
     let events = match json_get(&root, "event_observations") {
         Some(JSONValue::Array(events)) if events.len() <= MAX_EVENTS => events,
         Some(JSONValue::Array(_)) => {
@@ -45,11 +45,15 @@ pub fn render(snapshot: &str) -> Result<String, String> {
             "terminal",
         ];
         if fields.len() != KEYS.len() || fields.keys().any(|key| !KEYS.contains(&key.as_str())) {
-            return Err("runtime event observation contains an unsafe or unknown field".to_string());
+            return Err(
+                "runtime event observation contains an unsafe or unknown field".to_string(),
+            );
         }
         let sequence = unsigned(event, "sequence")?;
         if sequence <= previous {
-            return Err("runtime event observation sequence is not strictly increasing".to_string());
+            return Err(
+                "runtime event observation sequence is not strictly increasing".to_string(),
+            );
         }
         previous = sequence;
         let source = closed(event, "source", &["Event", "AsyncEvent", "DecisionHook"])?;
@@ -81,7 +85,11 @@ pub fn render(snapshot: &str) -> Result<String, String> {
         let blocked = count(event, "blocked")?;
         let running = count(event, "running")?;
         let capacity = unsigned(event, "capacity")?;
-        let overflow = closed(event, "overflow", &["None", "Block", "DropNewest", "DropOldest"])?;
+        let overflow = closed(
+            event,
+            "overflow",
+            &["None", "Block", "DropNewest", "DropOldest"],
+        )?;
         let priority = integer(event, "priority")?;
         let failure = closed(event, "failure", &["None", "Handler", "Panic"])?;
         let terminal = closed(
@@ -160,10 +168,14 @@ mod tests {
             "\"terminal\":\"None\"",
             "\"terminal\":\"None\",\"payload\":\"secret\"",
         );
-        assert!(render(&format!("{{\"event_observations\":[{unsafe_record}]}}"))
-            .unwrap_err()
-            .contains("unsafe or unknown"));
-        let too_many = std::iter::repeat_n(RECORD, 257).collect::<Vec<_>>().join(",");
+        assert!(
+            render(&format!("{{\"event_observations\":[{unsafe_record}]}}"))
+                .unwrap_err()
+                .contains("unsafe or unknown")
+        );
+        let too_many = std::iter::repeat_n(RECORD, 257)
+            .collect::<Vec<_>>()
+            .join(",");
         assert!(render(&format!("{{\"event_observations\":[{too_many}]}}"))
             .unwrap_err()
             .contains("256-record"));

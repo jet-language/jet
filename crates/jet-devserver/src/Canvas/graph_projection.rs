@@ -416,7 +416,7 @@ fn collect_interface_facts(
                 );
                 out.push(trait_fact_json(src, t, &trait_path));
             }
-            Item::Impl(i) if i.trait_name.is_some() => {
+            Item::Impl(i) if i.trait_name.is_some() && !i.is_generated_serde => {
                 let type_path = source_item_path(
                     name_ledger,
                     module_idx,
@@ -437,7 +437,11 @@ fn collect_interface_facts(
                 out.push(impl_fact_json(i, &type_path, &trait_path));
             }
             Item::Struct(s) => {
-                for block in &s.trait_impls {
+                for block in s
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
                     let type_path = source_item_path(
                         name_ledger,
                         module_idx,
@@ -462,7 +466,11 @@ fn collect_interface_facts(
                 }
             }
             Item::Enum(e) => {
-                for block in &e.trait_impls {
+                for block in e
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
                     let type_path = source_item_path(
                         name_ledger,
                         module_idx,
@@ -1342,12 +1350,8 @@ fn project_stmt(
                     g,
                     &node_id,
                     &format!("arm{}", i + 1),
-                    &if subjectless {
-                        balance_closing_parens(snippet(src, arm.cond.span()).trim())
-                    } else {
-                        dispatch_arm_pattern_label(src, &arm.cond)
-                    },
-                    arm.cond.span().into(),
+                    &dispatch_arm_pattern_label(src, &arm.cond),
+                    dispatch_arm_pattern_span(src, &arm.cond),
                 );
                 add_inline(
                     g,
@@ -1628,12 +1632,57 @@ fn pattern_pin_label(src: &str, expr: &Expr) -> String {
 /// Dispatch arms never carry their own `==`, and the leading dot on
 /// enum-variant patterns is source spelling rather than arm identity.
 fn dispatch_arm_pattern_label(src: &str, expr: &Expr) -> String {
-    let raw = snippet(src, expr.span());
-    let mut balanced = balance_closing_parens(raw.trim());
-    if let Some(pos) = balanced.find("==") {
-        balanced = balanced[pos + 2..].trim().to_string();
-    }
+    let (raw, _) = dispatch_arm_pattern_fragment(src, expr);
+    let balanced = balance_closing_parens(raw.trim());
     balanced.strip_prefix('.').unwrap_or(&balanced).to_string()
+}
+
+fn dispatch_arm_pattern_span(src: &str, expr: &Expr) -> SourceSpan {
+    let span: SourceSpan = expr.span().into();
+    let (pattern, offset) = dispatch_arm_pattern_fragment(src, expr);
+    SourceSpan {
+        start: span.start + offset,
+        end: span.start + offset + pattern.trim_end().len(),
+    }
+}
+
+fn dispatch_arm_pattern_fragment(src: &str, expr: &Expr) -> (String, usize) {
+    let span: SourceSpan = expr.span().into();
+    let source = src.get(span.start..span.end).unwrap_or("");
+    let trimmed = source.trim_start();
+    let mut offset = source.len() - trimmed.len();
+    let mut fragment = trimmed;
+
+    let dispatch_open = fragment.find("==").and_then(|pos| {
+        let after_cmp = &fragment[pos + 2..];
+        let after_space = after_cmp.trim_start();
+        after_space.starts_with('{').then(|| (pos + 2, after_cmp.len() - after_space.len()))
+    });
+    if let Some((comparator, whitespace)) = dispatch_open {
+        offset += comparator + whitespace;
+        fragment = &fragment[comparator + whitespace..];
+    } else {
+        let after_space = fragment.trim_start();
+        offset += fragment.len() - after_space.len();
+        fragment = after_space;
+    }
+    if let Some(after_open) = fragment.strip_prefix('{') {
+        offset += 1;
+        fragment = after_open.trim_start();
+        offset += after_open.len() - fragment.len();
+    }
+
+    if let Some(arrow) = fragment.rfind("->") {
+        let after_arrow = &fragment[arrow + 2..];
+        if let Some(close) = after_arrow.rfind('}') {
+            let after_body = &after_arrow[close + 1..];
+            offset += arrow + 2 + close + 1;
+            fragment = after_body.trim_start();
+            offset += after_body.len() - fragment.len();
+        }
+    }
+
+    (fragment.trim_end().to_string(), offset)
 }
 
 fn pattern_arm_edit_span(src: &str, expr: &Expr) -> SourceSpan {

@@ -444,14 +444,7 @@ fn ensure_exec_pin(
 }
 
 pub(super) fn func_source_span(f: &AST::Func) -> SourceSpan {
-    let mut start = f.name_span.start;
-    let mut end = f.name_span.end;
-    for stmt in &f.body {
-        let span = stmt.span();
-        start = start.min(span.start);
-        end = end.max(span.end);
-    }
-    SourceSpan { start, end }
+    f.span.into()
 }
 
 #[derive(Clone)]

@@ -2,6 +2,7 @@
 // Function-pin editing, transactions, graph loading, and action catalog loading.
   let canvasActionsLoading = null;
   let canvasActionsLoadingRevision = null;
+  let canvasActionsSkipRedraw = false;
   let actionEntriesRevision = null;
   function handleFunctionPinButton(ev) {
     const button = ev.target && ev.target.closest && ev.target.closest("#apply-function-pins, #set-function-output, #remove-function-output, #add-function-output");
@@ -353,6 +354,7 @@
           return;
         }
         const doc = result.doc;
+        const firstLoad = !latestDoc;
         const sourceChanged = previousSourceId !== requestedSourceId;
         const revisionChanged = !!previousRevision && previousRevision !== doc.revision;
         if (sourceChanged) {
@@ -395,7 +397,6 @@
         loadDetailToggles(doc);
         applyPendingInsertPlacement(doc);
         sourceView.textContent = doc.source_text || "";
-        const firstLoad = selectedGraphId === null;
         drawGraph(doc);
         if (doc.graphs && doc.graphs.length) {
           clearCanvasState();
@@ -411,7 +412,7 @@
         loadProject();
         loadSourceControl();
         loadProofRail();
-        loadCanvasActions();
+        loadCanvasActions({ skipRedraw: firstLoad });
         applySourceHash();
         if (firstLoad) fitGraph();
       })
@@ -435,15 +436,18 @@
     return escapeHtml(s).replace(/`/g, "&#96;");
   }
 
-  function loadCanvasActions() {
+  function loadCanvasActions(options = {}) {
+    const skipRedraw = options.skipRedraw === true;
     if (!latestDoc) return Promise.resolve(actionEntries);
     const loadRevision = latestDoc.revision;
     const loadSourceId = currentCanvasSourceId();
     if (canvasActionsLoading) {
+      if (skipRedraw) canvasActionsSkipRedraw = true;
       if (canvasActionsLoadingRevision === loadRevision) return canvasActionsLoading;
-      return canvasActionsLoading.then(() => loadCanvasActions());
+      return canvasActionsLoading.then(() => loadCanvasActions(options));
     }
     canvasActionsLoadingRevision = loadRevision;
+    canvasActionsSkipRedraw = skipRedraw;
     canvasActionsLoading = fetch(queryUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -492,13 +496,14 @@
         actionEntries = canvasActions;
         actionEntriesRevision = loadRevision;
         if (canvasActions.some((action) => action.kind === "canvas.core_catalog")) coreCatalogLoaded = true;
-        if (latestDoc && latestDoc.revision === loadRevision && !document.getElementById("execute-command-authority")) drawGraph(latestDoc);
+        if (latestDoc && latestDoc.revision === loadRevision && !document.getElementById("execute-command-authority") && !canvasActionsSkipRedraw) drawGraph(latestDoc);
         return actionEntries;
       })
       .catch(() => actionEntries)
       .finally(() => {
         canvasActionsLoading = null;
         canvasActionsLoadingRevision = null;
+        canvasActionsSkipRedraw = false;
       });
     return canvasActionsLoading;
   }

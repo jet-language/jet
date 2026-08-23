@@ -38,12 +38,26 @@ enum IO {
     Scripted {
         inputs: std::collections::VecDeque<String>,
         out: String,
+        /// Keep the inferior at the current stop when scripted input ends.
+        /// Canvas uses this to expose one live command boundary; the existing
+        /// transcript API retains its run-to-completion behavior.
+        pause_on_input_end: bool,
     },
 }
 
 impl IO {
     fn is_scripted(&self) -> bool {
         matches!(self, IO::Scripted { .. })
+    }
+
+    fn pause_on_input_end(&self) -> bool {
+        matches!(
+            self,
+            IO::Scripted {
+                pause_on_input_end: true,
+                ..
+            }
+        )
     }
 }
 
@@ -55,7 +69,7 @@ pub fn run(
     jet_src: &str,
     raw_frames: bool,
 ) -> i32 {
-    let (code, _captured) = run_with_io(
+    let (code, _captured, _paused) = run_with_io(
         binary,
         rust_file,
         rust_src,
@@ -86,11 +100,51 @@ pub fn run_scripted(
     let io = IO::Scripted {
         inputs: queue,
         out: String::new(),
+        pause_on_input_end: false,
     };
-    let (_code, captured) = run_with_io(
+    let (_code, captured, _paused) = run_with_io(
         binary, rust_file, rust_src, jet_file, jet_src, raw_frames, io,
     );
     captured
+}
+
+/// Scripted native session with one live command boundary. The inferior is
+/// restarted from the same compiled artifact on each replay, so the caller
+/// can keep a bounded command history while still using the native debugger
+/// for the current execution tier.
+pub fn run_scripted_paused(
+    binary: &Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+    raw_frames: bool,
+    inputs: &[&str],
+) -> (i32, String, bool) {
+    run_scripted_mode(
+        binary, rust_file, rust_src, jet_file, jet_src, raw_frames, inputs, true,
+    )
+}
+
+pub(crate) fn run_scripted_mode(
+    binary: &Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+    raw_frames: bool,
+    inputs: &[&str],
+    pause_on_input_end: bool,
+) -> (i32, String, bool) {
+    let queue: std::collections::VecDeque<String> = inputs.iter().map(|s| s.to_string()).collect();
+    let io = IO::Scripted {
+        inputs: queue,
+        out: String::new(),
+        pause_on_input_end,
+    };
+    run_with_io(
+        binary, rust_file, rust_src, jet_file, jet_src, raw_frames, io,
+    )
 }
 
 fn run_with_io(
@@ -101,7 +155,7 @@ fn run_with_io(
     jet_src: &str,
     raw_frames: bool,
     mut io: IO,
-) -> (i32, String) {
+) -> (i32, String, bool) {
     if !Inferior::available() {
         let msg = format!(
             "error: native `jet debug` needs `lldb` on PATH, which isn't installed\n fix: install lldb for the native backend (FFI/tasks/#Unsafe/native-std), or use `jet debug {}` on a program the step-1 interpreter covers",
@@ -115,14 +169,20 @@ fn run_with_io(
         } else {
             eprintln!("{}", msg);
         }
-        return (ExitCodes::USER_ERROR, io_into_output(io));
+        return (ExitCodes::USER_ERROR, io_into_output(io), false);
     }
     let map = LineMap::build(rust_src);
     let mut inf = match Inferior::spawn(binary) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("error: couldn't launch lldb: {}", e);
-            return (ExitCodes::ICE, io_into_output(io));
+            report_error(
+                &mut io,
+                &format!(
+                    "error: native debugger could not launch the compiled session: {}",
+                    e
+                ),
+            );
+            return (ExitCodes::ICE, io_into_output(io), false);
         }
     };
     // Stop at `fn run`'s first REAL statement, by file:line — the same place
@@ -132,18 +192,33 @@ fn run_with_io(
     // live lldb — see the module doc); a marker-based file:line breakpoint has
     // no such ambiguity.
     let Some(entry_line) = map.main_entry_line(rust_src) else {
-        eprintln!("error: internal: couldn't find a line-mapped statement inside `fn run` — compiler bug (I2)");
-        return (ExitCodes::ICE, io_into_output(io));
+        report_error(
+            &mut io,
+            "error: native debugger could not find a source-mapped entry statement",
+        );
+        return (ExitCodes::ICE, io_into_output(io), false);
     };
     if let Err(e) = inf.set_breakpoint(rust_file, entry_line) {
-        eprintln!("error: lldb command failed: {}", e);
-        return (ExitCodes::ICE, io_into_output(io));
+        report_error(
+            &mut io,
+            &format!(
+                "error: native debugger could not set the source breakpoint: {}",
+                e
+            ),
+        );
+        return (ExitCodes::ICE, io_into_output(io), false);
     }
     let result = match inf.resume_and_locate("run") {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("error: couldn't run the program under lldb: {}", e);
-            return (ExitCodes::ICE, io_into_output(io));
+            report_error(
+                &mut io,
+                &format!(
+                    "error: native debugger could not start the compiled session: {}",
+                    e
+                ),
+            );
+            return (ExitCodes::ICE, io_into_output(io), false);
         }
     };
     let mut session = Session {
@@ -158,16 +233,25 @@ fn run_with_io(
         io,
     };
     session.handle_resume(result);
-    let code = session.prompt_loop();
+    let (code, paused) = session.prompt_loop();
     let io = session.io;
     session.inf.quit();
-    (code, io_into_output(io))
+    (code, io_into_output(io), paused)
 }
 
 fn io_into_output(io: IO) -> String {
     match io {
         IO::Scripted { out, .. } => out,
         IO::Interactive => String::new(),
+    }
+}
+
+fn report_error(io: &mut IO, message: &str) {
+    if let IO::Scripted { out, .. } = io {
+        out.push_str(message);
+        out.push('\n');
+    } else {
+        eprintln!("{}", message);
     }
 }
 
@@ -211,7 +295,7 @@ impl Session {
                     Err(_) => None,
                 }
             }
-            IO::Scripted { inputs, out } => {
+            IO::Scripted { inputs, out, .. } => {
                 let next = inputs.pop_front()?;
                 out.push_str(&format!("{} {}\n", Syntax::DBG_PROMPT, next.trim()));
                 Some(next.trim().to_string())
@@ -470,17 +554,21 @@ commands:
     }
 
     /// Run the `(jet)` prompt until the program exits or the user quits.
-    /// Returns the process exit code.
-    fn prompt_loop(&mut self) -> i32 {
+    /// Returns the process exit code and whether scripted input ended at a
+    /// live stop.
+    fn prompt_loop(&mut self) -> (i32, bool) {
         loop {
             if self.exited {
-                return ExitCodes::OK;
+                return (ExitCodes::OK, false);
             }
             let cmd = match self.read_command() {
                 Some(c) => c,
                 None => {
+                    if self.io.pause_on_input_end() {
+                        return (ExitCodes::OK, true);
+                    }
                     self.run_to_completion();
-                    return ExitCodes::OK;
+                    return (ExitCodes::OK, false);
                 }
             };
             if cmd.is_empty() {
@@ -508,7 +596,7 @@ commands:
                 v if v == Syntax::DBG_BACKTRACE || v == "bt" => self.cmd_backtrace(),
                 v if v == Syntax::DBG_HELP || v == "h" => self.cmd_help(),
                 v if v == Syntax::DBG_QUIT || v == "q" => {
-                    return ExitCodes::USER_ERROR;
+                    return (ExitCodes::USER_ERROR, false);
                 }
                 other => self.emit(&format!(
                     "unknown command `{}` — type `help` for the verbs",

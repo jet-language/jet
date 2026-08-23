@@ -401,8 +401,9 @@ no dead controls, which is exactly #377's exit criterion.
 4. Extract `interaction.js` FSM from `input-events.js` + `graph-rendering.js`;
    add gesture scenarios for node-drag reposition, marquee, and **data-pin
    drag-to-wire** (the missing Blueprint gesture).
-5. Convert Details to the field-descriptor renderer; close #377's dead-control
-   bar.
+5. **Implemented; browser proof pending (#493).** Convert Details to the
+   field-descriptor renderer; #377 fills and verifies the product field set
+   and dead-control bar.
 
 Each step is guarded by the M0 harness — the anti-regression proof the last four
 attempts lacked.

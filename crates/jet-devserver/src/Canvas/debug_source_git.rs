@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +18,38 @@ const MAX_DEBUG_COMMANDS: usize = 64;
 const MAX_DEBUG_WATCHES: usize = 32;
 const MAX_DEBUG_BREAKPOINTS: usize = 128;
 const MAX_DEBUG_COMMAND_BYTES: usize = 256;
+const MAX_DEBUG_TRACE_LINES: usize = 128;
+const MAX_DEBUG_CALL_STACK: usize = 32;
+const MAX_DEBUG_TRACE_BYTES: usize = 32 * 1024;
+
+/// The only debugger engines a Canvas session may claim. The wire names are
+/// deliberately explicit: a client must never mistake a native compiled run
+/// for the `jet dev` interpreter session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DebugTier {
+    Interpreter,
+    NativeLldb,
+}
+
+impl DebugTier {
+    pub(super) fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("jet-dev-interpreter") {
+            "jet-dev-interpreter" => Ok(Self::Interpreter),
+            "native-lldb" => Ok(Self::NativeLldb),
+            _ => Err(debug_error(
+                "bad_request",
+                "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`",
+            )),
+        }
+    }
+
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::Interpreter => "jet-dev-interpreter",
+            Self::NativeLldb => "native-lldb",
+        }
+    }
+}
 
 /// Live Canvas debugger ownership. A session is source- and revision-bound;
 /// the server replays only its bounded command history through the same Jet
@@ -25,20 +58,43 @@ const MAX_DEBUG_COMMAND_BYTES: usize = 256;
 pub struct DebugSessions {
     next_id: AtomicU64,
     sessions: Mutex<HashMap<String, DebugSession>>,
+    pause_on_input_end: bool,
 }
 
 struct DebugSession {
     path: PathBuf,
     revision: String,
+    tier: DebugTier,
+    created: u64,
     breakpoints: Vec<usize>,
     commands: Vec<String>,
     watches: Vec<String>,
+    native: Option<NativeDebugArtifact>,
+}
+
+/// Compiled debugger material owned by one live session. It is deliberately
+/// session-scoped: a new source revision gets a new compile, and dropping a
+/// finished/stopped session removes only this private scratch directory.
+struct NativeDebugArtifact {
+    dir: PathBuf,
+    binary: PathBuf,
+    rust_file: String,
+    rust_source: String,
+    jet_file: String,
+    jet_source: String,
+}
+
+impl Drop for NativeDebugArtifact {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
 }
 
 pub(crate) struct DebugExecution {
     pub(crate) id: String,
     pub(crate) status: jet_debug::SessionStatus,
     pub(crate) transcript: String,
+    pub(crate) tier: DebugTier,
 }
 
 impl DebugSessions {
@@ -46,6 +102,15 @@ impl DebugSessions {
         Self {
             next_id: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
+            pause_on_input_end: true,
+        }
+    }
+
+    pub(crate) fn one_shot() -> Self {
+        Self {
+            next_id: AtomicU64::new(1),
+            sessions: Mutex::new(HashMap::new()),
+            pause_on_input_end: false,
         }
     }
 
@@ -57,6 +122,7 @@ impl DebugSessions {
         commands: &[String],
         breakpoints: &[usize],
         watches: &[String],
+        tier: DebugTier,
     ) -> Result<DebugExecution, String> {
         validate_debug_limits(commands, breakpoints, watches)?;
         let path = canonical_path(path);
@@ -79,11 +145,10 @@ impl DebugSessions {
                     "debug session is stale for the current source revision",
                 ));
             }
-            if session.breakpoints != breakpoints {
-                sessions.remove(id);
+            if session.tier != tier {
                 return Err(debug_error(
-                    "session",
-                    "breakpoints changed; start a new debug session",
+                    "conflict",
+                    "debug session tier does not match the requested execution tier",
                 ));
             }
             let mut next_commands = commands.to_vec();
@@ -96,31 +161,44 @@ impl DebugSessions {
                     "debug session command history is full; start a new session",
                 ));
             }
+            // Breakpoints and watches are editor state, not session identity.
+            // Updating them keeps one live session usable while preserving the
+            // same source revision and bounded replay history.
+            session.breakpoints = breakpoints.to_vec();
             session.commands.extend(next_commands);
             session.watches = watches.to_vec();
             id.to_string()
         } else {
             if sessions.len() >= MAX_DEBUG_SESSIONS {
-                if let Some(oldest) = sessions.keys().next().cloned() {
+                if let Some(oldest) = sessions
+                    .iter()
+                    .min_by_key(|(_, session)| session.created)
+                    .map(|(id, _)| id.clone())
+                {
                     sessions.remove(&oldest);
                 }
             }
-            let id = format!(
-                "canvas-debug-{}",
-                self.next_id.fetch_add(1, Ordering::Relaxed)
-            );
+            let serial = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let id = format!("canvas-debug-{serial}");
             let mut history = commands.to_vec();
             if history.is_empty() {
                 history.push("s".to_string());
             }
+            let native = match tier {
+                DebugTier::Interpreter => None,
+                DebugTier::NativeLldb => Some(NativeDebugArtifact::build(&path, &id)?),
+            };
             sessions.insert(
                 id.clone(),
                 DebugSession {
                     path: path.clone(),
                     revision: revision.to_string(),
+                    tier,
+                    created: serial,
                     breakpoints: breakpoints.to_vec(),
                     commands: history,
                     watches: watches.to_vec(),
+                    native,
                 },
             );
             id
@@ -129,6 +207,7 @@ impl DebugSessions {
         let session = sessions
             .get(&id)
             .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
+        let session_tier = session.tier;
         let mut inputs = session
             .breakpoints
             .iter()
@@ -139,7 +218,44 @@ impl DebugSessions {
         inputs.extend(session.watches.iter().map(|watch| format!("p {watch}")));
         inputs.push("bt".to_string());
         let refs = inputs.iter().map(String::as_str).collect::<Vec<_>>();
-        let result = jet_debug::run_session_result_paused(&path.display().to_string(), &refs);
+        let result = match session_tier {
+            DebugTier::Interpreter => {
+                if self.pause_on_input_end {
+                    jet_debug::run_session_result_paused(&path.display().to_string(), &refs)
+                } else {
+                    jet_debug::run_session_result(&path.display().to_string(), &refs)
+                }
+            }
+            DebugTier::NativeLldb => {
+                let Some(native) = session.native.as_ref() else {
+                    return Err(debug_error(
+                        "session",
+                        "native debug session lost its compiled artifact",
+                    ));
+                };
+                if self.pause_on_input_end {
+                    jet_debug::run_native_session_result_paused(
+                        &native.binary,
+                        &native.rust_file,
+                        &native.rust_source,
+                        &native.jet_file,
+                        &native.jet_source,
+                        false,
+                        &refs,
+                    )
+                } else {
+                    jet_debug::run_native_session_result(
+                        &native.binary,
+                        &native.rust_file,
+                        &native.rust_source,
+                        &native.jet_file,
+                        &native.jet_source,
+                        false,
+                        &refs,
+                    )
+                }
+            }
+        };
         if result.status != jet_debug::SessionStatus::Running {
             sessions.remove(&id);
         }
@@ -147,14 +263,15 @@ impl DebugSessions {
             id,
             status: result.status,
             transcript: result.transcript,
+            tier: session_tier,
         })
     }
 
-    pub(crate) fn stop(&self, id: &str) -> bool {
+    pub(crate) fn stop(&self, id: &str) -> Option<DebugTier> {
         self.sessions
             .lock()
-            .map(|mut sessions| sessions.remove(id).is_some())
-            .unwrap_or(false)
+            .ok()
+            .and_then(|mut sessions| sessions.remove(id).map(|session| session.tier))
     }
 }
 
@@ -188,7 +305,147 @@ fn validate_debug_limits(
             "Canvas debug command and watch names are limited to 256 bytes",
         ));
     }
+    for command in commands {
+        validate_debug_command(command)?;
+    }
+    for watch in watches {
+        if watch.trim().is_empty() || watch.split_whitespace().count() != 1 {
+            return Err(debug_error(
+                "unsupported",
+                "Canvas debug watches must be one source-level name",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn validate_debug_command(command: &str) -> Result<(), String> {
+    let mut parts = command.split_whitespace();
+    let Some(verb) = parts.next() else {
+        return Err(debug_error(
+            "unsupported",
+            "Canvas debug commands cannot be empty",
+        ));
+    };
+    let arg = parts.next();
+    let extra = parts.next().is_some();
+    let valid = match verb {
+        "step" | "s" | "next" | "n" | "continue" | "c" | "finish" | "f" | "locals"
+        | "backtrace" | "bt" | "help" | "h" | "quit" | "q" | "list" | "l" => {
+            arg.is_none() && !extra
+        }
+        "print" | "p" => arg.is_some() && !extra,
+        "break" | "b" => {
+            arg.and_then(|value| value.parse::<usize>().ok())
+                .is_some_and(|line| line >= 1)
+                && !extra
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(debug_error(
+            "unsupported",
+            "Canvas debug command is not in the source-level debugger vocabulary",
+        ))
+    }
+}
+
+impl NativeDebugArtifact {
+    fn build(path: &Path, id: &str) -> Result<Self, String> {
+        let jet_source = fs::read_to_string(path)
+            .map_err(|error| debug_error("io", &format!("couldn't read debug source: {error}")))?;
+        let output = jet_driver::run_compiler_work(|| {
+            jet_driver::Driver::compile_bundle_path_opts_dbg(
+                &path.display().to_string(),
+                jet_driver::Sema::CompileMode::Run,
+                false,
+                jet_driver::Policy::GateSet::default(),
+                false,
+                true,
+                None,
+            )
+        })
+        .map_err(|diags| debug_diagnostics_error(path, &jet_source, &diags))?;
+
+        let dir = std::env::temp_dir().join(format!("jet-canvas-debug-{id}"));
+        fs::create_dir_all(&dir).map_err(|error| {
+            debug_error(
+                "io",
+                &format!("couldn't prepare native Canvas debug storage: {error}"),
+            )
+        })?;
+        let rust_file = "canvas_debug.rs".to_string();
+        let rust_path = dir.join(&rust_file);
+        let binary = dir.join("canvas_debug");
+        if let Err(error) = fs::write(&rust_path, &output.rust) {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(debug_error(
+                "io",
+                &format!("couldn't write native Canvas debug artifact: {error}"),
+            ));
+        }
+
+        let mut rustc = Command::new("rustc");
+        rustc
+            .args([
+                "--edition",
+                "2021",
+                "-C",
+                "debuginfo=2",
+                "-C",
+                "opt-level=0",
+            ])
+            .arg("--crate-name")
+            .arg("jet_canvas_debug")
+            .arg(&rust_path)
+            .arg("-o")
+            .arg(&binary);
+        if let Some(link) = &output.ffi {
+            rustc
+                .arg("--extern")
+                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+                rustc
+                    .arg("-L")
+                    .arg(format!("dependency={}", deps_dir.display()));
+            }
+        }
+        rustc.args(&output.clinks);
+        let compiled = rustc.output().map_err(|error| {
+            debug_error(
+                "diagnostic",
+                &format!("native Canvas debugger is unavailable: couldn't run the native compiler ({error})"),
+            )
+        });
+        let compiled = match compiled {
+            Ok(output) if output.status.success() => output,
+            Ok(_) => {
+                let _ = fs::remove_dir_all(&dir);
+                return Err(debug_error(
+                    "diagnostic",
+                    "native Canvas debugger could not build the compiled source; the Jet source was kept intact",
+                ));
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(&dir);
+                return Err(error);
+            }
+        };
+        let _ = compiled;
+        Ok(Self {
+            dir,
+            binary,
+            rust_file,
+            rust_source: output.rust,
+            jet_file: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string()),
+            jet_source,
+        })
+    }
 }
 
 pub(super) fn debug_ok(
@@ -197,6 +454,8 @@ pub(super) fn debug_ok(
     transcript: &str,
     status: jet_debug::SessionStatus,
     session_id: &str,
+    tier: DebugTier,
+    source_id: &str,
     breakpoint_lines: &[usize],
     stale_breakpoints: &[String],
     watches: &[String],
@@ -219,13 +478,20 @@ pub(super) fn debug_ok(
         jet_debug::SessionStatus::Running => "running",
         jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => "finished",
     };
+    let revision = source_revision(src);
     format!(
-        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":\"jet-dev-interpreter\",\"persistence\":\"local-source-span\"}},\"overlay\":{{\"debug_overlay\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":{{\"debug_overlay\":{},\"source_id\":{},\"revision\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
         DEBUG_SCHEMA_VERSION,
-        json_str(&source_revision(src)),
+        json_str(source_id),
+        json_str(&revision),
         json_str(session_id),
         json_str(overlay),
+        json_str(tier.wire_name()),
+        json_str(source_id),
+        json_str(&revision),
         json_str(overlay),
+        json_str(source_id),
+        json_str(&revision),
         active_line
             .map(|line| line.to_string())
             .unwrap_or_else(|| "null".to_string()),
@@ -242,21 +508,44 @@ pub(super) fn debug_ok(
 }
 
 pub(super) fn debug_error(kind: &str, message: &str) -> String {
+    let message = bounded_message(message);
     format!(
         "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         DEBUG_SCHEMA_VERSION,
         json_str(kind),
-        json_str(message)
+        json_str(&message)
     )
 }
 
-pub(super) fn debug_stop_ok(src: &str, session_id: &str) -> String {
+pub(super) fn debug_stop_ok(
+    src: &str,
+    session_id: &str,
+    tier: DebugTier,
+    source_id: &str,
+) -> String {
+    let revision = source_revision(src);
     format!(
-        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":{},\"state\":\"stopped\",\"tier\":\"jet-dev-interpreter\",\"persistence\":\"local-source-span\"}},\"overlay\":null}}",
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":\"stopped\",\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":null}}",
         DEBUG_SCHEMA_VERSION,
-        json_str(&source_revision(src)),
-        json_str(session_id)
+        json_str(source_id),
+        json_str(&revision),
+        json_str(session_id),
+        json_str(tier.wire_name()),
+        json_str(source_id),
+        json_str(&revision)
     )
+}
+
+fn bounded_message(message: &str) -> String {
+    const MAX_MESSAGE_BYTES: usize = 16 * 1024;
+    if message.len() <= MAX_MESSAGE_BYTES {
+        return message.to_string();
+    }
+    let mut end = MAX_MESSAGE_BYTES.saturating_sub(" [truncated]".len());
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{} [truncated]", &message[..end])
 }
 
 pub(super) fn debug_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
@@ -474,7 +763,7 @@ fn call_stack_json(transcript: &str) -> String {
         .lines()
         .filter(|line| line.starts_with('#') && line.contains(" at "))
         .rev()
-        .take(32)
+        .take(MAX_DEBUG_CALL_STACK)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
@@ -484,16 +773,18 @@ fn call_stack_json(transcript: &str) -> String {
 }
 
 fn trace_json(transcript: &str) -> String {
-    transcript
-        .lines()
-        .rev()
-        .take(128)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(json_str)
-        .collect::<Vec<_>>()
-        .join(",")
+    let mut entries = Vec::new();
+    let mut bytes = 0usize;
+    for line in transcript.lines().rev().take(MAX_DEBUG_TRACE_LINES) {
+        let entry = json_str(line);
+        if bytes + entry.len() > MAX_DEBUG_TRACE_BYTES {
+            break;
+        }
+        bytes += entry.len();
+        entries.push(entry);
+    }
+    entries.reverse();
+    entries.join(",")
 }
 
 pub(super) fn canonical_path(path: &Path) -> PathBuf {
@@ -573,6 +864,8 @@ mod tests {
             transcript,
             jet_debug::SessionStatus::Running,
             "test-session",
+            DebugTier::Interpreter,
+            "main.jet",
             &[],
             &[],
             &[],

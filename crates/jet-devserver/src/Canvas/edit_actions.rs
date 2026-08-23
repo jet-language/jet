@@ -1555,7 +1555,7 @@ pub(super) fn apply_append_multi_input(
         ));
     };
     let (span, count) = match target {
-        MultiInputTarget::List { span, count } => (span, count),
+        MultiInputTarget::List { span, count, .. } => (span, count),
     };
     let insert = src
         .get(span.start..span.end)
@@ -1988,7 +1988,11 @@ fn find_pattern_span_in_children(
 }
 
 enum MultiInputTarget {
-    List { span: SourceSpan, count: usize },
+    List {
+        span: SourceSpan,
+        count: usize,
+        item_spans: Vec<SourceSpan>,
+    },
 }
 
 fn find_multi_input_target(
@@ -2104,10 +2108,12 @@ fn find_multi_input_in_stmt(
         | Stmt::Transact { body, .. }
         | Stmt::ScopeMember { body, .. } => find_multi_input_target(body, node_span, out),
         Stmt::ComptimeIf {
+            cond,
             then_body,
             else_body,
             ..
         } => {
+            find_multi_input_in_expr(cond, node_span, out);
             find_multi_input_target(then_body, node_span, out);
             if let Some(body) = else_body {
                 find_multi_input_target(body, node_span, out);
@@ -2149,6 +2155,7 @@ fn find_multi_input_in_expr(
             *out = Some(MultiInputTarget::List {
                 span: (*span).into(),
                 count: items.len(),
+                item_spans: items.iter().map(|item| item.span().into()).collect(),
             });
         }
         _ => walk_expr_children_for_multi_input(expr, node_span, out),
@@ -2262,110 +2269,13 @@ fn multi_input_element_belongs_to_graph(
     node_span: SourceSpan,
     element_span: SourceSpan,
 ) -> bool {
-    let mut found = false;
-    find_multi_input_element(stmts, node_span, element_span, &mut found);
-    found
-}
-
-fn find_multi_input_element(
-    stmts: &[Stmt],
-    node_span: SourceSpan,
-    element_span: SourceSpan,
-    found: &mut bool,
-) {
-    if *found {
-        return;
-    }
     let mut target = None;
     find_multi_input_target(stmts, node_span, &mut target);
-    let _ = target;
-    for stmt in stmts {
-        find_multi_input_element_in_stmt(stmt, node_span, element_span, found);
-    }
-}
-
-fn find_multi_input_element_in_stmt(
-    stmt: &Stmt,
-    node_span: SourceSpan,
-    element_span: SourceSpan,
-    found: &mut bool,
-) {
-    match stmt {
-        Stmt::Val(b) => find_multi_input_element_in_expr(&b.init, node_span, element_span, found),
-        Stmt::Expr(e)
-        | Stmt::DeferClose { close: e, .. }
-        | Stmt::Return(Some(e), _)
-        | Stmt::Yield(e, _)
-        | Stmt::BreakValue(e, _)
-        | Stmt::BreakLabelValue(_, _, e, _) => {
-            find_multi_input_element_in_expr(e, node_span, element_span, found)
-        }
-        Stmt::Assign { value, .. } => {
-            find_multi_input_element_in_expr(value, node_span, element_span, found)
-        }
-        Stmt::For { kind, body, .. } => {
-            match kind {
-                AST::ForKind::Range {
-                    start,
-                    end,
-                    step,
-                    exclusive: _,
-                } => {
-                    find_multi_input_element_in_expr(start, node_span, element_span, found);
-                    find_multi_input_element_in_expr(end, node_span, element_span, found);
-                    if let Some(step) = step {
-                        find_multi_input_element_in_expr(step, node_span, element_span, found);
-                    }
-                }
-                AST::ForKind::In { collection, step } => {
-                    find_multi_input_element_in_expr(collection, node_span, element_span, found);
-                    if let Some(step) = step {
-                        find_multi_input_element_in_expr(step, node_span, element_span, found);
-                    }
-                }
-            }
-            find_multi_input_element(body, node_span, element_span, found);
-        }
-        Stmt::CountedLoop {
-            init,
-            cond,
-            step,
-            body,
-            ..
-        } => {
-            find_multi_input_element_in_expr(&init.init, node_span, element_span, found);
-            find_multi_input_element_in_expr(cond, node_span, element_span, found);
-            if let Some(step) = step {
-                find_multi_input_element_in_stmt(step, node_span, element_span, found);
-            }
-            find_multi_input_element(body, node_span, element_span, found);
-        }
-        _ => {}
-    }
-}
-
-fn find_multi_input_element_in_expr(
-    expr: &Expr,
-    node_span: SourceSpan,
-    element_span: SourceSpan,
-    found: &mut bool,
-) {
-    if *found {
-        return;
-    }
-    match expr {
-        Expr::ListLit(items, span) if same_span((*span).into(), node_span) => {
-            *found = items
-                .iter()
-                .any(|item| same_span(item.span().into(), element_span));
-        }
-        _ => {
-            let mut nested = None;
-            walk_expr_children_for_multi_input(expr, node_span, &mut nested);
-            if nested.is_some() {
-                *found = true;
-            }
-        }
+    match target {
+        Some(MultiInputTarget::List { item_spans, .. }) => item_spans
+            .iter()
+            .any(|item_span| same_span(*item_span, element_span)),
+        None => false,
     }
 }
 

@@ -163,10 +163,29 @@ async function bigClickProjectFile(ctx, path) {
   const point = await ctx.driver.evaluate(`(() => {
     const element = document.querySelector('[data-project-file="${path}"]');
     if (!element) return null;
-    const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    const drawer = document.getElementById("left-drawer");
+    const drawerRect = drawer && drawer.getBoundingClientRect();
+    let rect = element.getBoundingClientRect();
+    if (drawer && drawerRect) {
+      if (rect.bottom > drawerRect.bottom - 8) drawer.scrollTop += rect.bottom - (drawerRect.bottom - 8);
+      if (rect.top < drawerRect.top + 8) drawer.scrollTop -= (drawerRect.top + 8) - rect.top;
+      rect = element.getBoundingClientRect();
+    }
+    const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    if (drawerRect) {
+      const visibleLeft = Math.max(rect.left, drawerRect.left + 4);
+      const visibleRight = Math.min(rect.right, drawerRect.right - 4);
+      const visibleTop = Math.max(rect.top, drawerRect.top + 4);
+      const visibleBottom = Math.min(rect.bottom, drawerRect.bottom - 4);
+      if (visibleRight >= visibleLeft) point.x = (visibleLeft + visibleRight) / 2;
+      if (visibleBottom >= visibleTop) point.y = (visibleTop + visibleBottom) / 2;
+    }
+    const top = document.elementFromPoint(point.x, point.y);
+    return { ...point, card: { top: rect.top, bottom: rect.bottom, width: rect.width }, drawer: drawerRect && { top: drawerRect.top, bottom: drawerRect.bottom, width: drawerRect.width }, top: top && { tag: top.tagName, id: top.id, className: top.className, file: top.getAttribute("data-project-file") } };
   })()`);
   if (!point) throw new Error(`project file card missing: ${path}`);
+  console.log(`BIG_PROJECT_FILE_CLICK ${JSON.stringify({ path, point })}`);
   await ctx.driver.click(point.x, point.y);
 }
 
@@ -1460,8 +1479,10 @@ async function selectInlineExpression(ctx, graphTitle, predicate, label) {
 async function expectVisibleRefusal(ctx, text, label) {
   await ctx.waitFor(async () => {
     const toast = await ctx.driver.evaluate(`document.getElementById("toast").textContent`);
+    const wireStatus = await ctx.driver.evaluate(`document.getElementById("wire-status") ? document.getElementById("wire-status").textContent : ""`);
     const problems = await ctx.problems();
     return String(toast || "").toLowerCase().includes(text.toLowerCase())
+      || String(wireStatus || "").toLowerCase().includes(text.toLowerCase())
       || problems.some((problem) => String(problem.rendered || problem.what || "").toLowerCase().includes(text.toLowerCase()));
   }, label);
 }
@@ -2089,6 +2110,10 @@ fn helper(value: Int) Int -[]> {
     return value
 }
 
+fn twice(value: Int) Int -[]> {
+    return value + value
+}
+
 fn use_callback(callback: fn(Int) Int -[]>) {
     print("callback")
 }
@@ -2103,6 +2128,7 @@ fn write_int(value: &Int) {}
 fn run() ParseError! {
     source := 4
     text :: "text"
+    call_target :: 0
     bad :: 0
     other :: 1
     use_callback(helper)
@@ -2123,6 +2149,12 @@ fn other_graph() {
 `);
     await ctx.openCanvas();
     await ctx.switchGraph("run");
+
+    await dragDataPin(ctx, "run", "twice", "result", "call_target", "value", true);
+    await ctx.waitFor(async () => (await ctx.source()).includes("call_target :: twice(2)"), "call result source transaction");
+    let graph = graphByTitle(await ctx.graph(), "run");
+    if (!dataWireExists(graph, "twice", "call_target")) throw new Error("call-result data wire missing");
+    await assertCleanSourceSync(ctx, ["call result drag"]);
 
     const refusal = async (fromTitle, fromPin, toTitle, toPin, reason) => {
       const before = await ctx.source();
@@ -2159,6 +2191,10 @@ fn other_graph() {
     await expectVisibleRefusal(ctx, "source changed since drag started", "stale-revision refusal");
     if (await ctx.source() === staleBase || !(await ctx.source()).includes("other :: 2")) throw new Error("stale-revision setup was lost");
     if (staleStart.fromPin.pin_id === staleTarget.pin_id) throw new Error("stale test did not use distinct pins");
+    const staleBeforeDrop = await ctx.source();
+    await finishDataPinDrag(ctx, staleTarget);
+    await expectVisibleRefusal(ctx, "source changed since drag started", "stale-revision drop refusal");
+    if (await ctx.source() !== staleBeforeDrop) throw new Error("stale-revision drop changed source");
 
     await ctx.switchGraph("run");
     await ctx.driver.evaluate(`window.__jetCanvasGatePosts = 0; (() => {
@@ -2380,6 +2416,12 @@ fn run() {
     const restored = await ctx.undo();
     if (restored !== edited) throw new Error(`undo did not restore edited pattern arm\nexpected:\n${edited}\nactual:\n${restored}`);
     if (before === restored) throw new Error("pattern add/edit/remove cycle did not change source before undo checkpoint");
+    await ctx.openCanvas();
+    const reloaded = graphByTitle(await ctx.graph(), "choose");
+    const arm2 = (reloaded.pins || []).find((pin) => pin.name === "arm2");
+    if (!arm2 || !arm2.pattern_source_span || !arm2.source_span || arm2.pattern_source_span.start >= arm2.pattern_source_span.end) {
+      throw new Error(`reloaded pattern arm lost source provenance: ${JSON.stringify({ arm2 })}`);
+    }
   },
 
   "pattern-arm-invalid-refused": async (ctx) => {
@@ -2440,14 +2482,36 @@ fn run() {
     await ctx.pickEntry("Append input");
     await ctx.waitFor(async () => (await ctx.source()).includes("[1, 2, 3, 4]"), "list append");
     await assertSourceSync(ctx, ["list append"]);
+    const appended = await ctx.source();
+    const projected = graphByTitle(await ctx.graph(), "demo");
+    const listNode = (projected.nodes || []).find((candidate) => candidate.title === "list");
+    const item4 = listNode && (projected.pins || []).find((pin) => pin.node_id === listNode.node_id && pin.name === "item4");
+    if (!item4 || item4.type !== "Int" || !item4.source_span || item4.source_span.start >= item4.source_span.end) {
+      throw new Error(`list append lost typed source provenance: ${JSON.stringify({ listNode, item4 })}`);
+    }
 
     let item = await ctx.pin("list", "item4");
     await ctx.driver.rightClick(item.x, item.y);
     await ctx.expectMenu("Remove element");
     await ctx.pickEntry("Remove element");
     await ctx.waitFor(async () => (await ctx.source()).includes("[1, 2, 3]") && !(await ctx.source()).includes("[1, 2, 3, 4]"), "list remove");
+    await assertCleanSourceSync(ctx, ["list append", "list remove"]);
 
-    await ctx.driver.evaluate(`window.prompt = () => "3"`);
+    const restored = await ctx.undo();
+    if (restored !== appended) throw new Error(`undo did not restore appended list source\nexpected:\n${appended}\nactual:\n${restored}`);
+    await assertCleanSourceSync(ctx, ["list append", "list remove", "list undo"]);
+    await ctx.openCanvas();
+    if (await ctx.source() !== appended) throw new Error("reloading list transaction changed Jet source bytes");
+
+    const beforeInvalid = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "true"`);
+    list = await ctx.node("list");
+    await ctx.driver.rightClick(list.x, list.y);
+    await ctx.expectMenu("Append input");
+    await ctx.pickEntry("Append input");
+    await ctx.expectProblem("");
+    if (await ctx.source() !== beforeInvalid) throw new Error("ill-typed list append changed Jet source");
+    await assertSourceUnchangedAfterReload(ctx, beforeInvalid, "ill-typed list append");
   },
 
   "node-state-off-toggle": async (ctx) => {
@@ -3125,17 +3189,32 @@ fn run() {
     if (await ctx.source() !== beforeSelectionChange) throw new Error("selection change wrote a dirty Details edit");
 
     await applyValue("flag", "false", "scalar", "boolean Details edit");
-    await applyValue("label", "done", "scalar", "string Details edit");
+    await applyValue("label", "line\n<b>☃</b>", "scalar", "string Details edit");
     await applyValue("amount", "7", "scalar", "scalar Details edit");
     await applyValue("mode", "Mode.Slow", "enum", "enum Details edit");
     await applyValue("alias", "other", "reference", "reference Details edit");
     const edited = await ctx.source();
-    for (const text of ["amount :: 7", "flag :: false", "label :: \"done\"", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
+    for (const text of ["amount :: 7", "flag :: false", "label :: \"line\\n<b>☃</b>\"", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
       if (!edited.includes(text)) throw new Error(`Details edit missing ${text}:\n${edited}`);
     }
 
     await ctx.openCanvas();
     if (await ctx.source() !== edited) throw new Error("Details edits changed source on reload");
+    await selectVariable("label");
+    const unicodeMultiline = await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      const row = input && input.closest('[data-details-field]');
+      return {
+        value: input && input.value,
+        expected: "line\\n<b>☃</b>",
+        rowText: row && row.textContent,
+        handlers: row && row.querySelectorAll("[onclick], [onchange], [onerror], [onload]").length,
+        markupNodes: row && row.querySelectorAll("b, img, script").length
+      };
+    })()`);
+    if (!unicodeMultiline || unicodeMultiline.value !== unicodeMultiline.expected || unicodeMultiline.handlers !== 0 || unicodeMultiline.markupNodes !== 0 || String(unicodeMultiline.rowText || "").includes("<b>")) {
+      throw new Error(`Details text lost safe multiline/Unicode rendering: ${JSON.stringify(unicodeMultiline)}`);
+    }
     await selectVariable("alias");
     const reloaded = await ctx.driver.evaluate(`(() => {
       const input = document.querySelector('[data-details-input="value"]');
@@ -3163,11 +3242,16 @@ fn run() {
       const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
       return result && result.ok === false;
     }, "incomplete scalar refusal");
+    const refusalState = await ctx.driver.evaluate("window.__jetCanvasDetailsState || null");
+    if (!refusalState || refusalState.phase !== "refused" || !(refusalState.event === "validation-error" || refusalState.event === "transaction-refused")) {
+      throw new Error(`Details refusal state was not preserved: ${JSON.stringify(refusalState)}`);
+    }
     await assertSourceUnchangedAfterReload(ctx, beforeInvalid, "incomplete scalar edit");
   },
 
   "traits-panel-authoring": async (ctx) => {
     await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
     await ctx.replaceSource(`trait Drawable {
     fn render(self) String -[IO]>
     fn label(self) String -> {
@@ -3182,7 +3266,9 @@ struct Badge {
 fn run() {
     print("ready")
 }
-`);
+    `);
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("dock-graphs")`, "open Canvas traits panel");
     await ctx.waitFor(async () => {
       const panel = await ctx.driver.evaluate(`document.querySelector("[data-canvas-traits]")?.textContent || ""`);
       const state = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel || null");
@@ -3201,6 +3287,7 @@ fn run() {
       .some((button) => button.textContent.includes("Drawable.render")))()`);
     if (!menuAction) throw new Error("trait method was not offered in the Canvas action palette");
     await ctx.driver.press("Escape");
+    await clickElement(ctx, `document.getElementById("dock-graphs")`, "reopen Canvas traits panel");
 
     const beforeInvalid = await ctx.source();
     await clickElement(ctx, `document.querySelector('[data-trait-create="0"]')`, "trait implementation button");
@@ -3214,6 +3301,10 @@ fn run() {
     })()`);
     await clickElement(ctx, `document.querySelector('[data-trait-create="0"]')`, "create trait implementation");
     await ctx.waitFor(async () => (await ctx.source()).includes("impl Badge.Drawable"), "trait implementation source");
+    await ctx.waitFor(async () => {
+      const state = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel || null");
+      return state && state.implementationCount === 1 && state.implementedMethodCount === 1;
+    }, "traits panel implementation projection");
     await ctx.expectSourceContains("fn render(self) String -[IO]>");
     await ctx.expectSourceContains('return "canvas"');
     const created = await ctx.source();
@@ -3236,7 +3327,8 @@ fn run() {
       type_name: "Badge",
       trait_name: "Drawable"
     });
-    if (stale.ok || !String(stale.json && stale.json.message || "").toLowerCase().includes("revision")) {
+    const staleMessage = String(stale.json && stale.json.message || "").toLowerCase();
+    if (stale.ok || !(staleMessage.includes("revision") || staleMessage.includes("source changed"))) {
       throw new Error(`stale trait edit was not refused: ${JSON.stringify(stale)}`);
     }
     if (await ctx.source() !== created) throw new Error("stale trait edit changed source");
@@ -3341,6 +3433,19 @@ fn run() {
     const problem = await ctx.expectProblem("E0107");
     if (!String(problem.rendered || "").includes("Why:") || !String(problem.rendered || "").includes("Fix:")) {
       throw new Error(`check diagnostic missing full text: ${JSON.stringify(problem)}`);
+    }
+    const diagnosticSurface = await ctx.driver.evaluate(`(() => {
+      const root = document.getElementById("problems-list");
+      const detail = root && root.querySelector(".problem-detail");
+      return {
+        detailTag: detail && detail.tagName,
+        detailText: detail && detail.textContent,
+        handlers: root && root.querySelectorAll("[onclick], [onchange], [onerror], [onload]").length,
+        markupNodes: root && root.querySelectorAll("img, script, iframe").length
+      };
+    })()`);
+    if (!diagnosticSurface || diagnosticSurface.detailTag !== "PRE" || !String(diagnosticSurface.detailText || "").includes("\n Why:") || diagnosticSurface.handlers !== 0 || diagnosticSurface.markupNodes !== 0) {
+      throw new Error(`diagnostic descriptor lost safe multiline rendering: ${JSON.stringify(diagnosticSurface)}`);
     }
     const ok = await ctx.jumpProblem(0);
     if (!ok) throw new Error("problem jump failed");
@@ -3454,10 +3559,17 @@ fn run() {
         && state.debugOverlay && state.debugOverlay.active_line !== null;
     }, "live debug stop");
     const first = await ctx.state();
+    const firstSessionId = first.debugSession.id;
+    const firstRevision = first.debugOverlay.revision;
+    if (!firstSessionId || firstRevision !== (await ctx.graph()).revision) {
+      throw new Error(`debug stop was not bound to the current session revision: ${JSON.stringify(first)}`);
+    }
     await clickElement(ctx, `document.getElementById("debug-step")`, "debug step");
     await ctx.waitFor(async () => {
       const state = await ctx.state();
       return state && state.debugSession && state.debugSession.state === "running"
+        && state.debugSession.id === firstSessionId
+        && state.debugOverlay && state.debugOverlay.revision === firstRevision
         && state.debugOverlay && state.debugOverlay.active_line !== first.debugOverlay.active_line;
     }, "second live debug stop");
     await clickElement(ctx, `document.getElementById("debug-stop")`, "stop debug");
@@ -3664,15 +3776,18 @@ fn run() {
     await bigClickSelector(ctx, "#source-jump", "source navigation");
     await ctx.waitFor(async () => String(await ctx.driver.evaluate("location.hash")).startsWith("#span-"), "source navigation hash");
     if (await ctx.source() !== sourceBefore) throw new Error("source navigation changed generated source");
+    await bigClickSelector(ctx, "#dock-graphs", "open project drawer");
+    await ctx.waitFor(async () => Number(await ctx.driver.evaluate(`document.querySelector('[data-project-file]')?.getBoundingClientRect().width || 0`)) > 0, "project drawer");
 
     const projectPath = await ctx.driver.evaluate(`(() => {
-      const card = Array.from(document.querySelectorAll("[data-project-file]")).find((element) => element.getAttribute("data-project-file")?.endsWith("part_10.jet"));
+      const card = Array.from(document.querySelectorAll("[data-project-file]")).find((element) => element.getAttribute("data-project-file")?.endsWith("part_00.jet"));
       return card && card.getAttribute("data-project-file");
     })()`);
     if (!projectPath) throw new Error("visible generated project file card missing");
     await bigFrameMeasure(ctx, "file-switch", async () => {
       await bigClickProjectFile(ctx, projectPath);
-      await ctx.waitFor(async () => String((await ctx.state()).doc?.source_id || "").endsWith("part_10.jet"), "generated file switch");
+      console.log(`BIG_PROJECT_FILE_STATE ${JSON.stringify(await ctx.driver.evaluate(`(() => ({ source: window.__jetCanvasTest?.doc?.source_id || null, selected: window.__jetCanvasTest?.selectedSourceId || null, generation: window.__jetCanvasGraphLoadGeneration || 0, canvas_state: document.getElementById("canvas-state")?.dataset.state || "" }))()`))}`);
+      await ctx.waitFor(async () => String((await ctx.state()).doc?.source_id || "").endsWith("part_00.jet"), "generated file switch");
     });
     const mainPath = await ctx.driver.evaluate(`(() => {
       const card = Array.from(document.querySelectorAll("[data-project-file]")).find((element) => element.getAttribute("data-project-file")?.endsWith("main.jet"));

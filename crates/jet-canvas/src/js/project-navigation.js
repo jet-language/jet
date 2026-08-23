@@ -925,7 +925,7 @@
       openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
       return;
     }
-    loadCanvasActions().then(() => {
+    loadCanvasActions({ skipRedraw: true }).then(() => {
       openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
     });
   }
@@ -1129,11 +1129,21 @@
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
     if (debugSessionId) body.session_id = debugSessionId;
+    if (debugSessionInfo && debugSessionInfo.tier) body.tier = debugSessionInfo.tier;
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         if (requestGeneration !== debugRequestGeneration) return;
-        if (latestDoc && (latestDoc.revision !== requestedRevision || currentCanvasSourceId() !== requestedSourceId)) {
+        const responseSourceId = result.json && (result.json.source_id || (result.json.session && result.json.session.source_id));
+        const responseRevision = result.json && (result.json.revision || (result.json.session && result.json.session.revision));
+        if (latestDoc && (
+          latestDoc.revision !== requestedRevision
+          || currentCanvasSourceId() !== requestedSourceId
+          || (result.ok && (
+            responseRevision !== requestedRevision
+            || (responseSourceId && responseSourceId !== currentCanvasSourceId())
+          ))
+        )) {
           debugSessionId = null;
           debugSessionInfo = null;
           debugOverlay = null;

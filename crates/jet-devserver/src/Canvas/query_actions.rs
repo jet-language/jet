@@ -3,12 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::FixEngine;
-use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
+use jet_semindex::{SemIndex, SourceSpan, SymbolDef, SymbolKind};
 
 use super::graph_helpers::{
-    call_has_effects, contains_ci, dedupe_results, edit, nearest_node, node_for_span,
-    open_query_context, query_diagnostics_error, query_error, query_ok, query_result_json,
-    simple_diff, spans_overlap, text_matches,
+    contains_ci, dedupe_results, edit, nearest_node, node_for_span, open_query_context,
+    query_diagnostics_error, query_error, query_ok, query_result_json, simple_diff, spans_overlap,
+    text_matches,
 };
 use super::graph_json::node_catalog;
 use super::project_scan::{env_project_json, project_context_for_entry, project_file};
@@ -672,13 +672,12 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         }) else {
             continue;
         };
-        let pure = !call_has_effects(&index, &def.name);
+        let pure = symbol_def_is_pure(def);
         project_functions.push(project_function_catalog_json(
             def,
             params,
             ret.as_deref(),
             &export.callee,
-            &index,
         ));
         if def.name == "run" {
             continue;
@@ -1436,9 +1435,8 @@ fn project_function_catalog_json(
     params: &[(String, String)],
     ret: Option<&str>,
     callee: &str,
-    index: &SemIndex,
 ) -> String {
-    let pure = !call_has_effects(index, &def.name);
+    let pure = symbol_def_is_pure(def);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     let default_args = params
@@ -1472,6 +1470,12 @@ fn project_function_catalog_json(
         defaults = default_args,
         span = span_json(def.def_span),
     )
+}
+
+fn symbol_def_is_pure(def: &SymbolDef) -> bool {
+    def.callable_signature
+        .as_ref()
+        .map_or(true, |signature| signature.effects.is_empty())
 }
 
 fn function_signature_from_parts(

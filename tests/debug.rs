@@ -21,6 +21,7 @@
 mod common;
 
 use std::io::Write;
+use std::path::Path;
 
 /// Write `src` to a temp `.jet` file and return its path.
 fn fixture(tag: &str, src: &str) -> String {
@@ -89,6 +90,117 @@ fn paused_session_stops_at_a_live_command_boundary() {
     let finished = jet::Debug::run_session_result_paused(&file, &["c"]);
     assert_eq!(finished.status, jet::Debug::SessionStatus::Finished);
     assert!(finished.transcript.contains("program finished"));
+}
+
+#[test]
+fn canvas_debug_session_replays_one_source_bound_session() {
+    let file = fixture("canvas_live_protocol", LOOPS);
+    let path = Path::new(&file);
+    let source = std::fs::read_to_string(path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let sessions = jet::Canvas::DebugSessions::default();
+    let first_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"s\"]}}",
+        revision
+    );
+    let first = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &first_request,
+        &sessions,
+    )
+    .expect("Canvas should expose the first live stop");
+    assert!(first.contains("\"state\":\"running\""), "{first}");
+    assert!(first.contains("\"tier\":\"jet-dev-interpreter\""), "{first}");
+    assert!(first.contains(&format!("\"revision\":\"{}\"", revision)), "{first}");
+
+    let marker = "\"id\":\"canvas-debug-";
+    let start = first.find(marker).expect("live response session id") + 6;
+    let end = first[start..]
+        .find('"')
+        .map(|offset| start + offset)
+        .expect("live response session id terminator");
+    let session_id = &first[start..end];
+    let next_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        revision, session_id
+    );
+    let next = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &next_request,
+        &sessions,
+    )
+    .expect("Canvas should replay the same live session");
+    assert!(next.contains("\"state\":\"running\""), "{next}");
+    assert!(next.contains(&format!("\"id\":\"{}\"", session_id)), "{next}");
+    assert!(next.contains("\"debug_overlay\":\"running\""), "{next}");
+
+    let stop_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"stop\":true}}",
+        revision, session_id
+    );
+    let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &stop_request,
+        &sessions,
+    )
+    .expect("Canvas should stop the live session without editing source");
+    assert!(stopped.contains("\"state\":\"stopped\""), "{stopped}");
+    assert!(stopped.contains("\"overlay\":null"), "{stopped}");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), source);
+
+    let invalid_request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"teleport\"]}}",
+        revision
+    );
+    let invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
+        path,
+        &invalid_request,
+        &sessions,
+    )
+    .expect_err("Canvas must reject commands outside the debugger vocabulary");
+    assert!(invalid.contains("\"kind\":\"unsupported\""), "{invalid}");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
+fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
+    let file = fixture("canvas_native_protocol", LOOPS);
+    let path = Path::new(&file);
+    let source = std::fs::read_to_string(path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let sessions = jet::Canvas::DebugSessions::default();
+    let request = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"commands\":[\"s\"]}}",
+        revision
+    );
+    match jet::Canvas::debug_session_json_for_file_with_sessions(path, &request, &sessions) {
+        Ok(body) => {
+            assert!(body.contains("\"tier\":\"native-lldb\""), "{body}");
+            assert!(!body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}");
+            assert!(body.contains("\"state\":\"running\""), "{body}");
+            let marker = "\"id\":\"canvas-debug-";
+            let start = body.find(marker).expect("native session id") + 6;
+            let end = body[start..]
+                .find('"')
+                .map(|offset| start + offset)
+                .expect("native session id terminator");
+            let session_id = &body[start..end];
+            let stop = format!(
+                "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
+                revision, session_id
+            );
+            let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(
+                path, &stop, &sessions,
+            )
+            .expect("native session stop");
+            assert!(stopped.contains("\"state\":\"stopped\""), "{stopped}");
+        }
+        Err(error) => {
+            assert!(error.contains("\"kind\":\"diagnostic\""), "{error}");
+            assert!(!error.contains("rustc rejected"), "{error}");
+        }
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), source);
 }
 
 /// `step`/`s` stops on the very first statement of `main`, with the right Jet

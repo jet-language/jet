@@ -772,6 +772,44 @@ fn run() {
 }
 
 #[test]
+fn canvas_projects_switch_arm_labels_with_exact_source_spans() {
+    let path = write_fixture(
+        "multi_exec_switch_pin_provenance",
+        r#"fn choose(value: Int) Int -> {
+    if value == {
+        0 -> { return 0 }
+        1 -> { return 1 }
+        else -> { return 2 }
+    }
+}
+
+fn run() {
+    print(choose(1))
+}
+"#,
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("switch multi-exec graph");
+    let choose = graph_object_for_title(&graph, "choose");
+    let pins = json_top_level_objects(json_array_field(choose, "pins"));
+
+    for (name, pattern) in [("arm1", "0"), ("arm2", "1")] {
+        let pin = pins
+            .iter()
+            .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+            .unwrap_or_else(|| panic!("missing {name} pin: {choose}"));
+        assert!(pin.contains(&format!("\"pattern_source\":\"{pattern}\"")), "{pin}");
+        let offset = source
+            .find(&format!("{pattern} ->"))
+            .expect("arm source span");
+        assert!(
+            pin.contains(&format!("\"source_span\":{{\"start\":{offset},\"end\":")),
+            "source span does not identify {pattern} arm: {pin}"
+        );
+    }
+}
+
+#[test]
 fn canvas_rejects_ambiguous_package_facts_before_projection() {
     let dir = temp_dir("graph_ambiguous_package");
     fs::write(
@@ -1428,6 +1466,85 @@ fn run() {
     let removed = fs::read_to_string(&multi_path).unwrap();
     assert!(removed.contains("[1, 2, 3]"), "{removed}");
     assert!(!removed.contains("[1, 2, 3, 4]"), "{removed}");
+}
+
+#[test]
+fn canvas_multi_input_transactions_guard_nested_pattern_scope_and_stale_edits() {
+    let path = write_fixture(
+        "nested_multi_input_tx",
+        r#"fn choose(x: Int) Int -> {
+    if x == {
+        1 -> {
+            values :: [1, 2]
+            return values[0]
+        }
+        else -> { return 0 }
+    }
+}
+
+fn run() { print(choose(1)) }
+"#,
+    );
+    let graph_json = jet::Canvas::graph_json_for_file(&path).expect("nested multi-input graph");
+    let graph = graph_object_for_title(&graph_json, "choose");
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let before = fs::read_to_string(&path).unwrap();
+    let append = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
+        jet::Canvas::source_revision(&before),
+        list_start,
+        list_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &append).expect("append pattern-bound list element");
+    let appended = fs::read_to_string(&path).unwrap();
+    assert!(appended.contains("values :: [1, 2, 3]"), "{appended}");
+    assert_eq!(
+        appended,
+        before.replacen("[1, 2]", "[1, 2, 3]", 1),
+        "nested append must preserve canonical source spelling"
+    );
+
+    let graph_json = jet::Canvas::graph_json_for_file(&path).expect("graph after nested append");
+    let graph = graph_object_for_title(&graph_json, "choose");
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let (item_start, item_end) = source_span_near(&graph, "\"name\":\"item3\"");
+    let remove = format!(
+        "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element_start\":{},\"element_end\":{}}}",
+        jet::Canvas::source_revision(&appended),
+        list_start,
+        list_end,
+        item_start,
+        item_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &remove)
+        .expect("remove nested list element after reprojection");
+    let restored = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        restored, before,
+        "nested append/remove must preserve source"
+    );
+
+    let graph_json = jet::Canvas::graph_json_for_file(&path).expect("graph before invalid append");
+    let graph = graph_object_for_title(&graph_json, "choose");
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let invalid_before = fs::read_to_string(&path).unwrap();
+    let invalid = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"true\"}}",
+        jet::Canvas::source_revision(&invalid_before),
+        list_start,
+        list_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
+    assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), invalid_before);
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"sha256-stale\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
+        list_start, list_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
+    assert!(err.contains("\"kind\":\"conflict\""), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), invalid_before);
 }
 
 #[test]
@@ -2227,11 +2344,11 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     .unwrap();
     fs::write(
         dir.join("helper.jet"),
-        "fn hidden(n: Int) Int -> {\n    return n\n}\n\npub fn square(n: Int) Int -> {\n    return n * n\n}\n",
+        "fn hidden(n: Int) Int -> {\n    return n\n}\n\npub fn square(n: Int) Int -> {\n    return n * n\n}\n\npub fn noisy(n: Int) Int -[IO]> {\n    print(n)\n    return n\n}\n",
     )
     .unwrap();
     let path = dir.join("main.jet");
-    let src = "use \"./helper\" as helper\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(helper.square(2))\n}\n";
+    let src = "use \"./helper\"\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(helper.square(2))\n}\n";
     fs::write(&path, src).unwrap();
 
     let request = format!(
@@ -2246,6 +2363,16 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     assert!(
         actions.contains("\"rank\":74") && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"),
         "project action must carry descriptor-owned ranking facts: {actions}"
+    );
+    let noisy = json_top_level_objects(json_array_field(&actions, "actions"))
+        .into_iter()
+        .find(|action| action.contains("\"callee\":\"helper.noisy\""))
+        .expect("effectful imported action");
+    assert!(
+        noisy.contains("\"node_descriptor_id\":\"function_exec\"")
+            && noisy.contains("\"rank\":72")
+            && noisy.contains("\"rank_terms\":[\"call\",\"function\"]"),
+        "effectful imported action must keep its own descriptor ranking: {noisy}"
     );
     assert!(
         !actions.contains("\"module_path\":\"js.plotly\"")
@@ -2267,13 +2394,87 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     assert!(inserted.contains("\"changed\":true"), "{inserted}");
     let changed = fs::read_to_string(&path).unwrap();
     assert!(changed.contains("helper.square(1)"), "{changed}");
+    assert_eq!(
+        jet::Formatter::format_source(&changed).unwrap(),
+        changed,
+        "insert_call must preserve canonical formatting"
+    );
 
-    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after insert");
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after formatted insert");
+    let square_node = json_top_level_objects(json_array_field(&graph, "nodes"))
+        .into_iter()
+        .find(|node| {
+            node.contains(":method:square")
+                && node.contains("\"node_descriptor_id\":\"function_exec\"")
+        })
+        .expect("inserted imported call node");
+    assert!(
+        square_node.contains("\"source_span\":{\"start\":"),
+        "inserted call must retain descriptor and source provenance: {square_node}"
+    );
+    let square_pin = json_top_level_objects(json_array_field(&graph, "pins"))
+        .into_iter()
+        .find(|pin| {
+            pin.contains(":method:square") && pin.contains("\"type\":\"Int\"")
+        })
+        .expect("typed imported call pin");
+    assert!(square_pin.contains("\"node_id\":\""), "{square_pin}");
+    let inline_id = json_top_level_objects(json_array_field(&graph, "inline_exprs"))
+        .into_iter()
+        .find(|inline| {
+            inline.contains(":method:square") && inline.contains("\"source\":\"1\"")
+        })
+        .map(|inline| json_field(inline, "inline_expr_id"))
+        .expect("editable imported call argument");
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"2\"}}",
+        jet::Canvas::source_revision(&changed),
+        inline_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit).expect("edit imported call argument");
+    let edited = fs::read_to_string(&path).unwrap();
+    assert!(edited.contains("helper.square(2)"), "{edited}");
+    assert_eq!(
+        jet::Formatter::format_source(&edited).unwrap(),
+        edited,
+        "edit_inline_expr must preserve canonical formatting"
+    );
+
+    let reloaded = jet::Canvas::graph_json_for_file(&path).expect("reload edited imported call");
+    let reloaded_square = json_top_level_objects(json_array_field(&reloaded, "nodes"))
+        .into_iter()
+        .find(|node| {
+            node.contains(":method:square")
+                && node.contains("\"node_descriptor_id\":\"function_exec\"")
+        })
+        .expect("reloaded imported call node");
+    assert!(
+        reloaded_square.contains("\"source_span\":{\"start\":"),
+        "reload must preserve imported call provenance: {reloaded_square}"
+    );
+    assert!(
+        reloaded.contains("\"source\":\"2\""),
+        "reload must preserve edited imported call spelling: {reloaded}"
+    );
+    let undo_source = src.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let undo = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\",\"undo_restore\":\"Undo\"}}",
+        jet::Canvas::source_revision(&edited),
+        undo_source
+    );
+    jet::Canvas::apply_transaction_json(&path, &undo).expect("undo imported call edits");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        src,
+        "undo must restore the original canonical source"
+    );
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after undo");
     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
-    let before_invalid = changed.clone();
+    let before_invalid = fs::read_to_string(&path).unwrap();
     let invalid = format!(
         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"println\",\"args\":[\"1\"]}}",
-        jet::Canvas::source_revision(&changed),
+        jet::Canvas::source_revision(&before_invalid),
         graph_id
     );
     let error = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
@@ -4082,6 +4283,9 @@ fn canvas_details_are_descriptor_driven_and_dom_safe() {
 
     assert!(inspector.contains("function renderFieldDescriptors"), "{inspector}");
     assert!(inspector.contains("function validatedFieldDescriptors"), "{inspector}");
+    assert!(inspector.contains("function appendSafeDescriptorAttributes"), "{inspector}");
+    assert!(inspector.contains("function detailsEditorSelectionIsCurrent"), "{inspector}");
+    assert!(inspector.contains("if (state.phase === \"applying\") return false"), "{inspector}");
     assert!(inspector.contains("apply_op"), "{inspector}");
     assert!(inspector.contains("function variableDetailDescriptors"), "{inspector}");
     assert!(inspector.contains("function functionDetailDescriptors"), "{inspector}");
@@ -4089,8 +4293,10 @@ fn canvas_details_are_descriptor_driven_and_dom_safe() {
     assert!(!inspector.contains("innerHTML"), "Details retained an HTML sink: {inspector}");
     assert!(!inspector.contains("row.innerHTML"), "Details retained per-row HTML construction: {inspector}");
     assert!(diagnostics.contains("function diagnosticDetailDescriptors"), "{diagnostics}");
+    assert!(diagnostics.contains("renderFieldDescriptors(problemsList"), "{diagnostics}");
     assert!(!diagnostics.contains("problemsList.innerHTML"), "diagnostics retained an HTML sink: {diagnostics}");
     assert!(project.contains("function projectMiniCard"), "{project}");
+    assert!(project.contains("renderFieldDescriptors(projectRail"), "{project}");
     assert!(!project.contains("projectRail.innerHTML"), "project selection retained an HTML sink: {project}");
 }
 
@@ -4473,6 +4679,10 @@ fn canvas_does_not_masquerade_static_event_calls_as_runtime_facts() {
 fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
     let path = write_fixture("trait_interface", CANVAS_TRAIT_INTERFACE_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    assert!(
+        !graph.contains("\"kind\":\"trait_impl\",\"type\":\"Badge\",\"trait\":\"Equatable\""),
+        "compiler-generated trait impls must stay out of Canvas authoring facts: {graph}"
+    );
     for field in [
         "\"interfaces\"",
         "\"kind\":\"trait_interface\"",

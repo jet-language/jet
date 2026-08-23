@@ -370,6 +370,10 @@
   }
 
   function closeContextMenu() {
+    if (contextMenuState && contextMenuState.renderFrame) {
+      cancelAnimationFrame(contextMenuState.renderFrame);
+      contextMenuState.renderFrame = 0;
+    }
     contextMenu.classList.remove("is-open");
     contextMenu.innerHTML = "";
     contextMenuState = null;
@@ -466,6 +470,7 @@
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : `All nodes · ${matches.length}/${contextMenuState.actions.length}`;
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
+    const largePalette = contextMenuState.actions.length > 160;
     const rowForAction = (action) => {
       const id = action.action_id || action.callee || action.title;
       const fav = favorites.has(id);
@@ -476,7 +481,9 @@
       return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
     const categories = ["Execution", "Variables", "Interfaces", "Project", "Core", "Commands"].map((category) => {
-      const limit = category === "Core" ? 1000 : category === "Project" ? 32 : category === "Variables" ? 200 : 64;
+      const limit = largePalette
+        ? ({ Execution: 16, Variables: 16, Interfaces: 16, Project: 12, Core: 24, Commands: 16 }[category] || 16)
+        : category === "Core" ? 1000 : category === "Project" ? 32 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
       let body = "<div class=\"action-empty\">No actions</div>";
@@ -503,12 +510,18 @@
     if (input) {
       input.addEventListener("input", () => {
         contextMenuState.query = input.value || "";
-        renderActionPalette();
-        const next = document.getElementById("action-palette-search");
-        if (next) {
-          next.focus();
-          next.setSelectionRange(next.value.length, next.value.length);
-        }
+        if (contextMenuState.renderFrame) cancelAnimationFrame(contextMenuState.renderFrame);
+        const state = contextMenuState;
+        state.renderFrame = requestAnimationFrame(() => {
+          state.renderFrame = 0;
+          if (contextMenuState !== state) return;
+          renderActionPalette();
+          const next = document.getElementById("action-palette-search");
+          if (next) {
+            next.focus();
+            next.setSelectionRange(next.value.length, next.value.length);
+          }
+        });
       });
       input.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") {
@@ -549,13 +562,15 @@
   }
 
   function openActionPalette(x, y, title, actions, opts = {}) {
+    if (contextMenuState && contextMenuState.renderFrame) cancelAnimationFrame(contextMenuState.renderFrame);
     contextMenuState = {
       title,
       actions: (actions.length ? actions : [{ title: "No compatible actions", detail: "source-backed only", group: "empty", run: () => {} }]).map((action, index) => Object.assign({ index }, action)),
       pin: opts.pin || null,
       context: opts.context || "",
       query: opts.query || "",
-      graphPoint: opts.graphPoint || null
+      graphPoint: opts.graphPoint || null,
+      renderFrame: 0
     };
     renderActionPalette();
     contextMenu.style.left = Math.min(x, window.innerWidth - 430) + "px";

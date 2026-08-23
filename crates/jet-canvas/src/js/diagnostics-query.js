@@ -281,6 +281,11 @@
 
   function setPendingPin(pin) {
     pendingPin = pin;
+    pendingPinContext = pin ? {
+      graphId: selectedGraphId,
+      revision: latestDoc && latestDoc.revision,
+      sourceId: currentCanvasSourceId()
+    } : null;
     window.__jetCanvasPendingPin = pin ? { pin_id: pin.pin_id, name: pin.name, type: pin.type, direction: pin.direction } : null;
     syncWireStatus(pin ? { title: "Source pin", detail: pinName(pin) + " : " + exactPinType(pin), color: colorForType(pin.type || "Value") } : null);
   }

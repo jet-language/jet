@@ -10,7 +10,7 @@ use jet_semindex::SourceSpan;
 use super::debug_source_git::{
     canonical_path, debug_diagnostics_error, debug_error, debug_ok, debug_stop_ok, git_output,
     git_relative_path, git_root, line_from_anchor, required_debug_string, untracked_diff,
-    DebugSessions,
+    DebugSessions, DebugTier,
 };
 use super::edit_actions::{
     apply_add_pattern_arm, apply_append_multi_input, apply_break_link,
@@ -20,24 +20,23 @@ use super::edit_actions::{
     apply_insert_structural, apply_move_link, apply_noop, apply_promote_inline,
     apply_remove_multi_input_element, apply_remove_pattern_arm, apply_rename,
     apply_reorder_statements, apply_toggle_switch_state, apply_update_comment_region,
-    apply_visible_conversion,
-    canvas_action_candidate, extract_inline_candidate, inline_helper_candidate,
-    write_checked_formatted, write_checked_source,
+    apply_visible_conversion, canvas_action_candidate, extract_inline_candidate,
+    inline_helper_candidate, write_checked_formatted, write_checked_source,
 };
 use super::graph_helpers::{
     canvas_action_preview_ok, diagnostics_json, edit_error, preview_ok, project_edit_error,
     query_error,
 };
 use super::project_scan::{
-    ProjectContext, env_project_json, lock_project_json, packages_project_json,
-    project_context_for_entry, project_file, project_file_with_runtime, targets_project_json,
-    workspace_project_json,
+    env_project_json, lock_project_json, packages_project_json, project_context_for_entry,
+    project_file, project_file_with_runtime, targets_project_json, workspace_project_json,
+    ProjectContext,
 };
 use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
     apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
-    apply_project_remove_dependency, clean_project_rel_path, rel_path,
-    diagnostic_json, required_project_touched_files, validate_touched_project_files,
+    apply_project_remove_dependency, clean_project_rel_path, diagnostic_json, rel_path,
+    required_project_touched_files, validate_touched_project_files,
 };
 use super::query_actions::{
     canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
@@ -116,7 +115,6 @@ pub(super) struct GraphBuilder {
     pub(super) getter_pins: HashMap<String, String>,
     pub(super) next_wire: usize,
 }
-
 
 #[derive(Clone)]
 pub(super) struct NodeRec {
@@ -260,7 +258,8 @@ fn runtime_events_json(snapshot: &str) -> Result<String, String> {
 /// Resolve a project-relative source id without escaping the projected source truth.
 pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathBuf> {
     let wanted = clean_project_rel_path(source_id).ok()?;
-    if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(jet_driver::Syntax::FILE_EXT) {
+    if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(jet_driver::Syntax::FILE_EXT)
+    {
         return None;
     }
     let ctx = project_context_for_entry(entry);
@@ -314,7 +313,11 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
     if let Some(root) = &ctx.ecosystem_root {
         return vec![root.clone()];
     }
-    vec![ctx.entry_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()]
+    vec![ctx
+        .entry_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()]
 }
 
 /// Project package/workspace source truth into the public Canvas project schema.
@@ -698,7 +701,8 @@ pub fn proof_json_for_entry_with_receipt(
                 .to_string()
         }
         Err(diags) => {
-            let message = jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags);
+            let message =
+                jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags);
             format!(
                 "{{\"state\":\"diagnostic\",\"diagnostics_count\":{},\"message\":{}}}",
                 diags.len(),
@@ -748,17 +752,28 @@ pub fn proof_json_for_entry_with_receipt(
     } else {
         "{\"state\":\"missing\",\"stale\":true,\"reasons\":[\"no check/build/run receipt for this source revision\"]}".to_string()
     };
-    let budget_root = jet_driver::Loader::find_manifest_root(path.parent().unwrap_or(Path::new(".")))
-        .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let budget_path = path.strip_prefix(&budget_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+    let budget_root =
+        jet_driver::Loader::find_manifest_root(path.parent().unwrap_or(Path::new(".")))
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let budget_path = path
+        .strip_prefix(&budget_root)
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .replace('\\', "/");
     let budget_digest = jet_driver::SHA256::sha256_hex(src.as_bytes());
-    let budgets = jet_driver::BudgetView::read_compatible(&budget_root, &[(budget_path, budget_digest)]);
+    let budgets =
+        jet_driver::BudgetView::read_compatible(&budget_root, &[(budget_path, budget_digest)]);
     let budget_reports = budgets.facts.iter().map(|fact| format!(
         "{{\"budget_id\":{},\"enforcement\":{},\"evidence\":{},\"evidence_id\":{},\"outcome\":{},\"report_id\":{},\"statistical\":{}}}",
         json_str(&fact.budget_id), json_str(&fact.enforcement), json_str(&fact.evidence), json_str(&fact.evidence_id),
         json_str(&fact.outcome), json_str(&fact.report_id), fact.statistical
     )).collect::<Vec<_>>().join(",");
-    let budget_rejected = budgets.rejected.iter().map(|reason| json_str(reason)).collect::<Vec<_>>().join(",");
+    let budget_rejected = budgets
+        .rejected
+        .iter()
+        .map(|reason| json_str(reason))
+        .collect::<Vec<_>>()
+        .join(",");
     Ok(format!(
         "{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"source_path\":{},\"revision\":{},\"check\":{},\"source_control\":{{\"truth\":\"git-text\",\"available\":{},\"dirty\":{},\"status\":{}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{},\"budget_reports\":{{\"mode\":\"read_only\",\"reports\":[{}],\"rejected\":[{}]}},\"proof\":{}}}",
         PROOF_SCHEMA_VERSION,
@@ -799,7 +814,12 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
     let (label, args, writes, requires_confirmation) = match action_id.as_str() {
         "canvas.command:run" => ("Run program", vec!["run", source], "none", false),
         "canvas.command:check" => ("Check project", vec!["check", source], "none", false),
-        "canvas.command:build" => ("Build project", vec!["build", source], "build_outputs", true),
+        "canvas.command:build" => (
+            "Build project",
+            vec!["build", source],
+            "build_outputs",
+            true,
+        ),
         _ => {
             return Err(query_error(
                 "unsupported",
@@ -820,8 +840,11 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
     let (success, exit_code, stdout, stderr, diagnostics) = if action_id == "canvas.command:check" {
         let abs = canonical_path(&source_path);
         let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
-        let (diags, _bundle, _facts) =
-            jet_driver::Driver::check_file_with_effect_facts(&source_path.display().to_string(), overlay, true);
+        let (diags, _bundle, _facts) = jet_driver::Driver::check_file_with_effect_facts(
+            &source_path.display().to_string(),
+            overlay,
+            true,
+        );
         let errors: Vec<Diagnostic> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)
@@ -834,7 +857,11 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
                 false,
                 Some(1),
                 String::new(),
-                jet_driver::Diagnostics::render_all(&source_path.display().to_string(), check_src, &errors),
+                jet_driver::Diagnostics::render_all(
+                    &source_path.display().to_string(),
+                    check_src,
+                    &errors,
+                ),
                 diagnostics_json(&source_path, check_src, &errors),
             )
         }
@@ -978,16 +1005,14 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
         "reorder_statements" => {
             let graph_id = required_string(request, "graph_id")?;
             let moved = SourceSpan {
-                start: json_usize_field(request, "moved_start").ok_or_else(|| {
-                    edit_error("bad_request", "missing `moved_start`")
-                })?,
+                start: json_usize_field(request, "moved_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `moved_start`"))?,
                 end: json_usize_field(request, "moved_end")
                     .ok_or_else(|| edit_error("bad_request", "missing `moved_end`"))?,
             };
             let anchor = SourceSpan {
-                start: json_usize_field(request, "anchor_start").ok_or_else(|| {
-                    edit_error("bad_request", "missing `anchor_start`")
-                })?,
+                start: json_usize_field(request, "anchor_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `anchor_start`"))?,
                 end: json_usize_field(request, "anchor_end")
                     .ok_or_else(|| edit_error("bad_request", "missing `anchor_end`"))?,
             };
@@ -1191,7 +1216,7 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
 
 /// Run the debugger against the source selected by a project-relative id.
 pub fn debug_session_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
-    let sessions = DebugSessions::default();
+    let sessions = DebugSessions::one_shot();
     debug_session_json_for_entry_with_sessions(entry, request, &sessions)
 }
 
@@ -1218,7 +1243,7 @@ pub fn debug_session_json_for_entry_with_sessions(
 
 /// Run one source-level debugger slice and project it onto Canvas graph spans.
 pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String, String> {
-    let sessions = DebugSessions::default();
+    let sessions = DebugSessions::one_shot();
     debug_session_json_for_file_with_sessions(path, request, &sessions)
 }
 
@@ -1245,10 +1270,21 @@ pub fn debug_session_json_for_file_with_sessions(
         ));
     }
     let session_id = json_string_field(request, "session_id");
+    let requested_tier = DebugTier::parse(json_string_field(request, "tier").as_deref())?;
     if json_bool_field(request, "stop").unwrap_or(false) {
         let id = required_debug_string(request, "session_id")?;
-        sessions.stop(&id);
-        return Ok(debug_stop_ok(&src, &id));
+        let tier = sessions.stop(&id).ok_or_else(|| {
+            debug_error(
+                "session",
+                "debug session is no longer live; nothing to stop",
+            )
+        })?;
+        let source_id = json_string_field(request, "source_id").unwrap_or_else(|| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "source".to_string())
+        });
+        return Ok(debug_stop_ok(&src, &id, tier, &source_id));
     }
     if revision != source_revision(&src) {
         if let Some(id) = session_id.as_deref() {
@@ -1269,6 +1305,14 @@ pub fn debug_session_json_for_file_with_sessions(
             stale_breakpoints.push(anchor);
         }
     }
+    breakpoint_lines.retain(|line| {
+        if *line > 0 && *line <= src.lines().count() {
+            true
+        } else {
+            stale_breakpoints.push(format!("line:{line}"));
+            false
+        }
+    });
     breakpoint_lines.sort_unstable();
     breakpoint_lines.dedup();
     let watches = json_string_array(request, "watches");
@@ -1280,19 +1324,38 @@ pub fn debug_session_json_for_file_with_sessions(
         &commands,
         &breakpoint_lines,
         &watches,
+        requested_tier,
     )?;
     if execution.status == jet_debug::SessionStatus::Failed {
         return Err(debug_error("diagnostic", &execution.transcript));
     }
+    let current_src = fs::read_to_string(path)
+        .map_err(|error| debug_error("io", &format!("couldn't re-read debug source: {error}")))?;
+    if current_src != src {
+        if execution.status == jet_debug::SessionStatus::Running {
+            sessions.stop(&execution.id);
+        }
+        return Err(debug_error(
+            "conflict",
+            "source changed while this Canvas debug command was running; the source was kept",
+        ));
+    }
 
     let projection =
         project_file(path).map_err(|diags| debug_diagnostics_error(path, &src, &diags))?;
+    let source_id = json_string_field(&projection.json, "source_id").unwrap_or_else(|| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "source".to_string())
+    });
     Ok(debug_ok(
         &src,
         &projection.json,
         &execution.transcript,
         execution.status,
         &execution.id,
+        execution.tier,
+        &source_id,
         &breakpoint_lines,
         &stale_breakpoints,
         &watches,

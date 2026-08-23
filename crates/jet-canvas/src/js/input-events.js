@@ -67,6 +67,39 @@
     showToast("Execution convergence preview: source unchanged");
   }
 
+  function canvasGestureIsCurrent(gesture) {
+    const graph = currentGraphOrNull();
+    return !!gesture && !!latestDoc && !!graph
+      && gesture.graphId === graph.graph_id
+      && gesture.revision === latestDoc.revision
+      && gesture.sourceId === currentCanvasSourceId();
+  }
+
+  function restoreNodeGesture(gesture) {
+    for (const [id, offset] of gesture.beforeOffsets || []) {
+      if (offset) nodeOffsets.set(id, Object.assign({}, offset));
+      else nodeOffsets.delete(id);
+    }
+  }
+
+  function restoreMarqueeGesture(gesture) {
+    selectedNodeIds = new Set(gesture.initialSelection || []);
+    selectedNodeId = gesture.initialSelectedNodeId || null;
+    selectionExplicitlyCleared = !!gesture.initialSelectionExplicitlyCleared;
+  }
+
+  function rejectStaleCanvasGesture(gesture) {
+    if (canvasGestureIsCurrent(gesture)) return false;
+    if (gesture && gesture.mode === "node") restoreNodeGesture(gesture);
+    if (gesture && gesture.mode === "marquee") restoreMarqueeGesture(gesture);
+    setCanvasState("stale", "Canvas gesture is stale", "The source or graph changed while this gesture was in progress. Nothing was saved; reload and retry.", [
+      { label: "Show source", run: openSourceRecovery },
+      { label: "Reload", primary: true, run: () => loadGraph() }
+    ]);
+    showToast("Canvas gesture is stale; reload and retry", { isError: true });
+    return true;
+  }
+
   canvas.addEventListener("click", function (ev) {
     if (window.__jetCanvasNoopClick) return;
     const rect = canvas.getBoundingClientRect();
@@ -169,8 +202,26 @@
         setSourceHash(found.node.source_span || { start: 0, end: 0 });
       }
       const starts = new Map();
-      for (const id of selectedNodeIds) starts.set(id, nodeOffsets.get(id) || { x: 0, y: 0 });
-      drag = { mode: "node", x, y, wx: wx(x), wy: wy(y), starts, moved: false };
+      const beforeOffsets = new Map();
+      for (const id of selectedNodeIds) {
+        const offset = nodeOffsets.get(id);
+        beforeOffsets.set(id, offset ? Object.assign({}, offset) : null);
+        starts.set(id, offset || { x: 0, y: 0 });
+      }
+      const graph = currentGraphOrNull();
+      drag = {
+        mode: "node",
+        x,
+        y,
+        wx: wx(x),
+        wy: wy(y),
+        starts,
+        beforeOffsets,
+        graphId: graph && graph.graph_id,
+        revision: latestDoc && latestDoc.revision,
+        sourceId: currentCanvasSourceId(),
+        moved: false
+      };
     } else if (hitCommentAt(x, y)) {
       const comment = hitCommentAt(x, y);
       selectedVariableName = null;
@@ -185,6 +236,7 @@
     } else if (ev.button === 1 || ev.altKey || spaceDown) {
       drag = { mode: "pan", x, y, ox: view.x, oy: view.y };
     } else {
+      const graph = currentGraphOrNull();
       drag = {
         mode: "marquee",
         x,
@@ -193,6 +245,11 @@
         my: y,
         selectionMode: ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace",
         initialSelection: new Set(selectedNodeIds),
+        initialSelectedNodeId: selectedNodeId,
+        initialSelectionExplicitlyCleared: selectionExplicitlyCleared,
+        graphId: graph && graph.graph_id,
+        revision: latestDoc && latestDoc.revision,
+        sourceId: currentCanvasSourceId(),
         moved: false
       };
     }
@@ -256,6 +313,11 @@
   });
 
   window.addEventListener("mouseup", function (ev) {
+    if (drag && (drag.mode === "node" || drag.mode === "marquee" || drag.mode === "pin") && rejectStaleCanvasGesture(drag)) {
+      drag = null;
+      if (latestDoc) drawGraph(latestDoc);
+      return;
+    }
     if (drag && drag.mode === "node" && drag.moved) {
       const graph = latestDoc ? currentGraph(latestDoc) : null;
       rememberSelectedNodePositions(graph);
@@ -280,6 +342,12 @@
       const target = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top) || hoverPin;
       const graph = latestDoc ? currentGraph(latestDoc) : null;
       const moved = Math.abs(drag.mx - drag.x) > 5 || Math.abs(drag.my - drag.y) > 5;
+      if (!moved && pendingPin && rejectStaleCanvasGesture(pendingPinContext)) {
+        setPendingPin(null);
+        drag = null;
+        if (latestDoc) drawGraph(latestDoc);
+        return;
+      }
       if (!moved && pendingPin && target) {
         const done = completeConnection(pendingPin, target, graph);
         setPendingPin(done || pendingPin.pin_id === target.pin_id ? null : pendingPin);
@@ -299,8 +367,12 @@
         openPinMenu(drag.pin, ev.clientX, ev.clientY, { x: wx(ev.clientX - rect.left), y: wy(ev.clientY - rect.top) });
       }
     }
+    const mouseupMode = drag && drag.mode;
+    const mouseupMoved = !!(drag && drag.moved);
     drag = null;
-    if (latestDoc) drawGraph(latestDoc);
+    // A click already drew the selected node in mousedown. Avoid a second
+    // full large-graph repaint when no node position changed.
+    if (latestDoc && (mouseupMode !== "node" || mouseupMoved)) drawGraph(latestDoc);
   });
 
   canvas.addEventListener("contextmenu", function (ev) {
@@ -433,6 +505,8 @@
     if (ev.key === " ") spaceDown = true;
     if (ev.key === "Escape") {
       const hadTransient = !!drag || !!pendingPin || contextMenu.classList.contains("is-open");
+      if (drag && drag.mode === "node") restoreNodeGesture(drag);
+      if (drag && drag.mode === "marquee") restoreMarqueeGesture(drag);
       drag = null;
       setPendingPin(null);
       closeContextMenu();

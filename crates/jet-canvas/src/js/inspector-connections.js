@@ -11,13 +11,21 @@
     return element;
   }
 
+  function appendSafeDescriptorAttributes(element, attributes) {
+    for (const [name, value] of Object.entries(attributes || {})) {
+      const attribute = String(name).toLowerCase();
+      if (!/^(?:data|aria)-[a-z0-9_.:-]+$/.test(attribute)) continue;
+      element.setAttribute(attribute, String(value));
+    }
+  }
+
   function appendButton(parent, id, label, className, attributes) {
     const button = document.createElement("button");
     button.type = "button";
     if (id) button.id = id;
     if (className) button.className = className;
     button.textContent = label;
-    for (const [name, value] of Object.entries(attributes || {})) button.setAttribute(name, String(value));
+    appendSafeDescriptorAttributes(button, attributes);
     parent.appendChild(button);
     return button;
   }
@@ -85,12 +93,19 @@
   function setDetailsEditorPhase(state, phase, event) {
     if (!state || state !== detailsEditorState) return;
     state.phase = phase;
+    for (const group of state.groups) {
+      for (const button of group.buttons) button.disabled = phase === "applying";
+    }
     publishDetailsEditorState(state, event);
   }
 
   function detailsEditorIsCurrent(state) {
     return !!state && state === detailsEditorState && details
       && details.dataset.detailsSelectionKey === state.selectionKey;
+  }
+
+  function detailsEditorSelectionIsCurrent(selectionKey) {
+    return !!details && details.dataset.detailsSelectionKey === String(selectionKey || "none");
   }
 
   function beginDetailsEditor(selectionKey) {
@@ -130,6 +145,7 @@
       setDetailsEditorPhase(state, "refused", "selection-change");
       return false;
     }
+    if (state.phase === "applying") return false;
     const dirty = group.fields.some((field) => {
       const record = state.controls.find((candidate) => candidate.field === field);
       return record && detailEditorSource(field, record.control) !== record.initial;
@@ -164,12 +180,15 @@
       return true;
     }
     Promise.resolve(result).then((outcome) => {
-      if (state !== detailsEditorState) return;
-      if (!outcome || outcome.ok === false) setDetailsEditorPhase(state, "refused", "transaction-refused");
-      else setDetailsEditorPhase(state, "clean", event || "apply");
+      if (!outcome || outcome.ok === false) {
+        if (state === detailsEditorState) setDetailsEditorPhase(state, "refused", "transaction-refused");
+        else if (detailsEditorSelectionIsCurrent(state.selectionKey)) setDetailsEditorPhase(detailsEditorState, "refused", "transaction-refused");
+      } else if (state === detailsEditorState) {
+        setDetailsEditorPhase(state, "clean", event || "apply");
+      }
     }).catch((error) => {
-      if (state !== detailsEditorState) return;
-      setDetailsEditorPhase(state, "refused", "transaction-error");
+      if (state === detailsEditorState) setDetailsEditorPhase(state, "refused", "transaction-error");
+      else if (detailsEditorSelectionIsCurrent(state.selectionKey)) setDetailsEditorPhase(detailsEditorState, "refused", "transaction-error");
       showToast(String(error), { isError: true });
     });
     return true;
@@ -210,7 +229,7 @@
         control.setAttribute("data-detail-source-start", field.sourceSpan.start);
         control.setAttribute("data-detail-source-end", field.sourceSpan.end);
       }
-      for (const [name, value] of Object.entries(field.dataAttributes || {})) control.setAttribute(name, String(value));
+      appendSafeDescriptorAttributes(control, field.dataAttributes);
       row.appendChild(control);
       const record = { field, control, initial: detailEditorSource(field, control) };
       state.controls.push(record);
@@ -252,7 +271,7 @@
       const row = field.apply_op && field.apply_op.mode === "action" ? document.createElement("button") : document.createElement("div");
       row.className = field.className || "project-card";
       if (row.tagName === "BUTTON") row.type = "button";
-      for (const [name, value] of Object.entries(field.buttonAttributes || {})) row.setAttribute(name, String(value));
+      appendSafeDescriptorAttributes(row, field.buttonAttributes);
       appendText(row, "b", "", field.label);
       appendText(row, "small", "", field.value);
       if (field.detail !== undefined) appendText(row, "code", "", field.detail);
@@ -266,7 +285,7 @@
       const row = document.createElement("div");
       row.className = field.className || "problem-row";
       if (field.severity) row.setAttribute("data-severity", field.severity);
-      for (const [name, value] of Object.entries(field.rowAttributes || {})) row.setAttribute(name, String(value));
+      appendSafeDescriptorAttributes(row, field.rowAttributes);
       appendText(row, "b", "", field.label);
       const value = field.apply_op && field.apply_op.mode === "action" ? appendButton(row, "", field.value, "", field.valueAttributes) : appendText(row, field.multiline ? "pre" : "span", "problem-detail", field.value);
       if (field.apply_op && field.apply_op.mode === "action") value.addEventListener("click", () => invokeFieldOperation(field.apply_op, {}, [field], state || { revision: latestDoc && latestDoc.revision, selectionKey: "diagnostic" }));
@@ -1416,6 +1435,55 @@
     return out.type === input.type;
   }
 
+  function sourceExpressionFromNode(node) {
+    if (!node || !latestDoc || !latestDoc.source_text || !node.source_span) return null;
+    const source = latestDoc.source_text;
+    const start = Number(node.source_span.start);
+    const nameEnd = Number(node.source_span.end);
+    if (!Number.isInteger(start) || !Number.isInteger(nameEnd) || start < 0 || nameEnd < start) return null;
+    let end = nameEnd;
+    const head = source.slice(start, nameEnd).trim();
+    const isCall = node.kind === "function"
+      && (node.archetype === "function_pure" || node.archetype === "function_exec")
+      && node.title === head;
+    if (node.kind === "function" && !isCall) return null;
+    if (isCall) {
+      const open = source.indexOf("(", nameEnd);
+      if (open >= nameEnd && !source.slice(nameEnd, open).trim()) {
+        let depth = 0;
+        let quote = null;
+        let escaped = false;
+        for (let i = open; i < source.length; i++) {
+          const ch = source[i];
+          if (quote) {
+            if (escaped) escaped = false;
+            else if (ch === "\\") escaped = true;
+            else if (ch === quote) quote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") {
+            quote = ch;
+          } else if (ch === "(") {
+            depth += 1;
+          } else if (ch === ")") {
+            depth -= 1;
+            if (depth === 0) {
+              end = i + 1;
+              break;
+            }
+          }
+        }
+      }
+      if (end === nameEnd) return null;
+    }
+    const text = source.slice(start, end).trim();
+    return text && !text.includes("\n") ? text : null;
+  }
+
+  function qualifiedSourceExpression(source) {
+    return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(String(source || "").trim());
+  }
+
   function sourceExprForOutputPin(pin) {
     if (!pin || pin.direction !== "output") return null;
     const graph = latestDoc ? currentGraph(latestDoc) : null;
@@ -1424,11 +1492,7 @@
       const name = node.kind === "entry" ? pin.name : node.title;
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return name;
     }
-    if (node && latestDoc && node.source_span && latestDoc.source_text) {
-      const source = latestDoc.source_text.slice(node.source_span.start, node.source_span.end).trim();
-      if (source && !source.includes("\n")) return source;
-    }
-    return null;
+    return sourceExpressionFromNode(node);
   }
 
   function wireIntoPin(graph, pin) {
@@ -1445,7 +1509,9 @@
 
   function inlineForPin(graph, pin) {
     if (!graph || !pin || !pin.source_span) return null;
-    return (graph.inline_exprs || []).find((e) => e.source_span && spansOverlap(e.source_span, pin.source_span));
+    const owner = (graph.inline_exprs || []).find((e) => e.node_id === pin.node_id
+      && (e.role === pin.name || (pin.name === "value" && ["init", "value"].includes(e.role))));
+    return owner || (graph.inline_exprs || []).find((e) => e.source_span && spansOverlap(e.source_span, pin.source_span));
   }
 
   function selectMarquee() {
@@ -1498,12 +1564,11 @@
       const input = fromPin.direction === "input" ? fromPin : target;
       const wire = wireIntoPin(graph, input);
       const replacement = sourceExprForOutputPin(out);
-      if (plan.exact && wire && replacement) {
+      const expr = inlineForPin(graph, input);
+      if (plan.exact && wire && replacement && qualifiedSourceExpression(replacement)) {
         postTransaction({ schema_version: 1, op: "move_link", revision: latestDoc.revision, wire_id: wire.wire_id, replacement });
-      } else if (plan.exact && replacement) {
-        const expr = inlineForPin(graph, input);
-        if (expr) postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: replacement });
-        else showToast("Input has no source expression to replace");
+      } else if (plan.exact && replacement && expr) {
+        postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: replacement });
       } else if (!plan.exact) {
         const expr = inlineForPin(graph, input);
         const callee = window.prompt("Visible conversion function", (input.type || "Value") + ".from");
