@@ -44,21 +44,50 @@ export JET_NIX_TMP_CLEANED=1
 # single holder near ~8G peak while staying fast on a warm target dir.
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
-# Memory floor. Cargo's lock serializes the *check*, but a lane can still hold
-# rustc while the orchestrator builds. Rather than race, wait for headroom and
-# then proceed; a lane that waits is cheaper than a box that dies.
+# A memory floor alone is not enough, and this is the lesson of two OOM kills:
+# it is a one-shot gate, so thirty lanes read "plenty free" in the same instant
+# and then all fork together. The floor has to be paired with a hard limit on
+# how many checks may run at once. `flock` gives us that: at most
+# JET_CHECK_SLOTS lanes hold a slot, the rest block until one frees.
 floor_mb="${JET_MIN_FREE_MB:-8000}"
-for _ in $(seq 1 60); do
-  avail="$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)"
-  [ "${avail:-0}" -ge "$floor_mb" ] && break
-  echo "lane-check: waiting for memory (${avail}MB < ${floor_mb}MB floor)" >&2
-  sleep 10
-done
+slots="${JET_CHECK_SLOTS:-3}"
+lockdir="${TMPDIR}/jet-check-slots"
+mkdir -p "$lockdir"
+
+run_check() {
+  for _ in $(seq 1 90); do
+    avail="$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)"
+    [ "${avail:-0}" -ge "$floor_mb" ] && break
+    echo "lane-check: waiting for memory (${avail}MB < ${floor_mb}MB floor)" >&2
+    sleep 10
+  done
+  timeout 1800 scripts/agent/jet-env cargo check "$@" >"$tmp" 2>&1
+}
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-timeout 1800 scripts/agent/jet-env cargo check "$@" >"$tmp" 2>&1
-code=$?
+# Take any free slot; if every slot is busy, block on slot 1 rather than spin.
+code=0
+got_slot=0
+for slot in $(seq 1 "$slots"); do
+  exec 9>"$lockdir/$slot"
+  if flock -n 9; then
+    got_slot=1
+    run_check "$@"
+    code=$?
+    flock -u 9
+    break
+  fi
+  exec 9>&-
+done
+if [ "$got_slot" -eq 0 ]; then
+  exec 9>"$lockdir/1"
+  flock 9
+  run_check "$@"
+  code=$?
+  flock -u 9
+fi
 
 node - "$tmp" <<'NODE'
 const fs = require("fs");

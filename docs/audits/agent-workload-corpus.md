@@ -62,7 +62,7 @@ The capture command is one run on one machine. It does not add a benchmark runne
 
 `tests/agent_workloads/native_os_matrix.tsv` freezes the native matrix: Linux x86_64 and macOS require Jet, Bash, Python, and Node; Windows is excluded because Bash has no native adapter in this corpus. The gate rejects a host that is absent from this file or uses a disallowed architecture.
 
-`tests/agent_workloads/jet_baseline.tsv` freezes every task that previously passed through Jet and keeps the existing loss-owner links. A Jet loss must keep a `#card` link or a `non-goal:` link.
+`tests/agent_workloads/jet_baseline.tsv` freezes every task that previously passed through Jet and keeps the existing loss-owner links. The CI validator requires each baseline and generated-report owner to equal the manifest's canonical owner. A Jet loss must keep a numeric `#card` link or a `non-goal:` link.
 
 `docs/audits/agent-workload-corpus-report.tsv` is the generated report. Each row scores Jet, Bash, Python, and Node for one task. `jet_vs_baselines=pass` requires exact output, exit status, cold and warm stability, unchanged input authority, and clean scratch state for all four adapters. The row also records source-token counts, cold and warm times, and the shared policy digest for each adapter run.
 
@@ -151,3 +151,43 @@ TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/test-agent-workload-gate.sh
 ```
 
 The old six-test run note is obsolete. The current source also checks the interpreter receipt, native OS matrix, Jet baseline ownership, production-path adapter reachability, and the first-program digest; a fresh full corpus run remains a closeout proof owned by #1173.
+
+## Card #1876: agent success and context economy
+
+### Derived plan
+
+The comparison set is the 29 rows in `tests/agent_workloads/manifest.tsv`, frozen by the manifest and checksum tests. Run one Jet candidate and one Node candidate for every task on `linux-x86_64:nix-core`. Hold the model, system prompt, user prompt, temperature, top-p, output limit, seed policy, tool policy, and repair limit constant. The model ID and settings are not recorded in this checkout, so the comparison has not started.
+
+Use these two planned runs:
+
+| Run | Candidate | State |
+| --- | --- | --- |
+| Jet | `jet` adapter, one initial generation plus compiler-feedback repairs | not recorded |
+| Node | `node` adapter, one initial generation plus the same repairs | not recorded |
+
+Use the existing `#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed` scoring string. Do not add an agent scorer. Do not give expected-output feedback before the candidate reaches a clean check.
+
+Classify each task before aggregating:
+
+| Result | Meaning | Required record |
+| --- | --- | --- |
+| `compiler-rejected-recovered` | A check failed, then a later repair reached clean | Every failed round and its diagnostic |
+| `compiler-rejected-unrecovered` | The candidate stayed rejected at the repair limit | A live loss card or ratified non-goal |
+| `green-wrong-output` | The check passed, but existing corpus scoring failed | A live loss card or ratified non-goal |
+| `inexpressible` | The ratified Jet surface cannot express the task | A live loss card or ratified non-goal; syntax unfamiliarity is not enough |
+
+Count repair rounds as edits after the initial candidate. Count the initial candidate as round zero. For each completed task and each repair round, record the same-run source and diagnostic token counts. The corpus `source_tokens` field is a stable Unicode-whitespace count, not a model-token count; do not present it as model context usage. Record the per-diagnostic length distribution beside the task results.
+
+### Current evidence and limit
+
+The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2088`). No fixed model/settings record, agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
+
+The existing six-task Jet/Node note is evidence for a different card and a different task set: [`docs/research/agent-codegen-benchmark-2026-08-23.md`](../research/agent-codegen-benchmark-2026-08-23.md). It reports Jet `1/6` compile-first-try, repair rounds `2, 1, 1, 1, 1, 0`, green `6/6`, and semantic correctness `6/6`; Node reports compile-first-try `6/6`, zero repair rounds, and semantic correctness `2/6`. This is the available case where Jet wins after repair. It is not evidence for this card because it does not use the 29 frozen workload rows or the #769 scoring.
+
+That precursor contains six Jet repair rounds and 14 diagnostics. Its diagnostic whitespace-token counts are `29, 30, 33, 54, 106, 144` per round and `23, 23, 23, 24, 24, 28, 29, 30, 30, 30, 30, 31, 33, 38` per diagnostic. These counts come from the recorded diagnostic text, not a model tokenizer. The precursor has no completed-task source/context token counts, so it cannot satisfy the context-economy criterion.
+
+### Finding
+
+No #1876 agent result is recorded. The current evidence supports only the narrower finding that one small Jet/Node run showed actionable Jet diagnostics and full post-repair semantic success, while Node had fewer compile barriers but more wrong outputs. It does not show whether compiler strictness carries an agent through an unfamiliar language, whether Jet lacks an expressible surface for any frozen task, or how many model tokens either language costs per task or repair round.
+
+The next required artifact is one externally executed, fixed-model Jet/Node run over the 29 manifest rows. Append its task ledger, loss links, repair rounds, completed-task token counts, and diagnostic length distribution here. Do not add a runner or a second scoring model.

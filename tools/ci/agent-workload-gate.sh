@@ -45,12 +45,13 @@ validate_report() {
       print "agent workload gate: " message > "/dev/stderr"
       bad = 1
     }
-    function owner_ok(value, parts, i, pair) {
+    function owner_ok(value, parts, i, pair, target) {
       if (value == "") return 0
       count = split(value, parts, ";")
       for (i = 1; i <= count; i++) {
         if (split(parts[i], pair, "=") != 2) return 0
-        if (pair[2] !~ /^#/ && pair[2] !~ /^non-goal:/) return 0
+        target = pair[2]
+        if (target !~ /^#[0-9]+$/ && target !~ /^non-goal:[^;]+$/) return 0
       }
       return 1
     }
@@ -58,8 +59,12 @@ validate_report() {
       return value ~ /^[0-9]+$/
     }
     BEGIN {
+      baseline_header = "version\ttask_id\tjet_status\tloss_owner"
+      matrix_header = "version\tos\tarch_policy\trequirement\tadapters\treason"
+      manifest_header = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
+      if ((getline line < baseline) <= 0 || line != baseline_header) fail("baseline schema drifted")
       while ((getline line < baseline) > 0) {
-        if (line ~ /^version\t/) continue
+        if (line == "") continue
         count = split(line, fields, "\t")
         if (count != 4 || fields[1] != "1" || fields[3] != "pass") {
           fail("bad Jet baseline row: " line)
@@ -72,12 +77,16 @@ validate_report() {
         baseline_owner[fields[2]] = fields[4]
       }
       close(baseline)
+      if ((getline line < matrix) <= 0 || line != matrix_header) fail("native OS matrix schema drifted")
       while ((getline line < matrix) > 0) {
-        if (line ~ /^version\t/) continue
+        if (line == "") continue
         count = split(line, fields, "\t")
         if (count != 6 || fields[1] != "1") {
           fail("bad native OS matrix row: " line)
           continue
+        }
+        if (fields[2] == "" || fields[3] == "" || fields[4] !~ /^(required|excluded)$/ || fields[5] !~ /^(jet|bash|python|node)(,(jet|bash|python|node))*$/ || fields[6] == "") {
+          fail("bad native OS matrix metadata: " line)
         }
         if (matrix_seen[fields[2]]++) fail("duplicate native OS matrix row: " fields[2])
         matrix_requirement[fields[2]] = fields[4]
@@ -86,8 +95,9 @@ validate_report() {
         matrix_count++
       }
       close(matrix)
+      if ((getline line < manifest) <= 0 || line != manifest_header) fail("corpus manifest schema drifted")
       while ((getline line < manifest) > 0) {
-        if (line ~ /^version\t/) continue
+        if (line == "") continue
         count = split(line, fields, "\t")
         if (count != 13 || fields[1] != "1") {
           fail("bad corpus manifest row: " line)
@@ -96,6 +106,8 @@ validate_report() {
         if (manifest_seen[fields[2]]++) fail("duplicate corpus manifest task: " fields[2])
         manifest_domain[fields[2]] = fields[3]
         manifest_case[fields[2]] = fields[4]
+        manifest_owner[fields[2]] = fields[13]
+        if (!owner_ok(fields[13])) fail("bad manifest loss owner: " fields[2])
         manifest_count++
       }
       close(manifest)
@@ -127,6 +139,7 @@ validate_report() {
         fail("report has unknown task: " task)
       } else {
         if ($5 != manifest_domain[task] || $6 != manifest_case[task]) fail("task metadata drifted: " task)
+        if ($12 != manifest_owner[task]) fail("loss owner drifted from manifest: " task)
       }
       if ($7 !~ /^(pass|loss|missing)$/ || $8 !~ /^(pass|loss|missing)$/ || $9 !~ /^(pass|loss|missing)$/ || $10 !~ /^(pass|loss|missing)$/) {
         fail("bad adapter status: " task)
@@ -137,10 +150,8 @@ validate_report() {
       current_owner[task] = $12
       run_exit = $13
       if ($13 != "0") fail("corpus command exited " $13 ": " task)
-      if ($11 == "pass" && ($7 != "pass" || $8 != "pass" || $9 != "pass" || $10 != "pass")) {
-        fail("passing corpus score has a non-passing adapter: " task)
-      }
-      if ($11 != "pass") fail("task did not pass all adapters: " task)
+      expected_score = $13 == "0" && $7 == "pass" && $8 == "pass" && $9 == "pass" && $10 == "pass" ? "pass" : "loss"
+      if ($11 != expected_score) fail("corpus score drifted: " task)
       if ($7 == "loss" && !owner_ok($12)) fail("Jet loss has no card or ratified non-goal: " task)
       if (!nonnegative_integer($13)) fail("bad corpus exit code: " task)
       for (metric = 14; metric <= 25; metric++) {
@@ -167,6 +178,11 @@ validate_report() {
       }
       for (i = 1; i <= baseline_count; i++) {
         task = baseline_task[i]
+        if (!(task in manifest_domain)) {
+          fail("Jet baseline names unknown task: " task)
+        } else if (baseline_owner[task] != manifest_owner[task]) {
+          fail("Jet baseline loss owner drifted from manifest: " task)
+        }
         if (!(task in current)) {
           fail("report is missing baseline task: " task)
         } else if (baseline_status[task] == "pass" && current[task] != "pass") {

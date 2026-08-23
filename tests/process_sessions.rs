@@ -164,6 +164,7 @@ fn run() {{
 fn native_pid_alive(pid: &str) -> bool {
     Command::new("kill")
         .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
@@ -198,7 +199,10 @@ fn native_pid_alive(pid: &str) -> bool {
 
 #[cfg(unix)]
 fn stop_native_pid(pid: &str) {
-    let _ = Command::new("kill").args(["-9", pid]).status();
+    let _ = Command::new("kill")
+        .args(["-9", pid])
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 #[cfg(windows)]
@@ -230,6 +234,15 @@ fn compatibility_matrix_names_every_session_capability() {
     ];
     let rows: Vec<_> = rows.collect();
     assert_eq!(rows.len(), expected.len());
+    let host_column = if cfg!(target_os = "linux") {
+        2
+    } else if cfg!(target_os = "macos") {
+        3
+    } else if cfg!(target_os = "windows") {
+        4
+    } else {
+        5
+    };
     for (row, capability) in rows.into_iter().zip(expected) {
         let fields: Vec<_> = row.split('\t').collect();
         assert_eq!(fields.len(), 6, "malformed matrix row: {row}");
@@ -241,6 +254,15 @@ fn compatibility_matrix_names_every_session_capability() {
             "native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop"
         };
         assert!(fields[2..5].iter().all(|state| *state == expected_test));
+        assert_eq!(
+            fields[host_column],
+            if host_column == 5 {
+                "unsupported"
+            } else {
+                expected_test
+            },
+            "matrix does not describe this target's fixture evidence: {row}"
+        );
         assert_eq!(fields[5], "unsupported");
     }
 }

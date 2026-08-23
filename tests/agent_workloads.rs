@@ -1636,6 +1636,15 @@ fn native_os_matrix_is_frozen_and_names_current_host() {
         "current host `{}` is absent from the frozen native OS matrix",
         std::env::consts::OS
     );
+    let current = matrix
+        .iter()
+        .find(|row| row.0 == std::env::consts::OS)
+        .unwrap();
+    assert!(
+        current.1 == "any" || current.1 == std::env::consts::ARCH,
+        "current host architecture `{}` is absent from the frozen native OS matrix",
+        std::env::consts::ARCH
+    );
 }
 
 #[test]

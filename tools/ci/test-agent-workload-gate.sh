@@ -53,6 +53,9 @@ check passing-report 0 "$report" | grep -Fq 'agent workload gate: pass'
 awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$7 = "loss"; $11 = "loss"} {print}' "$report" >"$tmp/regression.tsv"
 check regression-report 1 "$tmp/regression.tsv" | grep -Fq 'Jet regression: task=repository-marker-scan'
 
+awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$12 = "default-run=#999"} {print}' "$report" >"$tmp/owner-drift.tsv"
+check owner-drift-report 1 "$tmp/owner-drift.tsv" | grep -Fq 'loss owner drifted from manifest: repository-marker-scan'
+
 awk -F '\t' -v OFS='\t' '$1 == "1" {$2 = "windows"} {print}' "$report" >"$tmp/excluded.tsv"
 check excluded-os-report 1 "$tmp/excluded.tsv" | grep -Fq 'OS is excluded by frozen matrix: windows'
 
@@ -63,7 +66,7 @@ awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$13 = 1} {print}' "$rep
 check nonzero-exit-report 1 "$tmp/nonzero-exit.tsv" | grep -Fq 'corpus command exited 1'
 
 awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$8 = "loss"} {print}' "$report" >"$tmp/inconsistent-score.tsv"
-check inconsistent-score-report 1 "$tmp/inconsistent-score.tsv" | grep -Fq 'passing corpus score has a non-passing adapter'
+check inconsistent-score-report 1 "$tmp/inconsistent-score.tsv" | grep -Fq 'corpus score drifted: repository-marker-scan'
 
 check missing-report 1 "$tmp/missing.tsv" | grep -Fq 'missing report'
 

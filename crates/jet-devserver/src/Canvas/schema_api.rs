@@ -99,7 +99,21 @@ pub(super) struct GraphBuilder {
     pub(super) local_pins: HashMap<String, String>,
     pub(super) local_types: HashMap<String, String>,
     pub(super) getter_pins: HashMap<String, String>,
+    pub(super) exec_block_flows: HashMap<usize, ExecFlow>,
+    pub(super) exec_stmt_flows: HashMap<usize, ExecFlow>,
     pub(super) next_wire: usize,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct ExecFlow {
+    pub(super) entry: Option<ExecEndpoint>,
+    pub(super) exits: Vec<ExecEndpoint>,
+}
+
+#[derive(Clone)]
+pub(super) struct ExecEndpoint {
+    pub(super) pin_id: String,
+    pub(super) span: SourceSpan,
 }
 
 #[derive(Clone)]
