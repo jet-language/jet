@@ -7,9 +7,13 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 
+report_dir="$1"
+case "$report_dir" in
+  /*) ;;
+  *) report_dir="$PWD/$report_dir" ;;
+esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-report_dir="$1"
 matrix="$ROOT/tests/agent_workloads/native_os_matrix.tsv"
 status=0
 required=0

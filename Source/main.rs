@@ -31,6 +31,7 @@ mod CmdCompile;
 mod CmdDevTools;
 mod CmdNotebook;
 mod CmdDossier;
+mod CmdExec;
 mod CmdInspect;
 mod CmdExpand;
 mod CmdGc;
@@ -64,6 +65,7 @@ use CmdDevTools::{
     run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDossier::{run_dossier, run_module_explain};
+use CmdExec::run_exec;
 use CmdExpand::run_expand;
 use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
 use CmdStructure::run_structure;
@@ -1703,6 +1705,7 @@ fn main() {
             run_doctor(online, apply, mode);
             return;
         }
+        "exec" => run_exec(&raw, mode),
         "completions" => {
             run_completions(&raw[1..]);
             return;

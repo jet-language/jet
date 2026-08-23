@@ -181,7 +181,7 @@ pub enum HandlerKey {
     GcReport,
     ProjectParts,
     Push, Bridge, Services, Config,
-    Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
+    Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp, Exec,
     Env,
     SharedStore,
     Perf,
@@ -208,6 +208,7 @@ impl HandlerKey {
             Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
             Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
+            Self::Exec => "exec",
             Self::Env => "env",
             Self::SharedStore => "shared-store",
             Self::Perf => "perf",
@@ -296,6 +297,7 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
     NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
     NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
+    NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
 ];
 // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
 // `jetpack enter` subverbs exposed through Jet's environment front door. `env`
@@ -1266,6 +1268,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "repl"
             | "notebook"
             | "report"
+            | "exec"
             | "schema"
             | "semindex"
             | "dossier"
@@ -1878,6 +1881,7 @@ mod tests {
             ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
             ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
+            ("self", "exec", Exec, "exec", false),
             ("env", "test", Env, "env", true), ("env", "hook", Env, "env", true),
             ("env", "sync", Env, "env", true), ("env", "info", Env, "env", true),
             ("shared-store", "install", SharedStore, "shared-store", true),

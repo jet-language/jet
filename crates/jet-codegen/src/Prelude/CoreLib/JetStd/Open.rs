@@ -93,7 +93,7 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct ProcessResult {
+    pub struct ProcessReceipt {
         pub code: i64,
         pub output: String,
         pub errors: String,
@@ -106,7 +106,26 @@ mod jet_std {
         // arms against a Rust `Option` and rustc rejected generated code.
         pub signal: JetOutcome<i64, JetAbsent>,
         pub timed_out: bool,
+        // D-AGENT-EXEC2: a receipt is the result plus the facts bound to the
+        // launch transaction. These fields are deliberately ordinary data so
+        // every engine can marshal the same record without reimplementing
+        // policy semantics.
+        pub executable_identity: String,
+        pub argv: Vec<String>,
+        pub input_digest: String,
+        pub policy_digest: String,
+        pub backend: String,
+        pub authority: Vec<String>,
+        pub descendants: String,
+        pub limits: Vec<String>,
+        pub outputs: Vec<String>,
+        pub redacted: bool,
+        pub pid: i64,
     }
+
+    // The old internal spelling remains a Rust alias while the user-facing
+    // execution result is the ratified ProcessReceipt type.
+    pub type ProcessResult = ProcessReceipt;
 
     #[derive(Clone, Debug)]
     pub struct JetURL {

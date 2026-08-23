@@ -1308,7 +1308,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
     if group != Some(Syntax::CONFIG_VERB_TRUST) && group != Some(Syntax::CONFIG_VERB_SANDBOX) {
         theme.error(
             &format!("`jet os config {}` isn't a command", group.unwrap_or("")),
-            "jet os config manages the env/dev trust store and sandbox fallback policy.",
+            "jet os config manages the env/dev trust store and sandbox substitute-or-refuse policy.",
             "try `jet os config trust list` or `jet os config sandbox status`.",
         );
         return 2;
@@ -1338,7 +1338,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         {
             match RuntimePolicy::write_sandbox_policy(RuntimePolicy::SandboxPolicy::AllowFallback) {
                 Ok(path) => theme.status(&format!(
-                    "sandbox fallback allowed for non-executable actions: {}",
+                    "sandbox substitution allowed for non-executable actions; executable actions refuse without the native boundary: {}",
                     path.display()
                 )),
                 Err(e) => {
@@ -1447,7 +1447,7 @@ pub(super) fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
         _ => {
             theme.error(
                 &format!("`jet os config {}` isn't a command", group.unwrap_or("")),
-                "jet os config manages trust and sandbox fallback policy.",
+                "jet os config manages trust and sandbox substitute-or-refuse policy.",
                 "try `jet os config trust list` or `jet os config sandbox status`.",
             );
             2

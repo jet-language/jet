@@ -34,9 +34,53 @@ fn jet_process_policy_rights(spec: &jet_std::ProcessSpec) -> Vec<String> {
 fn jet_process_policy_digest_right(right: &str) -> String {
     let lower = right.to_ascii_lowercase();
     if lower.starts_with("secret=") {
-        return format!("{}=<redacted>", &right[.."Secret".len().min(right.len())]);
+        let equals = right.find('=').unwrap_or(right.len());
+        return format!("{}=<redacted>", &right[..equals]);
     }
     right.to_owned()
+}
+
+fn jet_process_policy_secret_values(spec: &jet_std::ProcessSpec) -> Vec<String> {
+    let mut values = jet_process_policy_rights(spec)
+        .into_iter()
+        .filter_map(|right| {
+            let (name, value) = right.split_once('=')?;
+            (name.eq_ignore_ascii_case("secret") && !value.is_empty())
+                .then(|| value.to_owned())
+        })
+        .collect::<Vec<_>>();
+    values.extend(
+        spec.env_set
+            .iter()
+            .filter(|(name, value)| {
+                !value.is_empty()
+                    && ["secret", "token", "password", "passwd", "credential", "key"]
+                        .iter()
+                        .any(|part| name.to_ascii_lowercase().contains(part))
+            })
+            .map(|(_, value)| value.clone()),
+    );
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    values
+}
+
+fn jet_process_redact_text(text: &str, values: &[String]) -> String {
+    values.iter().fold(text.to_owned(), |text, value| {
+        if value.is_empty() {
+            text
+        } else {
+            text.replace(value, "<redacted>")
+        }
+    })
+}
+
+fn jet_process_policy_receipt_rights(spec: &jet_std::ProcessSpec) -> Vec<String> {
+    let values = jet_process_policy_secret_values(spec);
+    jet_process_policy_rights(spec)
+        .into_iter()
+        .map(|right| jet_process_redact_text(&jet_process_policy_digest_right(&right), &values))
+        .collect()
 }
 
 fn jet_process_stream_mode_name(mode: &jet_std::ProcessStreamMode) -> &'static str {
@@ -57,6 +101,115 @@ fn jet_process_policy_environment(spec: &jet_std::ProcessSpec) -> String {
     names.sort();
     names.dedup();
     names.join("\n")
+}
+
+fn jet_process_backend_limits() -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    let mut limits = Vec::new();
+    #[cfg(target_os = "windows")]
+    limits.extend([
+        "job-kill-on-close=true".to_string(),
+        "active-processes=256".to_string(),
+        "memory-bytes=2147483648".to_string(),
+    ]);
+    #[cfg(not(target_os = "windows"))]
+    let limits = Vec::new();
+    limits
+}
+
+fn jet_process_policy_limits(spec: &jet_std::ProcessSpec) -> Vec<String> {
+    let mut limits = jet_process_backend_limits();
+    limits.extend([
+        format!(
+            "timeout-ms={}",
+            spec.timeout_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        format!(
+            "output-limit={}",
+            spec.output_limit
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+    ]);
+    limits
+}
+
+fn jet_process_policy_outputs(spec: &jet_std::ProcessSpec) -> Vec<String> {
+    if spec.detached {
+        return vec!["stdout=discarded".to_string(), "stderr=discarded".to_string()];
+    }
+    vec![
+        format!("stdout={}", jet_process_stream_mode_name(&spec.stdout)),
+        format!("stderr={}", jet_process_stream_mode_name(&spec.stderr)),
+    ]
+}
+
+fn jet_process_policy_descendants(spec: &jet_std::ProcessSpec) -> String {
+    if spec.detached {
+        "detached".to_string()
+    } else if spec.policy_wire.is_some() {
+        "contained".to_string()
+    } else {
+        "direct".to_string()
+    }
+}
+
+fn jet_process_input_digest(spec: &jet_std::ProcessSpec) -> String {
+    let mut material = String::from("jet-process-input-v1\n");
+    for word in &spec.cmd {
+        material.push_str(&word.len().to_string());
+        material.push(':');
+        material.push_str(word);
+        material.push('\n');
+    }
+    let digest = jet_sha256_raw(material.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+fn jet_process_policy_network(spec: &jet_std::ProcessSpec) -> bool {
+    jet_process_policy_rights(spec)
+        .iter()
+        .any(|right| *right == "Net")
+}
+
+fn jet_process_policy_safe_right_name(right: &str) -> &str {
+    right
+        .split(|character| character == ':' || character == '=')
+        .next()
+        .unwrap_or("unknown")
+}
+
+/// The process boundary has a deliberately small enforcement vocabulary. A
+/// grant that is only recorded in the digest but ignored by the backend would
+/// turn an expert policy into ambient authority, so planning rejects every
+/// right the shared child boundary cannot enforce.
+fn jet_process_policy_check(spec: &jet_std::ProcessSpec) -> Result<(), jet_std::IOError> {
+    for right in jet_process_policy_rights(spec) {
+        let supported = right == "FS.Read:repo"
+            || right == "FS.Write:.jet/build"
+            || right == "Net"
+            || right
+                .strip_prefix("Exec:")
+                .is_some_and(|executable| !executable.is_empty());
+        if supported {
+            continue;
+        }
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            format!(
+                "authority grant `{}` cannot be enforced by the native process boundary; refusing before spawn",
+                jet_process_policy_safe_right_name(&right),
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// D-AGENT-EXEC1: canonical policy material is deliberately separate from
@@ -82,10 +235,11 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     let environment_keys = jet_process_policy_environment(spec);
+    let backend_limits = jet_process_backend_limits().join("\n");
     let mut material = String::from("jet-process-policy-v1\n");
     let fields = [
         ("authority.rights", rights.as_str()),
-        ("network", "deny"),
+        ("network", if jet_process_policy_network(spec) { "allow" } else { "deny" }),
         ("home", "deny"),
         ("secrets", "deny"),
         ("devices", "deny"),
@@ -94,6 +248,7 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         ("cwd", cwd.as_str()),
         ("timeout-ms", timeout_ms.as_str()),
         ("output-limit", output_limit.as_str()),
+        ("backend.limits", backend_limits.as_str()),
         ("environment.keys", environment_keys.as_str()),
         (
             "stdin",
@@ -130,6 +285,10 @@ pub(crate) fn jet_process_policy_digest(spec: &jet_std::ProcessSpec) -> String {
         hex.push_str(&format!("{byte:02x}"));
     }
     hex
+}
+
+pub(crate) fn jet_process_policy_redact(spec: &jet_std::ProcessSpec, text: &str) -> String {
+    jet_process_redact_text(text, &jet_process_policy_secret_values(spec))
 }
 
 fn jet_process_resolve_executable(
@@ -185,6 +344,13 @@ fn jet_process_resolve_executable(
 /// selects the backend; profile construction and launch stay in the shared
 /// ProcessSandbox Prelude fragment.
 fn jet_process_isolation_backend() -> Option<&'static str> {
+    #[cfg(target_os = "linux")]
+    {
+        return jet_process_sandbox::status()
+            .available
+            .then_some("linux-bwrap");
+    }
+
     #[cfg(target_os = "macos")]
     {
         return jet_process_sandbox::status()
@@ -192,7 +358,18 @@ fn jet_process_isolation_backend() -> Option<&'static str> {
             .then_some("macos-seatbelt");
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        return jet_process_sandbox::status()
+            .available
+            .then_some("windows-appcontainer");
+    }
+
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )))]
     {
         None
     }
@@ -226,12 +403,22 @@ fn jet_process_spec_plan(
         )));
     }
     let executable_identity = jet_process_resolve_executable(spec)?;
+    jet_process_policy_check(spec)?;
     let backend = jet_process_isolation_backend().unwrap_or("unavailable");
     let plan = jet_std::ProcessPlan {
         executable_identity,
-        argv: spec.cmd.clone(),
+        argv: spec
+            .cmd
+            .iter()
+            .map(|word| jet_process_policy_redact(spec, word))
+            .collect(),
+        input_digest: jet_process_input_digest(spec),
         policy_digest: jet_process_policy_digest(spec),
         backend: backend.to_string(),
+        authority: jet_process_policy_receipt_rights(spec),
+        descendants: jet_process_policy_descendants(spec),
+        limits: jet_process_policy_limits(spec),
+        outputs: jet_process_policy_outputs(spec),
     };
     if backend == "unavailable" {
         return Err(jet_std::IOError::other(

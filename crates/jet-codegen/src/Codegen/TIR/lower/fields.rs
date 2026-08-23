@@ -447,9 +447,36 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         n if n == Syntax::TYPE_ALLOC_ERROR => {
             matches!(member, "requested_bytes" | "allocator")
         }
-        "ProcessResult" => matches!(
+        "ProcessResult" | "ProcessReceipt" => matches!(
             member,
-            "code" | "output" | "errors" | "success" | "signal" | "timed_out"
+            "code"
+                | "output"
+                | "errors"
+                | "success"
+                | "signal"
+                | "timed_out"
+                | "executable_identity"
+                | "argv"
+                | "policy_digest"
+                | "backend"
+                | "authority"
+                | "descendants"
+                | "limits"
+                | "outputs"
+                | "redacted"
+                | "pid"
+        ),
+        "ProcessPlan" => matches!(
+            member,
+            "executable_identity"
+                | "argv"
+                | "input_digest"
+                | "policy_digest"
+                | "backend"
+                | "authority"
+                | "descendants"
+                | "limits"
+                | "outputs"
         ),
         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` read the real
         // `ProcessChild` Rust struct field directly (a writer/reader handle),

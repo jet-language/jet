@@ -361,7 +361,7 @@ pub fn apply_impure_core_call_with_type(
                 std::time::Duration::from_secs(30),
             ) {
                 Ok(out) => Ok(CtValue::Present(Box::new(CtValue::Struct {
-                    type_name: "ProcessResult".to_string(),
+                    type_name: "ProcessReceipt".to_string(),
                     fields: vec![
                         (
                             "code".to_string(),
@@ -375,6 +375,56 @@ pub fn apply_impure_core_call_with_type(
                             "errors".to_string(),
                             CtValue::Str(String::from_utf8_lossy(&out.stderr).into_owned()),
                         ),
+                        (
+                            "signal".to_string(),
+                            CtValue::absent(Type::Int),
+                        ),
+                        (
+                            "success".to_string(),
+                            CtValue::Bool(out.status.success()),
+                        ),
+                        (
+                            "timed_out".to_string(),
+                            CtValue::Bool(false),
+                        ),
+                        (
+                            "executable_identity".to_string(),
+                            CtValue::Str(cmd.first().cloned().unwrap_or_default()),
+                        ),
+                        (
+                            "argv".to_string(),
+                            CtValue::List(cmd.iter().cloned().map(CtValue::Str).collect()),
+                        ),
+                        ("input_digest".to_string(), CtValue::Str(String::new())),
+                        ("policy_digest".to_string(), CtValue::Str(String::new())),
+                        (
+                            "backend".to_string(),
+                            CtValue::Str("comptime-ambient".to_string()),
+                        ),
+                        (
+                            "authority".to_string(),
+                            CtValue::List(Vec::new()),
+                        ),
+                        (
+                            "descendants".to_string(),
+                            CtValue::Str("direct".to_string()),
+                        ),
+                        (
+                            "limits".to_string(),
+                            CtValue::List(vec![
+                                CtValue::Str("timeout-ms=30000".to_string()),
+                                CtValue::Str("output-limit=none".to_string()),
+                            ]),
+                        ),
+                        (
+                            "outputs".to_string(),
+                            CtValue::List(vec![
+                                CtValue::Str("stdout=capture".to_string()),
+                                CtValue::Str("stderr=capture".to_string()),
+                            ]),
+                        ),
+                        ("redacted".to_string(), CtValue::Bool(false)),
+                        ("pid".to_string(), CtValue::Int(0)),
                     ],
                 }))),
                 Err(e) => Ok(CtValue::failed(Box::new(io_error_value(

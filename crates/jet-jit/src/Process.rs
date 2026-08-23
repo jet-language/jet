@@ -24,10 +24,12 @@ fn clone_string_list(list: i64) -> Vec<String> {
     })
 }
 
-fn alloc_process_result(out: &process_prelude::ProcessResult) -> i64 {
+fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        // Field order: code, output, errors, success, signal, timed_out.
-        let record = rt.heap.alloc_record(6);
+        // Field order mirrors ProcessReceipt in JetStd/Open.rs. The first six
+        // fields preserve the shipped ProcessResult layout; audit facts are
+        // appended so old field lowering cannot silently change ABI slots.
+        let record = rt.heap.alloc_record(17);
         let _ = rt.heap.record_set_int(record, 0, out.code);
         let output = rt.heap.alloc_string(out.output.clone());
         let _ = rt.heap.record_set_string(record, 1, output);
@@ -38,14 +40,54 @@ fn alloc_process_result(out: &process_prelude::ProcessResult) -> i64 {
         let signal = out.signal.map(|value| value.wrapping_add(1)).unwrap_or(0);
         let _ = rt.heap.record_set_int(record, 4, signal);
         let _ = rt.heap.record_set_bool(record, 5, out.timed_out);
+        let executable = rt.heap.alloc_string(out.executable_identity.clone());
+        let _ = rt.heap.record_set_string(record, 6, executable);
+        let argv_values = out
+            .argv
+            .iter()
+            .map(|word| rt.heap.alloc_string(word.clone()))
+            .collect::<Vec<_>>();
+        let argv = rt.heap.alloc_int_list(argv_values);
+        let _ = rt.heap.record_set_int(record, 7, argv);
+        let input_digest = rt.heap.alloc_string(out.input_digest.clone());
+        let _ = rt.heap.record_set_string(record, 8, input_digest);
+        let digest = rt.heap.alloc_string(out.policy_digest.clone());
+        let _ = rt.heap.record_set_string(record, 9, digest);
+        let backend = rt.heap.alloc_string(out.backend.clone());
+        let _ = rt.heap.record_set_string(record, 10, backend);
+        let authority_values = out
+            .authority
+            .iter()
+            .map(|right| rt.heap.alloc_string(right.clone()))
+            .collect::<Vec<_>>();
+        let authority = rt.heap.alloc_int_list(authority_values);
+        let _ = rt.heap.record_set_int(record, 11, authority);
+        let descendants = rt.heap.alloc_string(out.descendants.clone());
+        let _ = rt.heap.record_set_string(record, 12, descendants);
+        let limit_values = out
+            .limits
+            .iter()
+            .map(|fact| rt.heap.alloc_string(fact.clone()))
+            .collect::<Vec<_>>();
+        let limits = rt.heap.alloc_int_list(limit_values);
+        let _ = rt.heap.record_set_int(record, 13, limits);
+        let output_values = out
+            .outputs
+            .iter()
+            .map(|fact| rt.heap.alloc_string(fact.clone()))
+            .collect::<Vec<_>>();
+        let outputs = rt.heap.alloc_int_list(output_values);
+        let _ = rt.heap.record_set_int(record, 14, outputs);
+        let _ = rt.heap.record_set_bool(record, 15, out.redacted);
+        let _ = rt.heap.record_set_int(record, 16, out.pid);
         record
     })
 }
 
 fn alloc_process_plan(plan: &process_prelude::ProcessPlan) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        // Field order: executable identity, argv, policy digest, backend.
-        let record = rt.heap.alloc_record(4);
+        // Field order mirrors ProcessPlan in JetStd/CommonTypes.rs.
+        let record = rt.heap.alloc_record(9);
         let executable = rt.heap.alloc_string(plan.executable_identity.clone());
         let _ = rt.heap.record_set_string(record, 0, executable);
         let argv_values = plan
@@ -55,15 +97,40 @@ fn alloc_process_plan(plan: &process_prelude::ProcessPlan) -> i64 {
             .collect::<Vec<_>>();
         let argv = rt.heap.alloc_int_list(argv_values);
         let _ = rt.heap.record_set_int(record, 1, argv);
+        let input_digest = rt.heap.alloc_string(plan.input_digest.clone());
+        let _ = rt.heap.record_set_string(record, 2, input_digest);
         let digest = rt.heap.alloc_string(plan.policy_digest.clone());
-        let _ = rt.heap.record_set_string(record, 2, digest);
+        let _ = rt.heap.record_set_string(record, 3, digest);
         let backend = rt.heap.alloc_string(plan.backend.clone());
-        let _ = rt.heap.record_set_string(record, 3, backend);
+        let _ = rt.heap.record_set_string(record, 4, backend);
+        let authority_values = plan
+            .authority
+            .iter()
+            .map(|right| rt.heap.alloc_string(right.clone()))
+            .collect::<Vec<_>>();
+        let authority = rt.heap.alloc_int_list(authority_values);
+        let _ = rt.heap.record_set_int(record, 5, authority);
+        let descendants = rt.heap.alloc_string(plan.descendants.clone());
+        let _ = rt.heap.record_set_string(record, 6, descendants);
+        let limit_values = plan
+            .limits
+            .iter()
+            .map(|fact| rt.heap.alloc_string(fact.clone()))
+            .collect::<Vec<_>>();
+        let limits = rt.heap.alloc_int_list(limit_values);
+        let _ = rt.heap.record_set_int(record, 7, limits);
+        let output_values = plan
+            .outputs
+            .iter()
+            .map(|fact| rt.heap.alloc_string(fact.clone()))
+            .collect::<Vec<_>>();
+        let outputs = rt.heap.alloc_int_list(output_values);
+        let _ = rt.heap.record_set_int(record, 8, outputs);
         record
     })
 }
 
-fn outcome_to_result(out: process_prelude::ProcessResult) -> i64 {
+fn outcome_to_result(out: process_prelude::ProcessReceipt) -> i64 {
     result_ok(alloc_process_result(&out) as u64)
 }
 

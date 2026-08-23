@@ -101,6 +101,12 @@ const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 static OPTIMIZE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+const PRIVATE_UNTRUSTED_BUILD: &str = "private-untrusted";
+
+pub(crate) fn is_private_untrusted_build(producer: &ProducerRecord) -> bool {
+    producer.facts.get("build.trust").map(String::as_str) == Some(PRIVATE_UNTRUSTED_BUILD)
+}
+
 #[cfg(any(test, windows))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowsDirectorySyncContract {
@@ -2184,9 +2190,11 @@ pub fn realize_verified(
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
     project_receipt_projection(ctx, &entry)?;
-    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
-    if realized.source_state == super::Provider::SourceState::Built {
-        publish_realized_to_bound_caches(roots, &entry);
+    if !is_private_untrusted_build(&realized.producer) {
+        promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
+        if realized.source_state == super::Provider::SourceState::Built {
+            publish_realized_to_bound_caches(roots, &entry);
+        }
     }
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     if let Some(action_key) = independent
@@ -2251,8 +2259,10 @@ pub fn certify_independent_root_build(
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
     project_receipt_projection(ctx, &entry)?;
-    promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
-    publish_realized_to_bound_caches(roots, &entry);
+    if !is_private_untrusted_build(&realized.producer) {
+        promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
+        publish_realized_to_bound_caches(roots, &entry);
+    }
     Reproducibility::clear_reproducibility_report(roots, &action_key)
         .map_err(RealizeError::Store)?;
     Ok(IndependentRootCertification {
@@ -2656,6 +2666,12 @@ fn discard_substitution_stage(path: &Path) -> std::io::Result<()> {
 /// authorizes the operation; a failed mirror never turns a successful source
 /// build into a failed realization.
 fn publish_realized_to_bound_caches(roots: &Roots, entry: &StoreEntry) {
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return;
+    };
+    if is_private_untrusted_build(&producer) {
+        return;
+    }
     let Ok(bindings) = list_cache_bindings(roots) else {
         return;
     };

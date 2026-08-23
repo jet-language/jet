@@ -1134,7 +1134,10 @@ mod jet_compute_cuda {
 
     const CUDA_SUCCESS: c_int = 0;
     const RTLD_NOW: c_int = 2;
-    const RTLD_LOCAL: c_int = 4;
+    // glibc defines RTLD_LOCAL as zero; 4 is RTLD_NOLOAD and would make the
+    // explicit CUDA backend report an installed driver as unavailable unless
+    // another host loaded libcuda first.
+    const RTLD_LOCAL: c_int = 0;
     const BLOCK_SIZE: usize = 256;
 
     #[link(name = "dl")]
@@ -2191,6 +2194,7 @@ mod jet_compute_cuda {
     pub fn stream_sync(_: &StreamHandle) -> Result<(), JetComputeError> { unavailable() }
 }
 
+// JET_VETTED_UNSAFE_BEGIN: jet_compute_vulkan
 // D-COMPUTE-BACKEND1=D / #1146: Vulkan is a dynamically loaded native
 // bridge. It owns instance/device/queue/pipeline setup and launches the
 // embedded SPIR-V kernel. The Prelude keeps the CPU oracle and accelerator
@@ -3889,6 +3893,7 @@ mod jet_compute_vulkan {
     pub fn sgd(_: &[f32], _: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
     pub fn scale(_: &[f32], _: f32) -> Result<Vec<f32>, JetComputeError> { unavailable() }
 }
+// JET_VETTED_UNSAFE_END: jet_compute_vulkan
 
 // WebGPU is a browser-owned provider. Native hosts do not expose a standard
 // WebGPU ABI, so the production seam reports that fact instead of pretending

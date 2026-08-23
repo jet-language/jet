@@ -11,7 +11,7 @@ root="$PWD/service-root"
 state="$project/systemd-state"
 path="$project/bin:$PATH"
 rm -rf -- "$project" "$home" "$root"
-trap 'rm -rf -- "$project" "$home" "$root"' EXIT
+trap 'rm -rf -- "$project" "$home" "$root"; rm -f -- up.out up.err health.out health.err wait.out wait.err logs.out logs.err down.out down.err timeout.out timeout.err' EXIT
 mkdir -p -- "$home" "$root"
 cp -R -- "$input"/. "$project"/
 chmod +x "$project/bin/systemd-run" "$project/bin/systemctl"

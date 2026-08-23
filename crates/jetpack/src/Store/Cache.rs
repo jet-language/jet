@@ -1330,6 +1330,11 @@ fn cache_provenance_for_entry(entry: &StoreEntry) -> io::Result<CacheProvenance>
     }
     let producer = ProducerRecord::decode(&entry.producer_record)
         .map_err(|error| invalid(&format!("cache producer record is invalid: {error}")))?;
+    if super::is_private_untrusted_build(&producer) {
+        return Err(invalid(
+            "private untrusted local build output cannot enter shared cache publication",
+        ));
+    }
     let expected_policy = format!(
         "policy={}\nplatform={}",
         entry.cache_identity.policy_fingerprint, entry.cache_identity.platform

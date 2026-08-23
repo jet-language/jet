@@ -280,7 +280,7 @@ pub(crate) fn is_packed_process_signal(expr: &TExpr) -> bool {
             field,
             boxed: false,
         } if field == "signal"
-            && matches!(&recv.ty, Type::Named(name) if name == "ProcessResult") => true,
+            && matches!(&recv.ty, Type::Named(name) if name == "ProcessResult" || name == "ProcessReceipt") => true,
         _ => false,
     }
 }

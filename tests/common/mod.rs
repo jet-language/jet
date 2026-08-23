@@ -1448,6 +1448,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     // D-TASKBORROW1=A: canonical task-group lifetime erasure (mirrors golden.rs).
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_compute");
+    s = strip_vetted_module(&s, "jet_compute_metal");
+    s = strip_vetted_module(&s, "jet_compute_cuda");
+    s = strip_vetted_module(&s, "jet_compute_vulkan");
     s = strip_vetted_module(&s, "jet_compute_cpu_simd");
     s = strip_vetted_module(&s, "jet_regex_cpu_simd_dispatch");
     s = strip_vetted_module(&s, "jet_regex_cpu_simd");

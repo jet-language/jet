@@ -1,8 +1,8 @@
-// Shared macOS child boundary used by #398 and authority-bound Core process.
+// Shared native child boundary used by #398 and authority-bound Core process.
 //
 // This is a Prelude fragment: generated AOT code, the resident JIT, and the
 // interpreter compile the same backend source. Build execution includes the
-// same fragment instead of maintaining a second Seatbelt implementation.
+// same fragment instead of maintaining a second platform implementation.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -34,6 +34,24 @@ pub enum Error {
 }
 
 pub fn policy(output_is_separate: bool, share_network: bool) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        return format!(
+            "filesystem={};process=private-pid,parent-death;network={};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB",
+            if output_is_separate {
+                "source-readonly,output-private-copy"
+            } else {
+                "private-workspace-readwrite"
+            },
+            if share_network {
+                "declared-shared"
+            } else {
+                "isolated"
+            },
+        );
+    }
+
+    #[cfg(not(target_os = "linux"))]
     format!(
         "filesystem={};process=declared-tool-and-fork;network={};environment=clear;devices=denied;resources=none-declared",
         if output_is_separate {
@@ -41,11 +59,69 @@ pub fn policy(output_is_separate: bool, share_network: bool) -> String {
         } else {
             "private-workspace-readwrite"
         },
-        if share_network { "declared-shared" } else { "denied" },
+        if share_network {
+            "declared-shared"
+        } else {
+            "denied"
+        },
     )
 }
 
 pub fn status() -> Status {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
+            return Status {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "test sandbox override prevents the native Linux backend probe".to_string(),
+            };
+        }
+        let Some(bwrap) = find_program_path("bwrap") else {
+            return Status {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "bubblewrap (`bwrap`) is not available on PATH".to_string(),
+            };
+        };
+        let Some(probe) = find_program_path("sh") else {
+            return Status {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: "bubblewrap is present but no immutable shell probe is available"
+                    .to_string(),
+            };
+        };
+        let policy = policy(false, false);
+        let mut command =
+            linux_sandbox_command(&bwrap, None, None, &BTreeMap::new(), false, false, false);
+        command.args([probe.as_os_str(), std::ffi::OsStr::new("-c")]);
+        command.arg("exit 0");
+        return match command.status() {
+            Ok(status) if status.success() => Status {
+                available: true,
+                mechanism: "linux-bwrap".to_string(),
+                policy,
+                reason: "bubblewrap completed the isolated backend probe".to_string(),
+            },
+            Ok(status) => Status {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: format!("bubblewrap backend probe exited with {status}"),
+            },
+            Err(error) => Status {
+                available: false,
+                mechanism: "linux-bwrap-unavailable".to_string(),
+                policy: "not-enforced".to_string(),
+                reason: format!("bubblewrap backend probe failed: {error}"),
+            },
+        };
+    }
+
     #[cfg(target_os = "macos")]
     {
         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
@@ -109,13 +185,24 @@ pub fn status() -> Status {
         };
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let native = windows_status();
+        return Status {
+            available: native.available,
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
+        };
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         Status {
             available: false,
             mechanism: "unsupported".to_string(),
             policy: "not-enforced".to_string(),
-            reason: "native macOS Seatbelt backend is unavailable on this target".to_string(),
+            reason: "native child sandbox backend is unavailable on this target".to_string(),
         }
     }
 }
@@ -141,12 +228,13 @@ pub fn spawn<F>(
     share_network: bool,
     source_readable: bool,
     source_writable: bool,
+    argv0: Option<&std::ffi::OsStr>,
     configure: F,
 ) -> Result<Child, Error>
 where
     F: FnOnce(&mut Command) -> Result<(), Error>,
 {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
             return Err(Error::Unsupported(
@@ -168,38 +256,66 @@ where
         }
         let source_dir = real_directory(source_dir)?;
         let output_dir = output_dir.map(real_directory).transpose()?;
-        let profile = build_profile(
-            &executable,
-            &source_dir,
-            output_dir.as_deref(),
-            share_network,
-            source_readable,
-            source_writable,
-        )?;
-        let mut command = Command::new(MACOS_SANDBOX_EXEC);
-        command
-            .arg("-f")
-            .arg(&profile)
-            .arg(&executable)
-            .args(args)
-            .env_clear()
-            .current_dir(&source_dir);
-        if let Some(output_dir) = output_dir.as_deref() {
-            command.env("JET_BUILD_OUTPUT", output_dir);
-        }
-        for (key, value) in env {
-            command.env(key, value);
-        }
-        if let Err(error) = configure(&mut command) {
+        #[cfg(target_os = "macos")]
+        {
+            let profile = build_profile(
+                &executable,
+                &source_dir,
+                output_dir.as_deref(),
+                share_network,
+                source_readable,
+                source_writable,
+            )?;
+            let mut command = Command::new(MACOS_SANDBOX_EXEC);
+            command
+                .arg("-f")
+                .arg(&profile)
+                .arg(&executable)
+                .args(args)
+                .env_clear()
+                .current_dir(&source_dir);
+            if let Some(output_dir) = output_dir.as_deref() {
+                command.env("JET_BUILD_OUTPUT", output_dir);
+            }
+            let _ = argv0;
+            for (key, value) in env {
+                command.env(key, value);
+            }
+            if let Err(error) = configure(&mut command) {
+                let _ = fs::remove_file(profile);
+                return Err(error);
+            }
+            let result = command.spawn();
             let _ = fs::remove_file(profile);
-            return Err(error);
+            return result.map_err(|error| Error::Io(error.to_string()));
         }
-        let result = command.spawn();
-        let _ = fs::remove_file(profile);
-        return result.map_err(|error| Error::Io(error.to_string()));
+
+        #[cfg(target_os = "linux")]
+        {
+            let bwrap = find_program_path("bwrap").ok_or_else(|| {
+                Error::Unsupported("bubblewrap (`bwrap`) is not available on PATH".to_string())
+            })?;
+            let mut command = linux_sandbox_command(
+                &bwrap,
+                Some(&source_dir),
+                output_dir.as_deref(),
+                env,
+                share_network,
+                source_readable,
+                source_writable,
+            );
+            if let Some(argv0) = argv0 {
+                command.arg("--argv0").arg(argv0);
+            }
+            command.arg(&executable).args(args);
+            configure(&mut command)?;
+            return command
+                .spawn()
+                .map_err(|error| Error::Io(error.to_string()));
+        }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (
             executable,
@@ -210,10 +326,12 @@ where
             share_network,
             source_readable,
             source_writable,
+            argv0,
             configure,
         );
         Err(Error::Unsupported(
-            "native macOS Seatbelt backend is unavailable on this target".to_string(),
+            "native Windows AppContainer backend does not expose streaming spawn; use captured run()"
+                .to_string(),
         ))
     }
 }
@@ -226,6 +344,7 @@ pub fn output(
     env: &BTreeMap<String, String>,
     share_network: bool,
 ) -> Result<Output, Error> {
+    let argv0 = executable.file_name().map(std::ffi::OsStr::to_owned);
     let child = spawn(
         executable,
         args,
@@ -235,6 +354,7 @@ pub fn output(
         share_network,
         true,
         output_dir.is_none(),
+        argv0.as_deref(),
         |command| {
             command
                 .stdin(Stdio::null())
@@ -259,6 +379,117 @@ fn real_directory(path: &Path) -> Result<PathBuf, Error> {
         )));
     }
     Ok(canonical)
+}
+
+fn find_program_path(program: &str) -> Option<PathBuf> {
+    let direct = Path::new(program);
+    if direct.components().count() > 1 && direct.is_file() {
+        return fs::canonicalize(direct).ok();
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|directory| {
+            let candidate = directory.join(program);
+            candidate
+                .is_file()
+                .then(|| fs::canonicalize(candidate).ok())
+                .flatten()
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_sandbox_command(
+    bwrap: &Path,
+    source_dir: Option<&Path>,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    source_readable: bool,
+    source_writable: bool,
+) -> Command {
+    let mut command = Command::new(bwrap);
+    command
+        .arg("--die-with-parent")
+        .arg("--new-session")
+        .arg("--unshare-all")
+        .arg("--unshare-user")
+        .arg("--disable-userns")
+        .arg("--assert-userns-disabled")
+        .arg("--cap-drop")
+        .arg("ALL")
+        .arg("--ro-bind-try")
+        .arg("/nix/store")
+        .arg("/nix/store")
+        .arg("--proc")
+        .arg("/proc")
+        .arg("--dev")
+        .arg("/dev")
+        .arg("--size")
+        .arg("67108864")
+        .arg("--tmpfs")
+        .arg("/tmp")
+        .arg("--dir")
+        .arg("/homeless-shelter")
+        .arg("--clearenv")
+        .arg("--setenv")
+        .arg("PATH")
+        .arg("/nix/store")
+        .arg("--setenv")
+        .arg("HOME")
+        .arg("/homeless-shelter");
+    match (source_dir, output_dir) {
+        (Some(source), Some(output)) => {
+            command.arg("--dir").arg("/work");
+            if source_writable {
+                command.arg("--bind").arg(source).arg("/work/source");
+            } else if source_readable {
+                command.arg("--ro-bind").arg(source).arg("/work/source");
+            } else {
+                command.arg("--dir").arg("/work/source");
+            }
+            command
+                .arg("--bind")
+                .arg(output)
+                .arg("/work/output")
+                .arg("--chdir")
+                .arg("/work/source")
+                .arg("--setenv")
+                .arg("JET_BUILD_OUTPUT")
+                .arg("/work/output");
+        }
+        (Some(source), None) => {
+            if source_writable {
+                command.arg("--bind").arg(source).arg("/work");
+            } else if source_readable {
+                command.arg("--ro-bind").arg(source).arg("/work");
+            } else {
+                command.arg("--dir").arg("/work");
+            }
+            command.arg("--chdir").arg("/work");
+        }
+        (None, None) => {
+            command
+                .arg("--dir")
+                .arg("/work")
+                .arg("--chdir")
+                .arg("/work");
+        }
+        (None, Some(output)) => {
+            command
+                .arg("--bind")
+                .arg(output)
+                .arg("/work")
+                .arg("--chdir")
+                .arg("/work");
+        }
+    }
+    if share_network {
+        command.arg("--share-net");
+    }
+    for (key, value) in env {
+        command.arg("--setenv").arg(key).arg(value);
+    }
+    command
 }
 
 fn secure_child_directory(parent: &Path, name: &str) -> Result<PathBuf, Error> {

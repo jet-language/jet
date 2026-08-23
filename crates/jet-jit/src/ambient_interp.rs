@@ -607,7 +607,7 @@ pub(crate) mod process_prelude {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub struct ProcessResult {
+        pub struct ProcessReceipt {
             pub code: i64,
             pub output: String,
             pub errors: String,
@@ -616,7 +616,20 @@ pub(crate) mod process_prelude {
             // optional carrier, never a raw Rust `Option`.
             pub signal: JetOutcome<i64, JetAbsent>,
             pub timed_out: bool,
+            pub executable_identity: String,
+            pub argv: Vec<String>,
+            pub input_digest: String,
+            pub policy_digest: String,
+            pub backend: String,
+            pub authority: Vec<String>,
+            pub descendants: String,
+            pub limits: Vec<String>,
+            pub outputs: Vec<String>,
+            pub redacted: bool,
+            pub pid: i64,
         }
+
+        pub type ProcessResult = ProcessReceipt;
 
         #[derive(Clone, Debug, PartialEq)]
         pub enum ProcessStreamMode {
@@ -719,8 +732,13 @@ pub(crate) mod process_prelude {
         pub struct ProcessPlan {
             pub executable_identity: String,
             pub argv: Vec<String>,
+            pub input_digest: String,
             pub policy_digest: String,
             pub backend: String,
+            pub authority: Vec<String>,
+            pub descendants: String,
+            pub limits: Vec<String>,
+            pub outputs: Vec<String>,
         }
 
         #[derive(Clone, Debug)]
@@ -734,7 +752,11 @@ pub(crate) mod process_prelude {
                 std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
             pub terminal: JetOutcome<TerminalSession, JetAbsent>,
             pub process_group: bool,
+            pub detached: bool,
             pub timeout_ms: Option<i64>,
+            pub output_limit: Option<i64>,
+            pub audit_spec: ProcessSpec,
+            pub audit_plan: Option<ProcessPlan>,
             pub started: std::time::Instant,
         }
 
@@ -772,6 +794,7 @@ pub(crate) mod process_prelude {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     mod jet_process_sandbox {
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
+        include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
     }
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSpec.rs");
@@ -779,7 +802,7 @@ pub(crate) mod process_prelude {
 
     pub(crate) use jet_std::{
         Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
-        ProcessResult, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
+        ProcessReceipt, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
         TerminalSession, TerminalSize,
     };
 
@@ -850,15 +873,15 @@ pub(crate) mod process_prelude {
         jet_process_spec_plan(spec)
     }
 
-    pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
+    pub(crate) fn spec_run(spec: &ProcessSpec) -> Result<ProcessReceipt, IOError> {
         jet_process_spec_run(spec)
     }
 
-    pub(crate) fn spec_run_checked(spec: &ProcessSpec) -> Result<ProcessResult, IOError> {
+    pub(crate) fn spec_run_checked(spec: &ProcessSpec) -> Result<ProcessReceipt, IOError> {
         jet_process_spec_run_checked(spec)
     }
 
-    pub(crate) fn spec_pipeline(specs: &Vec<ProcessSpec>) -> Result<ProcessResult, IOError> {
+    pub(crate) fn spec_pipeline(specs: &Vec<ProcessSpec>) -> Result<ProcessReceipt, IOError> {
         jet_process_spec_pipeline(specs)
     }
 
@@ -870,7 +893,7 @@ pub(crate) mod process_prelude {
         jet_process_child_id(child)
     }
 
-    pub(crate) fn child_wait(child: &ProcessChild) -> Result<ProcessResult, IOError> {
+    pub(crate) fn child_wait(child: &ProcessChild) -> Result<ProcessReceipt, IOError> {
         jet_process_child_wait(child)
     }
 
@@ -1316,8 +1339,22 @@ fn process_plan_value(plan: process_prelude::ProcessPlan) -> CtValue {
                 "argv".to_string(),
                 CtValue::List(plan.argv.into_iter().map(CtValue::Str).collect()),
             ),
+            ("input_digest".to_string(), CtValue::Str(plan.input_digest)),
             ("policy_digest".to_string(), CtValue::Str(plan.policy_digest)),
             ("backend".to_string(), CtValue::Str(plan.backend)),
+            (
+                "authority".to_string(),
+                CtValue::List(plan.authority.into_iter().map(CtValue::Str).collect()),
+            ),
+            ("descendants".to_string(), CtValue::Str(plan.descendants)),
+            (
+                "limits".to_string(),
+                CtValue::List(plan.limits.into_iter().map(CtValue::Str).collect()),
+            ),
+            (
+                "outputs".to_string(),
+                CtValue::List(plan.outputs.into_iter().map(CtValue::Str).collect()),
+            ),
         ],
     }
 }
@@ -1333,9 +1370,9 @@ fn process_set_value(mut facts: Vec<String>) -> CtValue {
     }
 }
 
-fn process_result_value(result: process_prelude::ProcessResult) -> CtValue {
+fn process_result_value(result: process_prelude::ProcessReceipt) -> CtValue {
     CtValue::Struct {
-        type_name: "ProcessResult".to_string(),
+        type_name: "ProcessReceipt".to_string(),
         fields: vec![
             ("code".to_string(), CtValue::Int(result.code)),
             ("output".to_string(), CtValue::Str(result.output)),
@@ -1349,6 +1386,41 @@ fn process_result_value(result: process_prelude::ProcessResult) -> CtValue {
                 },
             ),
             ("timed_out".to_string(), CtValue::Bool(result.timed_out)),
+            (
+                "executable_identity".to_string(),
+                CtValue::Str(result.executable_identity),
+            ),
+            (
+                "argv".to_string(),
+                CtValue::List(result.argv.into_iter().map(CtValue::Str).collect()),
+            ),
+            (
+                "input_digest".to_string(),
+                CtValue::Str(result.input_digest),
+            ),
+            (
+                "policy_digest".to_string(),
+                CtValue::Str(result.policy_digest),
+            ),
+            ("backend".to_string(), CtValue::Str(result.backend)),
+            (
+                "authority".to_string(),
+                CtValue::List(result.authority.into_iter().map(CtValue::Str).collect()),
+            ),
+            (
+                "descendants".to_string(),
+                CtValue::Str(result.descendants),
+            ),
+            (
+                "limits".to_string(),
+                CtValue::List(result.limits.into_iter().map(CtValue::Str).collect()),
+            ),
+            (
+                "outputs".to_string(),
+                CtValue::List(result.outputs.into_iter().map(CtValue::Str).collect()),
+            ),
+            ("redacted".to_string(), CtValue::Bool(result.redacted)),
+            ("pid".to_string(), CtValue::Int(result.pid)),
         ],
     }
 }
@@ -1410,7 +1482,7 @@ fn process_io_error(error: process_prelude::IOError) -> CtValue {
 }
 
 fn process_result_outcome(
-    result: Result<process_prelude::ProcessResult, process_prelude::IOError>,
+    result: Result<process_prelude::ProcessReceipt, process_prelude::IOError>,
 ) -> CtValue {
     match result {
         Ok(result) => CtValue::Present(Box::new(process_result_value(result))),

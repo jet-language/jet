@@ -1295,7 +1295,7 @@ mod tests {
     /// Whenever sema declares a field, the JIT MUST hand back sema's answer
     /// byte for byte — a private row that merely looks right is how
     /// `DataError.row` came to be `Int` against sema's `Option<Int>`, and how
-    /// AOT came to read `ProcessResult.output` (a `String`) through the integer
+    /// AOT came to read `ProcessReceipt.output` (a `String`) through the integer
     /// accessor. The residual rows below the delegation are allowed to exist
     /// only where sema answers nothing.
     #[test]
@@ -1333,16 +1333,27 @@ mod tests {
             ("success", Type::Bool),
             ("timed_out", Type::Bool),
             ("signal", Type::Option(Box::new(Type::Int))),
+            ("executable_identity", Type::String),
+            ("argv", Type::List(Box::new(Type::String))),
+            ("input_digest", Type::String),
+            ("policy_digest", Type::String),
+            ("backend", Type::String),
+            ("authority", Type::List(Box::new(Type::String))),
+            ("descendants", Type::String),
+            ("limits", Type::List(Box::new(Type::String))),
+            ("outputs", Type::List(Box::new(Type::String))),
+            ("redacted", Type::Bool),
+            ("pid", Type::Int),
         ] {
             assert_eq!(
-                core_struct_field_type("ProcessResult", field),
+                core_struct_field_type("ProcessReceipt", field),
                 Some(declared.clone()),
-                "ProcessResult.{field}"
+                "ProcessReceipt.{field}"
             );
             assert_eq!(
-                jet_codegen::Sema::core_struct_field_type("ProcessResult", field, &[]),
+                jet_codegen::Sema::core_struct_field_type("ProcessReceipt", field, &[]),
                 Some(declared),
-                "sema ProcessResult.{field}"
+                "sema ProcessReceipt.{field}"
             );
         }
     }
@@ -1426,10 +1437,43 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
             "tls_version",
         ],
     ),
-    // Mirrors jet_std::ProcessResult field order (Open.rs).
+    // Mirrors jet_std::ProcessReceipt field order (Open.rs). ProcessResult is
+    // the retired compatibility spelling for this same record shape.
     (
-        &["ProcessResult"],
-        &["code", "output", "errors", "success", "signal", "timed_out"],
+        &["ProcessReceipt", "ProcessResult"],
+        &[
+            "code",
+            "output",
+            "errors",
+            "success",
+            "signal",
+            "timed_out",
+            "executable_identity",
+            "argv",
+            "input_digest",
+            "policy_digest",
+            "backend",
+            "authority",
+            "descendants",
+            "limits",
+            "outputs",
+            "redacted",
+            "pid",
+        ],
+    ),
+    (
+        &["ProcessPlan"],
+        &[
+            "executable_identity",
+            "argv",
+            "input_digest",
+            "policy_digest",
+            "backend",
+            "authority",
+            "descendants",
+            "limits",
+            "outputs",
+        ],
     ),
     (&["TerminalSize"], &["cols", "rows"]),
     (&["TerminalPolicy"], &["size", "mode"]),

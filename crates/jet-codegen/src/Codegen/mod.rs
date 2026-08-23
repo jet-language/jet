@@ -1416,6 +1416,7 @@ fn push_corelib_prelude_body(
         out.push_str("\n}\n");
         out.push_str("\nmod jet_process_sandbox {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessWindowsSandbox.rs"));
         out.push_str("\n}\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
@@ -2086,16 +2087,10 @@ fn strip_unused_term_prelude(out: String) -> String {
 /// Keep ordinary programs `unsafe`-free by stripping the whole dispatcher
 /// unless generated user code actually calls it.
 fn strip_unused_os_signal_prelude(out: String) -> String {
-    let prelude_end = [
-        out.find("fn __jet_"),
-        out.find("pub fn __jet_"),
-        out.find("fn main()"),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(out.len());
-    if out[prelude_end..].contains("jet_std_os_on_interrupt") {
+    // The cached runtime itself contains `fn __jet_*`, so a function-name
+    // boundary is not a user-code boundary. The wrapper definition is one
+    // occurrence; an emitted `core.sys.on_interrupt` call adds another.
+    if out.matches("jet_std_os_on_interrupt(").count() > 1 {
         return out;
     }
 

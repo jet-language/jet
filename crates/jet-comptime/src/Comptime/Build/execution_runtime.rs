@@ -16,16 +16,16 @@ use super::validation::resolve_under;
 use super::{RemoteAttemptError, RemoteBuildRequest, RemoteBuilder, RemoteScheduler};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     fs, io,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(target_os = "macos")]
 mod jet_process_sandbox {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
 }
 
 static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
@@ -140,7 +140,7 @@ pub fn native_sandbox_status() -> NativeSandboxStatus {
         };
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         let native = jet_process_sandbox::status();
         return NativeSandboxStatus {
@@ -153,7 +153,7 @@ pub fn native_sandbox_status() -> NativeSandboxStatus {
 
     #[cfg(target_os = "windows")]
     {
-        let native = super::windows_sandbox::status();
+        let native = jet_process_sandbox::windows_status();
         return NativeSandboxStatus {
             available: native.available,
             mechanism: native.mechanism,
@@ -178,58 +178,6 @@ pub fn native_sandbox_status() -> NativeSandboxStatus {
         };
     }
 
-    #[cfg(target_os = "linux")]
-    {
-        if !cfg!(target_os = "linux") {
-            return NativeSandboxStatus {
-                available: false,
-                mechanism: "unsupported".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: "Jetpack's native child sandbox is implemented only on Linux".to_string(),
-            };
-        }
-        let Some(bwrap) = find_program_path("bwrap") else {
-            return NativeSandboxStatus {
-                available: false,
-                mechanism: "linux-bwrap-unavailable".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: "bubblewrap (`bwrap`) is not available on PATH".to_string(),
-            };
-        };
-        let Some(probe) = find_program_path("sh") else {
-            return NativeSandboxStatus {
-                available: false,
-                mechanism: "linux-bwrap-unavailable".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: "bubblewrap is present but no immutable shell probe is available"
-                    .to_string(),
-            };
-        };
-        let policy = native_sandbox_policy(false, false);
-        let mut command = native_sandbox_command(&bwrap, None, None, &BTreeMap::new(), false);
-        command.args([probe.as_os_str(), std::ffi::OsStr::new("-c")]);
-        command.arg("exit 0");
-        match command.status() {
-            Ok(status) if status.success() => NativeSandboxStatus {
-                available: true,
-                mechanism: "linux-bwrap".to_string(),
-                policy,
-                reason: "bubblewrap completed the isolated backend probe".to_string(),
-            },
-            Ok(status) => NativeSandboxStatus {
-                available: false,
-                mechanism: "linux-bwrap-unavailable".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: format!("bubblewrap backend probe exited with {}", status),
-            },
-            Err(error) => NativeSandboxStatus {
-                available: false,
-                mechanism: "linux-bwrap-unavailable".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: format!("bubblewrap backend probe failed: {error}"),
-            },
-        }
-    }
 }
 
 /// Run one executable action through the shared native sandbox. `source_dir`
@@ -244,7 +192,7 @@ pub fn run_native_sandboxed(
     env: &BTreeMap<String, String>,
     share_network: bool,
 ) -> Result<NativeSandboxOutput, NativeSandboxError> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         let output_is_separate = output_dir.is_some();
         let output = jet_process_sandbox::output(
@@ -263,21 +211,37 @@ pub fn run_native_sandboxed(
         })?;
         return Ok(NativeSandboxOutput {
             output,
-            mechanism: "macos-seatbelt".to_string(),
+            mechanism: if cfg!(target_os = "linux") {
+                "linux-bwrap".to_string()
+            } else {
+                "macos-seatbelt".to_string()
+            },
             policy: jet_process_sandbox::policy(output_is_separate, share_network),
         });
     }
 
     #[cfg(target_os = "windows")]
     {
-        return super::windows_sandbox::run(
+        return jet_process_sandbox::windows_output(
             executable,
             args,
             source_dir,
             output_dir,
             env,
             share_network,
+            true,
+            output_dir.is_none(),
+            None,
+            None,
         )
+        .map_err(|error| match error {
+            jet_process_sandbox::WindowsSandboxError::Unsupported(detail) => {
+                NativeSandboxError::Unsupported(detail)
+            }
+            jet_process_sandbox::WindowsSandboxError::Io(detail) => {
+                NativeSandboxError::Io(detail)
+            }
+        })
         .map(|result| NativeSandboxOutput {
             output: result.output,
             mechanism: result.mechanism,
@@ -297,163 +261,6 @@ pub fn run_native_sandboxed(
         ));
     }
 
-    #[cfg(target_os = "linux")]
-    {
-        if !cfg!(target_os = "linux") {
-            return Err(NativeSandboxError::Unsupported(
-                "Jetpack's native child sandbox is implemented only on Linux".to_string(),
-            ));
-        }
-        if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-            return Err(NativeSandboxError::Unsupported(
-                "test sandbox override prevents child execution".to_string(),
-            ));
-        }
-        let status = native_sandbox_status();
-        if !status.available {
-            return Err(NativeSandboxError::Unsupported(status.reason));
-        }
-        let bwrap = find_program_path("bwrap").ok_or_else(|| {
-            NativeSandboxError::Unsupported(
-                "bubblewrap (`bwrap`) is not available on PATH".to_string(),
-            )
-        })?;
-        let executable = executable.canonicalize().map_err(|error| {
-            NativeSandboxError::Unsupported(format!("sandbox executable is unavailable: {error}"))
-        })?;
-        if !executable.starts_with("/nix/store") || !executable.is_file() {
-            return Err(NativeSandboxError::Unsupported(format!(
-                "sandbox executable `{}` is outside the immutable tool closure",
-                executable.display()
-            )));
-        }
-        let source_dir = real_directory(source_dir)?;
-        let output_dir = output_dir.map(real_directory).transpose()?;
-        let policy = native_sandbox_policy(output_dir.is_some(), share_network);
-        let mut command = native_sandbox_command(
-            &bwrap,
-            Some(&source_dir),
-            output_dir.as_deref(),
-            env,
-            share_network,
-        );
-        command.arg(&executable).args(args).stdin(Stdio::null());
-        let output = command
-            .output()
-            .map_err(|error| NativeSandboxError::Io(error.to_string()))?;
-        Ok(NativeSandboxOutput {
-            output,
-            mechanism: "linux-bwrap".to_string(),
-            policy,
-        })
-    }
-}
-
-fn real_directory(path: &Path) -> Result<PathBuf, NativeSandboxError> {
-    let canonical = path.canonicalize().map_err(|error| {
-        NativeSandboxError::Io(format!("sandbox directory `{}`: {error}", path.display()))
-    })?;
-    if !canonical.is_dir() {
-        return Err(NativeSandboxError::Io(format!(
-            "sandbox path `{}` is not a directory",
-            path.display()
-        )));
-    }
-    Ok(canonical)
-}
-
-fn native_sandbox_command(
-    bwrap: &Path,
-    source_dir: Option<&Path>,
-    output_dir: Option<&Path>,
-    env: &BTreeMap<String, String>,
-    share_network: bool,
-) -> Command {
-    let mut command = Command::new(bwrap);
-    command
-        .arg("--die-with-parent")
-        .arg("--new-session")
-        .arg("--unshare-all")
-        .arg("--unshare-user")
-        .arg("--disable-userns")
-        .arg("--assert-userns-disabled")
-        .arg("--cap-drop")
-        .arg("ALL")
-        .arg("--ro-bind-try")
-        .arg("/nix/store")
-        .arg("/nix/store")
-        .arg("--proc")
-        .arg("/proc")
-        .arg("--dev")
-        .arg("/dev")
-        .arg("--size")
-        .arg("67108864")
-        .arg("--tmpfs")
-        .arg("/tmp")
-        .arg("--clearenv")
-        .arg("--setenv")
-        .arg("PATH")
-        .arg("/nix/store");
-    match (source_dir, output_dir) {
-        (Some(source), Some(output)) => {
-            command
-                .arg("--dir")
-                .arg("/work")
-                .arg("--ro-bind")
-                .arg(source)
-                .arg("/work/source")
-                .arg("--bind")
-                .arg(output)
-                .arg("/work/output")
-                .arg("--chdir")
-                .arg("/work/source")
-                .arg("--setenv")
-                .arg("JET_BUILD_OUTPUT")
-                .arg("/work/output");
-        }
-        (Some(source), None) => {
-            command
-                .arg("--bind")
-                .arg(source)
-                .arg("/work")
-                .arg("--chdir")
-                .arg("/work");
-        }
-        (None, None) => {
-            command
-                .arg("--dir")
-                .arg("/work")
-                .arg("--chdir")
-                .arg("/work");
-        }
-        (None, Some(output)) => {
-            command
-                .arg("--bind")
-                .arg(output)
-                .arg("/work")
-                .arg("--chdir")
-                .arg("/work");
-        }
-    }
-    if share_network {
-        command.arg("--share-net");
-    }
-    for (key, value) in env {
-        command.arg("--setenv").arg(key).arg(value);
-    }
-    command
-}
-
-fn native_sandbox_policy(output_is_separate: bool, share_network: bool) -> String {
-    format!(
-        "filesystem={};process=private-pid,parent-death;network={};environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB",
-        if output_is_separate {
-            "source-readonly,output-private-copy"
-        } else {
-            "private-workspace-readwrite"
-        },
-        if share_network { "declared-shared" } else { "isolated" },
-    )
 }
 
 /// Execute the canonical action graph through the platform-native child
@@ -2142,6 +1949,196 @@ mod tests {
         for row in rows {
             assert_eq!(row.len(), 4, "malformed hostile corpus row");
             assert_eq!(row[3], "blocked-or-unsupported");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shared_hostile_corpus_runs_through_hermetic_backend() {
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let status = native_sandbox_status();
+        if !status.available {
+            assert_eq!(status.policy, "not-enforced");
+            assert!(
+                status.mechanism.contains("unavailable") || status.mechanism == "unsupported",
+                "unsupported backend must be named: {status:?}"
+            );
+            return;
+        }
+
+        let corpus = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/build_sandbox/hostile-corpus.tsv"
+        ));
+        let cases: Vec<_> = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let fields: Vec<_> = line.split('\t').collect();
+                assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+                (fields[0], fields[1], fields[2], fields[3])
+            })
+            .collect();
+        assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("bash"))
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+            )
+            .map(|directory| directory.join("sh"))
+            .find(|candidate| candidate.is_file())
+        })
+        .expect("a shell is required for the hostile corpus");
+        let shell_quote =
+            |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+        let link_tool = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("ln"))
+        .find(|candidate| candidate.is_file())
+        .expect("ln is required for the hostile corpus");
+        let fill_name = format!("/tmp/jet-hermetic-hostile-fill-{}", std::process::id());
+
+        for (case_id, _category, _attempt, _expected) in cases {
+            let root = std::env::temp_dir().join(format!(
+                "jet-hermetic-hostile-{case_id}-{}-{}",
+                std::process::id(),
+                REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let source = root.join("source");
+            let output = root.join("output");
+            let host_secret = root.with_file_name(format!(
+                "jet-hermetic-hostile-{case_id}-{}-secret",
+                std::process::id()
+            ));
+            let host_marker = root.with_file_name(format!(
+                "jet-hermetic-hostile-{case_id}-{}-marker",
+                std::process::id()
+            ));
+            fs::create_dir_all(&source).unwrap();
+            fs::create_dir_all(&output).unwrap();
+            fs::write(&host_secret, "host-only-secret").unwrap();
+            if case_id == "source-symlink" {
+                std::os::unix::fs::symlink(&host_secret, source.join("link")).unwrap();
+            }
+
+            let mut network_thread = None;
+            let command = match case_id {
+                "host-read" => format!(
+                    "if test -r {}; then printf escaped; else printf blocked; fi",
+                    shell_quote(&host_secret)
+                ),
+                "host-write" => format!(
+                    "if printf escaped > {}; then printf escaped; else printf blocked; fi",
+                    shell_quote(&host_marker)
+                ),
+                "source-symlink" => {
+                    "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"
+                        .to_string()
+                }
+                "output-symlink" => format!(
+                    "if {} -s {} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi",
+                    shell_quote(&link_tool),
+                    shell_quote(&host_marker)
+                ),
+                "network-exfiltration" => {
+                    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                    listener.set_nonblocking(true).unwrap();
+                    let port = listener.local_addr().unwrap().port();
+                    network_thread = Some(thread::spawn(move || {
+                        let deadline = Instant::now() + Duration::from_millis(750);
+                        loop {
+                            match listener.accept() {
+                                Ok(_) => return true,
+                                Err(error)
+                                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                                {
+                                    if Instant::now() >= deadline {
+                                        return false;
+                                    }
+                                    thread::sleep(Duration::from_millis(5));
+                                }
+                                Err(_) => return false,
+                            }
+                        }
+                    }));
+                    format!(
+                        "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf escaped; else printf blocked; fi"
+                    )
+                }
+                "child-process" => format!(
+                    "(printf escaped > {}) & printf blocked",
+                    shell_quote(&host_marker)
+                ),
+                "tmpfs-exhaustion" => format!(
+                    "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_name}; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped"
+                ),
+                other => panic!("unmapped hostile corpus case {other}"),
+            };
+            let result = run_native_sandboxed(
+                &shell,
+                &["-c".to_string(), command],
+                &source,
+                Some(&output),
+                &BTreeMap::new(),
+                false,
+            )
+            .unwrap_or_else(|error| panic!("{case_id} unexpectedly lost enforcement: {error:?}"));
+            assert_eq!(
+                result.mechanism, status.mechanism,
+                "{case_id} backend receipt"
+            );
+            for policy in [
+                "filesystem=",
+                "process=",
+                "network=",
+                "environment=",
+                "devices=",
+                "resources=",
+            ] {
+                assert!(
+                    result.policy.contains(policy),
+                    "{case_id} receipt lost {policy}: {}",
+                    result.policy
+                );
+            }
+            assert!(
+                result.output.status.success(),
+                "{case_id} backend failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&result.output.stdout),
+                String::from_utf8_lossy(&result.output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&result.output.stdout),
+                "blocked",
+                "{case_id} escaped through the hermetic backend"
+            );
+            assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+            if let Some(network_thread) = network_thread {
+                assert!(
+                    !network_thread.join().unwrap(),
+                    "{case_id} reached the network"
+                );
+            }
+            if case_id == "child-process" {
+                thread::sleep(Duration::from_millis(100));
+                assert!(
+                    !host_marker.exists(),
+                    "{case_id} left a hostile child behind"
+                );
+            }
+            fs::remove_file(&host_secret).ok();
+            fs::remove_file(&host_marker).ok();
+            fs::remove_file(&fill_name).ok();
+            fs::remove_dir_all(&root).ok();
         }
     }
 

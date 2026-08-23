@@ -270,7 +270,7 @@ pub(crate) fn process_spec_method_return(
             io_error_ty(),
         ))),
         ("run" | "run_checked", 0) => Some(Some(result_ty(
-            Type::Named("ProcessResult".to_string()),
+            Type::Named("ProcessReceipt".to_string()),
             io_error_ty(),
         ))),
         ("spawn", 0) => Some(Some(result_ty(
@@ -342,7 +342,7 @@ pub(crate) fn process_child_method_return(
     match (method, n_args) {
         ("id", 0) => Some(Some(Type::Int)),
         ("wait", 0) => Some(Some(result_ty(
-            Type::Named("ProcessResult".to_string()),
+            Type::Named("ProcessReceipt".to_string()),
             io.clone(),
         ))),
         // #1481 core.process: a non-blocking poll — `wait()` blocks until the

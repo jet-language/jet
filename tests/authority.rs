@@ -131,10 +131,12 @@ fn run() {
     let output = jet::compile(&source).expect("authority plan API should compile");
     assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
     assert!(output.rust.contains("jet_process_spec_plan"), "{}", output.rust);
-    #[cfg(target_os = "macos")]
-    tir_support::assert_tiers_agree("authority_plan_no_spawn", &source, "spawned\n");
-    #[cfg(not(target_os = "macos"))]
-    tir_support::assert_tiers_agree("authority_plan_refusal", &source, "refused\n");
+    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) {
+        "spawned\n"
+    } else {
+        "refused\n"
+    };
+    tir_support::assert_tiers_agree("authority_plan_no_spawn", &source, expected);
     assert!(!marker.exists(), "plan() spawned the authority-bound command");
 }
 
@@ -163,10 +165,87 @@ fn run() {
         output.rust
     );
     assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
-    #[cfg(target_os = "macos")]
-    tir_support::assert_tiers_agree("authority_process_exact_grants", source, "planned\n");
-    #[cfg(not(target_os = "macos"))]
-    tir_support::assert_tiers_agree("authority_process_exact_grants", source, "refused\n");
+    let expected = if cfg!(any(target_os = "linux", target_os = "macos")) {
+        "planned\n"
+    } else {
+        "refused\n"
+    };
+    tir_support::assert_tiers_agree("authority_process_exact_grants", source, expected);
+}
+
+#[test]
+fn authority_process_refuses_unenforced_scoped_network() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: Abilities.from_rights(["Net:example.com"])
+    spec :: process.cmd(["/usr/bin/true"]).under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_process_scoped_network", source, "refused\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn authority_process_receipt_redacts_secret_output_on_all_hosted_tiers() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    spec :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
+        .env_clear()
+        .env("SECRET_TOKEN", "receipt-secret")
+        .stdout(.Capture)
+        .stderr(.Capture)
+    receipt :: spec.run() ?? panic("process receipt failed")
+    print(receipt.output)
+    print(receipt.redacted)
+    print(receipt.policy_digest != "")
+    print(receipt.descendants)
+}
+"#;
+    let output = jet::compile(source).expect("ProcessReceipt fields should compile");
+    assert!(output.rust.contains("ProcessReceipt"), "{}", output.rust);
+    tir_support::assert_tiers_agree(
+        "authority_process_receipt_redaction",
+        source,
+        "<redacted>\ntrue\ntrue\ncontained\n",
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn authority_process_plan_and_receipt_share_the_policy_digest() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: Abilities.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:/usr/bin/printf",
+    ])
+    spec :: process.cmd(["/usr/bin/printf", "receipt"]).under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run() ?? panic("run failed")
+            print(plan.policy_digest == receipt.policy_digest)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "authority_process_receipt_digest",
+        source,
+        "true\ntrue\n",
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -199,6 +278,111 @@ fn run() {
 }
 "#;
     tir_support::assert_tiers_agree("authority_macos_seatbelt_host_read", hostile, "blocked\n");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn authority_process_linux_bwrap_runs_and_denies_host_read() {
+    let success = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["printf", "sandboxed"]).under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            if plan.backend == "linux-bwrap" {
+                result :: spec.run_checked()
+                if result == {
+                    .Ok(value) -> print(value.output)
+                    .Err(_) -> print("denied")
+                }
+            } else {
+                print("wrong-backend")
+            }
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_linux_bwrap_success", success, "sandboxed\n");
+
+    let hostile = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    result :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).under(policy).run_checked()
+    if result == {
+        .Ok(_) -> print("blocked")
+        .Err(_) -> print("escaped")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_linux_bwrap_host_read", hostile, "blocked\n");
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn authority_process_windows_appcontainer_runs_and_denies_host_read() {
+    let success = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    result :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy).run_checked()
+    if result == {
+        .Ok(_) -> print("sandboxed")
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_windows_appcontainer_success", success, "sandboxed\n");
+
+    let marker = std::env::temp_dir().join(format!(
+        "jet-authority-windows-host-secret-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&marker, "host-secret").expect("write Windows host-read marker");
+    let marker = marker.to_string_lossy().replace('\\', "/");
+    let hostile = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    policy :: process.workspace()
+    result :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).under(policy).run_checked()
+    if result == {{
+        .Ok(_) -> print("escaped")
+        .Err(_) -> print("blocked")
+    }}
+}}
+"#
+    );
+    tir_support::assert_tiers_agree("authority_windows_appcontainer_host_read", &hostile, "blocked\n");
+    let _ = std::fs::remove_file(marker);
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn authority_process_windows_plan_and_receipt_share_policy_digest() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy)
+    plan :: spec.plan() ?? panic("plan failed")
+    receipt :: spec.run() ?? panic("run failed")
+    print(plan.policy_digest == receipt.policy_digest)
+    print(receipt.backend)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "authority_process_windows_receipt_digest",
+        source,
+        "true\nwindows-appcontainer\n",
+    );
 }
 
 #[test]

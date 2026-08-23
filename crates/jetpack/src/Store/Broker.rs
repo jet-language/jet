@@ -452,6 +452,11 @@ pub fn promote_shared_entry(roots: &Roots, entry: &StoreEntry) -> io::Result<boo
     if !config.socket.exists() {
         return Ok(false);
     }
+    let producer = super::ProducerRecord::decode(&entry.producer_record)
+        .map_err(|error| invalid(&format!("shared-store producer record is invalid: {error}")))?;
+    if super::is_private_untrusted_build(&producer) {
+        return Ok(false);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;

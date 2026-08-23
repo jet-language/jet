@@ -3690,7 +3690,7 @@ fn lower_method_call_impl(
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
             let result_ty = in_own_frame(|| match (recv_type.as_deref(), method) {
                 (Some("ProcessSpec"), "run" | "run_checked") => Type::Result {
-                    ok: Box::new(Type::Named("ProcessResult".to_string())),
+                    ok: Box::new(Type::Named("ProcessReceipt".to_string())),
                     err: Box::new(Type::Named("IOError".to_string())),
                 },
                 (Some("ProcessSpec"), "plan") => Type::Result {
@@ -3708,7 +3708,7 @@ fn lower_method_call_impl(
                 (Some("ProcessSpec"), _) => Type::Named("ProcessSpec".to_string()),
                 (Some("ProcessChild"), "id") => Type::Int,
                 (Some("ProcessChild"), "wait") => Type::Result {
-                    ok: Box::new(Type::Named("ProcessResult".to_string())),
+                    ok: Box::new(Type::Named("ProcessReceipt".to_string())),
                     err: Box::new(Type::Named("IOError".to_string())),
                 },
                 (Some("ProcessChild"), "exited") => Type::Result {

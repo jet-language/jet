@@ -200,7 +200,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -1254,14 +1254,24 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         }
         ("UiNode", "label") => Some(Type::String),
         ("UiNode", "width" | "height") => Some(Type::Float),
-        ("ProcessResult", "code") => Some(Type::Int),
-        ("ProcessResult", "success" | "timed_out") => Some(Type::Bool),
-        ("ProcessResult", "signal") => Some(Type::Option(Box::new(Type::Int))),
-        ("ProcessResult", "output" | "errors") => Some(Type::String),
-        ("ProcessPlan", "executable_identity" | "policy_digest" | "backend") => {
+        ("ProcessResult" | "ProcessReceipt", "code") => Some(Type::Int),
+        ("ProcessResult" | "ProcessReceipt", "success" | "timed_out" | "redacted") => {
+            Some(Type::Bool)
+        }
+        ("ProcessResult" | "ProcessReceipt", "signal") => {
+            Some(Type::Option(Box::new(Type::Int)))
+        }
+        ("ProcessResult" | "ProcessReceipt", "output" | "errors" | "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants") => Some(Type::String),
+        ("ProcessResult" | "ProcessReceipt", "argv" | "authority" | "limits" | "outputs") => {
+            Some(Type::List(Box::new(Type::String)))
+        }
+        ("ProcessResult" | "ProcessReceipt", "pid") => Some(Type::Int),
+        ("ProcessPlan", "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants") => {
             Some(Type::String)
         }
-        ("ProcessPlan", "argv") => Some(Type::List(Box::new(Type::String))),
+        ("ProcessPlan", "argv" | "authority" | "limits" | "outputs") => {
+            Some(Type::List(Box::new(Type::String)))
+        }
         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` are handle fields, not
         // plain values — a writer and two streaming readers (E2502-restricted,
         // see `core_type_known`).

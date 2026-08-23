@@ -1442,9 +1442,9 @@ fn run() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult IOError!` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
+| `run(cmd)` | `ProcessReceipt IOError!` | Execute checked `Sh` argv directly; explicit `[String]` argv remains accepted for compatibility |
 | `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
-| `pipeline(specs)` | `ProcessResult IOError!` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
+| `pipeline(specs)` | `ProcessReceipt IOError!` | Connect stdout to stdin across `[ProcessSpec]` stages, no shell |
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
@@ -1476,18 +1476,35 @@ policy :: Abilities.from_rights([
 spec :: process.cmd(["cargo", "test"]).under(policy)
 ```
 
-`plan()` resolves the executable identity without spawning, records argv,
-backend, and the policy digest, and refuses before launch when the host has no
-#398/#893 isolation backend. Launch checks the same policy digest and backend
-boundary; it never silently falls back to ambient authority. The final receipt
-uses that same digest and is redacted by the receipt slice.
+`plan()` resolves the executable identity without spawning. It records the
+redacted argv, exact authority, descendant mode, limits, output modes, backend,
+policy digest, and an input digest. Launch checks the same policy digest,
+input digest, and backend boundary. It never falls back to ambient authority.
+The final `ProcessReceipt` carries the same policy facts and digest.
 
-On macOS, the consumer enters the shipped #398 Seatbelt boundary. The child
-gets a canonical read-only workspace, `.jet/build` as its only writable
-workspace output, a cleared environment with only explicit values, no network,
-no devices, and no inherited handles. If Seatbelt cannot be probed or the
-workspace/output path is not a real directory, planning or launch fails before
-the command starts.
+`ProcessReceipt` redacts secret grant values, secret-looking environment values,
+argv values, stdout, and stderr. Its `authority` field shows the exact grants
+after redaction. Its `redacted` field is `true` when the receipt applies the
+authority redaction policy. The receipt does not expose the host environment.
+
+On Linux and macOS, the consumer enters the shipped #398 native child boundary
+(Bubblewrap or Seatbelt). The child gets a canonical read-only workspace,
+`.jet/build` as its only writable workspace output, a cleared environment with
+only explicit values, no network, no devices, and no inherited handles. If the
+native backend cannot be probed or the workspace/output path is not a real
+directory, planning or launch fails before the command starts.
+An explicit `Net` right is the only network grant this consumer accepts; an
+unsupported or scoped right is refused before launch instead of widening to
+ambient access.
+
+On Windows, the consumer enters the same native child boundary through an
+AppContainer token and Job Object. The token has no ambient capabilities; the
+ACL projection grants only the declared workspace and output paths, the
+inherited handle list contains only the three standard streams, and the Job
+Object kills descendants and enforces active-process and memory limits. The
+Windows consumer currently accepts captured `run()`/`run_checked()` only;
+streaming, terminal, pipeline, detached, and cancellation paths refuse before
+an unsandboxed child can start.
 
 #### Explicit termination cleanup law (D-FAIL-EXIT1)
 
@@ -1505,15 +1522,15 @@ registered and does not run. A host kill or abort is outside this law and
 skips all three cleanup mechanisms.
 `mode` is one of the three stream-mode dot-literals: `.Stream` (pipe it —
 drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
-parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
+parent's stream), or `.Capture` (pipe it — collect into `ProcessReceipt` at
 `run()`/`wait()`). `stdin` defaults to closed (no `.stdin(...)` call — the
 child gets no stdin at all, never the parent's terminal by accident).
 `timeout` takes a `Duration` (e.g. `Duration.seconds(30)?`). A spec can
-`run()` to collect a `ProcessResult`, `run_checked()` to reject a failed exit,
+`run()` to collect a `ProcessReceipt`, `run_checked()` to reject a failed exit,
 or `spawn()` to return a `ProcessChild`.
 
 Use `run()` when you need the full result and will inspect `success` yourself.
-It returns `ProcessResult` for a nonzero exit with `success` set to `false`.
+It returns `ProcessReceipt` for a nonzero exit with `success` set to `false`.
 Use `run_checked()` when a nonzero exit must take the error path. Its `IOError`
 includes the exit code, the signal when present, and at most 4096 bytes of
 captured stderr.
@@ -1560,8 +1577,13 @@ closed with an `IOError` instead of silently falling back to pipes.
 
 `pipeline()` keeps ordinary pipe edges. A terminal-backed spec cannot be a
 pipeline stage; use `spawn()` for the interactive child. PTY/ConPTY transport,
-transcripts, binary streams, process-tree control, and resource limits remain
-separate backend slices of the same process mechanism.
+transcripts, and binary streams remain separate backend slices of the same
+process mechanism. On Unix, ordinary and terminal-backed argv children use a
+private process group; timeout, cancellation, explicit signals, and output
+limit exhaustion terminate that group. Captured stdout and stderr share the
+declared output limit, and an output-limit failure closes before waiting for
+unbounded child output. Detached execution is the explicit opt-out from
+automatic child cleanup.
 
 `ProcessChild` exposes `id()`, `wait()`, `exited()`, `kill()`, `terminate()`,
 `interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and
@@ -1572,12 +1594,16 @@ stream in a name is E2502). `exited()` is `Bool IOError!`: a non-blocking
 companion to `wait()` that reports whether the child has already exited,
 without draining its output or blocking (#1481).
 
-**`ProcessResult`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
-`signal: Int?`, `output: String`, `errors: String`.
+**`ProcessReceipt`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
+`signal: Int?`, `output: String`, `errors: String`,
+`executable_identity: String`, `argv: [String]`, `input_digest: String`,
+`policy_digest: String`,
+`backend: String`, `authority: [String]`, `descendants: String`,
+`limits: [String]`, `outputs: [String]`, `redacted: Bool`, `pid: Int`.
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `id`/`kill`/`wait`/`spawn`/
 `output`/`success` above already answer those competitor names one-for-one.
-`exitcode` is `ProcessResult.code`; `start` is `ProcessSpec.spawn()`.
+`exitcode` is `ProcessReceipt.code`; `start` is `ProcessSpec.spawn()`.
 
 ---
 

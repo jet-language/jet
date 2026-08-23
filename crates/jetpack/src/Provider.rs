@@ -1537,33 +1537,42 @@ impl Provider for CoreProvider {
         )
         .map_err(ProviderError::CoreBuild)?;
         let identity = cache_identity(&source_fingerprint, &recipe_identity, ctx);
+        let private_untrusted = recipe_id == "core-cargo-rlib";
+        let mut plan_facts = BTreeMap::from([
+            ("action.kind".into(), "core-build".into()),
+            ("action.recipe".into(), recipe_identity.clone()),
+            ("build.sandbox".into(), sandbox_class.clone()),
+            ("build.sandbox_policy".into(), sandbox_policy.clone()),
+        ]);
+        let mut producer_facts = BTreeMap::from([
+            ("source.kind".into(), "core-package-tree".into()),
+            (
+                "source.tree_schema".into(),
+                "jet-core-source-tree-v2".into(),
+            ),
+            ("source.tree_fingerprint".into(), fp.clone()),
+            ("artifact.kind".into(), recipe_id.to_string()),
+            (
+                "execution.platform".into(),
+                super::Envelope::host_platform(),
+            ),
+            ("build.sandbox".into(), sandbox_class),
+            ("build.sandbox_policy".into(), sandbox_policy),
+        ]);
+        if private_untrusted {
+            // D-JPK-SANDBOX2: an exact local build grant permits the action,
+            // but its output is private and cannot become shared cache input.
+            plan_facts.insert("build.trust".into(), "private-untrusted".into());
+            producer_facts.insert("build.trust".into(), "private-untrusted".into());
+        }
         let producer = producer_record(
             "core",
             &format!("cas:{source_fingerprint}"),
             &source_fingerprint,
-            BTreeMap::from([
-                ("action.kind".into(), "core-build".into()),
-                ("action.recipe".into(), recipe_identity.clone()),
-                ("build.sandbox".into(), sandbox_class.clone()),
-                ("build.sandbox_policy".into(), sandbox_policy.clone()),
-            ]),
+            plan_facts,
             &toolchain_facts(toolchain.as_ref()),
             &identity,
-            BTreeMap::from([
-                ("source.kind".into(), "core-package-tree".into()),
-                (
-                    "source.tree_schema".into(),
-                    "jet-core-source-tree-v2".into(),
-                ),
-                ("source.tree_fingerprint".into(), fp.clone()),
-                ("artifact.kind".into(), recipe_id.to_string()),
-                (
-                    "execution.platform".into(),
-                    super::Envelope::host_platform(),
-                ),
-                ("build.sandbox".into(), sandbox_class),
-                ("build.sandbox_policy".into(), sandbox_policy),
-            ]),
+            producer_facts,
         )?;
         Ok(Realized {
             name: spec.package.clone(),
@@ -1799,13 +1808,26 @@ fn build_rlib_from_cargo_mode(
         "--release".to_string(),
         "--manifest-path".to_string(),
         "/work/source/Cargo.toml".to_string(),
+        "--locked".to_string(),
     ];
     if offline {
         args.push("--offline".to_string());
-        args.push("--locked".to_string());
     }
+    let home = scratch.path.join("home");
+    let cargo_home = scratch.path.join("cargo-home");
+    std::fs::create_dir_all(&home).map_err(|error| {
+        CargoBuildError::Failed(format!("could not create Cargo home: {error}"))
+    })?;
+    std::fs::create_dir_all(&cargo_home).map_err(|error| {
+        CargoBuildError::Failed(format!("could not create Cargo cache home: {error}"))
+    })?;
     let mut env = BTreeMap::new();
     env.insert("CARGO_TARGET_DIR".to_string(), "/work/output".to_string());
+    env.insert(
+        "CARGO_HOME".to_string(),
+        "/work/output/cargo-home".to_string(),
+    );
+    env.insert("HOME".to_string(), "/work/output/home".to_string());
     env.insert("SOURCE_DATE_EPOCH".to_string(), "0".to_string());
     let sandboxed = jet_comptime::Comptime::Build::run_native_sandboxed(
         &toolchain.cargo,
@@ -2160,6 +2182,7 @@ pub(crate) fn realize_adapter(
     let declared_authority = table.trust_lines().join("\n");
     let sandbox_class = run_report.sandbox_class.clone();
     let sandbox_policy = run_report.sandbox_policy.clone();
+    let private_untrusted = matches!(&plan.recipe, AdapterRecipe::Build(_));
     let replay = Recipe::lower_to_plan(&recipe, &plan.name, &build_ctx.tools)
         .map_err(|d| ProviderError::Adapter(d.what))?
         .replay_record()
@@ -2179,8 +2202,25 @@ pub(crate) fn realize_adapter(
         "adapter.build.sandbox_policy".to_string(),
         sandbox_policy.clone(),
     );
+    if private_untrusted {
+        replay_facts.insert(
+            "adapter.build.trust".to_string(),
+            "private-untrusted".to_string(),
+        );
+    }
     let replay = crate::Comptime::Build::BuildPlanReplay::from_facts(replay_facts)
         .map_err(ProviderError::Adapter)?;
+    let mut producer_facts = BTreeMap::from([
+        ("adapter.source".into(), plan.source.clone()),
+        ("build.identity".into(), build_identity.clone()),
+        ("build.capabilities".into(), declared_capabilities.clone()),
+        ("build.dependencies".into(), declared_dependencies.clone()),
+        ("build.sandbox".into(), sandbox_class.clone()),
+        ("build.sandbox_policy".into(), sandbox_policy.clone()),
+    ]);
+    if private_untrusted {
+        producer_facts.insert("build.trust".into(), "private-untrusted".into());
+    }
     let producer = super::Store::ProducerRecord::new(
         "adapter",
         format!("cas:{source_fingerprint}"),
@@ -2196,17 +2236,7 @@ pub(crate) fn realize_adapter(
             sandbox_policy,
         ),
         format!("policy={}\nplatform={}", identity.policy_fingerprint, identity.platform),
-        BTreeMap::from([
-            ("adapter.source".into(), plan.source.clone()),
-            ("build.identity".into(), build_identity),
-            ("build.capabilities".into(), declared_capabilities),
-            (
-                "build.dependencies".into(),
-                declared_dependencies,
-            ),
-            ("build.sandbox".into(), sandbox_class),
-            ("build.sandbox_policy".into(), sandbox_policy),
-        ]),
+        producer_facts,
     )
     .map_err(ProviderError::Adapter)?;
     let mut realized = Realized {

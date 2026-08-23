@@ -2,7 +2,10 @@
 //!
 //! Jetpack is a user-owned, one-shot process: no resident daemon, no root
 //! requirement, cross-process coordination through lock files, and honest
-//! native child-sandbox reporting. The only privileged future path is
+//! native child-sandbox reporting. Executable actions use a substitute-first,
+//! fail-closed boundary: non-executing reuse may proceed, but an unavailable
+//! native backend never becomes an unsandboxed launch. The only privileged
+//! future path is
 //! transient `jetpack os switch` / jetos activation.
 
 use super::Output::Theme;

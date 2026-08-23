@@ -416,19 +416,25 @@
 
     /// D-AGENT-EXEC1: the dry-run record shared by AOT, JIT, and interpreter.
     /// A plan is only returned after executable identity resolution and backend
-    /// selection. Receipt production remains the adjacent receipt slice.
+    /// selection. The public argv is redacted; input_digest binds the exact
+    /// argv used by launch without placing command secrets in the plan.
     #[derive(Clone, Debug, PartialEq)]
     pub struct ProcessPlan {
         pub executable_identity: String,
         pub argv: Vec<String>,
+        pub input_digest: String,
         pub policy_digest: String,
         pub backend: String,
+        pub authority: Vec<String>,
+        pub descendants: String,
+        pub limits: Vec<String>,
+        pub outputs: Vec<String>,
     }
 
     #[derive(Clone, Debug)]
     pub struct ProcessChild {
         pub inner: std::rc::Rc<std::cell::RefCell<Option<std::process::Child>>>,
-        pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessResult>>>,
+        pub wait_result: std::rc::Rc<std::cell::RefCell<Option<ProcessReceipt>>>,
         pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
         pub stdout:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
@@ -436,7 +442,13 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub terminal: JetOutcome<TerminalSession, JetAbsent>,
         pub process_group: bool,
+        pub detached: bool,
         pub timeout_ms: Option<i64>,
+        // Keep the limit on the child so `spawn().wait()` enforces the same
+        // bound as `run()`, before captured bytes can grow without bound.
+        pub output_limit: Option<i64>,
+        pub audit_spec: ProcessSpec,
+        pub audit_plan: Option<ProcessPlan>,
         pub started: std::time::Instant,
     }
 

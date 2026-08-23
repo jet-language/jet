@@ -303,7 +303,10 @@ live acceptance, and documentation. Work order is binding.
   trust gate before launch; producer and Hangar receipts record the actual
   backend/policy (or `non-executing` for reuse/substitution). If the native
   backend is unavailable, Jetpack substitutes or refuses with E1275; it never
-  runs host Cargo unsandboxed.
+  runs host Cargo unsandboxed. An exact local build grant marks the resulting
+  output `private-untrusted`; the current consumer gets a private lease, but
+  the output is never promoted to the shared broker or published to a shared
+  cache.
 - macOS native Seatbelt profile (`sandbox-exec`) plus source/output,
   environment, network, device, and declared-process restrictions; the actual
   backend and policy receipt are recorded, and executable actions fail before
@@ -314,13 +317,16 @@ live acceptance, and documentation. Work order is binding.
   network denial unless the declared fetch capability is enabled. Card #891
   records the actual launch policy and fails closed before launch when the
   native backend cannot complete its probe.
-- Hostile corpus covers path/symlink escape, host reads, sibling writes,
-  undeclared executables, process/ptrace/device access, network, and daemon leak.
-  The single local corpus is `tests/fixtures/build_sandbox/hostile-corpus.tsv`;
-  the build sandbox, hermetic executor, and agent-workload ingress consume its
-  rows. The ambient #769 workload harness validates the rows only; #770's
-  enforcing agent executor must use this same file before it can publish a
-  confinement claim.
+- The shared hostile corpus has seven rows in five required categories:
+  host read/write escape, source/output symlink TOCTOU, loopback network
+  exfiltration, child-process escape, and private-tmpfs resource exhaustion.
+  The single local source is `tests/fixtures/build_sandbox/hostile-corpus.tsv`.
+  The recipe path, hermetic executor, and authority-bound agent executor run
+  those rows through the shared native child boundary. Each row must be
+  blocked, or the platform must report the backend unsupported before launch.
+  The ambient #769 workload harness remains ambient and records network and
+  external writes as `unmeasured:#769`; it does not publish a confinement
+  claim.
 - `jetpack build` reports the recorded producer receipt for new outputs:
   non-executing copy/prebuilt actions say that no child launched, executable
   actions name the backend and policy, missing receipts are reported as

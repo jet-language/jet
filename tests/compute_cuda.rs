@@ -172,6 +172,16 @@ fn cuda_prelude_uses_global_thread_indices_and_real_driver_launches() {
     let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
     assert!(prelude.contains("cuLaunchKernel"));
     assert!(prelude.contains("mod jet_compute_cuda"));
+    let cuda = prelude
+        .split("// JET_VETTED_UNSAFE_BEGIN: jet_compute_cuda\n")
+        .nth(1)
+        .and_then(|section| {
+            section
+                .split("// JET_VETTED_UNSAFE_END: jet_compute_cuda")
+                .next()
+        })
+        .expect("CUDA vetted module must be present");
+    assert!(cuda.contains("const RTLD_LOCAL: c_int = 0;"));
     assert!(
         prelude
             .matches("mad.lo.u32 %r0, %r0, %ntid.x, %tid.x")

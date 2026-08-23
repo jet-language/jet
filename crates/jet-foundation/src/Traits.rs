@@ -1791,6 +1791,7 @@ impl TraitRegistry {
             "Point",
             "Pool",
             "ProcessChild",
+            "ProcessReceipt",
             "ProcessResult",
             "ProcessSpec",
             "Quat",

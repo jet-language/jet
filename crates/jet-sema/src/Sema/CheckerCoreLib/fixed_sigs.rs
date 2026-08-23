@@ -667,7 +667,7 @@ fn core_fixed_sig_impl(
         ("core.process", "run") => Some((
             vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
             Some(result_ty(
-                Type::Named("ProcessResult".to_string()),
+                Type::Named("ProcessReceipt".to_string()),
                 io_error_ty(),
             )),
         )),
@@ -683,7 +683,7 @@ fn core_fixed_sig_impl(
                 Type::List(Box::new(Type::Named("ProcessSpec".to_string()))),
             )],
             Some(result_ty(
-                Type::Named("ProcessResult".to_string()),
+                Type::Named("ProcessReceipt".to_string()),
                 io_error_ty(),
             )),
         )),

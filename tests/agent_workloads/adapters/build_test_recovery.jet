@@ -28,13 +28,20 @@ fn run() {
         .run() ?? panic("valid check could not run")
     if checked.timed_out || checked.code != 0 -> panic("valid source did not build")
 
-    tested :: process.cmd([String]{~jet, "run", "--release", "{project}/build_test_recovery.jet"})
+    tested :: process.cmd([String]{~jet, "test", "--release", "{project}/build_test_recovery.jet"})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
         .run() ?? panic("valid test could not run")
-    if tested.timed_out || tested.code != 0 -> panic("valid source test failed")
+    if tested.timed_out || tested.code != 0 -> panic("valid test did not pass")
+
+    ran :: process.cmd([String]{~jet, "run", "--release", "{project}/build_test_recovery.jet"})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(timeout)
+        .run() ?? panic("valid test could not run")
+    if ran.timed_out || ran.code != 0 -> panic("valid source run failed")
     print("recovery=ok")
-    print("test={tested.output.trim()}")
+    print("test={ran.output.trim()}")
     fs.remove_all(project) ?? panic("cannot clean build/test project")
 }

@@ -187,6 +187,77 @@ fn run() {{
     assert!(stdout.contains("line-one\n"), "{stdout}");
 }
 
+#[cfg(unix)]
+#[test]
+fn core_process_limits_kill_descendants_and_stop_output_early() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_limits_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let timeout_pid = dir.join("timeout.pid");
+    let output_pid = dir.join("output.pid");
+    let timeout_script = dir.join("timeout.sh");
+    let output_script = dir.join("output.sh");
+    write_executable(
+        &timeout_script,
+        &format!(
+            "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{}'\nwait\n",
+            timeout_pid.display()
+        ),
+    );
+    write_executable(
+        &output_script,
+        &format!(
+            "#!/bin/sh\nsleep 2 &\nprintf '%s\\n' \"$!\" > '{}'\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'\nwait\n",
+            output_pid.display()
+        ),
+    );
+    let src = format!(
+        r#"
+use core.process as process
+use core.time as time
+
+fn run() {{
+    timeout :: Duration.seconds(1) ?? panic("duration")
+    timed :: process.cmd(["{timeout_script}"]).timeout(timeout).run() ?? panic("timeout run failed")
+    print(timed.timed_out)
+    limited :: process.cmd(["{output_script}"]).output_limit(16).run()
+    if limited == {{
+        .Ok(_) -> {{ print("limit:accepted") }}
+        .Err(_) -> {{ print("limit:refused") }}
+    }}
+}}
+"#,
+        timeout_script = jet_string_path(&timeout_script),
+        output_script = jet_string_path(&output_script),
+    );
+    let started = std::time::Instant::now();
+    let (code, stdout, stderr) = build_and_run(&dir, "process_limits", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.contains("true\nlimit:refused\n"), "{stdout}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "output limit waited for the child instead of terminating it: {:?}",
+        started.elapsed()
+    );
+
+    for pid_file in [&timeout_pid, &output_pid] {
+        let pid = fs::read_to_string(pid_file).unwrap();
+        let pid = pid.trim();
+        let alive = Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .unwrap()
+            .success();
+        if alive {
+            let _ = Command::new("kill").args(["-9", pid]).status();
+        }
+        assert!(!alive, "process descendant {pid} survived enforcement");
+    }
+}
+
 /// D-PROCESS-SESSION1=A (#1181): `.terminal()` is the one opt-in for a
 /// terminal-backed session, and it lives on the same `ProcessSpec`. Argv
 /// execution with no terminal stays the default. Unix run/spawn use a real PTY;

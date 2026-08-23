@@ -448,7 +448,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
         "EnvError" => Some("EnvError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => Some("UTF8Error"),
-        "ProcessResult" => Some("ProcessResult"),
+        "ProcessResult" | "ProcessReceipt" => Some("ProcessReceipt"),
+        "ProcessPlan" => Some("ProcessPlan"),
         "ProcessSpec" => Some("ProcessSpec"),
         "ProcessChild" => Some("ProcessChild"),
         // D-PROCESS1=A: the core dot-literal stream-mode enum.

@@ -1019,8 +1019,172 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
 }
 
 #[cfg(unix)]
+#[test]
+fn shared_hostile_corpus_uses_agent_executor_production_path() {
+    let _sandbox_guard = sandbox_test_lock();
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let cases: Vec<_> = HOSTILE_CORPUS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+            (fields[0], fields[1], fields[2], fields[3])
+        })
+        .collect();
+    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+
+    let base = scratch("agent-hostile");
+    let host_secret = base.with_file_name("build-sandbox-agent-hostile-secret");
+    let host_marker = base.with_file_name("build-sandbox-agent-hostile-marker");
+    std::fs::write(&host_secret, "host-only-secret").unwrap();
+    let source_link = base.join("link");
+    std::os::unix::fs::symlink(&host_secret, &source_link).unwrap();
+
+    let mut network_thread = None;
+    let commands: Vec<(&str, String)> = cases
+        .iter()
+        .map(|(case_id, _, _, _)| {
+            let command = match *case_id {
+                "host-read" => format!(
+                    "if test -r {}; then printf escaped; else printf blocked; fi",
+                    shell_quote(&host_secret)
+                ),
+                "host-write" => format!(
+                    "if printf escaped > {}; then printf escaped; else printf blocked; fi",
+                    shell_quote(&host_marker)
+                ),
+                "source-symlink" => {
+                    "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"
+                        .to_string()
+                }
+                "output-symlink" => format!(
+                    "if {} -s {} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi",
+                    shell_quote(&host_tool("ln")),
+                    shell_quote(&host_marker)
+                ),
+                "network-exfiltration" => {
+                    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                    listener.set_nonblocking(true).unwrap();
+                    let port = listener.local_addr().unwrap().port();
+                    network_thread = Some(thread::spawn(move || {
+                        let deadline = Instant::now() + Duration::from_millis(750);
+                        loop {
+                            match listener.accept() {
+                                Ok(_) => return true,
+                                Err(error)
+                                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                                {
+                                    if Instant::now() >= deadline {
+                                        return false;
+                                    }
+                                    thread::sleep(Duration::from_millis(5));
+                                }
+                                Err(_) => return false,
+                            }
+                        }
+                    }));
+                    format!(
+                        "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf escaped; else printf blocked; fi"
+                    )
+                }
+                "child-process" => format!(
+                    "(printf escaped > {}) & printf blocked",
+                    shell_quote(&host_marker)
+                ),
+                "tmpfs-exhaustion" => "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> /tmp/jet-agent-hostile-fill; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped".to_string(),
+                other => panic!("unmapped hostile corpus case {other}"),
+            };
+            (*case_id, command)
+        })
+        .collect();
+
+    let mut source = String::from(
+        "use core.process as process\n\nfn run() {\n    policy :: process.workspace()\n",
+    );
+    for (index, (case_id, command)) in commands.iter().enumerate() {
+        source.push_str(&format!(
+            "    print({})\n    result{index} :: process.cmd([\"bash\", \"-c\", {}]).under(policy).run_checked()\n    if result{index} == {{\n        .Ok(value) -> print(value.output)\n        .Err(_) -> print(\"unsupported\")\n    }}\n",
+            jet_string_literal(case_id),
+            jet_string_literal(command),
+        ));
+    }
+    source.push_str("}\n");
+    let source_path = base.join("agent-hostile.jet");
+    std::fs::write(&source_path, source).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "--release"])
+        .arg(&source_path)
+        .current_dir(&base)
+        .output()
+        .expect("agent executor should launch through the public CLI");
+    assert!(
+        output.status.success(),
+        "agent hostile corpus failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        cases.len() * 2,
+        "agent corpus output lost a row"
+    );
+    let capability = jetpack::RuntimePolicy::detect_sandbox();
+    let expected = if capability.level == jetpack::RuntimePolicy::SandboxLevel::Strong {
+        "blocked"
+    } else {
+        "unsupported"
+    };
+    for (index, (case_id, _, _, _)) in cases.iter().enumerate() {
+        assert_eq!(lines[index * 2], *case_id);
+        assert_eq!(lines[index * 2 + 1], expected, "{case_id} result");
+    }
+    if let Some(network_thread) = network_thread {
+        assert!(
+            !network_thread.join().unwrap(),
+            "agent corpus reached the network"
+        );
+    }
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        std::fs::read_to_string(&host_secret).unwrap(),
+        "host-only-secret",
+        "agent corpus modified the host secret"
+    );
+    assert!(!host_marker.exists(), "agent corpus wrote the host marker");
+    std::fs::remove_file("/tmp/jet-agent-hostile-fill").ok();
+    std::fs::remove_dir_all(&base).ok();
+    std::fs::remove_file(&host_secret).ok();
+    std::fs::remove_file(&host_marker).ok();
+}
+
+#[cfg(unix)]
 fn shell_quote(path: &std::path::Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+#[cfg(unix)]
+fn jet_string_literal(value: &str) -> String {
+    let mut literal = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => literal.push_str("\\\\"),
+            '"' => literal.push_str("\\\""),
+            '\n' => literal.push_str("\\n"),
+            '\r' => literal.push_str("\\r"),
+            '\t' => literal.push_str("\\t"),
+            character => literal.push(character),
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 #[cfg(unix)]
@@ -1101,5 +1265,91 @@ fn core_cargo_build_refuses_before_unavailable_sandbox_can_run_build_script() {
     );
     assert!(!marker.exists(), "Cargo build.rs ran without the sandbox");
     assert!(jetpack::Store::list(&roots).is_empty());
+    std::fs::remove_dir_all(base).ok();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn core_cargo_build_is_private_and_not_published_to_shared_cache() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("core-cargo-private");
+    let repo = base.join("repo");
+    let root = base.join("root");
+    let mirror = base.join("mirror");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&mirror).unwrap();
+    std::fs::write(
+        repo.join("package.jet"),
+        "name: \"private\"\nversion: \"0.1.0\"\npackages: { private: library }\n",
+    )
+    .unwrap();
+    std::fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    std::fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname = \"private\"\nversion = \"0.1.0\"\n[lib]\npath = \"lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("Cargo.lock"),
+        "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"private\"\nversion = \"0.1.0\"\n\n",
+    )
+    .unwrap();
+
+    let table = jetpack::RefSpec::SourceTable::from_decls([(
+        "mine".to_string(),
+        format!("path:{}", repo.display()),
+        jetpack::RefSpec::ProviderKind::Core,
+    )]);
+    let spec = jetpack::RefSpec::classify_in("private@mine", &table).unwrap();
+    let roots = jetpack::Store::Roots::at(root.clone());
+    jetpack::Store::bind_cache(
+        &roots,
+        "public",
+        vec![mirror.display().to_string()],
+        None,
+        None,
+        true,
+    )
+    .unwrap();
+    let store = roots.hangar_dir();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store,
+        offline: false,
+        project_dir: None,
+    };
+
+    let realized = jetpack::Store::realize_verified(
+        &roots,
+        &ctx,
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+    )
+    .expect("native Core Cargo build should produce a private lease");
+    assert_eq!(
+        realized.source_state(),
+        jetpack::Provider::SourceState::Built
+    );
+    assert_eq!(
+        realized.consumption_status(),
+        &jetpack::Store::ConsumptionStatus::Consumable
+    );
+    let producer =
+        jetpack::Store::ProducerRecord::decode(&realized.metadata().producer_record).unwrap();
+    assert_eq!(
+        producer.facts.get("build.trust").map(String::as_str),
+        Some("private-untrusted")
+    );
+    assert_eq!(
+        producer.plan.facts().get("build.trust").map(String::as_str),
+        Some("private-untrusted")
+    );
+    assert!(std::fs::read_dir(&mirror)
+        .unwrap()
+        .flatten()
+        .all(|item| item.path().extension().and_then(|ext| ext.to_str()) != Some("narinfo")));
+    drop(realized);
     std::fs::remove_dir_all(base).ok();
 }

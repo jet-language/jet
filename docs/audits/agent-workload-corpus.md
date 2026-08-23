@@ -18,9 +18,22 @@ The completeness test also fixes each task ID, domain, case, and outcome in code
 
 Each adapter gets the same declared input path as its only argument. Each adapter starts in an empty scratch working directory and inherits ambient host authority. The runner does not restrict or measure network access or writes outside the input tree or file.
 
+Build-sandbox hostile cases are a separate shared fixture at
+`tests/fixtures/build_sandbox/hostile-corpus.tsv`. The build and hermetic
+executors, plus the authority-bound agent executor, run that fixture through
+the native child boundary. This ambient workload runner only records its
+unsupported confinement dimensions as `unmeasured:#769`; its parsing of the
+fixture is not isolation proof.
+
 The runner starts Jet through the integration-test `CARGO_BIN_EXE_jet` public CLI with `jet run --release`. The report records the CLI path, SHA-256 digest, and reported version. Corpus test evidence is not shipped product proof.
 
 The repository and Git Jet adapters execute through the public `jet run --release` path, including semantic inspection, semantic rename, empty search, changed diff, and empty diff. Cross-platform native runs remain owned by #1173; sibling workload domains keep their own implementation owners.
+
+## Authority policy and receipt
+
+`tests/agent_workloads.rs::policy_digest` is the one policy identity. It covers the frozen plan, launch transaction, process-group descendant cleanup, wall and output limits, captured outputs, and receipt formats. The same digest appears in the baseline receipt, the run policy line, every task machine line, every adapter result, and the generated report.
+
+The manifest accepts only the enforced authority string. An unsupported authority value fails before an adapter starts. Baseline artifact paths reject absolute paths, empty components, and `..` components. Timed-out children are killed and reaped with their process group; scratch residue is checked before cleanup.
 
 ## Scoring
 
@@ -30,7 +43,7 @@ The runner records cold and warm stderr byte counts and SHA-256 digests. It does
 
 ## Interpreter baseline receipt
 
-`tests/agent_workloads/baselines/receipt.tsv` records one frozen Linux run for every task under Bash, Python, and Node. Each row pins the run ID, declared machine, interpreter version, task input digest, expected output digest, existing `#769` scoring string, exit status, cold and warm timings, output-stability result, and raw stdout/stderr paths and hashes. A supported row must match the checked-in expected output. An unsupported row must carry an explicit finding and no output path; it is never omitted.
+`tests/agent_workloads/baselines/receipt.tsv` records one frozen Linux run for every task under Bash, Python, and Node. Each row pins the run ID, declared machine, interpreter version, task input digest, expected output digest, existing `#769` scoring string, exit status, cold and warm timings, output-stability result, raw stdout/stderr paths and hashes, and the shared policy digest. A supported row must match the checked-in expected output. An unsupported row must carry an explicit finding and no output path; it is never omitted.
 
 The raw baseline files live under `tests/agent_workloads/baselines/outputs/`. The receipt validator is `tests/agent_workloads.rs::recorded_baselines_cover_frozen_tasks`. Capture uses the existing corpus runner and scorer:
 
@@ -49,7 +62,7 @@ The capture command is one run on one machine. It does not add a benchmark runne
 
 `tests/agent_workloads/jet_baseline.tsv` freezes every task that previously passed through Jet and keeps the existing loss-owner links. A Jet loss must keep a `#card` link or a `non-goal:` link.
 
-`docs/audits/agent-workload-corpus-report.tsv` is the generated report. Each row scores Jet, Bash, Python, and Node for one task. `jet_vs_baselines=pass` requires exact output, exit status, cold and warm stability, unchanged input authority, and clean scratch state for all four adapters. The row also records source-token counts and cold and warm times for each adapter.
+`docs/audits/agent-workload-corpus-report.tsv` is the generated report. Each row scores Jet, Bash, Python, and Node for one task. `jet_vs_baselines=pass` requires exact output, exit status, cold and warm stability, unchanged input authority, and clean scratch state for all four adapters. The row also records source-token counts, cold and warm times, and the shared policy digest for each adapter run.
 
 Run the gate on each required native host:
 
@@ -63,7 +76,7 @@ A safety result is green only when the runner proves the required authority and 
 
 Cold time is the first public adapter command. Warm time is the next unchanged command. Output stability requires byte-identical cold and warm output.
 
-Every process that the runner starts has a 120-second deadline. The runner kills and reaps that direct process on timeout. This does not prove descendant cleanup or orphan containment.
+Every process that the runner starts has a 120-second deadline. On Unix, the runner gives each child a private process group and kills and reaps the group on normal completion, timeout, or output-limit failure. The service fixture also checks descendant cleanup; Windows remains outside the native Bash matrix.
 
 `source_tokens` is the count of nonempty runs split by Unicode whitespace. This stable lexical count does not claim to match a model tokenizer.
 
@@ -73,9 +86,9 @@ No aggregate Jet rank exists until the corpus records all required metrics and a
 
 | Domain | Task | State | Blocking card |
 | --- | --- | --- | --- |
-| Repository search and edit | `repository-marker-scan`, `repository-marker-scan-empty`, `repository-semantic-inspection`, `repository-semantic-edit` | Linux proved; macOS declared native but not run; Windows cannot count Bash as native | #1165, #1173 |
+| Repository discovery, search, and edit | `repository-marker-scan`, `repository-marker-scan-empty`, `repository-semantic-inspection`, `repository-semantic-edit` | Linux proved; macOS declared native but not run; Windows cannot count Bash as native | #1165, #1173 |
 | Git | `git-diff-review`, `git-diff-empty` | Linux Git diff inspection proved; macOS declared native but not run; Windows cannot count Bash as native | #1165, #1173 |
-| Build, test, and debug | `build-test-failure-recovery` | Linux failed-check → successful-check → run recovery proved; debug not run; macOS declared native but not run; Windows cannot count Bash as native | #1166, #1173 |
+| Build, test, and debug | `build-test-failure-recovery` | Linux failed-check → successful-check → successful-test → run recovery proved; debug not run; macOS declared native but not run; Windows cannot count Bash as native | #1166, #1173 |
 | Data cleanup and report generation | `incident-report-success`, `incident-report-malformed`, `incident-report-partial` | Linux proved; macOS declared native but not run; Windows cannot count Bash as native | #1167, #1173 |
 | Structured data | `structured-data-transform`, `structured-data-hostile` | Linux production-path outputs proved; macOS declared native but not run; Windows cannot count Bash as native | #1167, #1173 |
 | Database access | `database-access`, `database-hostile` | Linux production-path outputs proved; macOS declared native but not run; Windows cannot count Bash as native | #1167, #1173 |
@@ -87,9 +100,11 @@ No aggregate Jet rank exists until the corpus records all required metrics and a
 | Service lifecycle | `service-lifecycle-roundtrip`, `service-lifecycle-readiness-timeout` | Linux systemd-shim authority, health/readiness/log/stop, bounded timeout, and descendant cleanup outputs proved; macOS authority unavailable; Windows unavailable | #1169, #1173 |
 | Subprocess control | `process-batch-success`, `process-batch-large-stderr`, `process-batch-timeout-recovery` | Linux proved for direct subprocesses; macOS declared native but not run; Windows cannot count Bash as native | #1166, #1173 |
 
-The report records task success, source tokens, cold and warm wall time, output stability, platform, architecture, adapter versions, the ambient Git version, corpus evidence, and the canonical card. The repository search workload freezes nested paths, a no-match case with a path containing spaces, and exact marker counts. The semantic-inspection workload reads the checked semantic index and compares definition, reference, and call-edge counts; the semantic-edit workload copies an input project, renames a resolved function through the existing Jet codemod engine, and proves that matching text in a string and comment stays unchanged. The Git workload runs one bounded `git diff --no-index --no-renames` over changed before and after trees, plus an identical-tree empty diff that accepts Git's zero exit. The build/test workload runs each adapter's native syntax check against an invalid source, records that failed check, then checks and runs the valid source. Each adapter parses and classifies modified, added, and deleted paths, including a same-content move and a path with a space. The data workload proves exact success, malformed-input, and partial-failure outcomes over identical TSV input for all four adapters. The browser workload validates the shipped BiDi profile and timeout contracts and attempts a closed-port `connect_profile`, with an unpinned profile, zero timeout, and refused connection as hostile rows. The desktop workload drives the shipped TUI focus group through two Tab events and an empty-key hostile row. The document workload walks Markdown files, counts headings and bullets, and rejects an empty heading. The media workload inventories shipped SVG and MP3 MIME mappings and rejects an unknown extension. The subprocess workload proves captured output, concurrent drain or explicit discard of 100,000 bytes of child stderr, direct-KILL cleanup of a TERM-resistant child at 50 milliseconds, and a successful next launch. The runner checks each adapter scratch directory before RAII deletion, so removing adapter cleanup fails the task. A cached Jet AOT run leaves exactly `build/<adapter-stem>`. An uncached run can also leave the regular public artifact `build/<adapter-stem>.rs`. Any other root or nested entry fails. The generic subprocess runner does not claim descendant-tree cleanup; the #1169 service fixture does. Agent tool calls, repair turns, peak memory, diagnostic quality, orphan processes, sandbox escapes, and cross-platform runs remain `not-recorded:#769`.
+The generated report records task status, per-adapter status, source-token counts, cold and warm wall time, platform, architecture, exit code, loss owner, canonical card, and the shared policy digest. The raw runner output also records adapter versions, the ambient Git version, corpus evidence, stderr digests, and the fields that remain `not-recorded:#769` or `unmeasured:#769`. The repository search workload freezes nested paths, a no-match case with a path containing spaces, and exact marker counts. The semantic-inspection workload reads the checked semantic index and compares definition, reference, and call-edge counts; the semantic-edit workload copies an input project, renames a resolved function through the existing Jet codemod engine, and proves that matching text in a string and comment stays unchanged. The Git workload runs one bounded `git diff --no-index --no-renames` over changed before and after trees, plus an identical-tree empty diff that accepts Git's zero exit. The build/test workload runs each adapter's native syntax check against an invalid source, records that failed check, then checks and runs the valid source. Each adapter parses and classifies modified, added, and deleted paths, including a same-content move and a path with a space. The data workload proves exact success, malformed-input, and partial-failure outcomes over identical TSV input for all four adapters. The browser workload validates the shipped BiDi profile and timeout contracts and attempts a closed-port `connect_profile`, with an unpinned profile, zero timeout, and refused connection as hostile rows. The desktop workload drives the shipped TUI focus group through two Tab events and an empty-key hostile row. The document workload walks Markdown files, counts headings and bullets, and rejects an empty heading. The media workload inventories shipped SVG and MP3 MIME mappings and rejects an unknown extension. The subprocess workload proves captured output, concurrent drain or explicit discard of 100,000 bytes of child stderr, direct-KILL cleanup of a TERM-resistant child at 50 milliseconds, and a successful next launch. The runner checks each adapter scratch directory before RAII deletion, so removing adapter cleanup fails the task. A cached Jet AOT run leaves exactly `build/<adapter-stem>`. An uncached run can also leave the regular public artifact `build/<adapter-stem>.rs`. Any other root or nested entry fails. The runner kills timed-out Unix process groups, and the #1169 service fixture checks delegated descendant cleanup. Cross-platform proof remains `not-run:#1173` until the native matrix runs.
 
 The six #1167 tasks normalize JSON, use parameterized database queries, and post JSON to a loopback HTTP server. Each has a normal and hostile fixture plus frozen dependencies, machine specification, variant, and #769 scoring in `domain_contract.tsv`.
+
+The build/test recovery fixture now exercises the production `jet test --release` path between the successful check and the final run. The process-policy fixture exercises both default and AOT `jet run` paths with an output limit, unsupported authority refusal, timeout cancellation, and descendant cleanup.
 
 The #1169 MCP workload speaks the shipped `jet self lsp` JSON-RPC resource path and proves that the environment projection is read-only; its hostile row rejects a denied resource and redacts the inherited secret. The terminal workload uses the shipped PTY process surface, resizes the session, completes a dialogue, and rejects a closed session. The service workload uses the shipped Jetpack service authority and lifecycle path to run health, readiness, logs, and stop, then exercises bounded readiness timeout and descendant cleanup. These rows do not claim cross-platform proof until #1173 runs the declared native matrix.
 
@@ -108,9 +123,12 @@ The Linux AOT run is much slower than all three peers. The report keeps this los
 | `process_deadline_reaps_and_scratch_drop_cleans` | Failure | The runner deadline stops and reaps a sleeping child in under two seconds, and `Scratch` removes its directory on `Drop`. |
 | `scratch_output_shape_rejects_arbitrary_build_residue` | Hostile | Seven separate scratch cases. A cache-hit and a cache-miss Jet layout both pass. A `build/` leak, a root leak, a nested directory and file, a wrong entry type, and a dangling symlink each fail with the exact violation list. |
 | `recorded_baselines_cover_frozen_tasks` | Receipt | Every frozen task has Bash, Python, and Node rows with one machine, pinned interpreter versions, frozen input/output hashes, existing scoring, and checked raw stdout/stderr. Unsupported rows require an explicit finding. |
+| `policy_digest_covers_authority_and_receipt_contract` | Policy | Plan, launch transaction, descendant handling, limits, outputs, authority, and receipt formats use one digest; unsupported authority fails closed. |
+| `receipt_artifact_paths_reject_escape_attempts` | Hostile | Absolute, empty-component, and parent-traversal receipt paths fail closed. |
 | `native_os_matrix_is_frozen_and_names_current_host` | Matrix | The committed Linux/macOS/Windows matrix and current host declaration stay exact. |
 | `jet_baseline_is_frozen_and_each_loss_has_an_owner` | Regression input | The Jet pass set covers every task and every loss owner names a card or ratified non-goal. |
 | `repository_and_git_jet_adapters_use_production_paths` | Non-vacuity | The Jet repository and Git adapters retain their public semantic-inspection, codemod, filesystem, and bounded Git-diff calls. |
+| `structured_data_database_http_jet_adapters_use_production_paths` | Non-vacuity | The Jet structured-data, database, and HTTP adapters retain their public JSON, SQLite, and loopback HTTP calls. |
 | `equivalent_adapters_complete_declared_tasks` | Integration | All declared tasks across all four adapters, cold and warm: exit status, exact stdout, output stability, unchanged input authority, no undeclared scratch residue, and adapter agreement on the declared outcome. |
 
 The frozen-input gate is proved by mutation, not by assertion alone. Changing one input byte fails with `fixture drift: <path>`. Adding an undeclared input fails with `checksum closure mismatch`. Deleting a declared expected output fails the presence check. Changing a task domain in the manifest fails with `task removed, added, or reclassified`.
@@ -119,6 +137,12 @@ The focused integration test is the first CI tier:
 
 ```sh
 JET_NIX_TMP_CLEANED=1 timeout 20m scripts/agent/jet-env cargo test --test agent_workloads -- --nocapture
+```
+
+The report-validator self-check is:
+
+```sh
+TMPDIR="$HOME/.cache/jet-test-scratch" bash tools/ci/test-agent-workload-gate.sh
 ```
 
 The old six-test run note is obsolete. The current source also checks the interpreter receipt, native OS matrix, Jet baseline ownership, production-path adapter reachability, and the first-program digest; a fresh full corpus run remains a closeout proof owned by #1173.

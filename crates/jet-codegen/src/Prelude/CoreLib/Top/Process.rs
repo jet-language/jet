@@ -34,9 +34,7 @@ fn jet_process_spec_terminal_with_policy(
 // keys without changing a public report type. Known facts come from the
 // checked TerminalFact namespace. Unix PTY support advertises the three
 // stable facts; unsupported targets keep the set empty.
-fn jet_process_spec_abilities(
-    _spec: &jet_std::ProcessSpec,
-) -> std::collections::HashSet<String> {
+fn jet_process_spec_abilities(_spec: &jet_std::ProcessSpec) -> std::collections::HashSet<String> {
     let mut facts = std::collections::HashSet::new();
     for fact in jet_process_policy::terminal_facts(jet_process_pty::supported()) {
         facts.insert((*fact).to_string());
@@ -46,9 +44,7 @@ fn jet_process_spec_abilities(
 // D-PROCESS-SESSION1=A: a terminal session needs a native backend. Running the
 // child on plain pipes instead would change what an interactive program prints,
 // so the launch fails rather than silently dropping the requested terminal.
-fn jet_process_terminal_backend_check(
-    spec: &jet_std::ProcessSpec,
-) -> Result<(), jet_std::IOError> {
+fn jet_process_terminal_backend_check(spec: &jet_std::ProcessSpec) -> Result<(), jet_std::IOError> {
     if spec.terminal.is_none() {
         return Ok(());
     }
@@ -83,8 +79,7 @@ fn jet_process_command_base_with_identity(
             Some("process command needs at least one word".to_string()),
         )));
     }
-    let mut command =
-        std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
+    let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
     command.args(&spec.cmd[1..]);
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
@@ -98,22 +93,36 @@ fn jet_process_command_base_with_identity(
         jet_std_env_snapshot_raw()
     };
     for (name, value) in &spec.env_set {
-        jet_env_validate_name(name).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
-        )))?;
-        jet_env_validate_value(value).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
-        )))?;
+        jet_env_validate_name(name).map_err(|error| {
+            jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Resolve,
+                Some(name.clone()),
+                None,
+                Some(error.jet_show()),
+            ))
+        })?;
+        jet_env_validate_value(value).map_err(|error| {
+            jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Resolve,
+                Some(name.clone()),
+                None,
+                Some(error.jet_show()),
+            ))
+        })?;
         let os_name = std::ffi::OsString::from(name);
-        child_env.retain(|(candidate, _)| {
-            !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str())
-        });
+        child_env
+            .retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), os_name.as_os_str()));
         child_env.push((os_name, std::ffi::OsString::from(value)));
     }
     for name in &spec.env_remove {
-        jet_env_validate_name(name).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
-            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
-        )))?;
+        jet_env_validate_name(name).map_err(|error| {
+            jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+                jet_std::IOOperation::Resolve,
+                Some(name.clone()),
+                None,
+                Some(error.jet_show()),
+            ))
+        })?;
         let name = std::ffi::OsStr::new(name);
         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
     }
@@ -130,7 +139,7 @@ fn jet_process_command_base_with_identity(
     Ok(command)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn jet_process_sandbox_error(
     spec: &jet_std::ProcessSpec,
     error: jet_process_sandbox::Error,
@@ -146,7 +155,7 @@ fn jet_process_sandbox_error(
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn jet_process_sandbox_env(
     spec: &jet_std::ProcessSpec,
 ) -> Result<std::collections::BTreeMap<String, String>, jet_std::IOError> {
@@ -184,11 +193,11 @@ fn jet_process_sandbox_env(
     Ok(environment)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn jet_process_sandbox_policy_scope(
     spec: &jet_std::ProcessSpec,
     executable_identity: &str,
-) -> Result<(bool, bool), jet_std::IOError> {
+) -> Result<(bool, bool, bool), jet_std::IOError> {
     let rights = spec
         .policy_wire
         .as_deref()
@@ -213,13 +222,87 @@ fn jet_process_sandbox_policy_scope(
     Ok((
         rights.iter().any(|right| *right == "FS.Read:repo"),
         rights.iter().any(|right| *right == "FS.Write:.jet/build"),
+        rights.iter().any(|right| *right == "Net"),
     ))
+}
+
+fn jet_process_receipt(
+    spec: &jet_std::ProcessSpec,
+    plan: Option<&jet_std::ProcessPlan>,
+    process_group: bool,
+    pid: i64,
+    code: i64,
+    success: bool,
+    signal: JetOutcome<i64, JetAbsent>,
+    timed_out: bool,
+    output: String,
+    errors: String,
+) -> jet_std::ProcessReceipt {
+    let executable_identity = plan
+        .map(|plan| plan.executable_identity.clone())
+        .or_else(|| jet_process_resolve_executable(spec).ok())
+        .or_else(|| spec.cmd.first().cloned())
+        .unwrap_or_default();
+    let argv = plan.map(|plan| plan.argv.clone()).unwrap_or_else(|| {
+        spec.cmd
+            .iter()
+            .map(|word| jet_process_policy_redact(spec, word))
+            .collect()
+    });
+    let policy_digest = plan
+        .map(|plan| plan.policy_digest.clone())
+        .unwrap_or_else(|| jet_process_policy_digest(spec));
+    let input_digest = plan
+        .map(|plan| plan.input_digest.clone())
+        .unwrap_or_else(|| jet_process_input_digest(spec));
+    let backend = plan
+        .map(|plan| plan.backend.clone())
+        .unwrap_or_else(|| "ambient".to_string());
+    let authority = plan
+        .map(|plan| plan.authority.clone())
+        .unwrap_or_else(|| jet_process_policy_receipt_rights(spec));
+    let descendants = if spec.detached {
+        "detached".to_string()
+    } else if process_group {
+        "contained".to_string()
+    } else {
+        plan.map(|plan| plan.descendants.clone())
+            .unwrap_or_else(|| "direct".to_string())
+    };
+    let limits = plan
+        .map(|plan| plan.limits.clone())
+        .unwrap_or_else(|| jet_process_policy_limits(spec));
+    let mut outputs = plan
+        .map(|plan| plan.outputs.clone())
+        .unwrap_or_else(|| jet_process_policy_outputs(spec));
+    outputs.push(format!("captured-bytes={}", output.len() + errors.len()));
+    let redacted = spec.policy_wire.is_some() || !jet_process_policy_secret_values(spec).is_empty();
+    jet_std::ProcessReceipt {
+        code,
+        output: jet_process_policy_redact(spec, &output),
+        errors: jet_process_policy_redact(spec, &errors),
+        success,
+        signal,
+        timed_out,
+        executable_identity,
+        argv,
+        input_digest,
+        policy_digest,
+        backend,
+        authority,
+        descendants,
+        limits,
+        outputs,
+        redacted,
+        pid,
+    }
 }
 
 fn jet_process_child_from_inner(
     mut child: std::process::Child,
     spec: &jet_std::ProcessSpec,
     process_group: bool,
+    plan: Option<jet_std::ProcessPlan>,
 ) -> jet_std::ProcessChild {
     jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -242,8 +325,12 @@ fn jet_process_child_from_inner(
         )),
         terminal: Err(JetAbsent),
         process_group,
+        detached: spec.detached,
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
+        output_limit: spec.output_limit,
+        audit_spec: spec.clone(),
+        audit_plan: plan,
         started: std::time::Instant::now(),
     }
 }
@@ -252,14 +339,35 @@ fn jet_process_verify_launch_plan(
     spec: &jet_std::ProcessSpec,
     plan: &jet_std::ProcessPlan,
 ) -> Result<(), jet_std::IOError> {
-    if plan.policy_digest == jet_process_policy_digest(spec) {
-        return Ok(());
+    let Some(backend) = jet_process_isolation_backend() else {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound process launch rejected because its isolation backend is unavailable",
+        ));
+    };
+    if plan.backend != backend {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound process launch rejected because its isolation backend changed after planning",
+        ));
     }
-    Err(jet_std::IOError::other(
-        jet_std::IOOperation::Resolve,
-        spec.cmd.first().cloned(),
-        "authority-bound process launch rejected a policy digest change after planning",
-    ))
+    if plan.policy_digest != jet_process_policy_digest(spec) {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound process launch rejected a policy digest change after planning",
+        ));
+    }
+    if plan.input_digest != jet_process_input_digest(spec) {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound process launch rejected because its argv inputs changed after planning",
+        ));
+    }
+    Ok(())
 }
 
 // Pipelines use ordinary pipe edges. A PTY session is one bidirectional byte
@@ -298,9 +406,10 @@ fn jet_process_spec_spawn(
             launch_plan
                 .as_ref()
                 .map(|plan| plan.executable_identity.as_str()),
+            launch_plan.as_ref(),
         );
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if spec.policy_wire.is_some() {
         let plan = launch_plan
             .as_ref()
@@ -310,7 +419,7 @@ fn jet_process_spec_spawn(
             .as_deref()
             .map(std::path::Path::new)
             .unwrap_or_else(|| std::path::Path::new("."));
-        let (source_readable, output_writable) =
+        let (source_readable, output_writable, share_network) =
             jet_process_sandbox_policy_scope(spec, &plan.executable_identity)?;
         let output_dir = if output_writable {
             Some(
@@ -327,9 +436,12 @@ fn jet_process_spec_spawn(
             cwd,
             output_dir.as_deref(),
             &environment,
-            false,
+            share_network,
             source_readable,
             output_writable,
+            spec.cmd
+                .first()
+                .map(|word| std::ffi::OsStr::new(word.as_str())),
             |command| {
                 if spec.detached {
                     command.stdin(std::process::Stdio::null());
@@ -349,7 +461,21 @@ fn jet_process_spec_spawn(
             },
         )
         .map_err(|error| jet_process_sandbox_error(spec, error))?;
-        return Ok(jet_process_child_from_inner(child, spec, true));
+        return Ok(jet_process_child_from_inner(
+            child,
+            spec,
+            true,
+            launch_plan.clone(),
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    if spec.policy_wire.is_some() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound Windows process children require capture via run(); refusing an unsandboxed spawn",
+        ));
     }
 
     let mut command = jet_process_command_base_with_identity(
@@ -363,16 +489,37 @@ fn jet_process_spec_spawn(
         command.stdout(std::process::Stdio::null());
         command.stderr(std::process::Stdio::null());
     }
-    let child = command.spawn().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
+    #[cfg(unix)]
+    jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
     })?;
-    Ok(jet_process_child_from_inner(child, spec, false))
+    let child = command.spawn().map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            error,
+        )
+    })?;
+    // Ordinary Unix children get the same descendant boundary as terminal
+    // sessions. Windows keeps direct-child cleanup until its native job
+    // boundary is available.
+    Ok(jet_process_child_from_inner(
+        child,
+        spec,
+        cfg!(unix),
+        launch_plan,
+    ))
 }
 
 #[cfg(unix)]
 fn jet_process_terminal_spawn(
     spec: &jet_std::ProcessSpec,
     executable_identity: Option<&str>,
+    plan: Option<&jet_std::ProcessPlan>,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
     if spec.detached {
         return Err(jet_std::IOError::other(
@@ -395,24 +542,36 @@ fn jet_process_terminal_spawn(
         )
     })?;
     let stdin = pair.slave.try_clone().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
     })?;
     let stdout = pair.slave.try_clone().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
     })?;
     let stderr = pair.slave.try_clone().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
     })?;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let child = if spec.policy_wire.is_some() {
-        let executable = executable_identity
-            .expect("authority terminal launch must have a resolved executable");
+        let executable =
+            executable_identity.expect("authority terminal launch must have a resolved executable");
         let cwd = spec
             .cwd
             .as_deref()
             .map(std::path::Path::new)
             .unwrap_or_else(|| std::path::Path::new("."));
-        let (source_readable, output_writable) =
+        let (source_readable, output_writable, share_network) =
             jet_process_sandbox_policy_scope(spec, executable)?;
         let output_dir = if output_writable {
             Some(
@@ -429,9 +588,12 @@ fn jet_process_terminal_spawn(
             cwd,
             output_dir.as_deref(),
             &environment,
-            false,
+            share_network,
             source_readable,
             output_writable,
+            spec.cmd
+                .first()
+                .map(|word| std::ffi::OsStr::new(word.as_str())),
             |command| {
                 command.stdin(std::process::Stdio::from(stdin));
                 command.stdout(std::process::Stdio::from(stdout));
@@ -461,7 +623,7 @@ fn jet_process_terminal_spawn(
             )
         })?
     };
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let child = {
         let mut command = jet_process_command_base_with_identity(spec, executable_identity)?;
         command.stdin(std::process::Stdio::from(stdin));
@@ -485,10 +647,18 @@ fn jet_process_terminal_spawn(
     drop(pair.slave);
     let master = std::rc::Rc::new(pair.master);
     let stdin = master.as_ref().try_clone().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
     })?;
     let stdout = master.as_ref().try_clone().map_err(|error| {
-        jet_std::IOError::other(jet_std::IOOperation::Resolve, Some("process terminal".to_string()), error)
+        jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process terminal".to_string()),
+            error,
+        )
     })?;
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -504,8 +674,12 @@ fn jet_process_terminal_spawn(
         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
         terminal: Ok(jet_std::TerminalSession { master }),
         process_group: true,
+        detached: spec.detached,
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
+        output_limit: spec.output_limit,
+        audit_spec: spec.clone(),
+        audit_plan: plan.cloned(),
         started: std::time::Instant::now(),
     })
 }
@@ -514,6 +688,7 @@ fn jet_process_terminal_spawn(
 fn jet_process_terminal_spawn(
     spec: &jet_std::ProcessSpec,
     _executable_identity: Option<&str>,
+    _plan: Option<&jet_std::ProcessPlan>,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
     jet_process_terminal_backend_check(spec)?;
     Err(jet_std::IOError::other(
@@ -522,39 +697,104 @@ fn jet_process_terminal_spawn(
         "terminal sessions need a native PTY or ConPTY backend, and this build has none",
     ))
 }
+struct JetProcessOutput {
+    text: String,
+    exceeded: bool,
+}
+
 fn jet_process_drain_reader<R>(
     reader: Option<std::io::BufReader<R>>,
-) -> Option<std::thread::JoinHandle<std::io::Result<String>>>
+    limit: Option<usize>,
+    budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>
 where
     R: std::io::Read + Send + 'static,
 {
     reader.map(|mut reader| {
         std::thread::spawn(move || {
-            let mut text = String::new();
-            std::io::Read::read_to_string(&mut reader, &mut text)?;
-            Ok(text)
+            let mut bytes = Vec::new();
+            let mut exceeded = false;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let count = std::io::Read::read(&mut reader, &mut chunk)?;
+                if count == 0 {
+                    break;
+                }
+                let kept = match limit {
+                    None => {
+                        bytes.extend_from_slice(&chunk[..count]);
+                        count
+                    }
+                    Some(limit) => {
+                        let budget = budget
+                            .as_ref()
+                            .expect("bounded process output needs a shared budget");
+                        let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
+                        loop {
+                            let available = limit.saturating_sub(used);
+                            let kept = available.min(count);
+                            if kept == 0 {
+                                break 0;
+                            }
+                            match budget.compare_exchange(
+                                used,
+                                used + kept,
+                                std::sync::atomic::Ordering::AcqRel,
+                                std::sync::atomic::Ordering::Acquire,
+                            ) {
+                                Ok(_) => {
+                                    bytes.extend_from_slice(&chunk[..kept]);
+                                    break kept;
+                                }
+                                Err(next) => used = next,
+                            }
+                        }
+                    }
+                };
+                if kept < count {
+                    exceeded = true;
+                    limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                    break;
+                }
+            }
+            let text = String::from_utf8(bytes)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+            Ok(JetProcessOutput { text, exceeded })
         })
     })
 }
 fn jet_process_start_output_drain(
     child: &jet_std::ProcessChild,
 ) -> (
-    Option<std::thread::JoinHandle<std::io::Result<String>>>,
-    Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    (
+        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
+        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
+    ),
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let stdout = child.stdout.borrow_mut().take();
     let stderr = child.stderr.borrow_mut().take();
+    let limit = child.output_limit.map(|limit| limit.max(0) as usize);
+    let budget = limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     (
-        jet_process_drain_reader(stdout),
-        jet_process_drain_reader(stderr),
+        (
+            jet_process_drain_reader(stdout, limit, budget.clone(), limit_hit.clone()),
+            jet_process_drain_reader(stderr, limit, budget, limit_hit.clone()),
+        ),
+        limit_hit,
     )
 }
 fn jet_process_finish_output_drain(
-    drain: Option<std::thread::JoinHandle<std::io::Result<String>>>,
+    drain: Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
     stream: &'static str,
-) -> Result<String, jet_std::IOError> {
+) -> Result<JetProcessOutput, jet_std::IOError> {
     let Some(drain) = drain else {
-        return Ok(String::new());
+        return Ok(JetProcessOutput {
+            text: String::new(),
+            exceeded: false,
+        });
     };
     drain
         .join()
@@ -566,38 +806,131 @@ fn jet_process_finish_output_drain(
             )
         })?
         .map_err(|error| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Read,
-                Some(stream.to_string()),
-                error,
-            )
+            jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
         })
 }
 fn jet_process_collect_output(
     drains: (
-        Option<std::thread::JoinHandle<std::io::Result<String>>>,
-        Option<std::thread::JoinHandle<std::io::Result<String>>>,
+        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
+        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
     ),
-) -> Result<(String, String), jet_std::IOError> {
+) -> Result<(String, String, bool), jet_std::IOError> {
     let output = jet_process_finish_output_drain(drains.0, "process stdout")?;
     let errors = jet_process_finish_output_drain(drains.1, "process stderr")?;
-    Ok((output, errors))
+    Ok((output.text, errors.text, output.exceeded || errors.exceeded))
 }
+
+#[cfg(target_os = "windows")]
+fn jet_process_spec_run_windows(
+    spec: &jet_std::ProcessSpec,
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
+    if spec.detached
+        || spec.terminal.is_some()
+        || spec.stdin.is_some()
+        || spec.stdout != jet_std::ProcessStreamMode::Capture
+        || spec.stderr != jet_std::ProcessStreamMode::Capture
+    {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound Windows execution requires non-detached capture streams and closed stdin",
+        ));
+    }
+    let plan = jet_process_spec_plan(spec)?;
+    jet_process_verify_launch_plan(spec, &plan)?;
+    let cwd = spec
+        .cwd
+        .as_deref()
+        .map(std::path::Path::new)
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let (source_readable, output_writable, share_network) =
+        jet_process_sandbox_policy_scope(spec, &plan.executable_identity)?;
+    let output_dir = if output_writable {
+        Some(
+            jet_process_sandbox::agent_output_dir(cwd)
+                .map_err(|error| jet_process_sandbox_error_windows(spec, error))?,
+        )
+    } else {
+        None
+    };
+    let environment = jet_process_sandbox_env(spec)?;
+    let result = jet_process_sandbox::windows_output(
+        std::path::Path::new(&plan.executable_identity),
+        &spec.cmd[1..],
+        cwd,
+        output_dir.as_deref(),
+        &environment,
+        share_network,
+        source_readable,
+        output_writable,
+        spec.timeout_ms,
+        spec.output_limit,
+    )
+    .map_err(|error| jet_process_sandbox_error_windows(spec, error))?;
+    if result.mechanism != plan.backend {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound Windows launch returned a different isolation backend",
+        ));
+    }
+    let output = String::from_utf8(result.output.stdout).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("process stdout".to_string()),
+            error,
+        )
+    })?;
+    let errors = String::from_utf8(result.output.stderr).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("process stderr".to_string()),
+            error,
+        )
+    })?;
+    Ok(jet_process_receipt(
+        spec,
+        Some(&plan),
+        true,
+        result.pid,
+        result.output.status.code().unwrap_or(-1) as i64,
+        result.output.status.success(),
+        Err(JetAbsent),
+        result.timed_out,
+        output,
+        errors,
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn jet_process_sandbox_error_windows(
+    spec: &jet_std::ProcessSpec,
+    error: jet_process_sandbox::WindowsSandboxError,
+) -> jet_std::IOError {
+    let detail = match error {
+        jet_process_sandbox::WindowsSandboxError::Unsupported(detail)
+        | jet_process_sandbox::WindowsSandboxError::Io(detail) => detail,
+    };
+    jet_std::IOError::other(
+        jet_std::IOOperation::Resolve,
+        spec.cmd.first().cloned(),
+        detail,
+    )
+}
+
 fn jet_process_spec_run_inner(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessResult, jet_std::IOError> {
-    let child = jet_process_spec_spawn(spec)?;
-    let result = jet_process_child_wait(&child)?;
-    if let Some(limit) = spec.output_limit {
-        if (result.output.len() + result.errors.len()) as i64 > limit {
-            return Err(jet_std::IOError::other(jet_std::IOOperation::Read, None, "process output exceeded output_limit"));
-        }
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
+    #[cfg(target_os = "windows")]
+    if spec.policy_wire.is_some() {
+        return jet_process_spec_run_windows(spec);
     }
-    Ok(result)
+    let child = jet_process_spec_spawn(spec)?;
+    jet_process_child_wait(&child)
 }
 fn jet_process_spec_run(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     jet_process_spec_run_inner(spec)
 }
 fn jet_process_checked_stderr(errors: &str) -> String {
@@ -613,7 +946,7 @@ fn jet_process_checked_stderr(errors: &str) -> String {
 }
 fn jet_process_spec_run_checked(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     let result = jet_process_spec_run(spec)?;
     if result.success {
         return Ok(result);
@@ -633,7 +966,7 @@ fn jet_process_spec_run_checked(
     ))
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn jet_process_sandbox_pipeline_spawn(
     spec: &jet_std::ProcessSpec,
     launch_plan: &jet_std::ProcessPlan,
@@ -651,7 +984,7 @@ fn jet_process_sandbox_pipeline_spawn(
         .as_deref()
         .map(std::path::Path::new)
         .unwrap_or_else(|| std::path::Path::new("."));
-    let (source_readable, output_writable) =
+    let (source_readable, output_writable, share_network) =
         jet_process_sandbox_policy_scope(spec, &launch_plan.executable_identity)?;
     let output_dir = if output_writable {
         Some(
@@ -668,9 +1001,12 @@ fn jet_process_sandbox_pipeline_spawn(
         cwd,
         output_dir.as_deref(),
         &environment,
-        false,
+        share_network,
         source_readable,
         output_writable,
+        spec.cmd
+            .first()
+            .map(|word| std::ffi::OsStr::new(word.as_str())),
         |command| {
             if let Some(stdout) = input {
                 command.stdin(std::process::Stdio::from(stdout));
@@ -692,7 +1028,7 @@ fn jet_process_sandbox_pipeline_spawn(
 
 fn jet_process_pipeline_cleanup(children: &mut [std::process::Child]) {
     for child in children.iter_mut() {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let _ = jet_process_pty::signal_group(child.id(), jet_process_signal_kill());
         let _ = child.kill();
     }
@@ -703,7 +1039,7 @@ fn jet_process_pipeline_cleanup(children: &mut [std::process::Child]) {
 
 fn jet_process_spec_pipeline(
     specs: &Vec<jet_std::ProcessSpec>,
-) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     if specs.is_empty() {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
             jet_std::IOOperation::Resolve,
@@ -711,6 +1047,14 @@ fn jet_process_spec_pipeline(
             None,
             Some("process.pipeline needs at least one command".to_string()),
         )));
+    }
+    #[cfg(target_os = "windows")]
+    if specs.iter().any(|spec| spec.policy_wire.is_some()) {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            Some("process.pipeline".to_string()),
+            "authority-bound Windows pipelines are unavailable; refusing an unsandboxed pipeline",
+        ));
     }
     let launch_plans = specs
         .iter()
@@ -732,7 +1076,7 @@ fn jet_process_spec_pipeline(
     for (spec, launch_plan) in specs.iter().zip(launch_plans.iter()) {
         let input = prev_stdout.take();
         let child = {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             if spec.policy_wire.is_some() {
                 jet_process_sandbox_pipeline_spawn(
                     spec,
@@ -753,6 +1097,14 @@ fn jet_process_spec_pipeline(
                 }
                 command.stdout(std::process::Stdio::piped());
                 command.stderr(std::process::Stdio::piped());
+                #[cfg(unix)]
+                jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Resolve,
+                        spec.cmd.first().cloned(),
+                        error,
+                    )
+                })?;
                 command.spawn().map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Resolve,
@@ -761,7 +1113,7 @@ fn jet_process_spec_pipeline(
                     )
                 })
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             {
                 let mut command = jet_process_command_with_identity(
                     spec,
@@ -774,6 +1126,14 @@ fn jet_process_spec_pipeline(
                 }
                 command.stdout(std::process::Stdio::piped());
                 command.stderr(std::process::Stdio::piped());
+                #[cfg(unix)]
+                jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Resolve,
+                        spec.cmd.first().cloned(),
+                        error,
+                    )
+                })?;
                 command.spawn().map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Resolve,
@@ -793,25 +1153,46 @@ fn jet_process_spec_pipeline(
         prev_stdout = child.stdout.take();
         children.push(child);
     }
-    let output_drain = prev_stdout
-        .take()
-        .and_then(|stdout| jet_process_drain_reader(Some(std::io::BufReader::new(stdout))));
+    let pipeline_limit = specs
+        .iter()
+        .filter_map(|spec| spec.output_limit)
+        .map(|limit| limit.max(0) as usize)
+        .min();
+    let pipeline_budget =
+        pipeline_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_drain = prev_stdout.take().and_then(|stdout| {
+        jet_process_drain_reader(
+            Some(std::io::BufReader::new(stdout)),
+            pipeline_limit,
+            pipeline_budget.clone(),
+            pipeline_limit_hit.clone(),
+        )
+    });
     let stderr_drains = children
         .iter_mut()
         .map(|child| {
             jet_process_drain_reader(
-                child
-                    .stderr
-                    .take()
-                    .map(std::io::BufReader::new),
+                child.stderr.take().map(std::io::BufReader::new),
+                pipeline_limit,
+                pipeline_budget.clone(),
+                pipeline_limit_hit.clone(),
             )
         })
         .collect::<Vec<_>>();
     let mut code = 0;
     let mut success = true;
-    for child in &mut children {
+    for index in 0..children.len() {
         let status = loop {
-            if let Some(status) = child.try_wait().map_err(|error| {
+            if pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+                jet_process_pipeline_cleanup(&mut children);
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Read,
+                    None,
+                    "process output exceeded output_limit",
+                ));
+            }
+            if let Some(status) = children[index].try_wait().map_err(|error| {
                 jet_std::IOError::other(
                     jet_std::IOOperation::Close,
                     Some("pipeline process".to_string()),
@@ -822,24 +1203,41 @@ fn jet_process_spec_pipeline(
             }
             jet_scheduler_park_ms("process wait", 10);
         };
+        #[cfg(unix)]
+        let _ = jet_process_pty::signal_group(children[index].id(), jet_process_signal_kill());
         if !status.success() {
             success = false;
             code = status.code().unwrap_or(-1) as i64;
         }
     }
     let output = jet_process_finish_output_drain(output_drain, "pipeline stdout")?;
+    let mut output_exceeded = output.exceeded;
     let mut errors = String::new();
     for drain in stderr_drains {
-        errors.push_str(&jet_process_finish_output_drain(drain, "pipeline stderr")?);
+        let result = jet_process_finish_output_drain(drain, "pipeline stderr")?;
+        output_exceeded |= result.exceeded;
+        errors.push_str(&result.text);
     }
-    Ok(jet_std::ProcessResult {
+    if output_exceeded {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            None,
+            "process output exceeded output_limit",
+        ));
+    }
+    let output_text = output.text;
+    Ok(jet_process_receipt(
+        specs.last().expect("nonempty pipeline"),
+        launch_plans.last().and_then(Option::as_ref),
+        true,
+        0,
         code,
         success,
-        signal: Err(JetAbsent),
-        timed_out: false,
-        output,
+        Err(JetAbsent),
+        false,
+        output_text,
         errors,
-    })
+    ))
 }
 
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
@@ -852,15 +1250,16 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
 }
 fn jet_process_child_wait(
     child: &jet_std::ProcessChild,
-) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+) -> Result<jet_std::ProcessReceipt, jet_std::IOError> {
     if let Some(result) = child.wait_result.borrow().clone() {
         return Ok(result);
     }
+    let _cleanup = JetProcessWaitCleanup { child };
     // Capture pipes must be drained while the child runs. Waiting first can
     // deadlock when either pipe fills; stdout and stderr need independent
     // readers because a child may fill both concurrently. Stream consumers
     // keep their earlier reads, and wait drains only the remaining bytes.
-    let drains = jet_process_start_output_drain(child);
+    let (drains, output_limit_hit) = jet_process_start_output_drain(child);
     let mut timed_out = false;
     let status = loop {
         let mut slot = child.inner.borrow_mut();
@@ -872,26 +1271,48 @@ fn jet_process_child_wait(
                 Some("process child wait result is unavailable".to_string()),
             )));
         };
-        if let Some(status) = inner.try_wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))? {
+        if let Some(status) = inner.try_wait().map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                error,
+            )
+        })? {
             break status;
+        }
+        if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+            jet_process_kill_inner(child, inner).map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("process".to_string()),
+                    error,
+                )
+            })?;
+            break inner.wait().map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("process".to_string()),
+                    error,
+                )
+            })?;
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-                #[cfg(unix)]
-                let group_killed = child.terminal.is_ok() || child.process_group;
-                if group_killed
-                    && jet_process_pty::signal_group(inner.id(), jet_process_signal_kill()).is_err()
-                {
-                    inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
-                }
-                #[cfg(unix)]
-                if !group_killed {
-                    inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
-                }
-                #[cfg(not(unix))]
-                inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
+                jet_process_kill_inner(child, inner).map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                })?;
                 timed_out = true;
-                break inner.wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
+                break inner.wait().map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                })?;
             }
         }
         drop(slot);
@@ -906,23 +1327,39 @@ fn jet_process_child_wait(
             let _ = jet_process_pty::signal_group(pid, jet_process_signal_kill());
         }
     }
+    let pid = child
+        .inner
+        .borrow()
+        .as_ref()
+        .map(|inner| inner.id() as i64)
+        .unwrap_or(0);
     child.inner.borrow_mut().take();
-    let (output, errors) = jet_process_collect_output(drains)?;
+    let (output, errors, output_exceeded) = jet_process_collect_output(drains)?;
+    if output_exceeded {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            None,
+            "process output exceeded output_limit",
+        ));
+    }
     let code = status.code().unwrap_or(-1) as i64;
     #[cfg(unix)]
-    let signal = jet_outcome_of(
-        std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from),
-    );
+    let signal =
+        jet_outcome_of(std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from));
     #[cfg(not(unix))]
     let signal = Err(JetAbsent);
-    let result = jet_std::ProcessResult {
+    let result = jet_process_receipt(
+        &child.audit_spec,
+        child.audit_plan.as_ref(),
+        child.process_group,
+        pid,
         code,
-        success: status.success(),
+        status.success(),
         signal,
         timed_out,
         output,
         errors,
-    };
+    );
     *child.wait_result.borrow_mut() = Some(result.clone());
     Ok(result)
 }
@@ -937,7 +1374,13 @@ fn jet_process_child_exited(child: &jet_std::ProcessChild) -> Result<bool, jet_s
     inner
         .try_wait()
         .map(|status| status.is_some())
-        .map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))
+        .map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                error,
+            )
+        })
 }
 
 fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
@@ -978,7 +1421,10 @@ impl std::io::Read for jet_std::ProcessReader {
             Self::Terminal(reader) => std::io::Read::read(reader, bytes),
         };
         match result {
-            Err(error) if matches!(self, Self::Terminal(_)) && jet_process_pty::is_terminal_eof(&error) => {
+            Err(error)
+                if matches!(self, Self::Terminal(_))
+                    && jet_process_pty::is_terminal_eof(&error) =>
+            {
                 Ok(0)
             }
             other => other,
@@ -1052,6 +1498,56 @@ fn jet_process_child_signal(
         })?;
     }
     Ok(())
+}
+
+fn jet_process_kill_inner(
+    child: &jet_std::ProcessChild,
+    inner: &mut std::process::Child,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if child.terminal.is_ok() || child.process_group {
+        if jet_process_pty::signal_group(inner.id(), jet_process_signal_kill()).is_ok() {
+            return Ok(());
+        }
+    }
+    inner.kill()
+}
+
+fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) {
+    if child.detached
+        || child
+            .wait_result
+            .try_borrow()
+            .map_or(false, |result| result.is_some())
+    {
+        return;
+    }
+    let Ok(mut slot) = child.inner.try_borrow_mut() else {
+        return;
+    };
+    let Some(inner) = slot.as_mut() else {
+        return;
+    };
+    let _ = jet_process_kill_inner(child, inner);
+    let _ = inner.wait();
+}
+
+struct JetProcessWaitCleanup<'a> {
+    child: &'a jet_std::ProcessChild,
+}
+
+impl Drop for JetProcessWaitCleanup<'_> {
+    fn drop(&mut self) {
+        jet_process_reap_unfinished(self.child);
+    }
+}
+
+impl Drop for jet_std::ProcessChild {
+    fn drop(&mut self) {
+        if std::rc::Rc::strong_count(&self.inner) == 1 {
+            jet_process_reap_unfinished(self);
+        }
+    }
 }
 // `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via
@@ -1167,7 +1663,13 @@ fn jet_process_child_read_line<R: std::io::Read>(
         return Ok(None);
     };
     let mut line = String::new();
-    let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Read, Some("process output".to_string()), error))?;
+    let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("process output".to_string()),
+            error,
+        )
+    })?;
     if n == 0 {
         Ok(None)
     } else {
