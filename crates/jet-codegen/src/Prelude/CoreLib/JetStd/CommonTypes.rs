@@ -1,7 +1,8 @@
     // Exactly the three stream modes. `Stream` and
     // `Capture` both pipe the child's stream (`Stdio::piped()`) — they differ
-    // only in which Jet-level API is meant to drain them (`Child.stdout.lines()`
-    // for `Stream`, the collected `ProcessResult.output`/`.errors` for `Capture`).
+    // only in which Jet-level API exposes or collects the drained bytes
+    // (`Child.stdout.lines()` for `Stream`, the collected
+    // `ProcessResult.output`/`.errors` for `Capture`).
     #[derive(Clone, Debug, PartialEq)]
     pub enum ProcessStreamMode {
         Stream,
@@ -131,6 +132,21 @@
         Stdout(std::process::ChildStdout),
         Stderr(std::process::ChildStderr),
         Terminal(std::fs::File),
+        Shared(std::sync::Arc<ProcessOutputState>),
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct ProcessOutputState {
+        pub(crate) bytes: std::sync::Mutex<ProcessOutputBuffer>,
+        pub(crate) ready: std::sync::Condvar,
+    }
+
+    #[derive(Debug)]
+    pub(crate) struct ProcessOutputBuffer {
+        pub(crate) bytes: Vec<u8>,
+        pub(crate) cursor: usize,
+        pub(crate) closed: bool,
+        pub(crate) error: Option<(std::io::ErrorKind, String)>,
     }
 
     impl EncodingError {
@@ -511,6 +527,14 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+        pub stdout_state: Option<std::sync::Arc<ProcessOutputState>>,
+        pub stderr_state: Option<std::sync::Arc<ProcessOutputState>>,
+        pub stdout_worker:
+            std::rc::Rc<std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>>,
+        pub stderr_worker:
+            std::rc::Rc<std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>>,
+        pub output_limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        pub output_read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
         pub terminal: JetOutcome<TerminalSession, JetAbsent>,
         pub process_group: bool,
         pub detached: bool,

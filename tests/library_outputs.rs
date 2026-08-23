@@ -202,3 +202,48 @@ fn library_build_load_and_foreign_call_are_one_surface() {
         "effect refusal happened after mapping:\n{over_granted_text}"
     );
 }
+
+#[test]
+fn component_build_load_and_foreign_call_are_one_surface() {
+    if !have_rustc() {
+        eprintln!("note: skipping Component end-to-end proof (need rustc)");
+        return;
+    }
+    if Command::new("wasm-tools")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("note: skipping Component end-to-end proof (need wasm-tools)");
+        return;
+    }
+
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/library_loadable");
+    let scratch = Scratch::new("component-loadable");
+    copy_tree(&fixture, &scratch.path);
+
+    let build = run_jet(&scratch.path, &["build", "--target=sandbox", "library.jet"]);
+    assert!(
+        build.status.success(),
+        "Component build failed:\n{}",
+        compiler_text(&build)
+    );
+    let component = scratch.path.join("build/library.wasm");
+    assert!(
+        component.is_file(),
+        "Component build missed {}",
+        component.display()
+    );
+
+    let host = run_jet(&scratch.path, &["run", "component_host.jet"]);
+    assert!(
+        host.status.success(),
+        "sandboxed Component host failed:\n{}",
+        compiler_text(&host)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&host.stdout),
+        "42|true|hello, Ada!\n"
+    );
+}

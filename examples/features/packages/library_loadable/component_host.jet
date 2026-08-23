@@ -1,0 +1,12 @@
+// D-EMBED1=E: the same pub export surface built as a sandbox Component.
+// The canonical backend spelling is `--target=sandbox`; this host carries the
+// Component runtime and gets the sandbox boundary.
+use core.plugin as plugin
+
+fn run() {
+    library :: plugin.load("build/library.wasm")
+    tick :: library.call_int("on-tick", [41]) ?? -1
+    enabled :: library.call_bool("is-enabled", [true]) ?? false
+    greeting :: library.call_text("greet", ["Ada"]) ?? "component call failed"
+    print("{tick}|{enabled}|{greeting}")
+}

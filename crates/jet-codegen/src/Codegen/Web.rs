@@ -72,6 +72,8 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/FloatProvenance.js"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
+    "\n",
+    include_str!("../Prelude/Core/ComputeWebGpu.js"),
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
@@ -1835,7 +1837,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 // D-UI-MOUNT1=A: 2-arg or 3-arg (constraint) — same as tir_core_call.
                 matches!(args.len(), 2 | 3)
             } else {
-                web_core_arity(module, method) == Some(args.len())
+                web_core_call_supported(module, method, args.len())
             };
             arity_ok && args.iter().all(web_expr_supported)
         }
@@ -9340,6 +9342,19 @@ fn tir_core_call(
 ) -> Result<String, ()> {
     let a = tir_plain_args(args, funcs, file_prefix)?;
     let module = module.strip_prefix("core.").unwrap_or(module);
+    if module == "compute" {
+        if !web_core_call_supported(module, method, a.len()) {
+            return Err(());
+        }
+        // D-COMPUTE-BACKEND1=D / I9: browser compute calls enter the same
+        // named Prelude rail as native `jet_compute_*` calls. The JS adapter
+        // awaits WebGPU queue work; it does not reclassify a failure as CPU.
+        return Ok(format!(
+            "await jet_compute_web_call({}, [{}])",
+            json_quote(method),
+            a.join(", ")
+        ));
+    }
     let storage = if module.ends_with("storage.local") {
         Some("local")
     } else if module.ends_with("storage.session") {
@@ -9446,6 +9461,39 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
         (false, "instant") => Some(0),
         (false, "on") => Some(3),
         _ => None,
+    }
+}
+
+fn web_core_call_supported(module: &str, method: &str, argc: usize) -> bool {
+    let module = module.strip_prefix("core.").unwrap_or(module);
+    if module != "compute" {
+        return web_core_arity(module, method) == Some(argc);
+    }
+    match method {
+        "zeros" | "ones" | "from_list" | "reshape" | "get" | "on_device"
+        | "broadcast_to" | "sum_axis" | "transfer" | "sparse_mv" | "mse_loss" => {
+            matches!(
+                (method, argc),
+                ("zeros" | "ones" | "from_list", 1)
+                    | ("reshape" | "get" | "on_device" | "broadcast_to" | "sum_axis" | "transfer" | "sparse_mv" | "mse_loss", 2)
+            )
+        }
+        "full" | "matrix" | "vec" => matches!((method, argc), ("full", 2) | ("matrix", 3) | ("vec", 2)),
+        "add" | "mul" | "sub" | "div" | "maximum" | "minimum" | "matmul"
+        | "matmul_f32_tile" => argc == 2,
+        "transpose" | "stream_new_on" => argc == 1,
+        "set" | "sgd_step" => argc == 3,
+        "kernel_bounds_ok" => argc == 2,
+        "negate" | "abs" | "exp" | "log" | "sqrt" | "to_list" | "device"
+        | "placement" | "stream_sync" | "stream_show" | "sparse_nnz" | "sparse_show"
+        | "transfer_show" => argc == 1,
+        "shape" | "rank" | "numel" | "det" | "inv" | "fft" | "serialize"
+        | "deserialize" | "to_sparse" => argc == 1,
+        "eye" => argc == 1,
+        "stream_new" | "profile_f32_strict" | "profile_show"
+        | "device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan"
+        | "device_webgpu" => argc == 0,
+        _ => false,
     }
 }
 

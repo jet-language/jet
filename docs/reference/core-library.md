@@ -1605,8 +1605,10 @@ The machine-readable rows are in
 `tests/fixtures/process_sessions/compatibility.tsv`; the targeted integration
 test is `tests/process_sessions.rs`.
 
-`pipeline()` keeps ordinary pipe edges. A terminal-backed spec cannot be a
-pipeline stage; use `spawn()` for the interactive child. PTY/ConPTY transport,
+`pipeline()` keeps ordinary pipe edges and honors the final stage's declared
+stdout and each stage's declared stderr mode; an intermediate stdout is the
+pipeline edge. A terminal-backed spec cannot be a pipeline stage; use `spawn()`
+for the interactive child. PTY/ConPTY transport,
 transcripts, and binary streams remain separate backend slices of the same
 process mechanism. On Unix, ordinary and terminal-backed argv children use a
 private process group; timeout, cancellation, explicit signals, and output
@@ -1620,9 +1622,13 @@ automatic child cleanup.
 `.stdout`/`.stderr` streaming readers consumed only via
 `loop line in child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`term.stdin().lines()` — storing the reader or the line
-stream in a name is E2502). `exited()` is `Bool IOError!`: a non-blocking
+stream in a name is E2502). Both piped streams are drained from spawn onward,
+so a child cannot deadlock because the caller is consuming only one stream;
+the shared `output_limit` counts raw bytes from stdout and stderr, including
+bytes already read by a live stream. `exited()` is `Bool IOError!`: a non-blocking
 companion to `wait()` that reports whether the child has already exited,
-without draining its output or blocking (#1481).
+without waiting for output receipt assembly or blocking on child completion
+(#1481).
 
 **`ProcessReceipt`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
 `signal: Int?`, `output: String`, `errors: String`,

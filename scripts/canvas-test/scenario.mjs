@@ -1872,6 +1872,109 @@ fn run() {
     await ctx.expectSourceContains("if score > 10");
   },
 
+  "details-scalar-enum-reference-editors": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`enum Mode {
+    Fast
+    Slow
+}
+
+fn edit() {
+    #Meta(category: "Tuning", tunable)
+    amount :: 3
+    other :: 9
+    mode :: Mode.Fast
+    alias :: amount
+    needs_int(amount)
+    print(alias)
+}
+
+fn needs_int(value: Int) {}
+
+fn run() {
+    edit()
+}
+`);
+    await ctx.openCanvas();
+    await ctx.switchGraph("edit");
+
+    const selectVariable = async (name) => {
+      const selected = await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable(${JSON.stringify(name)})`);
+      if (selected === false) throw new Error(`variable selection helper refused ${name}`);
+      await ctx.waitFor(async () => {
+        const state = await ctx.state();
+        return state && state.selectedVariableName === name;
+      }, `${name} selected`);
+      await ctx.waitFor(async () => await ctx.driver.evaluate(`!!document.querySelector('[data-details-input="value"]')`), `${name} Details field`);
+    };
+
+    const applyValue = async (name, value, expectedKind, label) => {
+      const before = await ctx.source();
+      await selectVariable(name);
+      const changed = await ctx.driver.evaluate(`(() => {
+        const input = document.querySelector('[data-details-input="value"]');
+        const apply = document.getElementById("apply-variable-details");
+        if (!input || !apply) return { ok: false };
+        if (${JSON.stringify(expectedKind)} && input.dataset.detailKind !== ${JSON.stringify(expectedKind)}) return { ok: false, kind: input.dataset.detailKind };
+        input.value = ${JSON.stringify(value)};
+        apply.click();
+        return { ok: true, kind: input.dataset.detailKind, tag: input.tagName };
+      })()`);
+      if (!changed.ok) throw new Error(`${label} control missing or wrong kind: ${JSON.stringify(changed)}`);
+      await ctx.waitFor(async () => (await ctx.source()) !== before, `${label} source change`);
+      await ctx.waitForCanvas();
+    };
+
+    await selectVariable("amount");
+    const metadata = await ctx.driver.evaluate(`(() => {
+      const meta = document.querySelector("[data-details-meta]");
+      const input = document.querySelector('[data-details-input="value"]');
+      return { text: meta && meta.textContent, type: input && input.type, kind: input && input.dataset.detailKind };
+    })()`);
+    if (!metadata || !String(metadata.text || "").includes("Tuning") || !String(metadata.text || "").includes("tunable")) {
+      throw new Error(`binding metadata missing from Details: ${JSON.stringify(metadata)}`);
+    }
+    if (metadata.kind !== "scalar" || metadata.type !== "number") throw new Error(`scalar editor missing: ${JSON.stringify(metadata)}`);
+    await applyValue("amount", "7", "scalar", "scalar Details edit");
+    await applyValue("mode", "Mode.Slow", "enum", "enum Details edit");
+    await applyValue("alias", "other", "reference", "reference Details edit");
+    const edited = await ctx.source();
+    for (const text of ["amount :: 7", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
+      if (!edited.includes(text)) throw new Error(`Details edit missing ${text}:\n${edited}`);
+    }
+
+    await ctx.openCanvas();
+    if (await ctx.source() !== edited) throw new Error("Details edits changed source on reload");
+    await selectVariable("alias");
+    const reloaded = await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      return { kind: input && input.dataset.detailKind, value: input && input.value };
+    })()`);
+    if (!reloaded || reloaded.kind !== "reference" || reloaded.value !== "other") throw new Error(`reference editor did not reload its source value: ${JSON.stringify(reloaded)}`);
+
+    const undone = await ctx.undo();
+    if (!undone.includes("alias :: amount")) throw new Error(`undo did not restore reference source:\n${undone}`);
+    const redone = await ctx.redo();
+    if (!redone.includes("alias :: other")) throw new Error(`redo did not restore reference edit:\n${redone}`);
+
+    const beforeInvalid = await ctx.source();
+    await selectVariable("amount");
+    const invalidStarted = await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      const apply = document.getElementById("apply-variable-details");
+      if (!input || !apply) return false;
+      input.value = "";
+      apply.click();
+      return true;
+    })()`);
+    if (!invalidStarted) throw new Error("scalar refusal control missing");
+    await ctx.waitFor(async () => {
+      const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
+      return result && result.ok === false;
+    }, "incomplete scalar refusal");
+    await assertSourceUnchangedAfterReload(ctx, beforeInvalid, "incomplete scalar edit");
+  },
+
   "fallible-context": async (ctx) => {
     await ctx.openCanvas();
     await ctx.switchGraph("scratch");

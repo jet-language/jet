@@ -36,7 +36,7 @@
   function graphVariables(graph) {
     if (!graph) return [];
     const vars = new Map();
-    const addVar = (name, type, source, editable, defaultSource, nodeId) => {
+    const addVar = (name, type, source, editable, defaultSource, nodeId, meta) => {
       if (!name) return;
       const prev = vars.get(name) || {};
       vars.set(name, {
@@ -45,7 +45,8 @@
         source: source || prev.source || "local",
         editable: editable || prev.editable || false,
         defaultSource: defaultSource !== undefined ? defaultSource : prev.defaultSource || "",
-        nodeId: nodeId || prev.nodeId || ""
+        nodeId: nodeId || prev.nodeId || "",
+        meta: meta !== undefined ? meta : prev.meta || null
       });
     };
     for (const param of (graph.function && graph.function.params) || []) {
@@ -60,10 +61,34 @@
       const dataOut = (graph.pins || []).find((pin) => pin.node_id === node.node_id && pin.direction === "output" && !isExecPin(pin));
       if (node.kind === "binding" || node.kind === "assign" || node.kind === "variable_get") {
         const init = (inlineByNode.get(node.node_id) || []).find((expr) => expr.role === "init" || expr.role === "value");
-        addVar(node.title, (dataOut && dataOut.type) || "Value", node.kind === "variable_get" ? "read" : "local", node.kind === "binding", init ? init.source : "", node.node_id);
+        addVar(node.title, (dataOut && dataOut.type) || "Value", node.kind === "variable_get" ? "read" : "local", node.kind === "binding", init ? init.source : "", node.node_id, node.meta || null);
       }
     }
     return Array.from(vars.values()).sort((a, b) => (a.source === "input" ? 0 : 1) - (b.source === "input" ? 0 : 1) || a.name.localeCompare(b.name));
+  }
+
+  function enumVariantsForType(type) {
+    const facts = latestDoc && latestDoc.facts;
+    const variants = facts && facts.enum_variants && facts.enum_variants[type];
+    return Array.isArray(variants) ? variants : [];
+  }
+
+  function isScalarType(type) {
+    return ["Bool", "Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "F64", "Decimal", "String", "Char"].includes(String(type || ""));
+  }
+
+  function isReferenceExpression(source) {
+    const text = String(source || "").trim();
+    return /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(text)
+      && !["true", "false", "Absent"].includes(text);
+  }
+
+  function detailEditorKind(type, source, graph) {
+    if (isReferenceExpression(source) && graphVariables(graph).some((candidate) => candidate.type === type && candidate.name === String(source).trim())) return "reference";
+    if (enumVariantsForType(type).length) return "enum";
+    if (isScalarType(type) && !isReferenceExpression(source)) return "scalar";
+    if (isReferenceExpression(source)) return "reference";
+    return "expression";
   }
 
   function syncVariablesList(graph) {

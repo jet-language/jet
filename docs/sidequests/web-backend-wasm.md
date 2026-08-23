@@ -21,6 +21,7 @@ called from generated JS.
 | D-JSBIND1 ABI round-trips | scalars, `String`, `[Int]`/`[String]`, `Map<String,Int>`, Codable structs, callbacks/errors | `web_build` hostile harnesses |
 | DOM shim + reactive UI | `ui.null_backend()` → `jet_dom_runtime.js`; signals/effects | `web_hello`, `ui_web_reactive`, browser harness |
 | Wasm compute bridge | `#WasmExport` + `#Target(JS) run()` calling Wasm | `web_compute`, `web_wasm_*` examples |
+| Browser WebGPU compute | explicit `#Target(JS)` calls through the async compute Prelude; no native/CPU fallback | `web_compute_webgpu`, `web_compute_webgpu_calls_use_the_browser_prelude` |
 | Companion HTML pages | `#HTML("page.html")`, `#Target(Web)` inference | `ui_web_click`, `ui_showcase` |
 | Dev server + live reload | `fn dev()` + `core.web.devserver` | `web_dev` (7/8; canvas panel test unrelated) |
 | Source maps + manifest | `web.manifest.json` partitions, JS source maps | `web_build` |
@@ -52,6 +53,7 @@ backend without `--target=web`. `jet run` never infers web.
 | `web_hello.jet` | DOM shim round-trip via `core.ui` null backend |
 | `app_typed_args.jet` | Typed CLI flags reaching an App-returning entry |
 | `web_compute.jet` | `#WasmExport` compute called from `#Target(JS) run` |
+| `web_compute_webgpu.jet` | Explicit browser WebGPU compute through the async JS Prelude |
 | `ui_web_reactive.jet` | `reactive_render` + DOM command stream |
 | `ui_web_click.jet` + `ui_web_click.html` | Real clickable page, `#HTML`, exported `render` |
 | `ui_showcase.jet` + `ui_showcase.html` | Flagship reactive UI + companion host page |
@@ -95,6 +97,10 @@ a test proves otherwise:
 - Wasm `#Target(Browser)` / DOM from Wasm → `E-WEB-TARGET-BROWSER`.
 - Full `core.ui` backend matrix on web (GTK/TUI/native mobile rows in
   `core-library.md` stay unsupported).
+- Browser WebGPU currently ships F32 device operations for elementwise/unary,
+  matrix, vector-reduction, MSE, SGD, transfer, and streams. Linalg,
+  FFT, sparse, serialization, and autodiff calls are rejected or return typed
+  unsupported results; they never fall back to CPU.
 - Still gated: `break value`, HostCall-backed pattern arms (struct/str/bin
   match), `Unsafe`/`DeferClose`/index-field/hook/swizzle assigns, Wasm
   `MapLit`, and broader HostCall/CoreCall expressions.
@@ -116,8 +122,11 @@ a test proves otherwise:
 ## Architecture (ratified, unchanged)
 
 Hybrid partition: view/DOM code → generated JS calling `jet_dom_runtime.js`;
-pure compute → `wasm32-unknown-unknown` module with a generated loader/bridge.
-Partition inference follows `Browser` effect facts plus `#Target` ceilings.
+pure native compute → `wasm32-unknown-unknown` module with a generated
+loader/bridge. Explicit `#Target(JS)` compute calls use the browser-owned
+WebGPU Prelude adapter, which awaits queue work and readback; native hosts keep
+the typed fail-closed WebGPU provider. Partition inference follows `Browser`
+effect facts plus `#Target` ceilings.
 `web.manifest.json` lists module→bucket assignments for loaders and
 `--explain-partition`.
 

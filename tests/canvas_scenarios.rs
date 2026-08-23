@@ -415,6 +415,11 @@ fn rename_variable_sidebar() {
 }
 
 #[test]
+fn details_scalar_enum_reference_editors() {
+    run_canvas_scenario("details-scalar-enum-reference-editors");
+}
+
+#[test]
 fn fallible_context() {
     run_canvas_scenario("fallible-context");
 }

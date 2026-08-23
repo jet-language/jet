@@ -205,11 +205,18 @@ opens a pattern editor writing through the existing source transaction.
   row — all developer-mode-only debris. Package/deps/diagnostics stay but
   collapse into a single quiet STATUS group.
 - **Right panel = Details** (BP Details): selected variable → name, type,
-  default value, all editable through existing transactions; selected
-  function → name, signature, effects list, markers (test/bench), visibility;
-  selected node → its pins/values, plain-language rows. NO raw kind strings,
-  no "flow", no protocol jargon anywhere a user reads. Terms: Functions,
-  Variables, Inputs, Outputs, Execution.
+  default value, all editable through existing transactions; scalar defaults
+  use typed controls (Bool, number, and text), unit enums use a source-qualified
+  dropdown, and compatible bindings use a reference dropdown. The field
+  descriptor keeps the source expression and span behind every control. A
+  selected function shows name, signature, effects list, markers
+  (test/bench), visibility, and read-only `#Meta` category/tunable facts;
+  selected nodes show their pins/values through the same descriptor path.
+  No control is shown unless it has a live source transaction. Invalid,
+  incomplete, and stale edits keep the original source and surface the normal
+  Canvas diagnostic. NO raw kind strings, no "flow", no protocol jargon
+  anywhere a user reads. Terms: Functions, Variables, Inputs, Outputs,
+  Execution.
 - **Toolbar**: icon buttons with tooltips, grouped: [view: fit, zoom] |
   [lens: Code / Split / Graph] | [edit: undo redo align tidy] | [run: run,
   debug controls collapsed into a Debug dropdown] | [right: search,

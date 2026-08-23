@@ -393,7 +393,9 @@ const CANVAS_DEBUG_FIXTURE: &str = r#"fn run() {
 "#;
 
 fn field_before(haystack: &str, marker: &str, field: &str) -> String {
-    let end = haystack.find(marker).expect("marker in graph JSON");
+    let end = haystack
+        .find(marker)
+        .unwrap_or_else(|| panic!("marker in graph JSON: {marker}"));
     let prefix = &haystack[..end];
     let key = format!("\"{field}\":\"");
     let start = prefix.rfind(&key).expect("field before marker") + key.len();
@@ -540,6 +542,13 @@ fn source_span_at_or_after(haystack: &str, marker: &str, minimum_start: usize) -
 
 fn graph_id_for_title(graph: &str, title: &str) -> String {
     field_before(graph, &format!("\"title\":\"{title}\""), "graph_id")
+}
+
+fn graph_object_for_title<'a>(graph: &'a str, title: &str) -> &'a str {
+    json_top_level_objects(json_array_field(graph, "graphs"))
+        .into_iter()
+        .find(|candidate| candidate.contains(&format!("\"title\":\"{title}\"")))
+        .unwrap_or_else(|| panic!("graph object for {title}"))
 }
 
 fn name_span(src: &str, name: &str) -> (usize, usize) {
@@ -2078,6 +2087,106 @@ fn run() {
 }
 
 #[test]
+fn canvas_details_editor_facts_and_checked_value_edits() {
+    let path = write_fixture(
+        "details_editor_facts",
+        r#"enum Mode {
+    Fast
+    Slow
+}
+
+fn edit() {
+    #Meta(category: "Tuning", tunable)
+    amount :: 3
+    other :: 9
+    mode :: Mode.Fast
+    alias :: amount
+    needs_int(amount)
+    print(alias)
+}
+
+fn needs_int(value: Int) {}
+
+fn run() {
+    edit()
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    assert!(
+        graph.contains(
+            "\"enum_variants\":{\"Mode\":[{\"name\":\"Fast\",\"source\":\"Mode.Fast\"},{\"name\":\"Slow\",\"source\":\"Mode.Slow\"}]}"
+        ),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"title\":\"amount\""),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"meta\":{\"category\":\"Tuning\",\"tunable\":true}"),
+        "{graph}"
+    );
+
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let edit_graph = graph_object_for_title(&graph, "edit");
+    let amount_id = field_before(edit_graph, "\"source\":\"3\"", "inline_expr_id");
+    let scalar = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"7\"}}",
+        revision, amount_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &scalar).expect("scalar Details edit");
+    let after_scalar = fs::read_to_string(&path).unwrap();
+    assert!(after_scalar.contains("amount :: 7"), "{after_scalar}");
+    assert!(after_scalar.contains("other :: 9"), "{after_scalar}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject scalar edit");
+    let revision = jet::Canvas::source_revision(&after_scalar);
+    let edit_graph = graph_object_for_title(&graph, "edit");
+    let mode_id = field_before(edit_graph, "\"source\":\"Mode.Fast\"", "inline_expr_id");
+    let enum_edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"Mode.Slow\"}}",
+        revision, mode_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &enum_edit).expect("enum Details edit");
+    let after_enum = fs::read_to_string(&path).unwrap();
+    assert!(after_enum.contains("mode :: Mode.Slow"), "{after_enum}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject enum edit");
+    let revision = jet::Canvas::source_revision(&after_enum);
+    let alias_id = field_before(graph_object_for_title(&graph, "edit"), "\"source\":\"amount\"", "inline_expr_id");
+    let reference_edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"other\"}}",
+        revision, alias_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &reference_edit).expect("reference Details edit");
+    let after_reference = fs::read_to_string(&path).unwrap();
+    assert!(after_reference.contains("alias :: other"), "{after_reference}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject reference edit");
+    let revision = jet::Canvas::source_revision(&after_reference);
+    let amount_id = field_before(graph_object_for_title(&graph, "edit"), "\"source\":\"7\"", "inline_expr_id");
+    let invalid = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"Mode.Slow\"}}",
+        revision, amount_id
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
+    assert!(err.contains("E"), "invalid Details edit lost diagnostic: {err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), after_reference);
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"8\"}}",
+        jet::Canvas::source_revision(&after_scalar), amount_id
+    );
+    let stale_err = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
+    assert!(stale_err.contains("conflict"), "stale Details edit lost conflict: {stale_err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), after_reference);
+    assert!(after_reference.contains("fn edit()"), "scope/provenance lost: {after_reference}");
+    assert!(after_reference.contains("print(alias)"), "reference consumers lost: {after_reference}");
+}
+
+#[test]
 fn canvas_function_transactions_write_source_and_reproject_calls() {
     let path = write_fixture("function_transactions", CANVAS_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
@@ -3417,9 +3526,11 @@ fn canvas_editor_shell_matches_round3_contract() {
 
     assert!(js.contains("function syncVariablesList"), "{js}");
     assert!(js.contains("function renderVariableDetails"), "{js}");
-    assert!(js.contains("originalSignature.includes(\"=[\")"), "{js}");
+    assert!(js.contains("originalSignature.includes(\"-[\")"), "{js}");
+    assert!(!js.contains("originalSignature.includes(\"=[\")"), "retired effect signature spelling leaked into Canvas: {js}");
     assert!(js.contains("fnMeta.effect_via ? \"via \" + fnMeta.effect_via"), "{js}");
-    assert!(js.contains("\" =[\" + effects + \"]=>\""), "{js}");
+    assert!(js.contains("\" -[\" + effects + \"]>\""), "{js}");
+    assert!(!js.contains("\" =[\" + effects + \"]=>\""), "retired effect signature arrow leaked into Canvas: {js}");
     assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");

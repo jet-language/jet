@@ -442,6 +442,13 @@ Every function graph carries source-backed metadata:
 "tunable": <bool>}` on annotated function metadata and binding nodes. Unannotated
 items use `meta: null`. The field is source-backed and read-only in v1.
 
+The graph `facts.enum_variants` map supplies unit-variant choices as
+`{"name":"Fast","source":"Mode.Fast"}` records. Details uses these records
+for enum fields and uses same-type binding facts for reference fields. Scalar,
+enum, and reference controls all submit the existing `edit_inline_expr` or
+`edit_function_signature` transaction, so revision checks, sema validation,
+formatting, source spans, undo, and reload remain one path.
+
 Function edits are ordinary source transactions:
 
 ```json

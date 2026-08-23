@@ -83,12 +83,89 @@
       return name + ": " + type + (String(fallback).trim() ? "{" + String(fallback).trim() + "}" : "");
     }).join(", ");
     const originalSignature = String(fnMeta.signature || "");
-    const hasEffectArrow = originalSignature.includes("=[");
+    const hasEffectArrow = originalSignature.includes("-[");
     const effects = fnMeta.effect_via ? "via " + fnMeta.effect_via : (fnMeta.effects || []).join(", ");
-    const arrow = hasEffectArrow ? " =[" + effects + "]=>" : " =>";
+    const arrow = hasEffectArrow ? " -[" + effects + "]>" : " ->";
     const ret = fnMeta.returns && fnMeta.returns !== "Void" ? arrow + " " + fnMeta.returns : (hasEffectArrow ? arrow : "");
     const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";
     return visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret;
+  }
+
+  function detailFieldValue(field) {
+    const source = String(field.source || "");
+    if (field.kind === "scalar" && field.type === "String" && source.length >= 2 && source.startsWith("\"") && source.endsWith("\"")) {
+      try {
+        return JSON.parse(source);
+      } catch (_) {
+        return source.slice(1, -1);
+      }
+    }
+    return source;
+  }
+
+  function detailFieldHtml(field) {
+    const key = field.key || "value";
+    const id = field.id ? ` id="${escapeAttr(field.id)}"` : "";
+    const inlineId = field.inlineId ? ` data-inline-id="${escapeAttr(field.inlineId)}"` : "";
+    const attrs = ` data-details-input="${escapeAttr(key)}" data-detail-kind="${escapeAttr(field.kind || "expression")}" data-detail-type="${escapeAttr(field.type || "Value")}"`;
+    let control;
+    if (!field.editable) {
+      control = `<span class="details-value" data-details-value="${escapeAttr(key)}">${escapeHtml(field.displayValue !== undefined ? field.displayValue : field.source || "")}</span>`;
+    } else if (field.kind === "enum" || field.kind === "reference") {
+      const options = (field.options || []).map((option) => `<option value="${escapeAttr(option.source)}"${option.source === field.source ? " selected" : ""}>${escapeHtml(option.name || option.source)}</option>`).join("");
+      control = `<select${id}${inlineId}${attrs}>${options}</select>`;
+    } else if (field.kind === "scalar" && field.type === "Bool") {
+      control = `<input${id}${inlineId}${attrs} type="checkbox"${String(field.source).trim() === "true" ? " checked" : ""}>`;
+    } else {
+      const inputType = field.kind === "scalar" && ["Int", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Float", "F32", "F64", "Decimal"].includes(field.type) ? "number" : "text";
+      const value = field.value !== undefined ? field.value : detailFieldValue(field);
+      control = `<input${id}${inlineId}${attrs} type="${inputType}"${field.placeholder ? ` placeholder="${escapeAttr(field.placeholder)}"` : ""} value="${escapeAttr(value)}">`;
+    }
+    return `<label class="details-field" data-details-field="${escapeAttr(key)}"><span>${escapeHtml(field.label || key)}</span>${control}${field.help ? `<small>${escapeHtml(field.help)}</small>` : ""}</label>`;
+  }
+
+  function detailExpressionFromElement(element) {
+    if (!element) return "";
+    if (element.type === "checkbox") return element.checked ? "true" : "false";
+    const value = String(element.value || "");
+    if (element.dataset.detailKind === "scalar" && element.dataset.detailType === "String") return JSON.stringify(value);
+    return value.trim();
+  }
+
+  function enumOptions(type) {
+    return enumVariantsForType(type).map((variant) => ({ name: variant.name, source: variant.source }));
+  }
+
+  function referenceOptions(graph, variable, source) {
+    const options = graphVariables(graph)
+      .filter((candidate) => candidate.name !== variable.name && candidate.type === variable.type)
+      .map((candidate) => ({ name: candidate.name, source: candidate.name }));
+    if (source && !options.some((option) => option.source === source)) options.unshift({ name: source, source });
+    return options;
+  }
+
+  function valueDetailField(graph, variable, expr, inlineId) {
+    const source = expr ? expr.source : variable.defaultSource || "";
+    let kind = detailEditorKind(variable.type, source, graph);
+    if (!source.trim() && kind === "scalar" && variable.type === "Bool") kind = "expression";
+    return {
+      key: inlineId ? "inline-value" : "value",
+      id: inlineId ? "" : "variable-default-input",
+      inlineId,
+      label: inlineId ? "Expression" : "Default value",
+      type: variable.type,
+      kind,
+      source,
+      value: detailFieldValue({ type: variable.type, kind, source }),
+      options: kind === "enum" ? enumOptions(variable.type) : kind === "reference" ? referenceOptions(graph, variable, source) : [],
+      editable: Boolean(inlineId || variable.source === "input" || expr),
+      placeholder: variable.source === "input" && !source ? "optional" : ""
+    };
+  }
+
+  function metadataDetailsHtml(meta) {
+    if (!meta) return "";
+    return `<div class="details-meta" data-details-meta><span class="details-chip">${escapeHtml(meta.category || "Canvas metadata")}</span><span class="tag">${meta.tunable ? "tunable" : "not tunable"}</span></div>`;
   }
 
   function renderVariableDetails(graph, name) {
@@ -105,18 +182,19 @@
     const defaultEditable = isParam || !!initExpr;
     const typeEditable = isParam;
     const nameEditable = isParam || variable.source === "local";
+    const fields = [
+      { key: "name", id: "variable-name-input", label: "Name", kind: "expression", type: "Identifier", source: variable.name, editable: nameEditable },
+      { key: "type", id: "variable-type-input", label: "Type", kind: "expression", type: "Type", source: variable.type, editable: typeEditable },
+      valueDetailField(graph, variable, initExpr, null)
+    ];
     details.innerHTML = `
       <div class="details-hero">
         <div class="details-titleline"><span class="node-glyph">•</span><div class="details-title"><p class="title">${escapeHtml(variable.name)}</p><div class="kind">${escapeHtml(isParam ? "Input variable" : "Local variable")}</div></div></div>
         <div class="details-chips"><span class="details-chip" style="color:${escapeAttr(color)}">${escapeHtml(variable.type)}</span><span class="details-chip">${escapeHtml(isParam ? "Function input" : "Inside this function")}</span></div>
+        ${metadataDetailsHtml(variable.meta)}
       </div>
       <h2>Variable</h2>
-      <div class="signature-board">
-        <div class="edit-grid">
-          <label>Name<input id="variable-name-input" ${nameEditable ? "" : "readonly"} value="${escapeAttr(variable.name)}"></label>
-          <label>Type<input id="variable-type-input" ${typeEditable ? "" : "readonly"} value="${escapeAttr(variable.type)}"></label>
-          <label>Default value<input id="variable-default-input" ${defaultEditable ? "" : "readonly"} placeholder="${isParam ? "optional" : "not set"}" value="${escapeAttr(variable.defaultSource || "")}"></label>
-        </div>
+      <div class="signature-board"><div class="edit-grid details-fields">${fields.map(detailFieldHtml).join("")}</div>
         <div class="signature-actions">${nameEditable || typeEditable || defaultEditable ? "<button id=\"apply-variable-details\" class=\"primary\">Apply</button>" : "<div class=\"pin-empty\">This variable is read-only here.</div>"}</div>
       </div>`;
     const apply = document.getElementById("apply-variable-details");
@@ -124,7 +202,8 @@
     apply.addEventListener("click", () => {
       const nextName = document.getElementById("variable-name-input").value.trim();
       const nextType = document.getElementById("variable-type-input").value.trim() || variable.type;
-      const nextDefault = document.getElementById("variable-default-input").value.trim();
+      const valueControl = details.querySelector('[data-details-input="value"]');
+      const nextDefault = detailExpressionFromElement(valueControl);
       if (isParam) {
         const signature = signatureWithVariable(graph, variable, { name: nextName, type: nextType, defaultSource: nextDefault });
         postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature });
@@ -136,7 +215,7 @@
         selectedVariableName = nextName;
         return;
       }
-      if (initExpr && nextDefault) {
+      if (initExpr) {
         postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: initExpr.inline_expr_id, new_expr: nextDefault });
       }
     });
@@ -166,6 +245,17 @@
     return `<div class="pin-card" style="--pin-color:${escapeAttr(color)}">${pinPortHtml(isExecPin(p) ? "exec" : type)}<div class="pin-card-title"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(flags)}<span class="type-detail"> - ${escapeHtml(type)}</span></small></div><button data-pin-menu="${escapeAttr(p.pin_id)}">Actions</button></div>`;
   }
 
+  function inlinePinType(graph, expr) {
+    const pins = (graph && graph.pins || []).filter((pin) => pin.node_id === expr.node_id && pin.direction === "input" && !isExecPin(pin));
+    return (pins.find((pin) => pin.name === expr.role) || pins[0] || {}).type || "Value";
+  }
+
+  function inlineDetailField(graph, expr) {
+    const type = inlinePinType(graph, expr);
+    const pseudo = { name: expr.role, type, source: "local", defaultSource: expr.source };
+    return valueDetailField(graph, pseudo, expr, expr.inline_expr_id);
+  }
+
   function updateDetails(graph, node, pins, inline) {
     if (!node) {
       details.innerHTML = "<div class=\"details-empty\"><b>No node selected</b><span class=\"tag\">Select, marquee, or use the graph tabs.</span></div>";
@@ -175,7 +265,10 @@
     details.style.setProperty("--node-accent", style.accent);
     const span = node.source_span || { start: 0, end: 0 };
     const pinRows = pins.map(pinCardHtml).join("");
-    const inlineRows = inline.map((expr) => `<div class="inline-row"><b>${escapeHtml(expr.role)}</b><code>${escapeHtml(expr.source)}</code><div class="edit-grid"><input data-inline-id="${escapeHtml(expr.inline_expr_id)}" value="${escapeAttr(expr.source)}"><button data-inline-apply="${escapeHtml(expr.inline_expr_id)}">Apply expression</button><button data-inline-promote="${escapeHtml(expr.inline_expr_id)}">Promote to binding</button><button data-inline-convert="${escapeHtml(expr.inline_expr_id)}">Insert conversion</button><button data-inline-preview-extract="${escapeHtml(expr.inline_expr_id)}">Preview extract</button><button data-inline-extract="${escapeHtml(expr.inline_expr_id)}">Extract function</button></div></div>`).join("");
+    const inlineRows = inline.map((expr) => {
+      const field = inlineDetailField(graph, expr);
+      return `<div class="inline-row"><b>${escapeHtml(expr.role)}</b><code>${escapeHtml(expr.source)}</code>${detailFieldHtml(field)}<div class="edit-grid"><button data-inline-apply="${escapeHtml(expr.inline_expr_id)}">Apply expression</button><button data-inline-promote="${escapeHtml(expr.inline_expr_id)}">Promote to binding</button><button data-inline-convert="${escapeHtml(expr.inline_expr_id)}">Insert conversion</button><button data-inline-preview-extract="${escapeHtml(expr.inline_expr_id)}">Preview extract</button><button data-inline-extract="${escapeHtml(expr.inline_expr_id)}">Extract function</button></div></div>`;
+    }).join("");
     const rename = node.kind === "binding" ? `<div class="edit-grid"><label>Rename binding<input id="rename-to" value="${escapeAttr(node.title)}"></label><button id="preview-rename">Preview rename</button><button id="rename-binding" class="primary">Rename</button></div>` : "";
     const calleeGraph = (node.kind === "call" || node.kind === "method") ? graphForFunctionName(node.title) : null;
     const calleeOpen = calleeGraph ? `<button id="open-callee-graph">Open ${escapeHtml(calleeGraph.title)} graph</button>` : "";
@@ -186,7 +279,7 @@
     const fnEvents = fnMeta ? (graph.event_views || []).map((event) => `<div class="pin-row"><b>${escapeHtml(event.title || event.function)}</b><br><span class="tag">Function event</span></div>`).join("") : "";
     const effectRows = fnMeta ? (fnMeta.effects || []).map((effect) => `<div class="pin-row"><b>${escapeHtml(effect)}</b><br><span class="tag">Effect</span></div>`).join("") : "";
     const markerRows = fnMeta ? [fnMeta.pure ? "Pure" : "", fnMeta.unsafe ? "Unsafe" : ""].filter(Boolean).map((marker) => `<div class="pin-row"><b>${escapeHtml(marker)}</b><br><span class="tag">Marker</span></div>`).join("") : "";
-    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">Function</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length}</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No inputs</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span><button id="add-function-output">+ Output</button></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">Source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${effectRows || markerRows ? `<h2>Effects and markers</h2><div class="pin-list">${effectRows}${markerRows}</div>` : ""}${fnEvents ? `<h2>Events</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
+    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">Function</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div>${metadataDetailsHtml(fnMeta.meta)}<div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length}</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No inputs</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span><button id="add-function-output">+ Output</button></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">Source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${effectRows || markerRows ? `<h2>Effects and markers</h2><div class="pin-list">${effectRows}${markerRows}</div>` : ""}${fnEvents ? `<h2>Events</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
     const bpLabel = nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint";
     const locals = debugRows(debugOverlay && debugOverlay.locals);
     const watches = debugRows(debugOverlay && debugOverlay.watches);
@@ -318,7 +411,7 @@
       button.addEventListener("click", () => {
         const id = button.getAttribute("data-inline-apply");
         const input = details.querySelector(`[data-inline-id="${cssEscape(id)}"]`);
-        postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: id, new_expr: input.value });
+        postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: id, new_expr: detailExpressionFromElement(input) });
       });
     });
     details.querySelectorAll("[data-inline-promote]").forEach((button) => {

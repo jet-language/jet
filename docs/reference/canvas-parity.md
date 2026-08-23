@@ -59,8 +59,8 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Stmt::ContinueLabel] status=graph control node with label in source detail.
 - [Stmt::Loop] status=graph loop rail.
 - [Stmt::CountedLoop] status=graph loop rail.
-- [Stmt::Val metadata] status=`#Meta` projects to binding-node `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
-- [Func metadata] status=`#Meta` projects to function `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
+- [Stmt::Val metadata] status=shipped: `#Meta` projects to binding-node `meta` JSON and Details shows its category/tunable facts (D-CANVASMETA1); scalar, enum, and reference values use source-backed Details editors, covered by `tests/canvas.rs::canvas_details_editor_facts_and_checked_value_edits` and the `details-scalar-enum-reference-editors` browser scenario.
+- [Func metadata] status=shipped: `#Meta` projects to function `meta` JSON and the function Details view shows its category/tunable facts (D-CANVASMETA1).
 - [Stmt::Off] status=graph `#Off` state badge with a source-backed toggle (D-CANVASSTATE1).
 - [Stmt::DebugOnly] status=graph `#DebugOnly` state badge with a source-backed toggle (D-CANVASSTATE1).
 - [Stmt::Unsafe] status=readonly expert gate, source edits.

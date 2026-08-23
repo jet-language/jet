@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use jet_driver::AST::{self, Expr, Item, Stmt};
@@ -59,8 +60,9 @@ pub(super) fn project_checked(
     }
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
     let blueprint = canvas_blueprint_facts_json(src, bundle, &index, runtime_events);
+    let enum_catalog = enum_catalog_json(bundle);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(&path.display().to_string()),
         json_str(&source_revision(src)),
@@ -69,6 +71,7 @@ pub(super) fn project_checked(
         node_catalog::catalog_json(),
         graph_json.join(","),
         index.schema_version(),
+        enum_catalog,
         blueprint
     );
     Projection {
@@ -76,6 +79,54 @@ pub(super) fn project_checked(
         inline_exprs: inline_spans,
         graph_anchors: anchors,
         node_refs,
+    }
+}
+
+fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {
+    let mut catalog = BTreeMap::<String, Vec<String>>::new();
+    for module in &bundle.modules {
+        collect_enum_variants(&module.items, &mut catalog);
+    }
+    let entries = catalog
+        .into_iter()
+        .map(|(name, variants)| {
+            let variants = variants
+                .into_iter()
+                .map(|variant| {
+                    format!(
+                        "{{\"name\":{},\"source\":{}}}",
+                        json_str(&variant),
+                        json_str(&format!("{name}.{variant}"))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}:[{}]", json_str(&name), variants)
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{entries}}}")
+}
+
+fn collect_enum_variants(items: &[Item], catalog: &mut BTreeMap<String, Vec<String>>) {
+    for item in items {
+        match item {
+            Item::Enum(def) => {
+                let variants = def
+                    .variants
+                    .iter()
+                    .filter(|variant| matches!(variant.payload, AST::VariantPayload::Unit))
+                    .map(|variant| variant.name.clone())
+                    .collect::<Vec<_>>();
+                catalog.entry(def.name.clone()).or_insert(variants);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_enum_variants(body, catalog);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -541,11 +592,17 @@ fn project_stmt(
             let output_pin = add_pin(g, &node_id, &b.name, "output", &ty, "", false);
             g.local_pins.insert(b.name.clone(), output_pin);
             g.local_types.insert(b.name.clone(), ty);
-            connect_expr_to_input(
+            let init_span = if b.pattern.is_none() {
+                binding_init_span(src, b)
+            } else {
+                b.init.span()
+            };
+            connect_expr_to_input_with_span(
                 g,
                 index,
                 src,
                 &b.init,
+                init_span,
                 ordinal,
                 "init",
                 &node_id,
@@ -1251,6 +1308,18 @@ fn expr_source_end(expr: &Expr) -> usize {
     }
 }
 
+fn binding_init_span(src: &str, binding: &AST::Binding) -> Span {
+    let end = expr_source_end(&binding.init);
+    let mut start = binding
+        .sigil_span
+        .map(|span| span.end)
+        .unwrap_or_else(|| binding.init.span().start);
+    while start < end && src.as_bytes()[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    Span::new(start, end)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn connect_expr_to_input_with_span(
     g: &mut GraphBuilder,
@@ -1273,6 +1342,11 @@ fn connect_expr_to_input_with_span(
         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         wire_ident_refs(g, expr, input_pin);
     } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
+        if matches!(expr, Expr::EnumLit { .. })
+            || matches!(expr, Expr::MethodCall { method, .. } if starts_uppercase(method))
+        {
+            add_inline(g, owner_node_id, ordinal, role, src, inline_span);
+        }
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     }
 }

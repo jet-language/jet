@@ -336,7 +336,6 @@ mod windows {
     const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x0002_0016;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
-    const CTRL_BREAK_EVENT: u32 = 1;
     const WAIT_OBJECT_0: u32 = 0;
     const WAIT_TIMEOUT: u32 = 258;
     const WAIT_FAILED: u32 = 0xffff_ffff;
@@ -458,7 +457,6 @@ mod windows {
             console: *mut Handle,
         ) -> i32;
         fn DeleteProcThreadAttributeList(attribute_list: *mut c_void);
-        fn GenerateConsoleCtrlEvent(event: u32, process_group_id: u32) -> i32;
         fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
         fn InitializeProcThreadAttributeList(
             attribute_list: *mut c_void,
@@ -998,13 +996,12 @@ mod windows {
         Ok(())
     }
 
-    pub fn interrupt(pid: u32, job: &File, input: Option<&File>) -> io::Result<()> {
-        // A ConPTY child is its own console process group. CTRL_BREAK reaches
-        // the group without stealing the parent's console input.
-        // SAFETY: the group id is the live ConPTY child PID.
-        if unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) } != 0 {
-            return Ok(());
-        }
+    pub fn interrupt(_pid: u32, job: &File, input: Option<&File>) -> io::Result<()> {
+        // The Win32 console-event API targets groups that share the caller's
+        // console. A ConPTY child instead belongs to the pseudoconsole
+        // represented by these pipes, so deliver Ctrl-C through the same byte
+        // stream as terminal keyboard input. ConPTY translates ETX into the
+        // console control event for the child and its descendants.
         if let Some(input) = input {
             let mut input = input.try_clone()?;
             input.write_all(&[3])?;

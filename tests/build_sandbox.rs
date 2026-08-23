@@ -775,6 +775,15 @@ fn native_windows_appcontainer_uses_the_shared_hostile_corpus() {
                 "{case_id} reached the network"
             );
         }
+        if case_id == "source-symlink" {
+            assert!(
+                !out.join("leak").exists(),
+                "{case_id} exposed the host file through declared output"
+            );
+        }
+        if case_id == "child-process" {
+            thread::sleep(Duration::from_millis(100));
+        }
         assert!(!host_marker.exists(), "{case_id} wrote the host marker");
         std::fs::remove_dir_all(&base).ok();
     }

@@ -325,26 +325,41 @@ fn jet_process_child_from_inner(
     #[cfg(not(windows))]
     let job = None;
     let process_group = process_group || job.is_some();
+    let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
+    let output_budget =
+        output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
+        child.stdout.take(),
+        false,
+        output_limit,
+        output_budget.clone(),
+        output_limit_hit.clone(),
+        output_read_error.clone(),
+    );
+    let (stderr, stderr_state, stderr_worker) = jet_process_spawn_output_reader(
+        child.stderr.take(),
+        false,
+        output_limit,
+        output_budget,
+        output_limit_hit.clone(),
+        output_read_error.clone(),
+    );
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(
             child.stdin.take().map(jet_std::ProcessStdin::Pipe),
         )),
-        stdout: std::rc::Rc::new(std::cell::RefCell::new(
-            child
-                .stdout
-                .take()
-                .map(jet_std::ProcessReader::Stdout)
-                .map(std::io::BufReader::new),
-        )),
-        stderr: std::rc::Rc::new(std::cell::RefCell::new(
-            child
-                .stderr
-                .take()
-                .map(jet_std::ProcessReader::Stderr)
-                .map(std::io::BufReader::new),
-        )),
+        stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
+        stderr: std::rc::Rc::new(std::cell::RefCell::new(stderr)),
+        stdout_state,
+        stderr_state,
+        stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
+        stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(stderr_worker)),
+        output_limit_hit,
+        output_read_error,
         terminal: Err(JetAbsent),
         process_group,
         detached: spec.detached,
@@ -675,19 +690,36 @@ fn jet_process_terminal_spawn(
             error,
         )
     })?;
+    let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
+    let output_budget =
+        output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
+        Some(stdout),
+        true,
+        output_limit,
+        output_budget,
+        output_limit_hit.clone(),
+        output_read_error.clone(),
+    );
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
             jet_std::ProcessStdin::Terminal(stdin),
         ))),
-        stdout: std::rc::Rc::new(std::cell::RefCell::new(Some(std::io::BufReader::new(
-            jet_std::ProcessReader::Terminal(stdout),
-        )))),
+        stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
         // A PTY has one combined output stream. Do not create a second reader
         // on the same master: stderr is represented by the unified stdout
         // stream, matching native terminal behavior.
         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        stdout_state,
+        stderr_state: None,
+        stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
+        stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        output_limit_hit,
+        output_read_error,
         terminal: Ok(jet_std::TerminalSession { master }),
         process_group: true,
         detached: spec.detached,
@@ -747,16 +779,33 @@ fn jet_process_terminal_spawn(
         )
     })?;
     let control = std::rc::Rc::new(jet_std::ConPtyControl::new(native.console));
+    let output_limit = spec.output_limit.map(|limit| limit.max(0) as usize);
+    let output_budget =
+        output_limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+    let output_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let output_read_error = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stdout, stdout_state, stdout_worker) = jet_process_spawn_output_reader(
+        Some(native.output),
+        true,
+        output_limit,
+        output_budget,
+        output_limit_hit.clone(),
+        output_read_error.clone(),
+    );
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
         stdin: std::rc::Rc::new(std::cell::RefCell::new(Some(
             jet_std::ProcessStdin::Terminal(native.input),
         ))),
-        stdout: std::rc::Rc::new(std::cell::RefCell::new(Some(std::io::BufReader::new(
-            jet_std::ProcessReader::Terminal(native.output),
-        )))),
+        stdout: std::rc::Rc::new(std::cell::RefCell::new(stdout)),
         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        stdout_state,
+        stderr_state: None,
+        stdout_worker: std::rc::Rc::new(std::cell::RefCell::new(stdout_worker)),
+        stderr_worker: std::rc::Rc::new(std::cell::RefCell::new(None)),
+        output_limit_hit,
+        output_read_error,
         terminal: Ok(jet_std::TerminalSession { control }),
         process_group: true,
         detached: false,
@@ -788,6 +837,192 @@ fn jet_process_terminal_spawn(
         "terminal sessions need a native PTY or ConPTY backend, and this build has none",
     ))
 }
+
+fn jet_process_output_state_read(
+    state: &std::sync::Arc<jet_std::ProcessOutputState>,
+    bytes: &mut [u8],
+) -> std::io::Result<usize> {
+    if bytes.is_empty() {
+        return Ok(0);
+    }
+    let mut buffer = state
+        .bytes
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if buffer.cursor < buffer.bytes.len() {
+            let available = &buffer.bytes[buffer.cursor..];
+            let count = available.len().min(bytes.len());
+            bytes[..count].copy_from_slice(&available[..count]);
+            buffer.cursor += count;
+            return Ok(count);
+        }
+        if let Some((kind, message)) = &buffer.error {
+            return Err(std::io::Error::new(*kind, message.clone()));
+        }
+        if buffer.closed {
+            return Ok(0);
+        }
+        buffer = state
+            .ready
+            .wait(buffer)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+    }
+}
+
+fn jet_process_output_state_snapshot(
+    state: Option<&std::sync::Arc<jet_std::ProcessOutputState>>,
+    stream: &'static str,
+) -> Result<String, jet_std::IOError> {
+    let Some(state) = state else {
+        return Ok(String::new());
+    };
+    let mut buffer = state
+        .bytes
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((kind, message)) = &buffer.error {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(stream.to_string()),
+            std::io::Error::new(*kind, message.clone()),
+        ));
+    }
+    let bytes = std::mem::take(&mut buffer.bytes);
+    String::from_utf8(bytes).map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
+    })
+}
+
+fn jet_process_output_worker<R>(
+    mut reader: R,
+    state: std::sync::Arc<jet_std::ProcessOutputState>,
+    terminal_eof: bool,
+    limit: Option<usize>,
+    budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::io::Result<()>
+where
+    R: std::io::Read + Send + 'static,
+{
+    let result = (|| {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let count = match std::io::Read::read(&mut reader, &mut chunk) {
+                Ok(count) => count,
+                Err(error) if terminal_eof && jet_process_pty::is_terminal_eof(&error) => 0,
+                Err(error) => return Err(error),
+            };
+            if count == 0 {
+                return Ok(());
+            }
+            let kept = match limit {
+                None => count,
+                Some(limit) => {
+                    let budget = budget
+                        .as_ref()
+                        .expect("bounded process output needs a shared budget");
+                    let mut used = budget.load(std::sync::atomic::Ordering::Acquire);
+                    loop {
+                        let available = limit.saturating_sub(used);
+                        let kept = available.min(count);
+                        if kept == 0 {
+                            break 0;
+                        }
+                        match budget.compare_exchange(
+                            used,
+                            used + kept,
+                            std::sync::atomic::Ordering::AcqRel,
+                            std::sync::atomic::Ordering::Acquire,
+                        ) {
+                            Ok(_) => break kept,
+                            Err(next) => used = next,
+                        }
+                    }
+                }
+            };
+            if kept != 0 {
+                let mut buffer = state
+                    .bytes
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                buffer.bytes.extend_from_slice(&chunk[..kept]);
+                state.ready.notify_all();
+            }
+            if kept < count {
+                limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                return Ok(());
+            }
+        }
+    })();
+    if let Err(error) = &result {
+        read_error.store(true, std::sync::atomic::Ordering::Release);
+        let mut buffer = state
+            .bytes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if buffer.error.is_none() {
+            buffer.error = Some((error.kind(), error.to_string()));
+        }
+    }
+    let mut buffer = state
+        .bytes
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    buffer.closed = true;
+    state.ready.notify_all();
+    result
+}
+
+fn jet_process_spawn_output_reader<R>(
+    reader: Option<R>,
+    terminal_eof: bool,
+    limit: Option<usize>,
+    budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> (
+    Option<std::io::BufReader<jet_std::ProcessReader>>,
+    Option<std::sync::Arc<jet_std::ProcessOutputState>>,
+    Option<std::thread::JoinHandle<std::io::Result<()>>>,
+)
+where
+    R: std::io::Read + Send + 'static,
+{
+    let Some(reader) = reader else {
+        return (None, None, None);
+    };
+    let state = std::sync::Arc::new(jet_std::ProcessOutputState {
+        bytes: std::sync::Mutex::new(jet_std::ProcessOutputBuffer {
+            bytes: Vec::new(),
+            cursor: 0,
+            closed: false,
+            error: None,
+        }),
+        ready: std::sync::Condvar::new(),
+    });
+    let worker_state = state.clone();
+    let worker = std::thread::spawn(move || {
+        jet_process_output_worker(
+            reader,
+            worker_state,
+            terminal_eof,
+            limit,
+            budget,
+            limit_hit,
+            read_error,
+        )
+    });
+    (
+        Some(std::io::BufReader::new(jet_std::ProcessReader::Shared(
+            state.clone(),
+        ))),
+        Some(state),
+        Some(worker),
+    )
+}
+
 struct JetProcessOutput {
     text: String,
     exceeded: bool,
@@ -855,28 +1090,6 @@ where
         })
     })
 }
-fn jet_process_start_output_drain(
-    child: &jet_std::ProcessChild,
-) -> (
-    (
-        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-        Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
-    ),
-    std::sync::Arc<std::sync::atomic::AtomicBool>,
-) {
-    let stdout = child.stdout.borrow_mut().take();
-    let stderr = child.stderr.borrow_mut().take();
-    let limit = child.output_limit.map(|limit| limit.max(0) as usize);
-    let budget = limit.map(|_| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
-    let limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    (
-        (
-            jet_process_drain_reader(stdout, limit, budget.clone(), limit_hit.clone()),
-            jet_process_drain_reader(stderr, limit, budget, limit_hit.clone()),
-        ),
-        limit_hit,
-    )
-}
 fn jet_process_finish_output_drain(
     drain: Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
     stream: &'static str,
@@ -917,6 +1130,57 @@ fn jet_process_collect_output(
         }
         (Err(error), _) | (_, Err(error)) => Err(error),
     }
+}
+
+fn jet_process_finish_output_worker(
+    worker: Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    stream: &'static str,
+) -> Result<(), jet_std::IOError> {
+    let Some(worker) = worker else {
+        return Ok(());
+    };
+    worker
+        .join()
+        .map_err(|_| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Read,
+                Some(stream.to_string()),
+                "process output reader panicked",
+            )
+        })?
+        .map_err(|error| {
+            jet_std::IOError::other(jet_std::IOOperation::Read, Some(stream.to_string()), error)
+        })
+}
+
+fn jet_process_collect_child_output(
+    child: &jet_std::ProcessChild,
+) -> Result<(String, String), jet_std::IOError> {
+    jet_process_join_child_output_workers(child)?;
+    let output = jet_process_output_state_snapshot(child.stdout_state.as_ref(), "process stdout")?;
+    let errors = jet_process_output_state_snapshot(child.stderr_state.as_ref(), "process stderr")?;
+    Ok((output, errors))
+}
+
+fn jet_process_join_child_output_workers(
+    child: &jet_std::ProcessChild,
+) -> Result<(), jet_std::IOError> {
+    // The worker owns the native pipe. Dropping the public reader releases its
+    // local buffering before the worker handles are joined, while the shared
+    // state retains every byte for the receipt, including bytes read live.
+    *child.stdout.borrow_mut() = None;
+    *child.stderr.borrow_mut() = None;
+    let stdout_worker = child.stdout_worker.borrow_mut().take();
+    let stderr_worker = child.stderr_worker.borrow_mut().take();
+    let stdout_result = jet_process_finish_output_worker(stdout_worker, "process stdout");
+    let stderr_result = jet_process_finish_output_worker(stderr_worker, "process stderr");
+    if let Err(error) = stdout_result {
+        return Err(error);
+    }
+    if let Err(error) = stderr_result {
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -1172,7 +1436,8 @@ fn jet_process_spec_pipeline(
     }
     let mut children: Vec<std::process::Child> = Vec::new();
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
-    for (spec, launch_plan) in specs.iter().zip(launch_plans.iter()) {
+    for (index, (spec, launch_plan)) in specs.iter().zip(launch_plans.iter()).enumerate() {
+        let is_last = index + 1 == specs.len();
         let input = prev_stdout.take();
         let child = {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1194,8 +1459,12 @@ fn jet_process_spec_pipeline(
                 if let Some(stdout) = input {
                     command.stdin(std::process::Stdio::from(stdout));
                 }
-                command.stdout(std::process::Stdio::piped());
-                command.stderr(std::process::Stdio::piped());
+                if is_last {
+                    command.stdout(jet_process_stdio(&spec.stdout));
+                } else {
+                    command.stdout(std::process::Stdio::piped());
+                }
+                command.stderr(jet_process_stdio(&spec.stderr));
                 #[cfg(unix)]
                 jet_process_pty::attach_process_group(&mut command).map_err(|error| {
                     jet_std::IOError::other(
@@ -1223,8 +1492,12 @@ fn jet_process_spec_pipeline(
                 if let Some(stdout) = input {
                     command.stdin(std::process::Stdio::from(stdout));
                 }
-                command.stdout(std::process::Stdio::piped());
-                command.stderr(std::process::Stdio::piped());
+                if is_last {
+                    command.stdout(jet_process_stdio(&spec.stdout));
+                } else {
+                    command.stdout(std::process::Stdio::piped());
+                }
+                command.stderr(jet_process_stdio(&spec.stderr));
                 #[cfg(unix)]
                 jet_process_pty::attach_process_group(&mut command).map_err(|error| {
                     jet_std::IOError::other(
@@ -1448,11 +1721,11 @@ fn jet_process_child_wait(
         return Ok(result);
     }
     let _cleanup = JetProcessWaitCleanup { child };
-    // Capture pipes must be drained while the child runs. Waiting first can
-    // deadlock when either pipe fills; stdout and stderr need independent
-    // readers because a child may fill both concurrently. Stream consumers
-    // keep their earlier reads, and wait drains only the remaining bytes.
-    let (drains, output_limit_hit) = jet_process_start_output_drain(child);
+    // Every piped stream has a worker from spawn onward. Waiting first can
+    // deadlock when either pipe fills; independent workers keep stdout and
+    // stderr flowing even when the caller consumes only one live stream.
+    let output_limit_hit = child.output_limit_hit.clone();
+    let output_read_error = child.output_read_error.clone();
     let mut timed_out = false;
     let status = loop {
         let mut slot = child.inner.borrow_mut();
@@ -1473,7 +1746,9 @@ fn jet_process_child_wait(
         })? {
             break status;
         }
-        if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+        if output_limit_hit.load(std::sync::atomic::Ordering::Acquire)
+            || output_read_error.load(std::sync::atomic::Ordering::Acquire)
+        {
             jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
                 .map_err(|error| {
                     jet_std::IOError::other(
@@ -1554,11 +1829,11 @@ fn jet_process_child_wait(
     if let Some(session) = child.terminal.as_ref().ok() {
         session.control.close();
     }
-    let (output, errors, output_exceeded) = jet_process_collect_output(drains)?;
+    let (output, errors) = jet_process_collect_child_output(child)?;
     if let Some(error) = cleanup_error {
         return Err(error);
     }
-    if output_exceeded {
+    if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
             None,
@@ -1665,6 +1940,7 @@ impl std::io::Read for jet_std::ProcessReader {
             Self::Stdout(reader) => std::io::Read::read(reader, bytes),
             Self::Stderr(reader) => std::io::Read::read(reader, bytes),
             Self::Terminal(reader) => std::io::Read::read(reader, bytes),
+            Self::Shared(state) => jet_process_output_state_read(state, bytes),
         };
         match result {
             Err(error)
@@ -1790,18 +2066,27 @@ fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) -> Result<(), jet_
         )
     })?;
     let Some(inner) = slot.as_mut() else {
-        return Ok(());
+        drop(slot);
+        return jet_process_join_child_output_workers(child);
     };
     let signal_error =
         jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
             .err()
             .map(jet_process_cleanup_io_error);
+    #[cfg(windows)]
+    if let Some(session) = child.terminal.as_ref().ok() {
+        session.control.close();
+    }
     let wait_error = jet_process_inner_wait(inner)
         .err()
         .map(jet_process_cleanup_io_error);
+    drop(slot);
+    let output_error = jet_process_join_child_output_workers(child).err();
     if let Some(error) = signal_error {
         Err(error)
     } else if let Some(error) = wait_error {
+        Err(error)
+    } else if let Some(error) = output_error {
         Err(error)
     } else {
         Ok(())

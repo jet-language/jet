@@ -180,6 +180,110 @@ fn run() {{
 
 #[cfg(unix)]
 #[test]
+fn core_process_pipeline_honors_final_redirection_modes() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_pipeline_redirect_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.sh");
+    let last = dir.join("last.sh");
+    write_executable(
+        &first,
+        "#!/bin/sh\nprintf 'edge\\n'\nprintf 'first-err\\n' >&2\n",
+    );
+    write_executable(
+        &last,
+        "#!/bin/sh\ncat\nprintf 'final-err\\n' >&2\n",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    result :: process.pipeline([
+        process.cmd(["{first}"]),
+        process.cmd(["{last}"]).stdout(.Inherit).stderr(.Inherit)
+    ]) ?? panic("pipeline failed")
+    print(result.success)
+    print(result.output)
+    print(result.errors)
+}}
+"#,
+        first = jet_string_path(&first),
+        last = jet_string_path(&last),
+    );
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "process_pipeline_redirect", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "edge\ntrue\n\nfirst-err\n\n");
+    assert_eq!(stderr, "final-err\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn core_process_live_stream_does_not_block_on_sibling_output() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_live_backpressure_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let slow = dir.join("slow.sh");
+    write_executable(
+        &slow,
+        "#!/bin/sh\n\
+dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null &\n\
+writer=$!\n\
+(sleep 2; kill -9 \"$writer\" 2>/dev/null) >/dev/null 2>&1 &\n\
+killer=$!\n\
+wait \"$writer\"\n\
+kill \"$killer\" 2>/dev/null || true\n\
+printf 'done\\n'\n",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    child :: process.cmd(["{slow}"]).stdout(.Stream).stderr(.Stream).spawn() ?? panic("spawn failed")
+    loop line in child.stdout.lines() {{
+        print(line)
+    }}
+    child.wait() ?? panic("wait failed")
+    print("finished")
+}}
+"#,
+        slow = jet_string_path(&slow),
+    );
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "process_live_backpressure", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "done\nfinished\n");
+    assert!(stderr.is_empty(), "unexpected child stderr: {stderr:?}");
+
+    let started = std::time::Instant::now();
+    let rerun = Command::new(dir.join("process_live_backpressure"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1500),
+        "live stream waited for the sibling pipe instead of draining it: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(rerun.status.code(), Some(0));
+    assert_eq!(rerun.stdout, b"done\nfinished\n");
+    assert!(
+        rerun.stderr.is_empty(),
+        "unexpected child stderr: {:?}",
+        rerun.stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn core_process_limits_kill_descendants_and_stop_output_early() {
     let dir = std::env::temp_dir().join(format!(
         "jet_core_process_limits_{}",
@@ -782,6 +886,8 @@ fn run() {{
     assert!(compiled.rust.contains("jet_std::ProcessHandle::Native"));
     assert!(compiled.rust.contains("TerminateJobObject"));
     assert!(compiled.rust.contains("ClosePseudoConsole"));
+    assert!(compiled.rust.contains("input.write_all(&[3])"));
+    assert!(!compiled.rust.contains("GenerateConsoleCtrlEvent"));
 }
 
 #[cfg(unix)]

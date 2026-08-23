@@ -3390,6 +3390,37 @@ fn web_compute_wasm_bridge_roundtrip() {
 }
 
 #[test]
+fn web_compute_webgpu_calls_use_the_browser_prelude() {
+    let source = r#"#Target(Web)
+use core.compute as compute
+
+#Target(JS)
+fn run() {
+    seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")
+    tile :: compute.matmul_f32_tile(seed, seed) ?? panic("tile")
+    gpu :: compute.on_device(tile, compute.device_webgpu()) ?? panic("webgpu")
+    doubled :: compute.add(gpu, gpu) ?? panic("add")
+    print(compute.to_list(doubled))
+    print(compute.placement(doubled))
+}
+"#;
+    let dir = build_web_fixture(
+        "compute_webgpu_browser_prelude",
+        source,
+        "tests/fixtures/compute_webgpu_browser_prelude.jet",
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("navigator.gpu")
+            && js.contains("jet_compute_web_call(\"device_webgpu\"")
+            && js.contains("await jet_compute_web_call(\"add\"")
+            && js.contains("backend=webgpu"),
+        "WebGPU calls must stay on the browser Prelude rail:\n{js}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn web_grouped_use_list_wasm_bridge_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web grouped-use-list test (need rustc + node)");
