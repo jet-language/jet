@@ -84,11 +84,7 @@ pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
 /// literals, calls, and loops over literal lists, so a value that only exists
 /// in the process environment is the smallest thing that reaches the Cranelift
 /// host instead of stopping the build with a comptime diagnostic.
-pub fn jit_run_with_env(
-    name: &str,
-    src: &str,
-    vars: &[(&str, &str)],
-) -> (i32, String, String) {
+pub fn jit_run_with_env(name: &str, src: &str, vars: &[(&str, &str)]) -> (i32, String, String) {
     jit_run_with_env_args(name, src, vars, &[])
 }
 
@@ -174,7 +170,10 @@ pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
     );
     if have_rustc() {
         let (aot_code, aot_out, aot_err) = build_and_run_full("jet_tir_test", name, src);
-        assert_eq!(aot_code, jit_code, "AOT and `jet run` exit codes disagree:\n{aot_err}");
+        assert_eq!(
+            aot_code, jit_code,
+            "AOT and `jet run` exit codes disagree:\n{aot_err}"
+        );
         assert_eq!(
             aot_out, jit_out,
             "AOT and `jet run` disagree — one tier re-encoded the rule (I9)"
@@ -238,11 +237,7 @@ pub fn assert_example_cli_tiers_agree(stem: &str, expected_stdout: &str) {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         );
         let _ = fs::remove_dir_all(&cache);
-        assert_eq!(
-            result.0, 0,
-            "{mode} run failed for {stem}:\n{}",
-            result.2
-        );
+        assert_eq!(result.0, 0, "{mode} run failed for {stem}:\n{}", result.2);
         assert_eq!(
             result.1, expected_stdout,
             "{mode} output disagreed for {stem}:\n{}",
@@ -319,7 +314,11 @@ pub fn assert_example_cli_error_tiers_agree(
         );
         let _ = fs::remove_dir_all(&cache);
         assert_eq!(result.0, expected_exit_code, "{mode} exit code for {stem}");
-        assert!(result.1.is_empty(), "{mode} stdout for {stem}: {:?}", result.1);
+        assert!(
+            result.1.is_empty(),
+            "{mode} stdout for {stem}: {:?}",
+            result.1
+        );
         assert_eq!(
             result.2, expected_stderr,
             "{mode} stderr disagreed with the .err.out oracle for {stem}"
@@ -365,21 +364,13 @@ fn build_and_run_full_inner(
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let mut rustc_cmd = Command::new("rustc");
-    rustc_cmd.args([
-        "--edition",
-        "2021",
-        "--crate-name",
-    ]);
+    rustc_cmd.args(["--edition", "2021", "--crate-name"]);
     rustc_cmd.arg(jet::Syntax::sanitize_crate_name(
         rs.file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("out"),
     ));
-    rustc_cmd.args([
-        rs.to_str().unwrap(),
-        "-o",
-        bin.to_str().unwrap(),
-    ]);
+    rustc_cmd.args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
     if let Some(cfg) = rustc_cfg {
         rustc_cmd.args(["--cfg", cfg]);
     }
@@ -410,16 +401,8 @@ fn build_and_run_full_inner(
 
 /// Build and run a multi-file program from a fresh temporary directory.
 #[allow(dead_code)]
-pub fn build_and_run_multi(
-    name: &str,
-    entry: &str,
-    files: &[(&str, &str)],
-) -> (i32, String) {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_tir_multi_{}_{}",
-        name,
-        std::process::id()
-    ));
+pub fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String) {
+    let dir = std::env::temp_dir().join(format!("jet_tir_multi_{}_{}", name, std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     for (rel, src) in files {
         let path = dir.join(rel);
@@ -441,21 +424,13 @@ pub fn build_and_run_multi(
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            "--crate-name",
-        ])
+        .args(["--edition", "2021", "--crate-name"])
         .arg(jet::Syntax::sanitize_crate_name(
             rs.file_stem()
                 .and_then(|name| name.to_str())
                 .unwrap_or("out"),
         ))
-        .args([
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
+        .args([rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(
@@ -471,11 +446,7 @@ pub fn build_and_run_multi(
 }
 
 /// Run a multi-file program through the default `jet run` lens.
-pub fn run_default_multi(
-    name: &str,
-    entry: &str,
-    files: &[(&str, &str)],
-) -> (i32, String, String) {
+pub fn run_default_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String, String) {
     let dir = unique_tmp(&format!("jet_jit_multi_{name}"));
     fs::create_dir_all(&dir).unwrap();
     for (rel, src) in files {

@@ -468,6 +468,43 @@ mod semantics {
         }
 
         #[test]
+        fn vulkan_mse_vjp_and_jvp_use_the_device_kernel() {
+            if !jet_compute_vulkan::available() {
+                eprintln!("SKIP Vulkan autodiff: no Vulkan device");
+                return;
+            }
+            let prediction = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![3.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let target = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![1.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+            let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+            let state = jet_compute_vjp_begin(loss, tape);
+            let seed = jet_compute_gradient_seed(&state).unwrap();
+            let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
+            assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
+            let tangent_prediction = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![1.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let tangent_target = jet_compute_on_device(
+                &f32_tensor(vec![1], vec![0.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let tangent = jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
+        }
+
+        #[test]
         fn webgpu_native_path_fails_closed_without_cpu_drift() {
             let cpu = f32_tensor(vec![1], vec![2.0]);
             let result = jet_compute_on_device(&cpu, JetComputeDevice::WebGpu);

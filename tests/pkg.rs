@@ -1922,7 +1922,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int -> {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -1951,7 +1951,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(stale_project.join("package.jet"), &manifest_text).unwrap();
     fs::write(
         &artifact,
-        "// jet-ffi-descriptor=stale\npub fn scatter() Int {\n    return 7\n}\n",
+        "// jet-ffi-descriptor=stale\npub fn scatter() Int -> {\n    return 7\n}\n",
     )
     .unwrap();
     let stale_manifest =
@@ -1972,7 +1972,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int -> {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();

@@ -92,6 +92,7 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
     let provenance = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap();
     assert!(provenance.contains("schema=jet-cobol-bind-v1\n"));
     assert!(provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
+    assert!(provenance.contains("program_symbol=JETPAY\n"));
     assert!(provenance.contains("record_width=29\n"));
     let run = Command::new(env!("CARGO_BIN_EXE_jet")).args(["run", "main.jet"]).current_dir(&root).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
@@ -146,7 +147,7 @@ fn ffi_capability_boundary_is_safe_only_inside_unsafe() {
     fs::create_dir_all(&root).unwrap();
     let safe = r#"
 extern rust "std" {
-    fn borrow(s: &String) String = "std::convert::identity"
+    fn borrow(s: &String) String = "std::mem::take"
 }
 fn run() {
     value := "hi"
@@ -167,7 +168,7 @@ fn run() {
 
     let audited = r#"
 extern rust "std" {
-    fn borrow(s: &String) String = "std::convert::identity"
+    fn borrow(s: &String) String = "std::mem::take"
 }
 fn run() {
     value := "hi"
@@ -193,6 +194,91 @@ fn run() {
         "`&` must remain an exclusive borrow at the generated call edge"
     );
 
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn cffi_write_capability_round_trips_through_the_native_c_boundary() {
+    if !have_rustc() {
+        eprintln!("note: skipping cffi_write_capability_round_trips (need rustc)");
+        return;
+    }
+    let root = common::unique_tmp("jet_ffi_c_write");
+    fs::create_dir_all(&root).unwrap();
+    declare_local_c_dep(&root, "cap");
+    build_local_c_provider(
+        &root,
+        "cap",
+        "#include <stdint.h>\ntypedef struct { int64_t x; int64_t y; } CapPair;\nvoid jet_cap_increment(int64_t *value) { *value += 1; }\nCapPair jet_cap_make(void) { return (CapPair){20, 22}; }\nint64_t jet_cap_consume(CapPair value) { return value.x + value.y; }\n",
+    );
+    let path = root.join("main.jet");
+    let source = r#"
+use c.cap as c
+#Layout(c)
+struct Pair {
+    x: Int
+    y: Int
+}
+#Extern module c.cap {
+    fn increment(value: &Int) = "jet_cap_increment"
+    fn make() Pair = "jet_cap_make"
+    fn consume(value: ^Pair) Int = "jet_cap_consume"
+}
+fn run() {
+    value := 41
+    #Unsafe("the C function writes through the exclusive capability") {
+        c.increment(&value)
+    }
+    print(value)
+    pair :: c.make()
+    #Unsafe("the C function consumes the C-layout value") {
+        print(c.consume(^pair))
+    }
+}
+"#;
+    fs::write(&path, source).unwrap();
+    let output = jet::compile_with_path(source, path.to_str().unwrap())
+        .unwrap_or_else(|diagnostics| panic!("C capability rejected:\n{diagnostics:?}"));
+    assert!(output.ffi.is_none(), "capability C calls must stay on the native path");
+    assert!(
+        output.rust.contains("*mut std::os::raw::c_longlong"),
+        "C `&` must lower to a mutable pointer:\n{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("&mut c0"),
+        "C `&` must pass the exclusive temporary:\n{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("pub fn __jet_consume(a0: super::__jet_Pair)"),
+        "C `^` must consume the C-layout value without a borrowed clone"
+    );
+    let rs = root.join("main.rs");
+    let bin = root.join("main_bin");
+    fs::write(&rs, &output.rust).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-lcap")
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected the native C capability wrapper:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(
+        run.status.success(),
+        "native C capability call failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n42\n");
     let _ = fs::remove_dir_all(root);
 }
 

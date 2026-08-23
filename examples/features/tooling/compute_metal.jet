@@ -8,6 +8,30 @@ fn run() {
         .Ok(_) -> { print("metal:f64:accepted") }
         .Err(_) -> { print("metal:f64:rejected") }
     }
+
+    f32_seed :: compute.matrix(1, 1, 2.0) ?? panic("f32_seed")
+    f32_value :: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_value")
+    expected :: [Float]{8.0}
+    f32_request :: compute.on_device(f32_value, compute.device_metal())
+    if f32_request == {
+        .Ok(metal) -> {
+            if !compute.placement(metal).contains("backend=metal") -> panic("metal receipt")
+            doubled :: compute.add(metal, metal) ?? panic("metal add")
+            if compute.to_list(doubled) != expected -> panic("metal arithmetic")
+            cpu :: compute.transfer(doubled, compute.device_cpu()) ?? panic("metal download")
+            if compute.to_list(cpu) != expected -> panic("metal transfer")
+            metal_stream :: compute.stream_new_on(compute.device_metal()) ?? panic("metal stream")
+            compute.stream_sync(metal_stream) ?? panic("metal sync")
+            unsupported :: compute.det(metal)
+            if unsupported == {
+                .Ok(_) -> panic("metal det unexpectedly accepted")
+                .Err(_) -> {}
+            }
+        }
+        .Err(_) -> {}
+    }
+    print("metal:f32:checked")
+
     stream :: compute.stream_new_on(compute.device_cpu()) ?? panic("stream")
     compute.stream_sync(stream) ?? panic("sync")
     print("stream:cpu-ok")

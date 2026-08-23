@@ -672,9 +672,9 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
     )
 }
 
-/// E1258 (D-PLUGIN1=B, c81): a `target: sandbox` package's own code uses an
-/// effect — sandboxes are deny-by-default (the wasmtime host registers zero
-/// host imports), so any effect would fail to instantiate at load time.
+/// E1258 (D-PLUGIN1=B, c81): a `target: sandbox` package's own code uses a
+/// host effect — sandboxes are deny-by-default (the wasmtime host registers
+/// zero host imports), so any host effect would fail to instantiate at load time.
 pub fn e1258(effects: &str) -> Diagnostic {
     Diagnostic::error(
         "E1258",

@@ -170,10 +170,11 @@ fn build_plan(source: &Path, target: &Path, language: &str) -> Result<Plan, Stri
         let mut output = relative.to_path_buf();
         output.set_extension("jet");
         let raw = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let generated_target = target.join(&output);
         let translation = match language {
-            "pascal" => translate_pascal_file(&raw, relative, &output),
-            "ada" => translate_ada_file(&raw, relative, &output),
-            _ => translate_file(&raw, relative, &output),
+            "pascal" => translate_pascal_file(&raw, &path, &generated_target),
+            "ada" => translate_ada_file(&raw, &path, &generated_target),
+            _ => translate_file(&raw, &path, &generated_target),
         };
         plan.functions += translation.functions;
         plan.tests += translation.tests;
@@ -325,9 +326,11 @@ fn translate_file(raw: &str, source: &Path, target: &Path) -> Translation {
         }
     }
     let mut output = header("py");
-    for item in rendered {
+    for (index, item) in rendered.into_iter().enumerate() {
+        if index > 0 {
+            output.push('\n');
+        }
         output.push_str(&item);
-        output.push('\n');
     }
     if functions == 0 {
         output.push_str("// No construct was safe to translate. See import-report.json.\n");

@@ -701,6 +701,35 @@ fn plugin_using_an_effect_is_e1258() {
     );
 }
 
+/// Component Model Text lowering allocates guest memory. That internal memory
+/// effect must not be mistaken for a host capability and rejected as E1258.
+#[test]
+fn plugin_text_export_allows_guest_memory_allocation() {
+    let dir = isolated_cwd("plugin_text_memory_allowed");
+    fs::write(
+        dir.join("main.jet"),
+        "pub fn echo(value: String) String -> value\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .arg("build")
+        .arg("main.jet")
+        .arg("--target=sandbox")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("E1258"),
+        "guest-local Text allocation must not be E1258:\n{stderr}"
+    );
+    assert!(
+        out.status.success() || stderr.contains("E1259"),
+        "Text sandbox build should succeed or report a missing toolchain, not another error:\n{stderr}"
+    );
+}
+
 /// D-DEP-WASM1=A (c81): `jet build --target=sandbox` shells out to
 /// `wasm-tools` to lift the rustc-built core wasm module into a Component. A
 /// PATH without `wasm-tools` on it (but with `rustc` still reachable, so the

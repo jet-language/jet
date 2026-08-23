@@ -2,16 +2,16 @@
 //! Same bridge AOT links — no parallel/fake native path.
 
 use super::Concurrency;
+use crate::Marshal::{alloc_string, clone_string};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_foundation::AST::{AccessConvention, CtFloat, CtValue, ProgramBundle, Type};
 use jet_foundation::Diagnostics::{Diagnostic, Span};
+use jet_foundation::AST::{AccessConvention, CtFloat, CtValue, ProgramBundle, Type};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::sync::Mutex;
-use crate::Marshal::{clone_string, alloc_string};
 
 #[cfg(unix)]
 #[link(name = "dl")]
@@ -99,8 +99,9 @@ fn param_abi(ty: &Type) -> Option<ParamAbi> {
         Type::Float | Type::Float32 => Some(ParamAbi::Float),
         Type::Bool => Some(ParamAbi::Bool),
         Type::String => Some(ParamAbi::String),
-        Type::Apply { name, .. }
-            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Some(ParamAbi::String),
+        Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => {
+            Some(ParamAbi::String)
+        }
         _ => None,
     }
 }
@@ -112,8 +113,9 @@ fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
         Some(Type::Float) | Some(Type::Float32) => Some(RetAbi::Float),
         Some(Type::Bool) => Some(RetAbi::Bool),
         Some(Type::String) => Some(RetAbi::String),
-        Some(Type::Apply { name, .. })
-            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Some(RetAbi::String),
+        Some(Type::Apply { name, .. }) if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => {
+            Some(RetAbi::String)
+        }
         _ => None,
     }
 }
@@ -184,10 +186,7 @@ pub(crate) fn has_bound_ffi() -> bool {
         .is_some()
 }
 
-fn load_cdylib(
-    path: &Path,
-    entries: &[jet_pkg_model::FFI::ExternEntry],
-) -> Result<(), String> {
+fn load_cdylib(path: &Path, entries: &[jet_pkg_model::FFI::ExternEntry]) -> Result<(), String> {
     #[cfg(not(unix))]
     {
         let _ = (path, entries);
@@ -207,7 +206,9 @@ fn load_cdylib(
         let setter_name = CString::new("jet_ffi_set_reporter").unwrap();
         let setter_ptr = unsafe { dlsym(handle, setter_name.as_ptr()) };
         if setter_ptr.is_null() {
-            unsafe { dlclose(handle); }
+            unsafe {
+                dlclose(handle);
+            }
             return Err(format!(
                 "jit ffi: missing symbol `jet_ffi_set_reporter` in {}",
                 path.display()
@@ -229,12 +230,34 @@ fn load_cdylib(
             None
         } else {
             Some(unsafe {
-                std::mem::transmute::<
-                    *mut c_void,
-                    unsafe extern "C" fn(*mut u8, usize),
-                >(free_ptr)
+                std::mem::transmute::<*mut c_void, unsafe extern "C" fn(*mut u8, usize)>(free_ptr)
             })
         };
+        if free_fn.is_none()
+            && entries.iter().any(|entry| {
+                matches!(entry.return_type.as_ref(), Some(Type::String))
+                    && entry.params.iter().all(|(convention, ty)| {
+                        *convention == AccessConvention::Read
+                            && matches!(
+                                ty,
+                                Type::Int
+                                    | Type::InlineRange { .. }
+                                    | Type::Float
+                                    | Type::Float32
+                                    | Type::Bool
+                                    | Type::String
+                            )
+                    })
+            })
+        {
+            unsafe {
+                dlclose(handle);
+            }
+            return Err(format!(
+                "jit ffi: missing symbol `jet_ffi_cabi_free` in {}",
+                path.display()
+            ));
+        }
         let mut by_wrapper = HashMap::new();
         for entry in entries {
             // D-FFI-CAP1: capability calls are native-boundary operations. The
@@ -259,7 +282,8 @@ fn load_cdylib(
                 continue;
             };
             let cabi = format!("{}_cabi", entry.wrapper_name);
-            let c_name = CString::new(cabi.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
+            let c_name =
+                CString::new(cabi.as_str()).map_err(|_| "jit ffi: bad symbol".to_string())?;
             let ptr = unsafe { dlsym(handle, c_name.as_ptr()) };
             if ptr.is_null() {
                 unsafe {
@@ -299,6 +323,18 @@ fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic 
     )
 }
 
+fn release_cabi_buffer(
+    free_fn: Option<unsafe extern "C" fn(*mut u8, usize)>,
+    ptr: *mut u8,
+    len: usize,
+) {
+    if !ptr.is_null() {
+        if let Some(free) = free_fn {
+            unsafe { free(ptr, len) };
+        }
+    }
+}
+
 /// Call one prepared bridge entry from the canonical TIR evaluator.
 ///
 /// This is the interpreter-side adapter for the same `*_cabi` symbols that
@@ -316,7 +352,11 @@ pub(crate) fn call_ctvalue(
         return Err(ffi_diag(wrapper, "has no prepared bridge", span));
     };
     let Some(entry) = state.by_wrapper.get(wrapper) else {
-        return Err(ffi_diag(wrapper, "is not bound in the prepared bridge", span));
+        return Err(ffi_diag(
+            wrapper,
+            "is not bound in the prepared bridge",
+            span,
+        ));
     };
     if args.len() != entry.params.len() {
         return Err(ffi_diag(
@@ -374,30 +414,29 @@ pub(crate) fn call_ctvalue(
             Ok(CtValue::Int(unsafe { f(value.as_ptr(), value.len()) }))
         }
         ([ParamAbi::String], RetAbi::String) => {
-            type FnStr = unsafe extern "C" fn(
-                *const u8,
-                usize,
-                *mut *mut u8,
-                *mut usize,
-            ) -> i32;
+            type FnStr = unsafe extern "C" fn(*const u8, usize, *mut *mut u8, *mut usize) -> i32;
             let f: FnStr = unsafe { std::mem::transmute(entry.ptr) };
             let value = strings[0].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
             let mut out_len = 0;
             let rc = unsafe { f(value.as_ptr(), value.len(), &mut out_ptr, &mut out_len) };
             if rc != 0 {
+                release_cabi_buffer(state.free_fn, out_ptr, out_len);
                 return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
+            }
+            if out_ptr.is_null() && out_len != 0 {
+                return Err(ffi_diag(
+                    wrapper,
+                    "returned a null buffer with a non-zero length",
+                    span,
+                ));
             }
             let bytes = if out_ptr.is_null() {
                 Vec::new()
             } else {
                 unsafe { std::slice::from_raw_parts(out_ptr, out_len) }.to_vec()
             };
-            if let Some(free) = state.free_fn {
-                if !out_ptr.is_null() {
-                    unsafe { free(out_ptr, out_len) };
-                }
-            }
+            release_cabi_buffer(state.free_fn, out_ptr, out_len);
             String::from_utf8(bytes)
                 .map(CtValue::Str)
                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
@@ -419,13 +458,8 @@ pub(crate) fn call_ctvalue(
             }))
         }
         ([ParamAbi::Int, ParamAbi::String], RetAbi::String) => {
-            type FnIntStr = unsafe extern "C" fn(
-                i64,
-                *const u8,
-                usize,
-                *mut *mut u8,
-                *mut usize,
-            ) -> i32;
+            type FnIntStr =
+                unsafe extern "C" fn(i64, *const u8, usize, *mut *mut u8, *mut usize) -> i32;
             let f: FnIntStr = unsafe { std::mem::transmute(entry.ptr) };
             let code = strings[1].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
@@ -440,18 +474,66 @@ pub(crate) fn call_ctvalue(
                 )
             };
             if rc != 0 {
+                release_cabi_buffer(state.free_fn, out_ptr, out_len);
                 return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
+            }
+            if out_ptr.is_null() && out_len != 0 {
+                return Err(ffi_diag(
+                    wrapper,
+                    "returned a null buffer with a non-zero length",
+                    span,
+                ));
             }
             let bytes = if out_ptr.is_null() {
                 Vec::new()
             } else {
                 unsafe { std::slice::from_raw_parts(out_ptr, out_len) }.to_vec()
             };
-            if let Some(free) = state.free_fn {
-                if !out_ptr.is_null() {
-                    unsafe { free(out_ptr, out_len) };
-                }
+            release_cabi_buffer(state.free_fn, out_ptr, out_len);
+            String::from_utf8(bytes)
+                .map(CtValue::Str)
+                .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
+        }
+        ([ParamAbi::Int, ParamAbi::String, ParamAbi::Int], RetAbi::String) => {
+            type FnIntStrInt = unsafe extern "C" fn(
+                i64,
+                *const u8,
+                usize,
+                i64,
+                *mut *mut u8,
+                *mut usize,
+            ) -> i32;
+            let f: FnIntStrInt = unsafe { std::mem::transmute(entry.ptr) };
+            let code = strings[1].as_deref().expect("String ABI argument");
+            let mut out_ptr = std::ptr::null_mut();
+            let mut out_len = 0;
+            let rc = unsafe {
+                f(
+                    int_arg(0)?,
+                    code.as_ptr(),
+                    code.len(),
+                    int_arg(2)?,
+                    &mut out_ptr,
+                    &mut out_len,
+                )
+            };
+            if rc != 0 {
+                release_cabi_buffer(state.free_fn, out_ptr, out_len);
+                return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
             }
+            if out_ptr.is_null() && out_len != 0 {
+                return Err(ffi_diag(
+                    wrapper,
+                    "returned a null buffer with a non-zero length",
+                    span,
+                ));
+            }
+            let bytes = if out_ptr.is_null() {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(out_ptr, out_len) }.to_vec()
+            };
+            release_cabi_buffer(state.free_fn, out_ptr, out_len);
             String::from_utf8(bytes)
                 .map(CtValue::Str)
                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
@@ -472,20 +554,24 @@ pub(crate) fn call_ctvalue(
             unsafe { f(int_arg(0)?) };
             Ok(CtValue::Unit)
         }
+        ([ParamAbi::Bool], RetAbi::Bool) => {
+            type FnBool = unsafe extern "C" fn(i8) -> i8;
+            let f: FnBool = unsafe { std::mem::transmute(entry.ptr) };
+            let value = match args.first() {
+                Some(CtValue::Bool(value)) => *value,
+                _ => {
+                    return Err(ffi_diag(wrapper, "argument 0 is not a Bool", span));
+                }
+            };
+            Ok(CtValue::Bool(unsafe { f(if value { 1 } else { 0 }) } != 0))
+        }
         ([ParamAbi::Float], RetAbi::Float) => {
             type FnFloat = unsafe extern "C" fn(f64) -> f64;
             let f: FnFloat = unsafe { std::mem::transmute(entry.ptr) };
             Ok(float_result(unsafe { f(float_arg(0)?) }))
         }
         (
-            [
-                ParamAbi::Float,
-                ParamAbi::Float,
-                ParamAbi::Float,
-                ParamAbi::Float,
-                ParamAbi::Float,
-                ParamAbi::Float,
-            ],
+            [ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float, ParamAbi::Float],
             RetAbi::Float,
         ) => {
             type FnSixFloat = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
@@ -511,6 +597,11 @@ pub(crate) fn call_ctvalue(
             type FnUnitInt = unsafe extern "C" fn() -> i64;
             let f: FnUnitInt = unsafe { std::mem::transmute(entry.ptr) };
             Ok(CtValue::Int(unsafe { f() }))
+        }
+        ([], RetAbi::Bool) => {
+            type FnUnitBool = unsafe extern "C" fn() -> i8;
+            let f: FnUnitBool = unsafe { std::mem::transmute(entry.ptr) };
+            Ok(CtValue::Bool(unsafe { f() } != 0))
         }
         _ => Err(ffi_diag(wrapper, "has an unsupported signature", span)),
     }
@@ -597,7 +688,9 @@ mod tests {
     fn reporter_is_installed_after_rtld_now_load() {
         let source = include_str!("Ffi.rs");
         let load = source.find("dlopen(c_path.as_ptr(), RTLD_NOW)").unwrap();
-        let reporter = source.find("CString::new(\"jet_ffi_set_reporter\")").unwrap();
+        let reporter = source
+            .find("CString::new(\"jet_ffi_set_reporter\")")
+            .unwrap();
         // The installed reporter is the generated no-unwind shim, so this also
         // pins that the bridge never receives a bare `extern "C"` body (#1995).
         let install = source

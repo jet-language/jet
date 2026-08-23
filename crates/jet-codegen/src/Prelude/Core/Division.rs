@@ -77,14 +77,14 @@ jet_floordiv_unsigned!(u8, u16, u32, u64);
 // takes the divisor's sign, so `-7 % 2` is 1, and for every pair of whole
 // numbers `a == b * (a /% b) + a % b`. Rust's `%` is the truncated remainder,
 // which Jet spells `%%`, so the floored one is built here.
-trait JetMod: Copy {
+trait JetModulo: Copy {
     fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self;
 }
 // Signed: the remainder comes back with the dividend's sign, so add the
 // divisor whenever the two signs disagree.
 macro_rules! jet_mod_signed {
     ($($t:ty),*) => { $(
-        impl JetMod for $t {
+        impl JetModulo for $t {
             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);
@@ -105,7 +105,7 @@ macro_rules! jet_mod_signed {
 // Unsigned: nothing is ever below zero, so the two remainders agree.
 macro_rules! jet_mod_unsigned {
     ($($t:ty),*) => { $(
-        impl JetMod for $t {
+        impl JetModulo for $t {
             fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
                 if rhs == 0 {
                     jet_arithmetic_stop(file, line, JET_FLOORDIV_ZERO);

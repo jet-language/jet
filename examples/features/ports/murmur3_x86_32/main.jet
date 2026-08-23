@@ -1,0 +1,87 @@
+// MurmurHash3_x86_32 port. The C source reads little-endian 32-bit blocks on
+// its intended x86 targets. This port states that byte order explicitly.
+
+fn rotl32(value: U32, shift: Int) U32 -[]> {
+    result := value << shift
+    result |= value >> (32 - shift)
+    return result
+}
+
+fn load_le(data: [U8], offset: Int) U32 -[]> {
+    value := U32.from_u8(data[offset])
+    value |= U32.from_u8(data[offset + 1]) << 8
+    value |= U32.from_u8(data[offset + 2]) << 16
+    value |= U32.from_u8(data[offset + 3]) << 24
+    return value
+}
+
+fn fmix32(value: U32) U32 -[]> {
+    h := value
+    h ~|= (h >> 16)
+    h = wrapping(h * U32{0x85ebca6b})
+    h ~|= (h >> 13)
+    h = wrapping(h * U32{0xc2b2ae35})
+    return h ~| (h >> 16)
+}
+
+pub fn hash(data: [U8], seed: U32) U32 -[]> {
+    nblocks :: data.len() /% 4
+    h1 := seed
+    c1 :: U32{0xcc9e2d51}
+    c2 :: U32{0x1b873593}
+
+    loop block in 0..<nblocks {
+        offset :: block * 4
+        k1 := load_le(data, offset)
+        k1 = wrapping(k1 * c1)
+        k1 = rotl32(k1, 15)
+        k1 = wrapping(k1 * c2)
+        h1 ~|= k1
+        h1 = rotl32(h1, 13)
+        h1 = wrapping(h1 * U32{5})
+        h1 = wrapping(h1 + U32{0xe6546b64})
+    }
+
+    tail :: nblocks * 4
+    tail_len :: data.len() % 4
+    k1 := U32{0}
+    if tail_len == 3 { k1 ~|= (U32.from_u8(data[tail + 2]) << 16) }
+    if tail_len >= 2 { k1 ~|= (U32.from_u8(data[tail + 1]) << 8) }
+    if tail_len >= 1 { k1 ~|= U32.from_u8(data[tail]) }
+    if tail_len != 0 {
+        k1 = wrapping(k1 * c1)
+        k1 = rotl32(k1, 15)
+        k1 = wrapping(k1 * c2)
+        h1 ~|= k1
+    }
+
+    length :: U32.from_int(data.len()) ?? U32{0}
+    h1 ~|= length
+    return fmix32(h1)
+}
+
+fn run() {
+    print(hash("".bytes(), U32{0}))
+    print(hash("a".bytes(), U32{0}))
+    print(hash("ab".bytes(), U32{0}))
+    print(hash("abc".bytes(), U32{0}))
+    print(hash("abcd".bytes(), U32{0}))
+    print(hash("hello".bytes(), U32{0}))
+    print(hash("hello world".bytes(), U32{0}))
+    print(hash("hello".bytes(), U32{42}))
+    print(hash([U8]{0, 1, 2, 3, 255}, U32{7}))
+}
+
+#Test("MurmurHash3 x86 32 vectors") {
+    tail_case :: [U8]{0, 1, 2, 3, 255}
+    assert_eq(tail_case.len() % 4, 1)
+    assert_eq(hash("".bytes(), U32{0}), U32{0})
+    assert_eq(hash("a".bytes(), U32{0}), U32{1009084850})
+    assert_eq(hash("ab".bytes(), U32{0}), U32{2613040991})
+    assert_eq(hash("abc".bytes(), U32{0}), U32{3017643002})
+    assert_eq(hash("abcd".bytes(), U32{0}), U32{1139631978})
+    assert_eq(hash("hello".bytes(), U32{0}), U32{613153351})
+    assert_eq(hash("hello world".bytes(), U32{0}), U32{1586663183})
+    assert_eq(hash("hello".bytes(), U32{42}), U32{3806057185})
+    assert_eq(hash(tail_case, U32{7}), U32{3881383995})
+}

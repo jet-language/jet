@@ -403,12 +403,6 @@ use core.encoding.json as json
     out.push_str(&format!(
         r#"}}
 
-#Codable
-struct TensorWire {{
-    shape: [Int]
-    data: [Float]
-}}
-
 pub struct Session {{
     value: Int
 }}
@@ -444,7 +438,18 @@ pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
         out.push_str(&format!(
             r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) Tensor OctaveError! -[FFI.Octave, GPU]> {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
-    request :: json.to_string(TensorWire{{ shape: compute.shape(input), data: compute.to_list(input) }})
+    shape_wire := [DataTree]{{}}
+    loop dimension in compute.shape(input) {{
+        shape_wire.push(DataTree.Int(dimension))
+    }}
+    data_wire := [DataTree]{{}}
+    loop value in compute.to_list(input) {{
+        data_wire.push(DataTree.Float(value))
+    }}
+    request :: json.to_string(DataTree.Object([
+        "shape": DataTree.Array(shape_wire),
+        "data": DataTree.Array(data_wire)
+    ]))
     raw :: abi.{function}(session.value, request, deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(OctaveError.NotRunning)
@@ -456,13 +461,26 @@ pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
     succeeded :: (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
     if !succeeded -> return Err(OctaveError.CommandFailed)
     value :: response.field("value") ?? return Err(OctaveError.Protocol)
-    wire :: json.decode<TensorWire>(json.to_string(value)) ?? return Err(OctaveError.Protocol)
-    if wire.shape.len() != 2 -> return Err(OctaveError.Shape)
-    if wire.shape[0] < 0 || wire.shape[1] < 0 -> return Err(OctaveError.Shape)
-    if wire.data.len() != wire.shape[0] * wire.shape[1] -> return Err(OctaveError.Width)
-    flat :: compute.from_list(wire.data) ?? return Err(OctaveError.Width)
-    result :: compute.reshape(flat, wire.shape) ?? return Err(OctaveError.Shape)
-    return Ok(result)
+    shape_tree :: value.field("shape") ?? return Err(OctaveError.Protocol)
+    if shape_tree == .Array(shape_values) {{
+        if shape_values.len() != 2 -> return Err(OctaveError.Shape)
+        rows :: shape_values[0].int() ?? return Err(OctaveError.Shape)
+        cols :: shape_values[1].int() ?? return Err(OctaveError.Shape)
+        if rows < 0 || cols < 0 -> return Err(OctaveError.Shape)
+        data_tree :: value.field("data") ?? return Err(OctaveError.Protocol)
+        if data_tree == .Array(items) {{
+            if items.len() != rows * cols -> return Err(OctaveError.Width)
+            flat := [Float]{{}}
+            loop item in items {{
+                number :: item.float() ?? return Err(OctaveError.Width)
+                flat.push(number)
+            }}
+            tensor :: compute.from_list(flat) ?? return Err(OctaveError.Width)
+            result :: compute.reshape(tensor, [rows, cols]) ?? return Err(OctaveError.Shape)
+            return Ok(result)
+        }} else {{ return Err(OctaveError.Protocol) }}
+    }} else {{ return Err(OctaveError.Shape) }}
+    return Err(OctaveError.Protocol)
 }}
 
 "#
@@ -615,9 +633,13 @@ mod tests {
     #[test]
     fn generated_surface_keeps_tensor_shape_checks_and_current_arrows() {
         let source = super::render_jet("matrix", &["scale".into()]);
-        assert!(source.contains("TensorWire{ shape: compute.shape(input)"));
+        assert!(source.contains("DataTree.Object(["));
+        assert!(source.contains("\"shape\": DataTree.Array(shape_wire)"));
+        assert!(source.contains(".Array(shape_values) {"));
+        assert!(source.contains("compute.reshape(tensor, [rows, cols])"));
         assert!(source.contains("compute.rank(input) != 2 ->"));
         assert!(source.contains("-[FFI.Octave, GPU]> {"));
+        assert!(!source.contains("TensorWire"));
         assert!(!source.contains("=>") && !source.contains("Session.{"));
     }
 

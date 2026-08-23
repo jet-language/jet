@@ -84,10 +84,18 @@ An exact confusable match or a reserved suffix blocks publish. Edit distance 1
 blocks publish. Edit distance 2 emits `L2608` and allows the publish. A blocked
 name emits `E2608`. `--force` does not bypass this name policy.
 
-The code stores `warn=2` and `block=1` in
-`Source/Publish/NamePolicy.rs`. These values are provisional. No owner-ratified
-threshold decision is recorded in this checkout. Ratify the two values, then
-update this section and the constants before closing #1912.
+### Owner threshold call
+
+The implementation currently stores `warn=2` and `block=1` in
+`Source/Publish/NamePolicy.rs`:
+
+- `block=1`: edit distance 0 or 1 blocks.
+- `warn=2`: edit distance 2 warns and allows publish.
+
+These values are implementation candidates, not registry law. No
+owner-ratified threshold decision is recorded in this checkout. The owner must
+ratify both values, or replace them, before #1912 closes. The ratified decision
+must update this section and the constants together.
 
 ## User surfaces
 

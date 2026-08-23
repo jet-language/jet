@@ -1171,7 +1171,8 @@ mod jet_compute_cuda {
     ld.param.u64 %rd1, [out];
     ld.param.u64 %rd2, [params];
     ld.global.u32 %r1, [%rd2];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra copy_done;
     mul.wide.u32 %rd3, %r0, 4;
@@ -1198,7 +1199,8 @@ copy_done:
     ld.param.u64 %rd3, [params];
     ld.global.u32 %r1, [%rd3];
     ld.global.u32 %r2, [%rd3+16];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra binary_done;
     mul.wide.u32 %rd4, %r0, 4;
@@ -1252,7 +1254,8 @@ binary_done:
     ld.param.u64 %rd2, [params];
     ld.global.u32 %r1, [%rd2];
     ld.global.u32 %r2, [%rd2+16];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra unary_done;
     mul.wide.u32 %rd3, %r0, 4;
@@ -1304,7 +1307,8 @@ unary_done:
     ld.global.u32 %r1, [%rd3+4];
     ld.global.u32 %r2, [%rd3+8];
     ld.global.u32 %r3, [%rd3+12];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     mul.lo.u32 %r4, %r1, %r3;
     setp.ge.u32 %p, %r0, %r4;
     @%p bra matmul_done;
@@ -1349,7 +1353,8 @@ matmul_done:
     ld.param.u64 %rd1, [out];
     ld.param.u64 %rd2, [params];
     ld.global.u32 %r1, [%rd2];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ne.u32 %p, %r0, 0;
     @%p bra sum_done;
     mov.u32 %r2, 0;
@@ -1383,7 +1388,8 @@ sum_done:
     ld.param.u64 %rd2, [out];
     ld.param.u64 %rd3, [params];
     ld.global.u32 %r1, [%rd3];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ne.u32 %p, %r0, 0;
     @%p bra mse_done;
     mov.u32 %r2, 0;
@@ -1426,7 +1432,8 @@ mse_done:
     ld.param.u64 %rd4, [params];
     ld.global.u32 %r1, [%rd4];
     ld.global.u32 %r2, [%rd4+16];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra mse_grad_done;
     mul.wide.u32 %rd5, %r0, 4;
@@ -1471,7 +1478,8 @@ mse_grad_done:
     ld.param.u64 %rd4, [out];
     ld.param.u64 %rd5, [params];
     ld.global.u32 %r1, [%rd5];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ne.u32 %p, %r0, 0;
     @%p bra mse_jvp_done;
     mov.u32 %r2, 0;
@@ -1518,7 +1526,8 @@ mse_jvp_done:
     ld.param.u64 %rd3, [params];
     ld.global.u32 %r1, [%rd3];
     ld.global.f32 %f0, [%rd3+20];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra sgd_done;
     mul.wide.u32 %rd4, %r0, 4;
@@ -1547,7 +1556,8 @@ sgd_done:
     ld.param.u64 %rd2, [params];
     ld.global.u32 %r1, [%rd2];
     ld.global.f32 %f0, [%rd2+20];
-    mov.u32 %r0, %tid.x;
+    mov.u32 %r0, %ctaid.x;
+    mad.lo.u32 %r0, %r0, %ntid.x, %tid.x;
     setp.ge.u32 %p, %r0, %r1;
     @%p bra scale_done;
     mul.wide.u32 %rd3, %r0, 4;
@@ -1745,8 +1755,12 @@ scale_done:
         fn new(context: &Context, bytes: usize) -> Result<Self, JetComputeError> {
             context.make_current()?;
             let mut raw = 0;
+            // CUDA rejects zero-byte allocations. Keep empty logical buffers
+            // valid so zero-inner-dimension matmul still matches the CPU
+            // oracle; kernels never dereference their empty inputs.
+            let allocation_bytes = bytes.max(1);
             check(
-                unsafe { (context.api.mem_alloc)(&mut raw, bytes) },
+                unsafe { (context.api.mem_alloc)(&mut raw, allocation_bytes) },
                 "device allocation",
             )?;
             Ok(Self {
@@ -2236,7 +2250,9 @@ mod jet_compute_vulkan {
     const VK_PIPELINE_BIND_POINT_COMPUTE: u32 = 1;
     const VK_COMMAND_BUFFER_LEVEL_PRIMARY: u32 = 0;
     const RTLD_NOW: c_int = 2;
-    const RTLD_LOCAL: c_int = 4;
+    // glibc defines RTLD_LOCAL as zero; 4 is RTLD_NOLOAD and would make the
+    // explicit Vulkan backend report an available system loader as missing.
+    const RTLD_LOCAL: c_int = 0;
 
     #[repr(C)]
     struct ApplicationInfo {
@@ -3624,9 +3640,7 @@ mod jet_compute_vulkan {
     }
 
     pub fn available() -> bool {
-        Api::load()
-            .and_then(Context::new)
-            .is_ok()
+        Api::load().and_then(Context::new).is_ok()
     }
 
     pub fn copy(values: &[f32]) -> Result<Vec<f32>, JetComputeError> {
@@ -8039,7 +8053,7 @@ fn jet_compute_unary_vjp(
         "exp" => jet_compute_binary("mul", output, cot),
         "log" => jet_compute_binary("div", cot, input),
         "sqrt" => {
-            let two = jet_compute_full(&output.shape, 2.0)?;
+            let two = jet_compute_tensor_from_shape_like(output, output.shape.clone(), 2.0)?;
             let denominator = jet_compute_binary("mul", &two, output)?;
             jet_compute_binary("div", cot, &denominator)
         }

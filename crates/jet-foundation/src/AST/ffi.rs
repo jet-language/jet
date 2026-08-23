@@ -832,11 +832,22 @@ impl ExternFn {
                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
                     )
             }
+            Some(Type::Bool) => {
+                self.params.is_empty()
+                    || matches!(self.params.as_slice(), [param] if param.ty == Type::Bool)
+            }
             Some(Type::String) => {
                 matches!(self.params.as_slice(), [param] if param.ty == Type::String)
                     || matches!(
                         self.params.as_slice(),
                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+                    )
+                    || matches!(
+                        self.params.as_slice(),
+                        [handle, code, deadline]
+                            if handle.ty == Type::Int
+                                && code.ty == Type::String
+                                && deadline.ty == Type::Int
                     )
             }
             _ => false,

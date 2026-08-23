@@ -41,7 +41,7 @@ fn python_sidecar_binds_runs_and_launders_failure() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("ops.py"),
-        "def add(left: int, right: int) -> int:\n    return left + right\n\ndef fail(value: int) -> int:\n    raise RuntimeError('secret foreign detail')\n",
+        "def add(left: int, right: int) -> int:\n    return left + right\n\ndef negate(value: bool) -> bool:\n    return not value\n\ndef fail(value: int) -> int:\n    raise RuntimeError('secret foreign detail')\n",
     )
     .unwrap();
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -104,7 +104,7 @@ fn python_sidecar_binds_runs_and_launders_failure() {
 
     fs::write(
         root.join("main.jet"),
-        "use py.ops as ops\nfn run() -[FFI.Py, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.fail(7) ?? 99)\n}\n",
+        "use py.ops as ops\nfn run() -[FFI.Py, IO]> {\n    print(ops.add(2, 3) ?? panic(\"add failed\"))\n    print(ops.negate(true) ?? true)\n    print(ops.fail(7) ?? 99)\n}\n",
     )
     .unwrap();
     let run = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -118,7 +118,7 @@ fn python_sidecar_binds_runs_and_launders_failure() {
         "Python sidecar run failed: {}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n99\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "5\nfalse\n99\n");
 
     fs::write(
         root.join("ops.py"),

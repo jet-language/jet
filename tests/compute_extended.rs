@@ -5,7 +5,10 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, jit_run_traced, run_default_multi};
+use tir_support::{
+    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, jit_run_traced,
+    run_default_multi,
+};
 
 fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
     let (aot_code, aot_stdout) = build_and_run(name, source);
@@ -203,6 +206,13 @@ fn run() {
 }
 
 #[test]
+fn metal_public_path_matches_cpu_oracle_and_declared_failure() {
+    let source = include_str!("../examples/features/tooling/compute_metal.jet");
+    let expected = include_str!("../examples/features/expected/tooling/compute_metal.out");
+    assert_tiers_agree("compute_metal_public_path", source, expected);
+}
+
+#[test]
 fn safe_kernel_boundary_and_f32_profile_are_explicit() {
     assert_aot_and_default_parity(
         "compute_kernel_targeted",
@@ -352,4 +362,12 @@ fn run() {
 "#,
     )
     .expect("Vulkan and WebGPU devices must be public core.compute seams");
+}
+
+#[test]
+fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu() {
+    assert_example_cli_tiers_agree(
+        "tooling/compute_vulkan_webgpu",
+        "vulkan:accepted\nwebgpu:rejected\n",
+    );
 }

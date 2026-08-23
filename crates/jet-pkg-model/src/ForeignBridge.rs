@@ -306,7 +306,7 @@ pub fn compile_scalar_sidecar_with_identity(
     let staged_archive = store.join(format!(".{abi}.a.tmp.{}", std::process::id()));
     fs::write(
         &c_path,
-        render_scalar_c(abi, runtime, worker, source, &descriptor.stamp(), functions)?,
+        render_scalar_c(abi, runtime, worker, source, descriptor, functions)?,
     )
     .map_err(|error| format!("could not write foreign bridge: {error}"))?;
     let compile = Command::new("cc")
@@ -563,9 +563,10 @@ fn render_scalar_c(
     runtime: &str,
     worker: &Path,
     source: &Path,
-    descriptor: &str,
+    descriptor: BinderDescriptor,
     functions: &[ScalarBridgeFunction],
 ) -> Result<String, String> {
+    let descriptor = descriptor.stamp();
     let worker = c_escape(&shell_quote(&worker.to_string_lossy()));
     let source = c_escape(&shell_quote(&source.to_string_lossy()));
     let runtime = c_escape(&shell_quote(runtime));
@@ -651,7 +652,7 @@ fn format_spec(scalar: ForeignScalar) -> Option<&'static str> {
     match scalar {
         ForeignScalar::Int => Some(" %lld"),
         ForeignScalar::Float => Some(" %.17g"),
-        ForeignScalar::Bool => Some(" %d"),
+        ForeignScalar::Bool => Some(" %s"),
         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
     }
 }
@@ -660,7 +661,7 @@ fn format_arg(scalar: ForeignScalar, index: usize) -> Option<String> {
     match scalar {
         ForeignScalar::Int => Some(format!("(long long)arg{index}")),
         ForeignScalar::Float => Some(format!("arg{index}")),
-        ForeignScalar::Bool => Some(format!("(int)(arg{index} ? 1 : 0)")),
+        ForeignScalar::Bool => Some(format!("arg{index} ? \"true\" : \"false\"")),
         ForeignScalar::Char | ForeignScalar::String | ForeignScalar::Unsupported => None,
     }
 }
@@ -856,7 +857,7 @@ mod tests {
             "python3",
             Path::new("worker.py"),
             Path::new("probe.py"),
-            &descriptor.stamp(),
+            descriptor,
             &functions,
         )
         .unwrap();
@@ -869,7 +870,7 @@ mod tests {
             "python3",
             Path::new("worker.py"),
             Path::new("probe.py"),
-            &changed.stamp(),
+            changed,
             &functions,
         )
         .unwrap();

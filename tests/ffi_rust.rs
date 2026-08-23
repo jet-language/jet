@@ -56,8 +56,8 @@ fn run() {
         "Rust bridge provenance must carry the canonical descriptor: {provenance}"
     );
     assert!(
-        !output.rust.contains("=>"),
-        "generated Rust must use the ratified arrow/effect surface"
+        output.rust.contains("jet_ffi_rust_max"),
+        "the production bridge wrapper must reach generated Rust"
     );
 
     let rust_source = root.join("main.rs");

@@ -4290,8 +4290,10 @@ via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
 runtime-side only, I6) registers **zero host imports** — deny-by-default
 authority: a sandbox that tried to touch the filesystem, network, or clock
 simply fails to instantiate at load time, reported as a clean `Err`, never a
-crash (I2). A sandbox's own code may not use any effect either — caught at
-build time as E1258, not deferred to that runtime failure.
+crash (I2). A sandbox's own code may not use any host effect — caught at build
+time as E1258, not deferred to that runtime failure. Guest-local `Mem` effects
+remain allowed because the Component Model Text ABI needs sandbox memory for
+string arguments and results.
 
 D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
 target field (`sandbox { export: "mathkit" }`), defaulting to the package

@@ -899,14 +899,17 @@ pub(crate) fn run_compile_cmd(
         };
         if let Some((entries, fact_registry)) = effect_view {
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
-            // host registers zero host imports, so any effect used by the
-            // plugin's own code would fail to instantiate at load time. Catch
-            // it here, at build time, with a clean diagnostic naming the
-            // effect, instead of deferring to that runtime failure (E1258).
+            // host registers zero host imports, so any host effect used by the
+            // plugin's own code would fail to instantiate at load time. Guest
+            // memory allocation is not a host import; Component Model Text
+            // exports require it. Catch every other effect here, at build time,
+            // with a clean diagnostic (E1258).
             if is_plugin {
                 if let Some(root) = entries.iter().find(|p| p.name == "root") {
-                    if !root.effects.is_empty() {
-                        let diag = jet::Manifest::e1258(&jet::Sema::show_set(&root.effects));
+                    let mut forbidden = root.effects.clone();
+                    forbidden.retain(|effect| jet::Sema::effect_root(effect) != "Mem");
+                    if !forbidden.is_empty() {
+                        let diag = jet::Manifest::e1258(&jet::Sema::show_set(&forbidden));
                         report_problems(mode, file, &src, &[diag]);
                         exit(ExitCodes::USER_ERROR);
                     }
