@@ -537,6 +537,7 @@ impl<'a> Checker<'a> {
                 } else if let Some(ty) = &ty {
                     let nominal = match ty {
                         Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                        Type::String => Some(Syntax::TYPE_STRING),
                         _ => None,
                     };
                     if !nominal.is_some_and(|name| {

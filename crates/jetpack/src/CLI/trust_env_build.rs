@@ -667,7 +667,31 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_provider_paths, validate_task_secret_allowlist};
+    use super::{build_sandbox_outcome, resolve_provider_paths, validate_task_secret_allowlist};
+
+    #[test]
+    fn sandbox_claim_uses_recorded_backend_or_says_no_child_ran() {
+        assert_eq!(
+            build_sandbox_outcome(
+                1,
+                0,
+                &[("non-executing".into(), "no child launched".into(),)],
+            ),
+            "non-executing (no child launched)"
+        );
+        assert_eq!(
+            build_sandbox_outcome(
+                1,
+                0,
+                &[("linux-bwrap".into(), "filesystem=source-readonly".into(),)],
+            ),
+            "enforced via linux-bwrap (filesystem=source-readonly)"
+        );
+        assert_eq!(
+            build_sandbox_outcome(1, 0, &[]),
+            "sandbox receipt missing for 1 built output(s)"
+        );
+    }
 
     #[test]
     fn lua_metadata_paths_resolve_inside_realized_output() {
@@ -771,6 +795,48 @@ fn select_request_from_flags(flags: &Flags) -> SelectRequest {
 fn report_select_error(theme: &Theme, d: &crate::Diagnostics::Diagnostic) -> i32 {
     theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
     2
+}
+
+fn sandbox_receipt(entry: &Store::StoreEntry) -> Option<(String, String)> {
+    let producer = Store::ProducerRecord::decode(&entry.producer_record).ok()?;
+    Some((
+        producer.facts.get("build.sandbox")?.clone(),
+        producer.facts.get("build.sandbox_policy")?.clone(),
+    ))
+}
+
+fn build_sandbox_outcome(
+    built: usize,
+    substituted: usize,
+    receipts: &[(String, String)],
+) -> String {
+    if built > 0 {
+        if receipts.len() < built {
+            return format!(
+                "sandbox receipt missing for {} built output(s)",
+                built - receipts.len()
+            );
+        }
+        let mut classes = std::collections::BTreeSet::new();
+        let mut policies = std::collections::BTreeSet::new();
+        for (class, policy) in receipts {
+            classes.insert(class.as_str());
+            policies.insert(policy.as_str());
+        }
+        if classes.iter().all(|class| *class == "non-executing") {
+            return "non-executing (no child launched)".to_string();
+        }
+        return format!(
+            "enforced via {} ({})",
+            classes.into_iter().collect::<Vec<_>>().join(","),
+            policies.into_iter().collect::<Vec<_>>().join(" | ")
+        );
+    }
+    if substituted > 0 {
+        "trusted substitution (no local executable launched)".to_string()
+    } else {
+        "verified cache only".to_string()
+    }
 }
 
 /// Build (or test) each selected workspace member via the core provider.
@@ -981,6 +1047,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
     let mut realized_refs = Vec::new();
     let mut holes = Vec::new();
+    let mut sandbox_receipts = Vec::new();
     let name_w = name_column_width(&plan.refs);
     let total_steps = plan.refs.len() + plan.adapters.len();
     let mut completed_steps = 0usize;
@@ -1019,6 +1086,11 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 if live_mode {
                     live.finish(&line);
                 }
+                if state == Provider::SourceState::Built {
+                    if let Some(receipt) = sandbox_receipt(&entry) {
+                        sandbox_receipts.push(receipt);
+                    }
+                }
                 realized_refs.push(entry.reference);
                 completed_steps += 1;
                 match state {
@@ -1047,6 +1119,11 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         match realize_adapter(theme, &roots, &parsed.flags, adapter, &plan.table, false) {
             Some((entry, state, _lease)) => {
+                if state == Provider::SourceState::Built {
+                    if let Some(receipt) = sandbox_receipt(&entry) {
+                        sandbox_receipts.push(receipt);
+                    }
+                }
                 realized_refs.push(entry.reference);
                 completed_steps += 1;
                 match state {
@@ -1080,14 +1157,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             cached,
             substituted
         ));
-        let sandbox = RuntimePolicy::detect_sandbox();
-        let outcome = if built > 0 {
-            format!("enforced via {} ({})", sandbox.mechanism, sandbox.policy)
-        } else if substituted > 0 {
-            format!("trusted substitution ({})", sandbox.reason)
-        } else {
-            "verified cache only".to_string()
-        };
+        let outcome = build_sandbox_outcome(built, substituted, &sandbox_receipts);
         theme.detail(&format!("build sandbox outcome: {outcome}"));
         auto_clean_after_success(theme, &roots);
         0

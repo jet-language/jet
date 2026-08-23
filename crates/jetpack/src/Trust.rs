@@ -195,11 +195,13 @@ fn unescape_component(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `~/.jet/trust`. `HOME` is test-overridable (existing convention, see
+/// `~/.jet/trust`. `HOME` is preferred and test-overridable; Windows falls
+/// back to `USERPROFILE` (existing convention, see
 /// `JetOS::resolve_config_path` and `tests/jetpack_jetos.rs`'s `os_build_default_
 /// config_path_uses_home_dot_jet`).
 pub fn store_path() -> PathBuf {
     let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(Syntax::CONFIG_DEFAULT_DIR)

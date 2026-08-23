@@ -1216,11 +1216,26 @@ fn commit_staged_output(staged: &Path, output_root: &Path) -> Result<(), Diagnos
 
 fn remove_path(path: &Path) {
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
-        if metadata.is_dir() {
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
+            let _ = std::fs::remove_file(path);
+        } else if metadata.is_dir() {
             let _ = std::fs::remove_dir_all(path);
         } else {
             let _ = std::fs::remove_file(path);
         }
+    }
+}
+
+fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x0000_0400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
     }
 }
 
@@ -1235,16 +1250,35 @@ fn recipe_io_error(what: &str, error: std::io::Error) -> Diagnostic {
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let source_metadata = std::fs::symlink_metadata(src)?;
+    if source_metadata.file_type().is_symlink() || is_reparse_point(&source_metadata) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "recipe tree root is a symlink or reparse point `{}`",
+                src.display()
+            ),
+        ));
+    }
+    if !source_metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("recipe tree root is not a directory `{}`", src.display()),
+        ));
+    }
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let from = entry.path();
         let to = dst.join(entry.file_name());
         let metadata = std::fs::symlink_metadata(&from)?;
-        if metadata.file_type().is_symlink() {
+        if metadata.file_type().is_symlink() || is_reparse_point(&metadata) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
-                format!("recipe source contains symlink `{}`", from.display()),
+                format!(
+                    "recipe source contains a symlink or reparse point `{}`",
+                    from.display()
+                ),
             ));
         }
         if metadata.is_dir() {

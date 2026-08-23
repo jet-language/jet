@@ -533,6 +533,83 @@ pub fn cache_expectation(
     }
 }
 
+/// Return the exact external approval subject for a Core Cargo action without
+/// executing package code. The CLI gates this subject before the Store reaches
+/// the provider; project metadata can therefore describe a build but cannot
+/// authorize its Cargo/build-script execution.
+pub(crate) fn core_build_identity(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<Option<String>, String> {
+    if resolve_kind(spec, table, ctx.offline, ctx.store_dir) != ProviderKind::Core {
+        return Ok(None);
+    }
+    let upstream = table.upstream(spec.source.label()).ok_or_else(|| {
+        format!(
+            "Core source `{}` has no resolved upstream",
+            spec.source.label()
+        )
+    })?;
+    let repo = source_repo(upstream, &spec.package, ctx)
+        .map_err(|error| format!("could not resolve Core source: {error:?}"))?;
+    let canonical_package = find_canonical_package(&repo, &spec.package)?;
+    let canonical_facts = canonical_package.as_ref().map(|(_, facts)| facts);
+    let src_dir = if let Some(source) = canonical_package
+        .as_ref()
+        .and_then(|(root, facts)| canonical_source_dir(root, facts))
+    {
+        source
+    } else {
+        Package::discover_module_in(&repo, &spec.package)
+            .map_err(|error| format!("could not identify Core source: {error:?}"))?
+    };
+    validate_core_source_tree(&src_dir)?;
+    let source_digest = core_tree_fingerprint(&src_dir)?;
+    let (manifest, canonical) = if canonical_facts.is_some() {
+        (None, canonical_facts)
+    } else {
+        let manifest = match Package::PackageFacts::load(&repo) {
+            None => None,
+            Some(Ok(manifest)) => Some(manifest),
+            Some(Err(error)) => return Err(format!("Core package manifest is invalid: {error:?}")),
+        };
+        (manifest, None)
+    };
+    let kind = canonical
+        .and_then(|facts| canonical_package_kind(facts, &spec.package))
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|manifest| manifest.package_kind(&spec.package))
+        })
+        .unwrap_or_else(|| infer_package_kind(&src_dir));
+    if kind != Package::PackageKind::Library || !src_dir.join("Cargo.toml").is_file() {
+        return Ok(None);
+    }
+    let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
+    if ctx.offline && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned) {
+        return Ok(None);
+    }
+    let recipe = core_recipe_identity(
+        &src_dir,
+        &spec.package,
+        manifest.as_ref(),
+        kind,
+        canonical,
+        toolchain.as_ref(),
+    )?;
+    let platform = super::Envelope::host_platform();
+    let authority = format!(
+        "jet-core-build-hook.v1\npackage={}\nprovider={}\nsource={}\nsource_digest={}\nplatform={}\nrecipe={}\ncapabilities=exec:cargo\n",
+        spec.package, upstream, spec.raw, source_digest, platform, recipe
+    );
+    Ok(Some(format!(
+        "build-sha256:{}",
+        SHA256::sha256_hex(authority.as_bytes())
+    )))
+}
+
 /// Derive the adapter cache identity without trusting an existing output.
 /// Staging reads the declared source; the output path follows only from those
 /// bytes plus the normalized recipe.
@@ -1385,11 +1462,13 @@ impl Provider for CoreProvider {
                 .and_then(|pm| pm.version.clone())
                 .unwrap_or_default()
         };
-        let (bin, rlib, recipe_id) = match kind {
+        let (bin, rlib, recipe_id, sandbox_class, sandbox_policy) = match kind {
             Package::PackageKind::Executable => (
                 out_dir.join("bin").to_string_lossy().into_owned(),
                 String::new(),
                 "core-source",
+                "non-executing".to_string(),
+                "no child launched".to_string(),
             ),
             Package::PackageKind::Library => {
                 // D-BFS1: if the package ships a Cargo.toml, compile it to an
@@ -1417,12 +1496,29 @@ impl Provider for CoreProvider {
                                 .to_string(),
                         ));
                     }
-                    let rlib =
+                    let cargo_build =
                         build_rlib_from_cargo_mode(&out_dir, ctx.store_dir, toolchain, ctx.offline)
-                            .map_err(ProviderError::CoreBuild)?;
-                    (String::new(), rlib, "core-cargo-rlib")
+                            .map_err(|error| match error {
+                                CargoBuildError::SandboxUnavailable(reason) => {
+                                    ProviderError::SandboxUnavailable(reason)
+                                }
+                                CargoBuildError::Failed(reason) => ProviderError::CoreBuild(reason),
+                            })?;
+                    (
+                        String::new(),
+                        cargo_build.rlib,
+                        "core-cargo-rlib",
+                        cargo_build.sandbox_class,
+                        cargo_build.sandbox_policy,
+                    )
                 } else {
-                    (String::new(), String::new(), "core-source")
+                    (
+                        String::new(),
+                        String::new(),
+                        "core-source",
+                        "non-executing".to_string(),
+                        "no child launched".to_string(),
+                    )
                 }
             }
         };
@@ -1448,6 +1544,8 @@ impl Provider for CoreProvider {
             BTreeMap::from([
                 ("action.kind".into(), "core-build".into()),
                 ("action.recipe".into(), recipe_identity.clone()),
+                ("build.sandbox".into(), sandbox_class.clone()),
+                ("build.sandbox_policy".into(), sandbox_policy.clone()),
             ]),
             &toolchain_facts(toolchain.as_ref()),
             &identity,
@@ -1463,6 +1561,8 @@ impl Provider for CoreProvider {
                     "execution.platform".into(),
                     super::Envelope::host_platform(),
                 ),
+                ("build.sandbox".into(), sandbox_class),
+                ("build.sandbox_policy".into(), sandbox_policy),
             ]),
         )?;
         Ok(Realized {
@@ -1626,7 +1726,7 @@ impl Drop for BuildScratch {
 /// a hangar-scoped scratch (`<hangar>/build-scratch/<key>`) swept immediately
 /// after the build and on crash (D-JPK-GC1). A prior realize of the same
 /// content-addressed object leaves the rlib in place, so the rebuild is skipped
-/// (cache hit). Returns the absolute path to the rlib inside the object, or an
+/// (cache hit). Returns the rlib path plus the actual sandbox receipt, or an
 /// error. Every failure is returned to the caller. A missing rlib is not a valid
 /// library realization: silently returning an empty artifact would make the
 /// package appear built while leaving the eventual failure to an unrelated
@@ -1636,6 +1736,17 @@ impl Drop for BuildScratch {
 /// (D-JPK-BUILDTOOL1=A): the build execs *its* `cargo`, so a bridge's output
 /// hash does not depend on whatever host `cargo` happens to be on PATH when the
 /// toolchain is a pinned object.
+struct CargoBuildReceipt {
+    rlib: String,
+    sandbox_class: String,
+    sandbox_policy: String,
+}
+
+enum CargoBuildError {
+    SandboxUnavailable(String),
+    Failed(String),
+}
+
 #[cfg(test)]
 pub(crate) fn build_rlib_from_cargo(
     pkg_dir: &Path,
@@ -1643,6 +1754,10 @@ pub(crate) fn build_rlib_from_cargo(
     toolchain: &super::Toolchain::Toolchain,
 ) -> Result<String, String> {
     build_rlib_from_cargo_mode(pkg_dir, hangar_dir, toolchain, false)
+        .map(|build| build.rlib)
+        .map_err(|error| match error {
+            CargoBuildError::SandboxUnavailable(reason) | CargoBuildError::Failed(reason) => reason,
+        })
 }
 
 fn build_rlib_from_cargo_mode(
@@ -1650,44 +1765,66 @@ fn build_rlib_from_cargo_mode(
     hangar_dir: &Path,
     toolchain: &super::Toolchain::Toolchain,
     offline: bool,
-) -> Result<String, String> {
+) -> Result<CargoBuildReceipt, CargoBuildError> {
     if offline && !toolchain.pinned {
-        return Err("offline Core builds require a pinned realized toolchain".to_string());
+        return Err(CargoBuildError::Failed(
+            "offline Core builds require a pinned realized toolchain".to_string(),
+        ));
     }
     if offline
         && !std::fs::symlink_metadata(pkg_dir.join("Cargo.lock"))
             .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
             .unwrap_or(false)
     {
-        return Err("offline Core builds require a regular Cargo.lock".to_string());
+        return Err(CargoBuildError::Failed(
+            "offline Core builds require a regular Cargo.lock".to_string(),
+        ));
     }
     // Cache hit: a previously realized object already carries its rlib.
     if let Some(existing) = find_rlib_in(pkg_dir) {
-        return Ok(existing);
+        return Ok(CargoBuildReceipt {
+            rlib: existing,
+            sandbox_class: "non-executing".to_string(),
+            sandbox_policy: "no child launched (rlib already present)".to_string(),
+        });
     }
     let cache_key = pkg_dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "pkg".to_string());
-    let scratch = BuildScratch::new(hangar_dir, &cache_key)?;
-    let mut command = Command::new(&toolchain.cargo);
-    command
-        .arg("build")
-        .arg("--lib")
-        .arg("--release")
-        .arg("--manifest-path")
-        .arg(pkg_dir.join("Cargo.toml"));
+    let scratch = BuildScratch::new(hangar_dir, &cache_key).map_err(CargoBuildError::Failed)?;
+    let mut args = vec![
+        "build".to_string(),
+        "--lib".to_string(),
+        "--release".to_string(),
+        "--manifest-path".to_string(),
+        "/work/source/Cargo.toml".to_string(),
+    ];
     if offline {
-        command.arg("--offline").arg("--locked");
+        args.push("--offline".to_string());
+        args.push("--locked".to_string());
     }
-    let out = command
-        .env("CARGO_TARGET_DIR", &scratch.path)
-        .output()
-        .map_err(|error| format!("could not execute pinned cargo: {error}"))?;
+    let mut env = BTreeMap::new();
+    env.insert("CARGO_TARGET_DIR".to_string(), "/work/output".to_string());
+    env.insert("SOURCE_DATE_EPOCH".to_string(), "0".to_string());
+    let sandboxed = jet_comptime::Comptime::Build::run_native_sandboxed(
+        &toolchain.cargo,
+        &args,
+        pkg_dir,
+        Some(&scratch.path),
+        &env,
+        false,
+    )
+    .map_err(|error| {
+        CargoBuildError::SandboxUnavailable(format!(
+            "Core Cargo action could not enter the native sandbox: {error:?}"
+        ))
+    })?;
+    let out = sandboxed.output;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        return Err(format!(
+        return Err(CargoBuildError::Failed(format!(
             "pinned cargo failed with {}{}{}",
             out.status,
             if stderr.is_empty() { "" } else { ": " },
@@ -1696,12 +1833,16 @@ fn build_rlib_from_cargo_mode(
             } else {
                 stderr.trim()
             }
-        ));
+        )));
     }
     // Find the rlib in the scratch `release/` dir and copy it into the object.
     let release = scratch.path.join("release");
     let built = std::fs::read_dir(&release)
-        .map_err(|error| format!("pinned cargo produced no release directory: {error}"))?
+        .map_err(|error| {
+            CargoBuildError::Failed(format!(
+                "sandboxed cargo produced no release directory: {error}"
+            ))
+        })?
         .flatten()
         .map(|e| e.path())
         .find(|p| {
@@ -1711,14 +1852,21 @@ fn build_rlib_from_cargo_mode(
                     .map(|n| n.starts_with("lib"))
                     .unwrap_or(false)
         })
-        .ok_or_else(|| "pinned cargo produced no lib*.rlib artifact".to_string())?;
-    let file_name = built
-        .file_name()
-        .ok_or_else(|| "pinned cargo rlib has no file name".to_string())?;
+        .ok_or_else(|| {
+            CargoBuildError::Failed("sandboxed cargo produced no lib*.rlib artifact".to_string())
+        })?;
+    let file_name = built.file_name().ok_or_else(|| {
+        CargoBuildError::Failed("sandboxed cargo rlib has no file name".to_string())
+    })?;
     let dest = pkg_dir.join(file_name);
-    std::fs::copy(&built, &dest)
-        .map_err(|error| format!("could not copy rlib into package object: {error}"))?;
-    Ok(dest.to_string_lossy().into_owned())
+    std::fs::copy(&built, &dest).map_err(|error| {
+        CargoBuildError::Failed(format!("could not copy rlib into package object: {error}"))
+    })?;
+    Ok(CargoBuildReceipt {
+        rlib: dest.to_string_lossy().into_owned(),
+        sandbox_class: sandboxed.mechanism,
+        sandbox_policy: sandboxed.policy,
+    })
     // `scratch` drops here → the cargo target dir is swept.
 }
 
@@ -2332,8 +2480,20 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     let mut replay_facts = BTreeMap::from([
         ("nix.drv_path".into(), drv_path.to_string()),
         ("nix.reference".into(), spec.raw.clone()),
+        ("build.sandbox".into(), "non-executing".into()),
+        (
+            "build.sandbox_policy".into(),
+            "trusted substitution (no local executable launched)".into(),
+        ),
     ]);
-    let mut facts = BTreeMap::from([("nix.drv_path".into(), drv_path.to_string())]);
+    let mut facts = BTreeMap::from([
+        ("nix.drv_path".into(), drv_path.to_string()),
+        ("build.sandbox".into(), "non-executing".into()),
+        (
+            "build.sandbox_policy".into(),
+            "trusted substitution (no local executable launched)".into(),
+        ),
+    ]);
     for (name, path) in &named_outputs {
         replay_facts.insert(format!("nix.output.{name}"), path.clone());
         facts.insert(format!("nix.output.{name}"), path.clone());
@@ -3479,14 +3639,12 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
-    fn bridge_build_uses_pinned_toolchain() {
-        // T2 (D-JPK-BUILDTOOL1=A): a bridge build execs the *pinned* toolchain's
-        // cargo, not host cargo. A fixture toolchain stands in for #179's hangar
-        // object; its cargo shim emits a deterministic rlib, so the output hash
-        // is stable across builds regardless of host cargo. Two fresh builds
-        // (no cache hit) produce byte-identical output — proof the pinned tool
-        // ran, not whatever host cargo is on PATH.
+    #[cfg(target_os = "linux")]
+    fn bridge_build_rejects_untrusted_toolchain_outside_native_closure() {
+        // D-JPK-SANDBOX2=D: a pinned-looking cargo path is not enough to permit
+        // an executable build. The Linux substrate accepts only tools from the
+        // immutable closure, so a fixture outside `/nix/store` fails before its
+        // shim can create an rlib.
         use super::super::Toolchain::Toolchain;
         use std::collections::HashMap;
         use std::os::unix::fs::PermissionsExt;
@@ -3512,28 +3670,22 @@ mod tests {
         let hangar = base.join("hangar");
         std::fs::create_dir_all(&hangar).unwrap();
 
-        let build_once = |tag: &str| -> Vec<u8> {
-            let pkg = base.join(tag);
-            std::fs::create_dir_all(&pkg).unwrap();
-            std::fs::write(pkg.join("Cargo.toml"), "[package]\nname=\"math\"\n").unwrap();
-            let rlib =
-                build_rlib_from_cargo(&pkg, &hangar, &tc).expect("pinned build produced rlib");
-            let bytes = std::fs::read(&rlib).unwrap();
-            // The rlib lands inside the object, and the scratch is swept.
-            assert!(rlib.starts_with(pkg.to_string_lossy().as_ref()));
-            assert!(
-                !hangar.join(BUILD_SCRATCH_DIR).join(tag).exists(),
-                "build scratch must be swept after the build"
-            );
-            bytes
-        };
-
-        let a = build_once("pkg-a");
-        let b = build_once("pkg-b");
-        assert_eq!(a, b"PINNED-RLIB-BYTES", "the pinned toolchain's cargo ran");
-        assert_eq!(
-            a, b,
-            "output is stable across builds with the pinned toolchain"
+        let pkg = base.join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("Cargo.toml"), "[package]\nname=\"math\"\n").unwrap();
+        let error = build_rlib_from_cargo(&pkg, &hangar, &tc)
+            .expect_err("a tool outside the immutable closure must not run");
+        assert!(
+            error.contains("outside the immutable tool closure")
+                || error.contains("native sandbox"),
+            "unexpected refusal: {error}"
+        );
+        assert!(!pkg.join("libmath.rlib").exists());
+        assert!(
+            std::fs::read_dir(hangar.join(BUILD_SCRATCH_DIR))
+                .map(|entries| entries.flatten().next().is_none())
+                .unwrap_or(true),
+            "build scratch must be swept after refusal"
         );
         std::fs::remove_dir_all(&base).ok();
     }

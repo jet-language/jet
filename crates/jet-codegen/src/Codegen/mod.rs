@@ -1414,6 +1414,9 @@ fn push_corelib_prelude_body(
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str("\nmod jet_process_sandbox {\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
+        out.push_str("\n}\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
@@ -2301,6 +2304,85 @@ pub(crate) fn emit_synthetic_foreign_close_impls(
     }
 
     collect(cx, items, out, &mut HashSet::new());
+    out.push('\n');
+}
+
+/// D-FFI-CAP1: imported C modules have their own Rust namespace, but a handle
+/// consumed in the entry module must implement the entry module's `Close`
+/// trait. Emit that cross-module impl at the root and route it through the
+/// imported wrapper; otherwise rustc sees two same-named `Close` traits.
+pub(crate) fn emit_imported_foreign_close_impls(
+    cx: &Cx,
+    bundle: &ProgramBundle,
+    out: &mut String,
+) {
+    fn seed_entry_types(cx: &Cx, items: &[Item], emitted: &mut HashSet<String>) {
+        for item in items {
+            match item {
+                Item::ExternRust(block) => {
+                    for function in &block.functions {
+                        if function.close.is_some() {
+                            if let Some(return_type) = &function.return_type {
+                                emitted.insert(cx.rust_type(return_type));
+                            }
+                        }
+                    }
+                }
+                Item::CModule(module) => {
+                    for function in &module.functions {
+                        if function.close.is_some() {
+                            if let Some(return_type) = &function.return_type {
+                                emitted.insert(qualify_named_rust_type(cx, return_type));
+                            }
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        seed_entry_types(cx, body, emitted);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut emitted = HashSet::new();
+    seed_entry_types(cx, &bundle.modules[bundle.entry].items, &mut emitted);
+    let imported_targets = bundle
+        .cffi
+        .import_links
+        .iter()
+        .map(|link| link.target_idx)
+        .collect::<HashSet<_>>();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        if module_idx == bundle.entry || !imported_targets.contains(&module_idx) {
+            continue;
+        }
+        let rust_module = mangle(&module.alias);
+        for item in &module.items {
+            match item {
+                Item::CModule(c_module) => {
+                    for function in &c_module.functions {
+                        let Some((close_name, _)) = &function.close else {
+                            continue;
+                        };
+                        let Some(return_type) = &function.return_type else {
+                            continue;
+                        };
+                        let ty = cx.rust_type(return_type);
+                        if emitted.insert(ty.clone()) {
+                            out.push_str(&format!(
+                                "impl __jet_Close for {ty} {{ fn close(self) {{ {rust_module}::{}(self); }} }}\n",
+                                mangle(close_name)
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     out.push('\n');
 }
 
@@ -4852,6 +4934,7 @@ pub fn emit_bundle_dbg(
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     emit_program_items(&cx, &entry.items, &mut out, true, false);
+    emit_imported_foreign_close_impls(&cx, bundle, &mut out);
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `process.argv()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
@@ -5112,6 +5195,7 @@ fn emit_bundle_tests_cov_inner(
             .expect("Driver::swap_command_entry_point installs the override entry before codegen")
     });
     emit_program_items(&cx, &entry.items, &mut out, override_entry.is_some(), false);
+    emit_imported_foreign_close_impls(&cx, bundle, &mut out);
 
     emit_test_fns(&cx, &tests, None, &mut out);
     coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
@@ -5374,6 +5458,7 @@ pub fn emit_bundle_fuzz(
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     emit_program_items(&cx, &entry.items, &mut out, false, false);
+    emit_imported_foreign_close_impls(&cx, bundle, &mut out);
 
     emit_test_fns(&cx, &tests, None, &mut out);
     emit_fuzz_main(&cx, &tests[target], target, file_label, &mut out);

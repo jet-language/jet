@@ -9,8 +9,18 @@ use jetpack::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use jetpack::Toolchain;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 const HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
+
+static SANDBOX_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn sandbox_test_lock() -> MutexGuard<'static, ()> {
+    SANDBOX_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn target_sandbox_manifest_runs() {
@@ -148,6 +158,7 @@ fn sandbox_tool_path_must_be_an_absolute_realized_artifact() {
 #[cfg(unix)]
 #[test]
 fn build_hook_does_not_inherit_host_credentials() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("clean-env");
     let src = base.join("src");
     let out = base.join("out");
@@ -190,6 +201,7 @@ fn build_hook_does_not_inherit_host_credentials() {
 #[cfg(target_os = "linux")]
 #[test]
 fn native_linux_recipe_sandbox_blocks_host_escape_and_records_backend_receipt() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("native-linux");
     let src = base.join("src");
     let out = base.join("out");
@@ -255,6 +267,7 @@ fn windows_command_interpreter() -> PathBuf {
 #[cfg(target_os = "windows")]
 #[test]
 fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("native-windows-output");
     let src = base.join("src");
     let out = base.join("out");
@@ -307,6 +320,7 @@ fn native_windows_appcontainer_allows_declared_output_and_records_receipt() {
 #[cfg(target_os = "windows")]
 #[test]
 fn native_windows_appcontainer_blocks_sibling_write_before_publication() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("native-windows-escape");
     let src = base.join("src");
     let out = base.join("out");
@@ -346,9 +360,201 @@ fn native_windows_appcontainer_blocks_sibling_write_before_publication() {
     std::fs::remove_dir_all(&base).ok();
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+fn native_windows_appcontainer_uses_the_shared_hostile_corpus() {
+    let _sandbox_guard = sandbox_test_lock();
+    use std::net::TcpListener;
+    use std::os::windows::fs::symlink_file;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let cases: Vec<_> = HOSTILE_CORPUS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+            (fields[0], fields[1], fields[2], fields[3])
+        })
+        .collect();
+    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+
+    for (case_id, _category, _attempt, _expected) in cases {
+        let base = scratch(&format!("windows-hostile-{case_id}"));
+        let src = base.join("src");
+        let out = base.join("out");
+        let cache = base.join("cache");
+        let host_secret = base.join("host-secret");
+        let host_marker = base.join("host-marker");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(&host_secret, "host-only-secret").unwrap();
+        if case_id == "source-symlink" {
+            symlink_file(&host_secret, src.join("link")).expect(
+                "Windows hostile corpus needs symlink creation to test the source boundary",
+            );
+        }
+
+        let mut network_thread = None;
+        let (tool, args) = match case_id {
+            "host-read" => (
+                windows_command_interpreter(),
+                vec![
+                    "/C".to_string(),
+                    format!(
+                        "copy /Y \"{}\" \"{}\" >NUL 2>&1 && exit /b 70 || echo blocked>\"%JET_BUILD_OUTPUT%\\status\"",
+                        host_secret.display(),
+                        host_marker.display()
+                    ),
+                ],
+            ),
+            "host-write" => (
+                windows_command_interpreter(),
+                vec![
+                    "/C".to_string(),
+                    format!("echo escaped>\"{}\"", host_marker.display()),
+                ],
+            ),
+            "source-symlink" => (
+                windows_command_interpreter(),
+                vec![
+                    "/C".to_string(),
+                    "if exist \"%CD%\\link\" (copy /Y \"%CD%\\link\" \"%JET_BUILD_OUTPUT%\\leak\" >NUL 2>&1 && exit /b 70) else echo blocked>\"%JET_BUILD_OUTPUT%\\status\"".to_string(),
+                ],
+            ),
+            "output-symlink" => (
+                windows_command_interpreter(),
+                vec![
+                    "/C".to_string(),
+                    format!(
+                        "mklink \"%JET_BUILD_OUTPUT%\\link\" \"{}\" >NUL 2>&1 && echo escaped>\"%JET_BUILD_OUTPUT%\\link\" || echo blocked>\"%JET_BUILD_OUTPUT%\\status\"",
+                        host_marker.display()
+                    ),
+                ],
+            ),
+            "network-exfiltration" => {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                listener.set_nonblocking(true).unwrap();
+                let port = listener.local_addr().unwrap().port();
+                network_thread = Some(thread::spawn(move || {
+                    let deadline = Instant::now() + Duration::from_millis(750);
+                    loop {
+                        match listener.accept() {
+                            Ok((_stream, _address)) => return true,
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                if Instant::now() >= deadline {
+                                    return false;
+                                }
+                                thread::sleep(Duration::from_millis(5));
+                            }
+                            Err(_) => return false,
+                        }
+                    }
+                }));
+                let powershell = PathBuf::from(
+                    std::env::var_os("WINDIR")
+                        .unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows")),
+                )
+                .join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe");
+                (
+                    powershell,
+                    vec![
+                        "-NoProfile".to_string(),
+                        "-NonInteractive".to_string(),
+                        "-Command".to_string(),
+                        format!(
+                            "try {{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70}} catch {{exit 0}}"
+                        ),
+                    ],
+                )
+            }
+            "child-process" => {
+                let interpreter = windows_command_interpreter();
+                (
+                    interpreter.clone(),
+                    vec![
+                        "/C".to_string(),
+                        format!(
+                            "start \"\" /b \"{}\" /C \"echo escaped>\\\"{}\\\"\"",
+                            interpreter.display(),
+                            host_marker.display()
+                        ),
+                    ],
+                )
+            }
+            "tmpfs-exhaustion" => {
+                let interpreter = windows_command_interpreter();
+                (
+                    interpreter.clone(),
+                    vec![
+                        "/C".to_string(),
+                        format!(
+                            "for /L %i in (1,1,300) do @start \"\" /b \"{}\" /C \"timeout /T 3 /NOBREAK >NUL\" & echo blocked>\"%JET_BUILD_OUTPUT%\\status\"",
+                            interpreter.display()
+                        ),
+                    ],
+                )
+            }
+            other => panic!("unmapped hostile corpus case {other}"),
+        };
+
+        let mut tools = HashMap::new();
+        tools.insert("hostile-tool".to_string(), tool);
+        let ctx = BuildContext {
+            source_dir: &src,
+            output_root: &out,
+            tools,
+            fetch_cache: &cache,
+            offline: false,
+        };
+        let recipe = BuildRecipe {
+            steps: vec![BuildStep::Exec {
+                tool: "hostile-tool".to_string(),
+                args,
+            }],
+        };
+        let result = Recipe::run(&recipe, &ctx, None);
+        if let Some(error) = result.as_ref().err() {
+            assert!(
+                ["E1237", "E1238", "E1275"].contains(&error.code.as_str()),
+                "{case_id} returned an unrelated diagnostic: {}",
+                error.code
+            );
+        }
+        if let Ok(report) = result {
+            assert_eq!(report.sandbox_class, "windows-appcontainer");
+            for policy in [
+                "filesystem=",
+                "process=",
+                "network=",
+                "environment=",
+                "devices=",
+                "resources=",
+            ] {
+                assert!(
+                    report.sandbox_policy.contains(policy),
+                    "{case_id}: {policy}"
+                );
+            }
+        }
+        if let Some(network_thread) = network_thread {
+            assert!(
+                !network_thread.join().unwrap(),
+                "{case_id} reached the network"
+            );
+        }
+        assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+        std::fs::remove_dir_all(&base).ok();
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn unavailable_native_backend_refuses_before_recipe_tool_launch() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("unavailable");
     let src = base.join("src");
     let out = base.join("out");
@@ -386,7 +592,10 @@ fn unavailable_native_backend_refuses_before_recipe_tool_launch() {
     }
     let error = result.expect_err("an unavailable native backend must fail closed");
     assert_eq!(error.code, "E1275");
-    assert!(!marker.exists(), "the recipe tool launched without a sandbox");
+    assert!(
+        !marker.exists(),
+        "the recipe tool launched without a sandbox"
+    );
     assert!(!out.join("marker").exists());
     std::fs::remove_dir_all(&base).ok();
 }
@@ -394,6 +603,7 @@ fn unavailable_native_backend_refuses_before_recipe_tool_launch() {
 #[cfg(unix)]
 #[test]
 fn failed_recipe_preserves_previous_output_and_removes_partial_stage() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("rollback");
     let src = base.join("src");
     let out = base.join("out");
@@ -449,6 +659,7 @@ fn failed_recipe_preserves_previous_output_and_removes_partial_stage() {
 
 #[cfg(target_os = "macos")]
 fn run_macos_attack(tag: &str, command_template: &str) {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch(tag);
     let src = base.join("src");
     let out = base.join("out");
@@ -487,6 +698,7 @@ fn run_macos_attack(tag: &str, command_template: &str) {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_native_sandbox_records_seatbelt_policy() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("macos-receipt");
     let src = base.join("src");
     let out = base.join("out");
@@ -512,8 +724,60 @@ fn macos_native_sandbox_records_seatbelt_policy() {
     };
     let report = Recipe::run(&recipe, &ctx, None).expect("native macOS sandbox should run");
     assert_eq!(report.sandbox_class, "macos-seatbelt");
-    assert!(report.sandbox_policy.contains("network=denied"));
+    for policy in [
+        "filesystem=source-readonly,output-readwrite",
+        "process=declared-tool-and-fork",
+        "network=denied",
+        "environment=clear",
+        "devices=denied",
+        "resources=",
+    ] {
+        assert!(report.sandbox_policy.contains(policy), "{policy}");
+    }
     assert_eq!(std::fs::read_to_string(out.join("ok")).unwrap(), "ok");
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn unavailable_macos_backend_refuses_before_recipe_tool_launch() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("macos-unavailable");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    let marker = base.join("host-marker");
+    std::fs::create_dir_all(&src).unwrap();
+
+    let previous = std::env::var_os("JETPACK_FAKE_SANDBOX");
+    std::env::set_var("JETPACK_FAKE_SANDBOX", "unavailable");
+    let mut tools = HashMap::new();
+    tools.insert("bash".to_string(), PathBuf::from("/bin/bash"));
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![BuildStep::Exec {
+            tool: "bash".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!("printf launched > '{}'", marker.display()),
+            ],
+        }],
+    };
+    let result = Recipe::run(&recipe, &ctx, None);
+    match previous {
+        Some(value) => std::env::set_var("JETPACK_FAKE_SANDBOX", value),
+        None => std::env::remove_var("JETPACK_FAKE_SANDBOX"),
+    }
+    let error = result.expect_err("an unavailable macOS backend must fail closed");
+    assert_eq!(error.code, "E1275");
+    assert!(!marker.exists(), "recipe tool launched without Seatbelt");
+    assert!(!out.join("marker").exists());
     std::fs::remove_dir_all(&base).ok();
 }
 
@@ -538,6 +802,7 @@ fn macos_native_sandbox_blocks_sibling_write() {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_native_sandbox_blocks_source_and_symlink_escape() {
+    let _sandbox_guard = sandbox_test_lock();
     let base = scratch("macos-symlink");
     let outside = base.join("symlink-result");
     let host = base.join("host-secret");
@@ -604,6 +869,7 @@ fn toolchain_unavailable_is_e1240() {
 #[cfg(unix)]
 #[test]
 fn shared_hostile_corpus_uses_the_recipe_production_path() {
+    let _sandbox_guard = sandbox_test_lock();
     use std::io::Read;
     use std::net::TcpListener;
     use std::os::unix::fs::symlink;
@@ -764,4 +1030,76 @@ fn host_tool(name: &str) -> PathBuf {
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
         .unwrap_or_else(|| PathBuf::from(format!("/bin/{name}")))
+}
+
+#[test]
+fn core_cargo_build_refuses_before_unavailable_sandbox_can_run_build_script() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("core-cargo-unavailable");
+    let repo = base.join("repo");
+    let root = base.join("root");
+    let marker = base.join("host-marker");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(
+        repo.join("package.jet"),
+        "name: \"escape\"\nversion: \"0.1.0\"\npackages: { escape: library }\n",
+    )
+    .unwrap();
+    std::fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    std::fs::write(
+        repo.join("Cargo.toml"),
+        "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n",
+    )
+    .unwrap();
+    std::fs::write(repo.join("Cargo.lock"), "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"escape\"\nversion = \"0.1.0\"\n\n").unwrap();
+    std::fs::write(
+        repo.join("build.rs"),
+        format!(
+            "fn main() {{ let _ = std::fs::write({:?}, \"escaped\"); }}\n",
+            marker.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let table = jetpack::RefSpec::SourceTable::from_decls([(
+        "mine".to_string(),
+        format!("path:{}", repo.display()),
+        jetpack::RefSpec::ProviderKind::Core,
+    )]);
+    let spec = jetpack::RefSpec::classify_in("escape@mine", &table).unwrap();
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let store = roots.hangar_dir();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store,
+        offline: false,
+        project_dir: None,
+    };
+
+    let previous = std::env::var_os("JETPACK_FAKE_SANDBOX");
+    std::env::set_var("JETPACK_FAKE_SANDBOX", "unavailable");
+    let result = jetpack::Store::realize_verified(
+        &roots,
+        &ctx,
+        jetpack::Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+    );
+    match previous {
+        Some(value) => std::env::set_var("JETPACK_FAKE_SANDBOX", value),
+        None => std::env::remove_var("JETPACK_FAKE_SANDBOX"),
+    }
+
+    let error = match result {
+        Ok(_) => panic!("an unavailable build sandbox must refuse Core Cargo"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:?}").contains("SandboxUnavailable"),
+        "{error:?}"
+    );
+    assert!(!marker.exists(), "Cargo build.rs ran without the sandbox");
+    assert!(jetpack::Store::list(&roots).is_empty());
+    std::fs::remove_dir_all(base).ok();
 }

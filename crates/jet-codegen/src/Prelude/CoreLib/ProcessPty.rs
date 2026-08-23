@@ -223,6 +223,21 @@ mod unix {
         Ok(())
     }
 
+    pub(super) fn attach_process_group(command: &mut Command) -> io::Result<()> {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `pre_exec` only installs a session boundary; `setsid` is
+        // async-signal-safe and the closure captures nothing.
+        unsafe {
+            command.pre_exec(|| {
+                if setsid() < 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        Ok(())
+    }
+
     pub(super) fn resize(master: &File, config: PtyConfig) -> io::Result<()> {
         let (cols, rows) = validate_size(config)?;
         let size = WinSize {
@@ -298,6 +313,18 @@ pub fn attach_command(command: &mut Command) -> io::Result<()> {
     #[cfg(unix)]
     {
         return unix::attach_command(command);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+        Ok(())
+    }
+}
+
+pub fn attach_process_group(command: &mut Command) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        return unix::attach_process_group(command);
     }
     #[cfg(not(unix))]
     {

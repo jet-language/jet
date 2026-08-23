@@ -47,10 +47,10 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #201 | model-only | `crates/jetpack/src/Store.rs` | #393/#420 own canonical store and closure-safe GC. |
 | #202 | compatibility-only | `tests/jetpack_no_daemon.rs` | #399 owns permanent no-installed-Nix product gate. |
 | #203 | schema-only | `crates/jet-pkg-model/src/Envelope.rs` | #395 owns live cache protocol. |
-| #204 | live | `tests/jetpack_platform.rs` | #433 drives a native package through provider, lease, Hangar, offline, missing-component, and clean-store paths; the focused lane runs on Linux, macOS, and Windows CI. Host/tool gaps fail closed; hostile child confinement remains #398. |
+| #204 | live | `tests/jetpack_platform.rs` | #433 drives a native package through provider, lease, Hangar, offline, missing-component, and clean-store paths; the focused lane runs on Linux, macOS, and Windows CI. Host/tool gaps fail closed; hostile child confinement remains the #398 platform family, including #891. |
 | #205 | live | `tests/jetpack_discovery.rs` | Local index discovery only; no live registry claim. |
 | #206 | live | `tests/jetpack_build_debug.rs` | Local debuggability path only. |
-| #207 | live | `crates/jetpack/src/RuntimePolicy.rs`, `crates/jetpack/src/Recipe.rs` | #398 Linux slice owns the enforced Bubblewrap child boundary and actual policy receipt; other platform backends remain separate. |
+| #207 | live | `crates/jetpack/src/RuntimePolicy.rs`, `crates/jetpack/src/Recipe.rs` | #398 owns the enforced Linux Bubblewrap child boundary; #891 owns the enforced Windows AppContainer child boundary and actual policy receipt; other platform slices remain separate. |
 | #208 | fixture-only | `tests/jetpack_offline.rs` | #395/#433 own syscall denial and live closure proof. |
 | #6 | compatibility-only | `tests/pkg.rs` | #423 owns live registry consumption and delivery. |
 | #139 | schema-only | `Source/Publish/Schema.rs` | #393 landed canonical Store v2; #395 owns the live cache protocol over its envelope and store. |

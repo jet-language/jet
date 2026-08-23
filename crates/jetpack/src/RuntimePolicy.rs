@@ -259,6 +259,7 @@ pub struct SandboxStatus {
 
 pub fn sandbox_policy_path() -> PathBuf {
     let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(Syntax::CONFIG_DEFAULT_DIR)

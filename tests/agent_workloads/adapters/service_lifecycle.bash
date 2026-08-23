@@ -22,9 +22,12 @@ run_jp() {
   local timeout_ms=$3
   shift 3
   set +e
-  HOME="$home" JETPACK_ROOT="$root" JETPACK_FAKE_SYSTEMD_STATE="$state" \
-    JETPACK_SERVICE_HEALTH_TIMEOUT_MS="$timeout_ms" PATH="$path" \
-    "$jetpack" "$@" >"$output" 2>"$errors"
+  (
+    cd "$project"
+    HOME="$home" JETPACK_ROOT="$root" JETPACK_FAKE_SYSTEMD_STATE="$state" \
+      JETPACK_SERVICE_HEALTH_TIMEOUT_MS="$timeout_ms" PATH="$path" \
+      "$jetpack" "$@"
+  ) >"$output" 2>"$errors"
   local status=$?
   set -e
   return "$status"

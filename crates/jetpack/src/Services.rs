@@ -2993,7 +2993,9 @@ fn record_start_failure(dir: &Path, lifecycle: &mut LifecycleFacts, error: &str)
     lifecycle.phase = "failed".to_string();
     lifecycle.recovery = "startup-failed".to_string();
     lifecycle.pid = None;
+    let _ = fs::remove_file(pid_path(dir));
     let _ = fs::remove_file(ports_path(dir));
+    let _ = fs::remove_file(stopping_path(dir));
     let _ = write_lifecycle(dir, lifecycle);
     let _ = write_atomic(&supervisor_error_path(dir), error.as_bytes());
 }
@@ -3265,7 +3267,8 @@ fn finish_supervisor(
         return;
     }
     let preserve_terminal_state = existing_lifecycle.as_ref().is_some_and(|facts| {
-        (facts.phase == "failed" && facts.recovery == "dependency-failed")
+        (facts.phase == "failed"
+            && matches!(facts.recovery.as_str(), "dependency-failed" | "startup-failed"))
             || (facts.phase == "stopped" && facts.recovery == "down")
     });
 
@@ -4369,6 +4372,12 @@ where
                 cleanup_indexes.push(index);
             }
             let cleanup = down_ordered(project_dir, plans, &cleanup_indexes).err();
+            if !was_running && cleanup.is_none() {
+                let service_dir = service_dir(project_dir, &plan.name);
+                if let Ok(Some(mut lifecycle)) = read_lifecycle(&service_dir) {
+                    record_start_failure(&service_dir, &mut lifecycle, &current_error);
+                }
+            }
             return Err(match cleanup {
                 None => current_error,
                 Some(cleanup) => format!("{current_error}; cleanup failed: {cleanup}"),

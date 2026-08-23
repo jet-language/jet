@@ -23,9 +23,12 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 #[cfg(target_os = "macos")]
-static MACOS_PROFILE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
+mod jet_process_sandbox {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
+}
+
+static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 const MAX_REMOTE_EXECUTION_ATTEMPTS: usize = 2;
 
 struct RemoteAttemptFailure {
@@ -139,7 +142,13 @@ pub fn native_sandbox_status() -> NativeSandboxStatus {
 
     #[cfg(target_os = "macos")]
     {
-        return macos_sandbox_status();
+        let native = jet_process_sandbox::status();
+        return NativeSandboxStatus {
+            available: native.available,
+            mechanism: native.mechanism,
+            policy: native.policy,
+            reason: native.reason,
+        };
     }
 
     #[cfg(target_os = "windows")]
@@ -237,14 +246,26 @@ pub fn run_native_sandboxed(
 ) -> Result<NativeSandboxOutput, NativeSandboxError> {
     #[cfg(target_os = "macos")]
     {
-        return run_macos_native_sandboxed(
+        let output_is_separate = output_dir.is_some();
+        let output = jet_process_sandbox::output(
             executable,
             args,
             source_dir,
             output_dir,
             env,
             share_network,
-        );
+        )
+        .map_err(|error| match error {
+            jet_process_sandbox::Error::Unsupported(detail) => {
+                NativeSandboxError::Unsupported(detail)
+            }
+            jet_process_sandbox::Error::Io(detail) => NativeSandboxError::Io(detail),
+        })?;
+        return Ok(NativeSandboxOutput {
+            output,
+            mechanism: "macos-seatbelt".to_string(),
+            policy: jet_process_sandbox::policy(output_is_separate, share_network),
+        });
     }
 
     #[cfg(target_os = "windows")]
@@ -326,238 +347,6 @@ pub fn run_native_sandboxed(
             policy,
         })
     }
-}
-
-#[cfg(target_os = "macos")]
-const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
-
-#[cfg(target_os = "macos")]
-fn macos_sandbox_policy(output_is_separate: bool, share_network: bool) -> String {
-    format!(
-        "filesystem={};process=declared-tool-and-fork;network={};environment=clear;devices=denied;resources=none-declared",
-        if output_is_separate {
-            "source-readonly,output-readwrite"
-        } else {
-            "private-workspace-readwrite"
-        },
-        if share_network { "declared-shared" } else { "denied" },
-    )
-}
-
-#[cfg(target_os = "macos")]
-fn macos_sandbox_status() -> NativeSandboxStatus {
-    if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-        return NativeSandboxStatus {
-            available: false,
-            mechanism: "macos-seatbelt-unavailable".to_string(),
-            policy: "not-enforced".to_string(),
-            reason: "test sandbox override prevents the native macOS backend probe".to_string(),
-        };
-    }
-    if !Path::new(MACOS_SANDBOX_EXEC).is_file() {
-        return NativeSandboxStatus {
-            available: false,
-            mechanism: "macos-seatbelt-unavailable".to_string(),
-            policy: "not-enforced".to_string(),
-            reason: format!("native macOS backend `{MACOS_SANDBOX_EXEC}` is unavailable"),
-        };
-    }
-
-    let profile = match write_macos_profile(macos_probe_profile()) {
-        Ok(path) => path,
-        Err(error) => {
-            return NativeSandboxStatus {
-                available: false,
-                mechanism: "macos-seatbelt-unavailable".to_string(),
-                policy: "not-enforced".to_string(),
-                reason: format!("native macOS backend profile could not be prepared: {error}"),
-            };
-        }
-    };
-    let status = Command::new(MACOS_SANDBOX_EXEC)
-        .arg("-f")
-        .arg(&profile)
-        .arg("/usr/bin/true")
-        .env_clear()
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = fs::remove_file(&profile);
-    match status {
-        Ok(status) if status.success() => NativeSandboxStatus {
-            available: true,
-            mechanism: "macos-seatbelt".to_string(),
-            policy: macos_sandbox_policy(true, false),
-            reason: "native macOS Seatbelt completed the isolated backend probe".to_string(),
-        },
-        Ok(status) => NativeSandboxStatus {
-            available: false,
-            mechanism: "macos-seatbelt-unavailable".to_string(),
-            policy: "not-enforced".to_string(),
-            reason: format!("native macOS Seatbelt backend probe exited with {status}"),
-        },
-        Err(error) => NativeSandboxStatus {
-            available: false,
-            mechanism: "macos-seatbelt-unavailable".to_string(),
-            policy: "not-enforced".to_string(),
-            reason: format!("native macOS Seatbelt backend probe failed: {error}"),
-        },
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn run_macos_native_sandboxed(
-    executable: &Path,
-    args: &[String],
-    source_dir: &Path,
-    output_dir: Option<&Path>,
-    env: &BTreeMap<String, String>,
-    share_network: bool,
-) -> Result<NativeSandboxOutput, NativeSandboxError> {
-    if std::env::var_os("JETPACK_FAKE_SANDBOX").is_some() {
-        return Err(NativeSandboxError::Unsupported(
-            "test sandbox override prevents child execution".to_string(),
-        ));
-    }
-    let status = macos_sandbox_status();
-    if !status.available {
-        return Err(NativeSandboxError::Unsupported(status.reason));
-    }
-    let executable = executable.canonicalize().map_err(|error| {
-        NativeSandboxError::Unsupported(format!("sandbox executable is unavailable: {error}"))
-    })?;
-    let source_dir = real_directory(source_dir)?;
-    let output_dir = output_dir.map(real_directory).transpose()?;
-    let output_is_separate = output_dir.is_some();
-    let profile = macos_build_profile(
-        &executable,
-        &source_dir,
-        output_dir.as_deref(),
-        share_network,
-    )?;
-
-    let mut command = Command::new(MACOS_SANDBOX_EXEC);
-    command
-        .arg("-f")
-        .arg(&profile)
-        .arg(&executable)
-        .args(args)
-        .env_clear()
-        .stdin(Stdio::null())
-        .current_dir(&source_dir);
-    if let Some(output_dir) = output_dir.as_deref() {
-        command.env("JET_BUILD_OUTPUT", output_dir);
-    }
-    for (key, value) in env {
-        command.env(key, value);
-    }
-    let result = command.output();
-    let _ = fs::remove_file(&profile);
-    let output = result.map_err(|error| NativeSandboxError::Io(error.to_string()))?;
-    Ok(NativeSandboxOutput {
-        output,
-        mechanism: "macos-seatbelt".to_string(),
-        policy: macos_sandbox_policy(output_is_separate, share_network),
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn macos_probe_profile() -> &'static str {
-    concat!(
-        "(version 1)\n",
-        "(deny default)\n",
-        "(import \"system.sb\")\n",
-        "(allow process-exec (literal \"/usr/bin/true\"))\n",
-        "(allow file-read* (subpath \"/System\") (subpath \"/usr\") (subpath \"/bin\") (subpath \"/nix/store\"))\n",
-    )
-}
-
-#[cfg(target_os = "macos")]
-fn macos_build_profile(
-    executable: &Path,
-    source_dir: &Path,
-    output_dir: Option<&Path>,
-    share_network: bool,
-) -> Result<PathBuf, NativeSandboxError> {
-    let executable = sbpl_path(executable)?;
-    let source_dir = sbpl_path(source_dir)?;
-    let output_dir = output_dir.map(sbpl_path).transpose()?;
-    let mut profile = String::from(
-        "(version 1)\n(deny default)\n(import \"system.sb\")\n(allow process-fork)\n(allow process-exec\n",
-    );
-    profile.push_str(&format!("  (literal \"{executable}\")\n)\n"));
-    profile.push_str("(allow file-read*\n");
-    profile.push_str(&format!("  (subpath \"{source_dir}\")\n"));
-    if let Some(output_dir) = output_dir.as_deref() {
-        profile.push_str(&format!("  (subpath \"{output_dir}\")\n"));
-    }
-    profile.push_str(&format!("  (literal \"{executable}\")\n"));
-    profile.push_str("  (subpath \"/System\")\n");
-    profile.push_str("  (subpath \"/usr/lib\")\n");
-    profile.push_str("  (subpath \"/usr/bin\")\n");
-    profile.push_str("  (subpath \"/bin\")\n");
-    profile.push_str("  (subpath \"/sbin\")\n");
-    profile.push_str("  (subpath \"/nix/store\"))\n");
-    if let Some(output_dir) = output_dir.as_deref() {
-        profile.push_str(&format!("(allow file-write* (subpath \"{output_dir}\"))\n"));
-    } else {
-        profile.push_str(&format!("(allow file-write* (subpath \"{source_dir}\"))\n"));
-    }
-    if share_network {
-        profile.push_str("(allow network*)\n");
-    } else {
-        profile.push_str("(deny network*)\n");
-    }
-    profile.push_str("(deny device*)\n");
-    write_macos_profile(&profile)
-}
-
-#[cfg(target_os = "macos")]
-fn sbpl_path(path: &Path) -> Result<String, NativeSandboxError> {
-    let value = path.to_str().ok_or_else(|| {
-        NativeSandboxError::Unsupported(format!(
-            "sandbox path is not valid UTF-8: {}",
-            path.display()
-        ))
-    })?;
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '\\' => escaped.push_str("\\\\"),
-            '"' => escaped.push_str("\\\""),
-            character if character.is_control() => {
-                return Err(NativeSandboxError::Unsupported(
-                    "sandbox path contains a control character".to_string(),
-                ));
-            }
-            character => escaped.push(character),
-        }
-    }
-    Ok(escaped)
-}
-
-#[cfg(target_os = "macos")]
-fn write_macos_profile(profile: &str) -> Result<PathBuf, NativeSandboxError> {
-    let path = std::env::temp_dir().join(format!(
-        "jet-native-sandbox-{}-{}.sb",
-        std::process::id(),
-        MACOS_PROFILE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
-        .map_err(|error| {
-            NativeSandboxError::Io(format!("could not create sandbox profile: {error}"))
-        })?;
-    if let Err(error) = file.write_all(profile.as_bytes()) {
-        let _ = fs::remove_file(&path);
-        return Err(NativeSandboxError::Io(format!(
-            "could not write sandbox profile: {error}"
-        )));
-    }
-    Ok(path)
 }
 
 fn real_directory(path: &Path) -> Result<PathBuf, NativeSandboxError> {

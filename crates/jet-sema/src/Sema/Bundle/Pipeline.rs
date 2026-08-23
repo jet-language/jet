@@ -2085,6 +2085,30 @@ fn check_bundle_opts_for_output_inner(
         }
     }
 
+    // D-FFI-CAP1: CFFI re-homes foreign declarations into synthetic modules,
+    // but a returned `#Close` handle is consumed in the importing module's
+    // body. Copy the checked nominal fact across that import edge before body
+    // checking, so imported C handles use the same Close protocol as local
+    // foreign declarations.
+    for link in &bundle.cffi.import_links {
+        let Some(target_state) = states.get(link.target_idx) else {
+            continue;
+        };
+        let close_impls = target_state
+            .trait_reg
+            .trait_impls
+            .iter()
+            .filter(|(_, trait_name)| trait_name == Syntax::TRAIT_CLOSE)
+            .cloned()
+            .collect::<Vec<_>>();
+        for close_impl in close_impls {
+            states[link.importing_idx]
+                .trait_reg
+                .trait_impls
+                .insert(close_impl);
+        }
+    }
+
     // D-MOD3/4: process `use alias.Item` unqualified imports now that file-module
     // aliases are registered in `st.imports`. `pub use` additionally re-exports the
     // item onto this module's public surface (`reexports`).

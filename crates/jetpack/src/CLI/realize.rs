@@ -201,6 +201,31 @@ pub(super) fn realize_ref_outcome(
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
     };
+    // D-JPK-BUILDSCRIPT1: a Core Cargo action is an upstream executable hook,
+    // even when its package manifest is locally reviewed. The exact staged
+    // source/recipe/capability identity must be approved outside the project
+    // metadata before Store realization can reach the provider.
+    match Provider::core_build_identity(spec, table, &ctx) {
+        Ok(Some(identity)) => {
+            if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
+                .is_err()
+            {
+                drop(spinner);
+                return RefOutcome::Failed;
+            }
+        }
+        Ok(None) => {}
+        Err(reason) => {
+            report_provider_error(
+                theme,
+                &ProviderError::SandboxUnavailable(format!(
+                    "could not establish the exact Core Cargo build identity: {reason}"
+                )),
+            );
+            drop(spinner);
+            return RefOutcome::Failed;
+        }
+    }
     let started = std::time::Instant::now();
     let result = Store::realize_verified(
         roots,

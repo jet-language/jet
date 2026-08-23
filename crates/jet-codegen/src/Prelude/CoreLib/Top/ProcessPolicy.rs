@@ -14,6 +14,51 @@ mod jet_process_policy {
     }
 }
 
+fn jet_process_policy_rights(spec: &jet_std::ProcessSpec) -> Vec<String> {
+    let mut rights = spec
+        .policy_wire
+        .as_deref()
+        .unwrap_or_default()
+        .lines()
+        .filter(|right| !right.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    rights.sort();
+    rights.dedup();
+    rights
+}
+
+/// Secret values are never policy identity. Authority entries may carry a
+/// value only in an internal `Secret=...` form; keep the key and redact the
+/// value before the shared digest sees it.
+fn jet_process_policy_digest_right(right: &str) -> String {
+    let lower = right.to_ascii_lowercase();
+    if lower.starts_with("secret=") {
+        return format!("{}=<redacted>", &right[.."Secret".len().min(right.len())]);
+    }
+    right.to_owned()
+}
+
+fn jet_process_stream_mode_name(mode: &jet_std::ProcessStreamMode) -> &'static str {
+    match mode {
+        jet_std::ProcessStreamMode::Stream => "stream",
+        jet_std::ProcessStreamMode::Inherit => "inherit",
+        jet_std::ProcessStreamMode::Capture => "capture",
+    }
+}
+
+fn jet_process_policy_environment(spec: &jet_std::ProcessSpec) -> String {
+    let mut names = spec
+        .env_set
+        .iter()
+        .map(|(name, _)| format!("set:{name}"))
+        .chain(spec.env_remove.iter().map(|name| format!("remove:{name}")))
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names.join("\n")
+}
+
 /// D-AGENT-EXEC1: canonical policy material is deliberately separate from
 /// command inputs. The same bytes feed plan and receipt consumers, and secret
 /// values never enter the digest material.
@@ -31,10 +76,15 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         .output_limit
         .map(|value| value.to_string())
         .unwrap_or_default();
+    let rights = jet_process_policy_rights(spec)
+        .iter()
+        .map(|right| jet_process_policy_digest_right(right))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let environment_keys = jet_process_policy_environment(spec);
     let mut material = String::from("jet-process-policy-v1\n");
     let fields = [
-        ("workspace.read", "repo"),
-        ("workspace.write", ".jet/build"),
+        ("authority.rights", rights.as_str()),
         ("network", "deny"),
         ("home", "deny"),
         ("secrets", "deny"),
@@ -44,14 +94,20 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         ("cwd", cwd.as_str()),
         ("timeout-ms", timeout_ms.as_str()),
         ("output-limit", output_limit.as_str()),
+        ("environment.keys", environment_keys.as_str()),
+        (
+            "stdin",
+            spec.stdin
+                .as_ref()
+                .map(jet_process_stream_mode_name)
+                .unwrap_or("closed"),
+        ),
+        ("stdout", jet_process_stream_mode_name(&spec.stdout)),
+        ("stderr", jet_process_stream_mode_name(&spec.stderr)),
         ("detached", if spec.detached { "true" } else { "false" }),
         (
             "terminal",
             if spec.terminal.is_some() { "requested" } else { "none" },
-        ),
-        (
-            "authority",
-            spec.policy_wire.as_deref().unwrap_or("<unbound>"),
         ),
     ];
     for (key, value) in fields {
@@ -67,7 +123,7 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
 
 /// D-AGENT-EXEC1: the shared policy digest contract. Receipt implementation
 /// (#1179) must consume this function rather than reconstructing policy bytes.
-fn jet_process_policy_digest(spec: &jet_std::ProcessSpec) -> String {
+pub(crate) fn jet_process_policy_digest(spec: &jet_std::ProcessSpec) -> String {
     let digest = jet_sha256_raw(jet_process_policy_material(spec).as_bytes());
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -124,11 +180,22 @@ fn jet_process_resolve_executable(
     ))
 }
 
-/// D-AGENT-EXEC1/#398/#893: this slice has no isolation backend to enter.
-/// Keep this refusal in the shared Prelude so every engine makes the same
-/// decision and no adapter can accidentally spawn with ambient authority.
+/// D-AGENT-EXEC1/#398: authority-bound process execution enters the native
+/// child boundary already used by hermetic build actions. The consumer only
+/// selects the backend; profile construction and launch stay in the shared
+/// ProcessSandbox Prelude fragment.
 fn jet_process_isolation_backend() -> Option<&'static str> {
-    None
+    #[cfg(target_os = "macos")]
+    {
+        return jet_process_sandbox::status()
+            .available
+            .then_some("macos-seatbelt");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 fn jet_process_spec_backend_check(

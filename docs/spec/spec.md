@@ -2944,6 +2944,11 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   recipe actions use the native Bubblewrap boundary; if the required backend
   is unavailable, Jetpack emits L0205 and refuses the executable action, while
   `jetpack config sandbox require` makes that condition E1275 before launch.
+  Core Cargo library actions use the same boundary and require the exact
+  staged-source/recipe/platform/`exec:cargo` build identity before launch;
+  their producer receipts record the actual backend and policy, or the
+  non-executing substitute/reuse outcome. Host Cargo is never an unsandboxed
+  fallback.
 - **Universal trust grants (D-JPK-GRANTCMD1/SCHEMA1):** `jet trust` is the
   public command family for the unified grant graph. `jet trust list` shows
   package, build, env, service, image, fleet, and jetos authority grants;

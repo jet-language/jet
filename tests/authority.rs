@@ -31,6 +31,8 @@ fn run() {
         "{}",
         output.rust
     );
+    assert!(output.rust.contains("FS.Read:repo"), "{}", output.rust);
+    assert!(output.rust.contains("FS.Write:.jet/build"), "{}", output.rust);
 }
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
@@ -111,22 +113,92 @@ fn run() {
 
 #[test]
 fn authority_plan_refuses_before_spawn_on_all_hosted_tiers() {
+    let marker = std::env::temp_dir().join(format!("jet-authority-plan-marker-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
     let source = r#"
 use core.process as process
 
 fn run() {
     policy :: process.workspace()
-    spec :: process.cmd(["sh", "-c", "printf spawned"]).under(policy)
+    spec :: process.cmd(["sh", "-c", "printf spawned > '__MARKER__'"]).under(policy)
     if spec.plan() == {
         .Ok(_) -> print("spawned")
         .Err(_) -> print("refused")
     }
 }
-"#;
-    let output = jet::compile(source).expect("authority plan API should compile");
+"#
+    .replace("__MARKER__", &marker.to_string_lossy());
+    let output = jet::compile(&source).expect("authority plan API should compile");
     assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
     assert!(output.rust.contains("jet_process_spec_plan"), "{}", output.rust);
-    tir_support::assert_tiers_agree("authority_plan_refusal", source, "refused\n");
+    #[cfg(target_os = "macos")]
+    tir_support::assert_tiers_agree("authority_plan_no_spawn", &source, "spawned\n");
+    #[cfg(not(target_os = "macos"))]
+    tir_support::assert_tiers_agree("authority_plan_refusal", &source, "refused\n");
+    assert!(!marker.exists(), "plan() spawned the authority-bound command");
+}
+
+#[test]
+fn authority_process_binds_exact_resource_grants() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: Abilities.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:/usr/bin/cargo",
+    ])
+    spec :: process.cmd(["cargo", "test"]).under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("planned")
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    let output = jet::compile(source).expect("exact process grants should compile");
+    assert!(
+        output.rust.contains("JetAuthority::__jet_from_rights"),
+        "{}",
+        output.rust
+    );
+    assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
+    #[cfg(target_os = "macos")]
+    tir_support::assert_tiers_agree("authority_process_exact_grants", source, "planned\n");
+    #[cfg(not(target_os = "macos"))]
+    tir_support::assert_tiers_agree("authority_process_exact_grants", source, "refused\n");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn authority_process_macos_seatbelt_runs_and_denies_host_read() {
+    let success = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    result :: process.cmd(["/usr/bin/printf", "sandboxed"]).under(policy).run_checked()
+    if result == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("denied")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_macos_seatbelt_success", success, "sandboxed\n");
+
+    let hostile = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    result :: process.cmd(["/bin/sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).under(policy).run_checked()
+    if result == {
+        .Ok(_) -> print("blocked")
+        .Err(_) -> print("escaped")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree("authority_macos_seatbelt_host_read", hostile, "blocked\n");
 }
 
 #[test]

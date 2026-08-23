@@ -1464,12 +1464,30 @@ spec :: process.cmd(["cargo", "test"]).under(abilities)
 plan :: spec.plan()
 ```
 
-Experts widen the same value with exact rights before binding it. `plan()`
-resolves the executable identity without spawning, records argv, backend, and
-the policy digest, and refuses before launch when the host has no #398/#893
-isolation backend. Launch checks the same policy digest and backend boundary;
-it never silently falls back to ambient authority. The final receipt uses that
-same digest and is redacted by the receipt slice.
+Experts provide exact rights on the same value before binding it. The existing
+`Abilities` constructor keeps the grant data explicit and reviewable:
+
+```jet
+policy :: Abilities.from_rights([
+    "FS.Read:repo",
+    "FS.Write:.jet/build",
+    "Exec:/usr/bin/cargo",
+])
+spec :: process.cmd(["cargo", "test"]).under(policy)
+```
+
+`plan()` resolves the executable identity without spawning, records argv,
+backend, and the policy digest, and refuses before launch when the host has no
+#398/#893 isolation backend. Launch checks the same policy digest and backend
+boundary; it never silently falls back to ambient authority. The final receipt
+uses that same digest and is redacted by the receipt slice.
+
+On macOS, the consumer enters the shipped #398 Seatbelt boundary. The child
+gets a canonical read-only workspace, `.jet/build` as its only writable
+workspace output, a cleared environment with only explicit values, no network,
+no devices, and no inherited handles. If Seatbelt cannot be probed or the
+workspace/output path is not a real directory, planning or launch fails before
+the command starts.
 
 #### Explicit termination cleanup law (D-FAIL-EXIT1)
 

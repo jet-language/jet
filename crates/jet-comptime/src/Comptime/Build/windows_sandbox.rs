@@ -1,9 +1,10 @@
 //! Native Windows AppContainer backend for build actions.
 //!
-//! The child is created with a capability-free AppContainer token, a
-//! per-run ACL projection, and a Job Object. It is created suspended, joined
-//! to the Job Object, and resumed only after every boundary is ready. Any
-//! preparation failure is returned before the build tool can execute.
+//! The child is created with a default-deny AppContainer token, only the
+//! declared capability set, a per-run ACL projection, and a Job Object. It is
+//! created suspended, joined to the Job Object, and resumed only after every
+//! boundary is ready. Any preparation failure is returned before the build
+//! tool can execute.
 
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::c_void;
@@ -55,6 +56,8 @@ const NO_MULTIPLE_TRUSTEE: u32 = 0;
 const TRUSTEE_IS_SID: u32 = 0;
 const TRUSTEE_IS_UNKNOWN: u32 = 0;
 const SUB_CONTAINERS_AND_OBJECTS_INHERIT: u32 = 0x0000_0003;
+const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+const PROFILE_ALREADY_EXISTS: i32 = 0x8007_00b7_u32 as i32;
 
 type Handle = *mut c_void;
 type Sid = *mut c_void;
@@ -278,6 +281,10 @@ unsafe extern "system" {
         capability_count: u32,
         app_container_sid: *mut Sid,
     ) -> i32;
+    fn DeriveAppContainerSidFromAppContainerName(
+        profile_name: *const u16,
+        app_container_sid: *mut Sid,
+    ) -> i32;
     fn DeleteAppContainerProfile(profile_name: *const u16) -> i32;
 }
 
@@ -350,25 +357,41 @@ struct AppContainer {
 }
 
 impl AppContainer {
-    fn create() -> io::Result<Self> {
+    fn create(capability: Option<&mut SidAndAttributes>) -> io::Result<Self> {
         let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = wide(&format!("JetpackBuild-{}-{id}", std::process::id()))?;
         let display = wide("Jetpack build")?;
         let description = wide("One-shot Jetpack build isolation")?;
         let mut sid = null_handle();
-        // SAFETY: all strings are NUL-terminated and live through the call;
-        // the profile starts with no capabilities.
+        let (capabilities, capability_count) = capability
+            .map_or((std::ptr::null_mut(), 0), |value| {
+                (value as *mut SidAndAttributes, 1)
+            });
+        // SAFETY: all strings and the optional capability live through the
+        // call; Windows allocates the returned profile SID.
         let status = unsafe {
             CreateAppContainerProfile(
                 name.as_ptr(),
                 display.as_ptr(),
                 description.as_ptr(),
-                std::ptr::null_mut(),
-                0,
+                capabilities,
+                capability_count,
                 &mut sid,
             )
         };
-        if status != 0 {
+        if status == PROFILE_ALREADY_EXISTS {
+            // A killed build can leave its profile behind. Reuse its SID by
+            // name instead of treating that recoverable state as "sandbox
+            // unavailable".
+            let derive_status =
+                unsafe { DeriveAppContainerSidFromAppContainerName(name.as_ptr(), &mut sid) };
+            if derive_status != 0 {
+                return Err(hresult_error(
+                    "DeriveAppContainerSidFromAppContainerName",
+                    derive_status,
+                ));
+            }
+        } else if status != 0 {
             return Err(hresult_error("CreateAppContainerProfile", status));
         }
         if sid.is_null() {
@@ -963,31 +986,60 @@ pub(crate) fn status() -> BackendStatus {
             reason: "test sandbox override prevents the native Windows backend probe".to_string(),
         };
     }
-    let profile = match AppContainer::create() {
-        Ok(profile) => profile,
-        Err(error) => {
-            return BackendStatus {
-                available: false,
-                mechanism: format!("{MECHANISM}-unavailable"),
-                policy: "not-enforced".to_string(),
-                reason: format!("AppContainer profile could not be prepared: {error}"),
-            };
-        }
-    };
-    if let Err(error) = Job::create() {
+    let root = std::env::temp_dir().join(format!(
+        ".jetpack-sandbox-probe-{}-{}",
+        std::process::id(),
+        PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let source = root.join("source");
+    let output = root.join("output");
+    if let Err(error) = fs::create_dir_all(&source).and_then(|_| fs::create_dir_all(&output)) {
+        let _ = fs::remove_dir_all(&root);
         return BackendStatus {
             available: false,
             mechanism: format!("{MECHANISM}-unavailable"),
             policy: "not-enforced".to_string(),
-            reason: format!("Job Object could not be prepared: {error}"),
+            reason: format!("native Windows sandbox probe workspace could not be created: {error}"),
         };
     }
-    drop(profile);
-    BackendStatus {
-        available: true,
-        mechanism: MECHANISM.to_string(),
-        policy: backend_policy(None, false),
-        reason: "AppContainer and Job Object preflight succeeded; each launch applies its declared ACL projection before resume".to_string(),
+    let executable = PathBuf::from(
+        std::env::var_os("WINDIR").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows")),
+    )
+    .join("System32")
+    .join("cmd.exe");
+    let args = [String::from("/C"), String::from("exit"), String::from("0")];
+    let probe = run(
+        &executable,
+        &args,
+        &source,
+        Some(&output),
+        &BTreeMap::new(),
+        false,
+    );
+    let _ = fs::remove_dir_all(&root);
+    match probe {
+        Ok(result) if result.output.status.success() => BackendStatus {
+            available: true,
+            mechanism: result.mechanism,
+            policy: result.policy,
+            reason: "native AppContainer launch, ACL projection, inherited-handle list, and Job Object probe succeeded".to_string(),
+        },
+        Ok(result) => BackendStatus {
+            available: false,
+            mechanism: format!("{MECHANISM}-unavailable"),
+            policy: "not-enforced".to_string(),
+            reason: format!(
+                "native Windows sandbox probe exited with {}",
+                result.output.status
+            ),
+        },
+        Err(super::execution_runtime::NativeSandboxError::Unsupported(detail))
+        | Err(super::execution_runtime::NativeSandboxError::Io(detail)) => BackendStatus {
+            available: false,
+            mechanism: format!("{MECHANISM}-unavailable"),
+            policy: "not-enforced".to_string(),
+            reason: format!("native Windows sandbox probe failed: {detail}"),
+        },
     }
 }
 
@@ -1004,16 +1056,9 @@ pub(crate) fn run(
             "test sandbox override prevents child execution".to_string(),
         ));
     }
-    let executable = fs::canonicalize(executable).map_err(|error| {
-        super::execution_runtime::NativeSandboxError::Unsupported(format!(
-            "sandbox executable is unavailable: {error}"
-        ))
-    })?;
+    let executable = real_executable(executable)?;
     let source_dir = real_directory(source_dir)?;
     let output_dir = output_dir.map(real_directory).transpose()?;
-    let profile = AppContainer::create().map_err(io_error)?;
-    let _acl = AclProjection::create(profile.sid, &source_dir, output_dir.as_deref(), &executable)
-        .map_err(io_error)?;
     let network_capability = if share_network {
         Some(CapabilitySid::internet_client().map_err(io_error)?)
     } else {
@@ -1021,8 +1066,11 @@ pub(crate) fn run(
     };
     let mut capability = network_capability.as_ref().map(|sid| SidAndAttributes {
         sid: sid.0,
-        attributes: 0,
+        attributes: SE_GROUP_ENABLED,
     });
+    let profile = AppContainer::create(capability.as_mut()).map_err(io_error)?;
+    let _acl = AclProjection::create(profile.sid, &source_dir, output_dir.as_deref(), &executable)
+        .map_err(io_error)?;
     let security = SecurityCapabilities {
         app_container_sid: profile.sid,
         capabilities: capability
@@ -1038,7 +1086,7 @@ pub(crate) fn run(
     let application_name = wide(&executable.to_string_lossy()).map_err(io_error)?;
     let current_directory = wide(&source_dir.to_string_lossy()).map_err(io_error)?;
     let mut command_line = command_line(&executable, args).map_err(io_error)?;
-    let environment = environment_block(output_dir.as_deref(), env).map_err(io_error)?;
+    let mut environment = environment_block(output_dir.as_deref(), env).map_err(io_error)?;
     let mut attributes = AttributeList::create().map_err(io_error)?;
     attributes
         .update(
@@ -1094,7 +1142,7 @@ pub(crate) fn run(
             std::ptr::null_mut(),
             1,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-            environment.as_ptr().cast(),
+            environment.as_mut_ptr().cast(),
             current_directory.as_ptr(),
             &mut startup.startup_info,
             &mut process_information,
@@ -1194,10 +1242,62 @@ fn real_directory(path: &Path) -> Result<PathBuf, super::execution_runtime::Nati
             format!("sandbox directory `{}`: {error}", path.display()),
         ))
     })?;
-    if !canonical.is_dir() {
+    let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
+        io_error(io::Error::new(
+            io::ErrorKind::Other,
+            format!("sandbox directory `{}`: {error}", path.display()),
+        ))
+    })?;
+    if canonical_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || !canonical_metadata.is_dir()
+    {
         return Err(io_error(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("sandbox path `{}` is not a directory", path.display()),
+        )));
+    }
+    Ok(canonical)
+}
+
+fn real_executable(path: &Path) -> Result<PathBuf, super::execution_runtime::NativeSandboxError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        io_error(io::Error::new(
+            io::ErrorKind::Other,
+            format!("sandbox executable `{}`: {error}", path.display()),
+        ))
+    })?;
+    if metadata.file_type().is_symlink()
+        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    {
+        return Err(io_error(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "sandbox executable `{}` is a symlink or reparse point",
+                path.display()
+            ),
+        )));
+    }
+    let canonical = path.canonicalize().map_err(|error| {
+        io_error(io::Error::new(
+            io::ErrorKind::Other,
+            format!("sandbox executable `{}`: {error}", path.display()),
+        ))
+    })?;
+    let canonical_metadata = fs::symlink_metadata(&canonical).map_err(|error| {
+        io_error(io::Error::new(
+            io::ErrorKind::Other,
+            format!("sandbox executable `{}`: {error}", path.display()),
+        ))
+    })?;
+    if canonical_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || !canonical_metadata.is_file()
+    {
+        return Err(io_error(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sandbox executable `{}` is not a regular file",
+                path.display()
+            ),
         )));
     }
     Ok(canonical)

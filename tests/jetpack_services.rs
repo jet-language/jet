@@ -317,6 +317,40 @@ fn services_wait_reports_readiness_timeout() {
     assert!(stderr.contains("service `fixture` is not ready"), "stderr: {stderr}");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn services_up_readiness_timeout_preserves_startup_failure_receipt() {
+    let proj = Scratch::new("up-timeout-receipt");
+    let root = Scratch::new("up-timeout-receipt-root");
+    let home = Scratch::new("up-timeout-receipt-home");
+    write_project(
+        &proj.path,
+        r#"timeout: { run: ["sh", "-c", "sleep 30"], ready: "false" }"#,
+        "fn run() {}\n",
+    );
+    let out = jetpack()
+        .args(["services", "up", "timeout", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "readiness timeout unexpectedly succeeded");
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(output.contains("E1261"), "output: {output}");
+    let service_dir = proj.path.join(".jet/services/timeout");
+    let lifecycle = fs::read_to_string(service_dir.join("lifecycle")).unwrap();
+    assert!(lifecycle.contains("phase=failed"), "{lifecycle}");
+    assert!(lifecycle.contains("recovery=startup-failed"), "{lifecycle}");
+    assert!(service_dir.join("supervisor.error").is_file());
+    assert!(!service_dir.join("pid").exists());
+}
+
 /// `jetpack dev` health-gates on its declared services (U19's `jetpack dev`
 /// health-gate plug point, previously a no-op) — it must not run the
 /// project's `fn dev()` until the service is healthy.

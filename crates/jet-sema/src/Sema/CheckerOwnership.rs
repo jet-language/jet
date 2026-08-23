@@ -163,11 +163,15 @@ fn append_view_source_projections(
 
 impl<'a> Checker<'a> {
     pub(crate) fn is_resource_type(&self, ty: &Type) -> bool {
-        matches!(
-            ty,
-            Type::Named(name) | Type::Apply { name, .. }
-                if self.trait_reg.implements_trait(name, Syntax::TRAIT_CLOSE)
-        )
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => {
+                self.trait_reg.implements_trait(name, Syntax::TRAIT_CLOSE)
+            }
+            Type::String => self
+                .trait_reg
+                .implements_trait(Syntax::TYPE_STRING, Syntax::TRAIT_CLOSE),
+            _ => false,
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────

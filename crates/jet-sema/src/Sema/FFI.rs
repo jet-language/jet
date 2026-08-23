@@ -118,14 +118,15 @@ pub(crate) fn register_foreign_close_impls(
             continue;
         }
         let Some(type_name) = (match return_type {
-            Type::Named(name) | Type::Apply { name, .. } => Some(name),
+            Type::Named(name) | Type::Apply { name, .. } => Some(name.clone()),
+            Type::String => Some(Syntax::TYPE_STRING.to_string()),
             _ => None,
         }) else {
             continue;
         };
         traits
             .trait_impls
-            .insert((type_name.clone(), Syntax::TRAIT_CLOSE.to_string()));
+            .insert((type_name, Syntax::TRAIT_CLOSE.to_string()));
     }
 }
 

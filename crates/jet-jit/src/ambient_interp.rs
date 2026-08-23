@@ -733,6 +733,7 @@ pub(crate) mod process_prelude {
             pub stderr:
                 std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
             pub terminal: JetOutcome<TerminalSession, JetAbsent>,
+            pub process_group: bool,
             pub timeout_ms: Option<i64>,
             pub started: std::time::Instant,
         }
@@ -769,6 +770,9 @@ pub(crate) mod process_prelude {
     }
 
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+    mod jet_process_sandbox {
+        include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
+    }
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessPolicy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSpec.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Process.rs");

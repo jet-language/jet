@@ -17,6 +17,7 @@ try:
     )
     if invalid.returncode == 0:
         raise SystemExit("invalid source passed")
+    print("invalid=failed")
 
     checked = subprocess.run(
         ["python3", "-m", "py_compile", str(project / "valid.py")],

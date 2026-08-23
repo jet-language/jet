@@ -435,6 +435,7 @@
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub terminal: JetOutcome<TerminalSession, JetAbsent>,
+        pub process_group: bool,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,
     }

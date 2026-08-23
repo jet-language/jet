@@ -7280,6 +7280,12 @@ fn jet_compute_eye(n: i64) -> Result<JetTensor, JetComputeError> {
 }
 
 fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
+    jet_compute_validate_tensor(tensor)?;
+    if jet_compute_is_accelerator(tensor.device) {
+        return Err(JetComputeError::Unsupported(
+            "accelerator backend does not support det; transfer to CPU explicitly".to_string(),
+        ));
+    }
     if tensor.trace.is_some() {
         return Err(JetComputeError::Unsupported(
             "det has no registered autodiff rule".to_string(),
@@ -7288,12 +7294,6 @@ fn jet_compute_det(tensor: &JetTensor) -> Result<f64, JetComputeError> {
     if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] {
         return Err(JetComputeError::RankMismatch(
             "det requires a square rank-2 tensor".to_string(),
-        ));
-    }
-    jet_compute_validate_tensor(tensor)?;
-    if jet_compute_is_accelerator(tensor.device) {
-        return Err(JetComputeError::Unsupported(
-        "accelerator backend does not support det; transfer to CPU explicitly".to_string(),
         ));
     }
     let n = usize::try_from(tensor.shape[0]).map_err(|_| {

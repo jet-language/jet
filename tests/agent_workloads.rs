@@ -4,6 +4,7 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -12,9 +13,30 @@ use std::time::{Duration, Instant};
 const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
 const DOMAIN_CONTRACT_HEADER: &str =
     "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring";
+const BASELINE_HEADER: &str =
+    "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version";
 const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
 const DOMAIN_SCORING: &str =
     "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
+const NATIVE_OS_MATRIX_HEADER: &str = "version\tos\tarch_policy\trequirement\tadapters\treason";
+const EXPECTED_NATIVE_OS_MATRIX: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "linux",
+        "x86_64",
+        "required",
+        "jet,bash,python,node",
+        "native",
+    ),
+    ("macos", "any", "required", "jet,bash,python,node", "native"),
+    (
+        "windows",
+        "any",
+        "excluded",
+        "jet,python,node",
+        "bash-not-native",
+    ),
+];
+const JET_BASELINE_HEADER: &str = "version\ttask_id\tjet_status\tloss_owner";
 const SANDBOX_HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
 const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
     (
@@ -198,7 +220,32 @@ const ADAPTERS: &[(&str, &str)] = &[
     ("python", "py"),
     ("node", "mjs"),
 ];
+const BASELINE_ADAPTERS: &[&str] = &["bash", "python", "node"];
 const EXPECTED_DOMAIN_CONTRACT: &[(&str, &str, &str, &str)] = &[
+    (
+        "build-test-failure-recovery",
+        "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "process-batch-success",
+        "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "process-batch-large-stderr",
+        "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "process-batch-timeout-recovery",
+        "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
     (
         "structured-data-transform",
         "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json",
@@ -293,6 +340,42 @@ const EXPECTED_DOMAIN_CONTRACT: &[(&str, &str, &str, &str)] = &[
         "service-lifecycle-readiness-timeout",
         "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process",
         "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "repository-marker-scan",
+        "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "repository-marker-scan-empty",
+        "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "hostile",
+    ),
+    (
+        "repository-semantic-inspection",
+        "jet=Core:process,sys,inspect-semindex;bash=awk;python=stdlib-pathlib;node=stdlib-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "repository-semantic-edit",
+        "jet=Core:files,process,inspect-codemod;bash=cp,awk,mv;python=stdlib-shutil,pathlib;node=stdlib-fs",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "git-diff-review",
+        "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
+        "normal",
+    ),
+    (
+        "git-diff-empty",
+        "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git",
+        "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
         "hostile",
     ),
 ];
@@ -457,6 +540,56 @@ fn read_tasks() -> Vec<Task> {
         .collect()
 }
 
+fn read_native_os_matrix() -> Vec<(String, String, String, String, String)> {
+    let matrix = fs::read_to_string(corpus_root().join("native_os_matrix.tsv")).unwrap();
+    let mut lines = matrix.lines();
+    assert_eq!(
+        lines.next(),
+        Some(NATIVE_OS_MATRIX_HEADER),
+        "native OS matrix schema drifted"
+    );
+    lines
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 6, "bad native OS matrix row: {line}");
+            assert_eq!(
+                fields[0], "1",
+                "unsupported native OS matrix version: {line}"
+            );
+            (
+                fields[1].into(),
+                fields[2].into(),
+                fields[3].into(),
+                fields[4].into(),
+                fields[5].into(),
+            )
+        })
+        .collect()
+}
+
+fn read_jet_baseline() -> Vec<(String, String, String)> {
+    let baseline = fs::read_to_string(corpus_root().join("jet_baseline.tsv")).unwrap();
+    let mut lines = baseline.lines();
+    assert_eq!(
+        lines.next(),
+        Some(JET_BASELINE_HEADER),
+        "Jet baseline schema drifted"
+    );
+    lines
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let fields = line.split('\t').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 4, "bad Jet baseline row: {line}");
+            assert_eq!(
+                fields[0], "1",
+                "unsupported Jet baseline version: {line}"
+            );
+            (fields[1].into(), fields[2].into(), fields[3].into())
+        })
+        .collect()
+}
+
 fn run_bounded(mut command: Command, label: &str, deadline: Duration) -> BoundedOutput {
     let capture = Scratch::new("jet_agent_process_output");
     let stdout_path = capture.path.join("stdout");
@@ -578,6 +711,106 @@ fn input_hashes(input: &Path) -> BTreeMap<String, String> {
         input.file_name().unwrap().to_string_lossy().into_owned(),
         jet::SHA256::sha256_hex(&fs::read(input).unwrap()),
     )])
+}
+
+fn input_digest(input: &Path) -> String {
+    let mut canonical = String::new();
+    for (path, hash) in input_hashes(input) {
+        canonical.push_str(&path);
+        canonical.push('\t');
+        canonical.push_str(&hash);
+        canonical.push('\n');
+    }
+    jet::SHA256::sha256_hex(canonical.as_bytes())
+}
+
+struct BaselineCapture {
+    root: PathBuf,
+    run_id: String,
+    machine: String,
+    receipt: fs::File,
+}
+
+impl BaselineCapture {
+    fn from_env() -> Option<Self> {
+        let root = PathBuf::from(std::env::var_os("JET_CORPUS_BASELINE_DIR")?);
+        let run_id = std::env::var("JET_CORPUS_BASELINE_RUN_ID")
+            .expect("JET_CORPUS_BASELINE_RUN_ID is required when capturing baselines");
+        let machine = std::env::var("JET_CORPUS_BASELINE_MACHINE")
+            .expect("JET_CORPUS_BASELINE_MACHINE is required when capturing baselines");
+        fs::create_dir_all(root.join("outputs")).unwrap();
+        let mut receipt = fs::File::create(root.join("receipt.tsv")).unwrap();
+        writeln!(receipt, "{BASELINE_HEADER}").unwrap();
+        Some(Self {
+            root,
+            run_id,
+            machine,
+            receipt,
+        })
+    }
+
+    fn record(
+        &mut self,
+        task: &Task,
+        adapter: &str,
+        source: &Path,
+        input: &Path,
+        expected: &[u8],
+        cold: &BoundedOutput,
+        warm: &BoundedOutput,
+        version: &str,
+    ) {
+        let output_dir = self.root.join("outputs").join(adapter);
+        fs::create_dir_all(&output_dir).unwrap();
+        let stdout_file = format!("outputs/{adapter}/{}.stdout", task.id);
+        let stderr_file = format!("outputs/{adapter}/{}.stderr", task.id);
+        fs::write(self.root.join(&stdout_file), &cold.output.stdout).unwrap();
+        fs::write(self.root.join(&stderr_file), &cold.output.stderr).unwrap();
+        let output_stable = cold.output.stdout == warm.output.stdout;
+        let supported = cold.output.status.code() == Some(0)
+            && warm.output.status.code() == Some(0)
+            && cold.output.stdout == expected
+            && warm.output.stdout == expected
+            && output_stable;
+        let expressibility = if supported { "supported" } else { "unsupported" };
+        let finding = if supported {
+            "none".to_string()
+        } else {
+            format!(
+                "cold_exit={:?};warm_exit={:?};stdout_expected={};warm_stable={}",
+                cold.output.status.code(),
+                warm.output.status.code(),
+                cold.output.stdout == expected && warm.output.stdout == expected,
+                output_stable
+            )
+        };
+        let row = [
+            "1".to_string(),
+            self.run_id.clone(),
+            self.machine.clone(),
+            adapter.to_string(),
+            task.id.clone(),
+            expressibility.to_string(),
+            finding,
+            input_digest(input),
+            jet::SHA256::sha256_hex(expected),
+            cold.output.status.code().unwrap_or(-1).to_string(),
+            source_tokens(source).to_string(),
+            stdout_file,
+            jet::SHA256::sha256_hex(&cold.output.stdout),
+            stderr_file,
+            jet::SHA256::sha256_hex(&cold.output.stderr),
+            cold.elapsed.as_nanos().to_string(),
+            warm.elapsed.as_nanos().to_string(),
+            jet::SHA256::sha256_hex(&warm.output.stdout),
+            jet::SHA256::sha256_hex(&warm.output.stderr),
+            output_stable.to_string(),
+            DOMAIN_SCORING.to_string(),
+            version.replace('\t', " "),
+        ]
+        .join("\t");
+        writeln!(self.receipt, "{row}").unwrap();
+    }
 }
 
 fn fixture_files(root: &Path) -> BTreeSet<String> {
@@ -707,6 +940,87 @@ fn scratch_output_violations(
     violations
 }
 
+fn baseline_artifact_path(root: &Path, relative: &str) -> PathBuf {
+    let path = Path::new(relative);
+    assert!(!path.is_absolute(), "baseline artifact escaped root: {relative}");
+    assert!(
+        relative.split('/').all(|part| !part.is_empty() && part != ".."),
+        "invalid baseline artifact path: {relative}"
+    );
+    root.join(path)
+}
+
+#[test]
+fn recorded_baselines_cover_frozen_tasks() {
+    let root = corpus_root().join("baselines");
+    let receipt = fs::read_to_string(root.join("receipt.tsv")).unwrap();
+    let mut lines = receipt.lines();
+    assert_eq!(lines.next(), Some(BASELINE_HEADER), "baseline schema drifted");
+
+    let tasks = read_tasks();
+    let mut seen = BTreeSet::new();
+    let mut run_id = None;
+    let mut machine = None;
+    for line in lines.filter(|line| !line.is_empty()) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 22, "bad baseline receipt row: {line}");
+        assert_eq!(fields[0], "1", "unsupported baseline receipt version: {line}");
+        assert!(BASELINE_ADAPTERS.contains(&fields[3]), "unknown baseline adapter: {line}");
+        let task = tasks
+            .iter()
+            .find(|task| task.id == fields[4])
+            .unwrap_or_else(|| panic!("baseline names unknown task: {line}"));
+        assert!(
+            seen.insert((fields[3].to_string(), fields[4].to_string())),
+            "duplicate baseline row: {line}"
+        );
+        if let Some(previous) = run_id {
+            assert_eq!(previous, fields[1], "baseline mixes run IDs");
+        } else {
+            run_id = Some(fields[1]);
+        }
+        if let Some(previous) = machine {
+            assert_eq!(previous, fields[2], "baseline mixes machines");
+        } else {
+            machine = Some(fields[2]);
+        }
+        assert!(!fields[1].is_empty() && !fields[2].is_empty());
+        assert!(fields[21] != "" && fields[21] != "unknown");
+        assert_eq!(fields[7], input_digest(&corpus_root().join(&task.input)));
+        let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
+        assert_eq!(fields[8], jet::SHA256::sha256_hex(&expected));
+        assert_eq!(fields[10].parse::<usize>().unwrap().to_string(), fields[10]);
+        assert!(fields[15].parse::<u128>().is_ok());
+        assert!(fields[16].parse::<u128>().is_ok());
+        assert_eq!(fields[20], DOMAIN_SCORING);
+
+        match fields[5] {
+            "supported" => {
+                assert_eq!(fields[6], "none");
+                assert_eq!(fields[9], "0");
+                assert_eq!(fields[19], "true");
+                let stdout = fs::read(baseline_artifact_path(&root, fields[11])).unwrap();
+                let stderr = fs::read(baseline_artifact_path(&root, fields[13])).unwrap();
+                assert_eq!(stdout, expected, "baseline stdout drifted: {line}");
+                assert_eq!(fields[12], jet::SHA256::sha256_hex(&stdout));
+                assert_eq!(fields[14], jet::SHA256::sha256_hex(&stderr));
+                assert_eq!(fields[17], fields[12]);
+            }
+            "unsupported" => {
+                assert_ne!(fields[6], "none", "unsupported baseline lacks finding: {line}");
+                assert_eq!(fields[11], "-");
+                assert_eq!(fields[13], "-");
+            }
+            other => panic!("unknown baseline expressibility {other}: {line}"),
+        }
+    }
+    assert_eq!(
+        seen.len(),
+        tasks.len() * BASELINE_ADAPTERS.len(),
+        "baseline omitted a frozen task or adapter"
+    );
+}
+
 #[test]
 fn manifest_is_complete_frozen_and_non_vacuous() {
     let hostile_cases = SANDBOX_HOSTILE_CORPUS
@@ -759,7 +1073,10 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
         assert!(corpus_root().join(&task.expected).is_file());
         if matches!(
             task.id.as_str(),
-            "browser-automation-preflight"
+            "build-test-failure-recovery"
+                | "process-batch-large-stderr"
+                | "process-batch-timeout-recovery"
+                | "browser-automation-preflight"
                 | "desktop-interaction-focus"
                 | "document-markdown-inspection"
                 | "media-asset-inventory"
@@ -767,13 +1084,47 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
                 | "interactive-terminal-closed"
                 | "service-lifecycle-readiness-timeout"
         ) {
-            let expected = fs::read_to_string(corpus_root().join(&task.expected)).unwrap();
-            let hostile = if task.id == "desktop-interaction-focus" {
-                expected.lines().any(|line| line == "event|Empty|observed")
-            } else {
-                expected.lines().any(|line| line.starts_with("reject|"))
-            };
-            assert!(hostile, "target task {} lost its hostile variant", task.id);
+            let input = corpus_root().join(&task.input);
+            match task.id.as_str() {
+                "build-test-failure-recovery" => {
+                    for invalid in ["invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"] {
+                        let source = fs::read_to_string(input.join(invalid)).unwrap();
+                        assert!(
+                            source.contains("fn run( {")
+                                || source.contains("if then")
+                                || source.contains("def run(:")
+                                || source.contains("function run( {"),
+                            "build recovery lost hostile source {invalid}"
+                        );
+                    }
+                }
+                "process-batch-large-stderr" => {
+                    let source = fs::read_to_string(input).unwrap();
+                    assert!(
+                        source.contains("100000") && source.contains(">&2"),
+                        "large-stderr task lost hostile output pressure"
+                    );
+                }
+                "process-batch-timeout-recovery" => {
+                    let source = fs::read_to_string(input).unwrap();
+                    assert!(
+                        source.contains("trap '' TERM") && source.contains("50"),
+                        "timeout task lost TERM-resistant cancellation case"
+                    );
+                }
+                _ => {
+                    let expected = fs::read_to_string(corpus_root().join(&task.expected)).unwrap();
+                    let hostile = match task.id.as_str() {
+                        "desktop-interaction-focus" => expected.lines().any(|line| line == "event|Empty|observed"),
+                        "browser-automation-preflight" => expected.lines().any(|line| line.ends_with("|rejected")),
+                        "mcp-environment-denied" => expected.lines().any(|line| line == "error=-32002"),
+                        "interactive-terminal-closed" => expected.lines().any(|line| line == "closed=ok"),
+                        "service-lifecycle-readiness-timeout" => expected.lines().any(|line| line == "error=E1261"),
+                        _ => expected.lines().any(|line| line.starts_with("reject|")),
+                    };
+                    assert!(hostile, "target task {} lost its hostile variant", task.id);
+                }
+            }
         }
         let stem = adapter_stem(&task.id);
         for (_, extension) in ADAPTERS {
@@ -812,7 +1163,91 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 63, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 82, "all inputs and declared outputs must be frozen");
+}
+
+#[test]
+fn repository_and_git_jet_adapters_use_production_paths() {
+    let checks = [
+        (
+            "repository_marker_scan.jet",
+            ["core.files", "fs.walk"].as_slice(),
+        ),
+        (
+            "repository_semantic_inspection.jet",
+            ["inspect", "semindex"].as_slice(),
+        ),
+        (
+            "repository_semantic_edit.jet",
+            ["inspect", "codemod", "--yes"].as_slice(),
+        ),
+        (
+            "git_diff_review.jet",
+            ["git", "diff", "--no-index", "--name-status"].as_slice(),
+        ),
+    ];
+    for (adapter, needles) in checks {
+        let source = fs::read_to_string(corpus_root().join("adapters").join(adapter)).unwrap();
+        for needle in needles {
+            assert!(
+                source.contains(needle),
+                "{adapter} no longer reaches the production path containing {needle}"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_os_matrix_is_frozen_and_names_current_host() {
+    let matrix = read_native_os_matrix();
+    let actual = matrix
+        .iter()
+        .map(|row| {
+            (
+                row.0.as_str(),
+                row.1.as_str(),
+                row.2.as_str(),
+                row.3.as_str(),
+                row.4.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        EXPECTED_NATIVE_OS_MATRIX,
+        "native OS matrix changed without a frozen review"
+    );
+    assert!(
+        matrix.iter().any(|row| row.0 == std::env::consts::OS),
+        "current host `{}` is absent from the frozen native OS matrix",
+        std::env::consts::OS
+    );
+}
+
+#[test]
+fn jet_baseline_is_frozen_and_each_loss_has_an_owner() {
+    let tasks = read_tasks();
+    let baseline = read_jet_baseline();
+    assert_eq!(
+        baseline.len(),
+        tasks.len(),
+        "Jet baseline must contain one row per corpus task"
+    );
+    for (task, row) in tasks.iter().zip(baseline) {
+        assert_eq!(row.0, task.id, "Jet baseline task order drifted");
+        assert_eq!(row.1, "pass", "baseline must freeze a passing Jet task");
+        assert_eq!(row.2, task.loss_cards, "baseline loss owner drifted");
+        assert!(
+            row.2.split(';').all(|owner| {
+                owner
+                    .split_once('=')
+                    .map(|(_, target)| target.starts_with('#') || target.starts_with("non-goal:"))
+                    .unwrap_or(false)
+            }),
+            "Jet loss owner must name a card or ratified non-goal: {}",
+            row.2
+        );
+    }
 }
 
 #[test]
@@ -992,6 +1427,8 @@ fn equivalent_adapters_complete_declared_tasks() {
         ("node", command_version(Path::new("node"), "--version", "node")),
     ]);
     let git_version = command_version(Path::new("git"), "--version", "git");
+    let mut baseline = BaselineCapture::from_env();
+    let capture_baselines = baseline.is_some();
 
     for task in read_tasks() {
         let input = corpus_root().join(&task.input);
@@ -1001,6 +1438,9 @@ fn equivalent_adapters_complete_declared_tasks() {
         let mut measurements = Vec::new();
         let mut declared_outputs = Vec::new();
         for &(adapter, extension) in ADAPTERS {
+            if capture_baselines && adapter == "jet" {
+                continue;
+            }
             let scratch = Scratch::new("jet_agent_workload");
             let source = corpus_root()
                 .join("adapters")
@@ -1071,6 +1511,20 @@ fn equivalent_adapters_complete_declared_tasks() {
                 "{} {adapter} left undeclared scratch residue",
                 task.id
             );
+            if adapter != "jet" {
+                if let Some(capture) = baseline.as_mut() {
+                    capture.record(
+                        &task,
+                        adapter,
+                        &source,
+                        &input,
+                        &expected,
+                        &cold,
+                        &warm,
+                        &versions[adapter],
+                    );
+                }
+            }
             declared_outputs.push(cold.output.stdout);
             measurements.push(Measurement {
                 adapter,

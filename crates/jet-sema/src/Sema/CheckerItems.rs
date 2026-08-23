@@ -406,6 +406,39 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("DataLimits".to_string()));
         }
+        // D-AUTHORITY-NAME1=A: exact process grants are ordinary data on the
+        // one named authority carrier. Check the list shape here so the
+        // Prelude constructor receives the same `[String]` value on every
+        // execution tier.
+        if type_name == Syntax::TYPE_ABILITIES && method == "from_rights" {
+            if args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`Abilities.from_rights` takes 1 argument, got {}", args.len()),
+                    "a grant set is one list of named rights".to_string(),
+                    "pass one `[String]` rights list".to_string(),
+                    Some(span),
+                ));
+                for arg in args {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()));
+            }
+            let expected = Type::List(Box::new(Type::String));
+            let old_expected = self.expected_type.replace(expected.clone());
+            let got = self.infer(&mut args[0].expr);
+            self.expected_type = old_expected;
+            if got.as_ref() != Some(&expected) {
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`Abilities.from_rights` expects `[String]`, got `{}`", got.map_or_else(|| "unknown".to_string(), |ty| ty.name())),
+                    "rights are named strings carried by one authority value".to_string(),
+                    "pass a list of string rights".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+            }
+            return Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()));
+        }
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(type_name, method) else {
             let builtin = crate::Sema::Diagnostics::builtin_type_from_ident(type_name).is_some();
             self.diags.push(Diagnostic::error(

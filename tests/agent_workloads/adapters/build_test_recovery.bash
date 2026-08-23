@@ -14,6 +14,7 @@ if bash -n "$project/invalid.sh" 2>/dev/null; then
   printf '%s\n' 'invalid source passed' >&2
   exit 1
 fi
+printf '%s\n' 'invalid=failed'
 bash -n "$project/valid.sh"
 result=$(bash "$project/valid.sh")
 printf '%s\n' 'recovery=ok'

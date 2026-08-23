@@ -16,8 +16,16 @@ impl JetAuthority {
         }
     }
 
-    /// D-AUTHORITY-NAME1=A: the workspace value starts with the safe workspace
-    /// read right. Boundary operations may narrow it, but never widen it.
+    /// Generated TIR uses the prefixed constructor name to keep the runtime
+    /// helper distinct from a user-defined static method. Both spellings use
+    /// this one authority constructor.
+    pub fn __jet_from_rights(rights: Vec<String>) -> Self {
+        Self::from_rights(rights)
+    }
+
+    /// D-AUTHORITY-NAME1=A / D-AGENT-EXEC1: the workspace value names the
+    /// default resource boundary explicitly. The executor treats omitted
+    /// resources as denied; these entries are the only default grants.
     pub fn workspace() -> Self {
         Self {
             rights: jet_authority_workspace_rights(),
@@ -42,12 +50,19 @@ fn jet_authority_covers(held: &str, requested: &str) -> bool {
     held == requested
         || requested
             .strip_prefix(held)
-            .is_some_and(|tail| tail.starts_with('.'))
+            .is_some_and(|tail| tail.starts_with('.') || tail.starts_with(':') || tail.starts_with('/'))
 }
 
-/// D-AGENT-EXEC1: the default workspace process scope is read-only.
+/// D-AGENT-EXEC1: the default workspace process scope is a repository read
+/// plus a private build write. Network, home, secrets, devices, inherited
+/// handles, and every other resource stay absent and therefore denied.
 pub(crate) fn jet_authority_workspace_rights() -> std::collections::BTreeSet<String> {
-    ["FS.Read".to_string()].into_iter().collect()
+    [
+        "FS.Read:repo".to_string(),
+        "FS.Write:.jet/build".to_string(),
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// D-AUTHORITY-NAME1=A: `with` can only attenuate a right already held.

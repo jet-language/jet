@@ -2771,7 +2771,13 @@ fn concurrent_processes_share_one_bridge_build_per_key() {
                 continue;
             }
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if name.starts_with("libjet_ffi_") && name.ends_with(".rlib") {
+            // Cargo uplifts the package rlib into `release/` and also keeps a
+            // dependency-copy under `release/deps/`. Count the blessed
+            // release artifact only; both files are one bridge build.
+            if name.starts_with("libjet_ffi_")
+                && name.ends_with(".rlib")
+                && path.parent().is_some_and(|parent| parent.ends_with("release"))
+            {
                 rlibs.push(name);
             } else if name.starts_with("jet_ffi_") && name.ends_with(".sha256") {
                 sidecars.push(name);

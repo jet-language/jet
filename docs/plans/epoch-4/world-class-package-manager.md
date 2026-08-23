@@ -14,15 +14,15 @@ Epoch 4 exits when Jetpack has functional Nix package-manager support,
 native Nix-package interoperability without an installed `nix` binary, and the
 best compatible features from leading language and build package managers.
 Per `D-JPK-EPOCHBOUNDARY1=B`, Epoch 4 proves the 20 functional lanes below and
-reports the actual sandbox class. Card #398 owns hostile Linux/macOS/Windows
-confinement; its native Linux, macOS, and Windows slices now supply enforced
-child boundaries.
+reports the actual sandbox class. Card #398 and its split platform cards own
+hostile Linux/macOS/Windows confinement; card #891 owns the native Windows
+AppContainer slice.
 
 The product may claim functional package-manager support only when all Epoch
 4 acceptance lanes below pass against live stores, registries, caches,
 builders, packages, and independent machines. Fixture-only tests support
 development; they never close a product-claim card. Full parity remains reserved
-until #398 also passes its hostile cross-platform lane.
+until the #398 platform family passes its hostile cross-platform lane.
 
 ## Current truth
 
@@ -45,7 +45,7 @@ Windows CI. Missing offline output fails with E1315 without leaving a partial
 Hangar entry. Its success and failure rows run with an empty tool directory, so
 an installed Nix or shell command cannot make the lane pass by accident. The
 private lease snapshot is the non-Linux executable handoff; hostile child
-confinement remains Epoch 8 card #398.
+confinement remains the Epoch 8 #398 platform family, including #891.
 
 JP0 stop-line now enforces three truth boundaries:
 
@@ -298,13 +298,22 @@ live acceptance, and documentation. Work order is binding.
   denies ambient network, exposes the private source copy read-only, binds only
   the private output copy, promotes it after success, and records the backend
   policy in build provenance.
+- Core library Cargo actions use that same child boundary. The exact staged
+  source, recipe, platform, and `exec:cargo` identity must pass the build-hook
+  trust gate before launch; producer and Hangar receipts record the actual
+  backend/policy (or `non-executing` for reuse/substitution). If the native
+  backend is unavailable, Jetpack substitutes or refuses with E1275; it never
+  runs host Cargo unsandboxed.
 - macOS native Seatbelt profile (`sandbox-exec`) plus source/output,
   environment, network, device, and declared-process restrictions; the actual
   backend and policy receipt are recorded, and executable actions fail before
   launch when Seatbelt is unavailable.
 - Windows AppContainer token with no default capabilities, per-run source/output/tool
-  ACL projection, Job Object kill-on-close plus process/memory limits, cleared
-  environment, and network denial unless a declared fetch capability is active.
+  ACL projection, reparse-point rejection, an explicit inherited-handle list,
+  Job Object kill-on-close plus process/memory limits, cleared environment, and
+  network denial unless the declared fetch capability is enabled. Card #891
+  records the actual launch policy and fails closed before launch when the
+  native backend cannot complete its probe.
 - Hostile corpus covers path/symlink escape, host reads, sibling writes,
   undeclared executables, process/ptrace/device access, network, and daemon leak.
   The single local corpus is `tests/fixtures/build_sandbox/hostile-corpus.tsv`;
@@ -312,6 +321,11 @@ live acceptance, and documentation. Work order is binding.
   rows. The ambient #769 workload harness validates the rows only; #770's
   enforcing agent executor must use this same file before it can publish a
   confinement claim.
+- `jetpack build` reports the recorded producer receipt for new outputs:
+  non-executing copy/prebuilt actions say that no child launched, executable
+  actions name the backend and policy, missing receipts are reported as
+  missing, and cache or substitution outcomes do not claim a local sandbox
+  run.
 
 ### E4-JP4 — closure DB, roots, leases, GC, verify, repair
 
@@ -953,7 +967,7 @@ JP0
 ├─ JP2 action IR
 ├─ JP6A trust primitives       after JP1 + JP2
 ├─ JP15 variants/domains       after JP2
-├─ JP3 hostile sandbox         E8 #398, after JP2
+├─ JP3 hostile sandbox         E8 #398 platform family, after JP2
 ├─ JP8 Nix derivations         after JP1 + JP2
 ├─ JP13 semantic lock          after JP1 + JP2 + JP15
 ├─ JP4 closure/roots           after JP1 + JP2 + JP13
@@ -1020,7 +1034,7 @@ JP9 follows JP8; JP10 follows JP9; JP11 follows JP4–JP5 + JP8–JP10 + JP13.
 20. **R9 lane:** `jet run file.jet` remains rootless and manifest/profile/
     registry/daemon-free; inline dependencies are the only package opt-in.
 
-Epoch 8 #398 adds the hostile sandbox lane: host read/write, symlink escape,
+Epoch 8 #398 and its split platform cards add the hostile sandbox lane: host read/write, symlink escape,
 network, process, ptrace, device, daemon, and undeclared executable attacks fail
 at the OS boundary on Linux, macOS, and Windows.
 

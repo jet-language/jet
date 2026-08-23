@@ -140,14 +140,15 @@ fn is_regular_file(path: &Path) -> bool {
 
 /// The host `cargo` as the implicit dev toolchain, if it is on PATH.
 fn host_toolchain() -> Option<Toolchain> {
-    if std::process::Command::new("cargo")
+    let cargo = resolve_on_path("cargo")?;
+    if std::process::Command::new(&cargo)
         .arg("--version")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
     {
         Some(Toolchain {
-            cargo: PathBuf::from("cargo"),
+            cargo,
             id: "host".to_string(),
             version: String::new(),
             pinned: false,
@@ -156,6 +157,19 @@ fn host_toolchain() -> Option<Toolchain> {
     } else {
         None
     }
+}
+
+fn resolve_on_path(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let names = if cfg!(windows) {
+        vec![program.to_string(), format!("{program}.exe")]
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::split_paths(&path)
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
 }
 
 /// E1240 — no realized Rust toolchain and no Nix to build an `extern rust`

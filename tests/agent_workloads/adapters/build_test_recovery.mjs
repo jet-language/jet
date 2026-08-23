@@ -27,6 +27,7 @@ function run(program, args) {
 try {
   const invalid = await run("node", ["--check", `${project}/invalid.mjs`]);
   if (invalid.code === 0) throw new Error("invalid source passed");
+  console.log("invalid=failed");
 
   const checked = await run("node", ["--check", `${project}/valid.mjs`]);
   if (checked.code !== 0) throw new Error("valid source did not build");
