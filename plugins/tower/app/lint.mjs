@@ -3,7 +3,7 @@
 // findings [{rule, ref, msg}]; `lint()` aggregates them. Read-only — never
 // mutates the store.
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { ballotGaps, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 
@@ -16,7 +16,12 @@ function daysSince(dateStr) {
 }
 
 const EVIDENCE_RE = /verif|green|tests?|evidence/i;
-const DISPUTED_EVIDENCE_RE = /\b(?:not\s+satisfied|blocked|could\s+not|unproven|not\s+run)\b/i;
+const EXPLICIT_DISPUTE_RE = /\b(?:not\s+satisfied|unproven|(?:criterion|proof|check|test)\s+(?:is|remains)\s+(?:not\s+met|incomplete))\b/i;
+const WEAK_DISPUTE_RE = /\b(?:could|can|did|does)\s+not\s+(?:be\s+)?(?:run|finish|pass|prove|cover|exercise|satisfy|meet|complete)|\bnot\s+(?:run|verified|met|complete|implemented)\b/i;
+const HISTORICAL_EVIDENCE_RE = /\b(?:before|prior(?:\s+to)?|previously|formerly|earlier|at\s+that\s+head|historical(?:ly)?|was\s+fixed|were\s+fixed|has\s+been\s+fixed|have\s+been\s+fixed|now\s+(?:fits|passes|green|works|fixed|resolved)|removed|resolved|predated|old\s+state|past)\b/i;
+const IRRELEVANT_EVIDENCE_RE = /\b(?:unrelated|independent|contains|quoted|source\s+string|outside\s+(?:this|the)\s+(?:card|criterion|scope)|not\s+(?:this|the)\s+(?:card|criterion|change))\b/i;
+const QUALIFIED_EVIDENCE_RE = /\b(?:evidence|criterion|audit|review|report|log)\b[^.!?]{0,80}\b(?:said|reported|recorded|found|read|showed)\b[^.!?]{0,40}\b(?:not\s+satisfied|unproven)\b|\bnot\s+satisfied\s+by\b|\bnot\s+implemented\s+as\s+written\b/i;
+const POSITIVE_EVIDENCE_RE = /\b(?:proof|pass(?:ed|es|ing)?|green|verified|confirmed|clean|success(?:ful)?|works?|assert(?:s|ed)?|golden|parity|measured|re-verified|production)\b/i;
 
 // ---- rule: done-without-evidence -------------------------------------------
 // A card phase==='done' whose log never mentions evidence AND whose criteria
@@ -138,12 +143,30 @@ export function ruleCriteriaEvidenceConflicts(s) {
     for (const item of c.criteria || []) {
       if (!['met', 'verified'].includes(item.status)) continue;
       const evidence = String(item.evidence || '').trim();
-      if (!DISPUTED_EVIDENCE_RE.test(evidence)) continue;
+      if (!evidenceConflicts(evidence)) continue;
       findings.push({ rule: 'criteria-evidence-conflict', ref: '#' + c.num,
         msg: '#' + c.num + ' "' + c.title + '" criterion #' + item.n + ' is ' + item.status + ' but its evidence disputes it: ' + evidence });
     }
   }
   return findings;
+}
+
+function evidenceConflicts(evidence) {
+  // Inline code often quotes a diagnostic, fixture, or source string. It is
+  // not a claim about the criterion's current state.
+  const prose = evidence.replace(/`[^`]*`/g, ' ');
+  const sentences = prose.split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  const hasPositiveProof = POSITIVE_EVIDENCE_RE.test(prose);
+  return sentences.some(sentence => {
+    const explicit = EXPLICIT_DISPUTE_RE.test(sentence);
+    const weak = WEAK_DISPUTE_RE.test(sentence);
+    if (!explicit && !weak) return false;
+    if (HISTORICAL_EVIDENCE_RE.test(sentence) || IRRELEVANT_EVIDENCE_RE.test(sentence) || QUALIFIED_EVIDENCE_RE.test(sentence)) return false;
+    // Strong present-tense admissions are findings even when the same
+    // evidence also records earlier or partial proof. Weaker phrases only
+    // dispute a settled row when no positive proof appears in the evidence.
+    return explicit || !hasPositiveProof;
+  });
 }
 
 // ---- rule: duplicate-suspect -----------------------------------------------
@@ -178,34 +201,80 @@ export function ruleDuplicateSuspects(s) {
 
 const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard, ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects];
 
-// ---- --docs mode: ratified decision id still listed in an open-ballot doc --
-// Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans
-// may legitimately reference a ratified id long after the fact.
-const DECISION_ID_RE = /\bD-[A-Z0-9-]+\b/g;
+const DECISION_ID_RE = /\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
+const CARD_REF_RE = /#(\d+)\b/g;
+const DECISION_CONTEXT_RE = /\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/;
 
-export function ruleBallotDocGaps(s, history, { docsRoot } = {}) {
-  const dir = join(docsRoot, 'ballots');
-  if (!existsSync(dir)) return [];
-  const ratified = new Set([
-    ...s.decisions.filter(d => d.status === 'ratified').map(d => d.id),
-    ...(history?.decisions || []).map(d => d.id), // decisions only retire once ratified
-  ]);
-  const findings = [];
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.md')) continue;
-    const text = readFileSync(join(dir, f), 'utf8');
-    // A doc that declares itself decided history isn't an open queue.
-    const head = text.split('\n').slice(0, 10).join('\n');
-    if (/status:\s*(ratified|historical|archived)/i.test(head)) continue;
-    const seen = new Set();
-    for (const m of text.matchAll(DECISION_ID_RE)) {
-      const id = m[0];
-      if (seen.has(id) || !ratified.has(id)) continue;
-      seen.add(id);
-      findings.push({ rule: 'ratified-in-open-ballot-doc', ref: id,
-        msg: `${id} is ratified but still listed in docs/ballots/${f}` });
+function specFiles(root) {
+  if (!existsSync(root)) return [];
+  const files = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.')) continue;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) walk(abs);
+      else if (/\.(?:md|json|txt)$/i.test(entry.name)) files.push(abs);
     }
+  };
+  walk(root);
+  return files;
+}
+
+function addLocation(map, id, path, line) {
+  const locations = map.get(id) || [];
+  locations.push(`${path}:${line}`);
+  map.set(id, locations);
+}
+
+function cardRefsInLine(line) {
+  // Only treat references as cards when prose names cards/issues, or when a
+  // decision citation carries its owning card list. This avoids `[U8#4096]`
+  // and similar language examples.
+  const hasCardContext = /\b(?:card|cards|issue|issues)\b/i.test(line) || DECISION_CONTEXT_RE.test(line);
+  if (!hasCardContext) return [];
+  return [...line.matchAll(CARD_REF_RE)]
+    .filter(m => (line.slice(0, m.index).match(/`/g) || []).length % 2 === 0)
+    .map(m => `#${m[1]}`);
+}
+
+function isPlaceholderDecision(id) {
+  return /^D-(?:X+|Y+|EXAMPLE|TODO)$/i.test(id);
+}
+
+export function ruleSpecReferenceGaps(s, history, { docsRoot = join(process.cwd(), 'docs') } = {}) {
+  const specRoot = join(docsRoot, 'spec');
+  const knownCards = new Set([
+    ...(s?.cards || []).map(c => c.num),
+    ...(history?.cards || []).map(c => c.num),
+  ]);
+  const knownDecisions = new Set([
+    ...(s?.decisions || []).map(d => d.id),
+    ...(history?.decisions || []).map(d => d.id),
+  ]);
+  const missingCards = new Map();
+  const missingDecisions = new Map();
+
+  for (const file of specFiles(specRoot)) {
+    const path = `docs/${relative(docsRoot, file).replaceAll('\\', '/')}`;
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, index) => {
+      for (const ref of cardRefsInLine(line)) {
+        if (!knownCards.has(Number(ref.slice(1)))) addLocation(missingCards, ref, path, index + 1);
+      }
+      for (const match of line.matchAll(DECISION_ID_RE)) {
+        if (!isPlaceholderDecision(match[0]) && !knownDecisions.has(match[0]))
+          addLocation(missingDecisions, match[0], path, index + 1);
+      }
+    });
   }
+
+  const findings = [];
+  for (const [ref, locations] of [...missingCards].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })))
+    findings.push({ rule: 'spec-card-ref-missing', ref,
+      msg: `${locations.join(', ')} cites ${ref}, but Tower has no card record` });
+  for (const [ref, locations] of [...missingDecisions].sort(([a], [b]) => a.localeCompare(b)))
+    findings.push({ rule: 'spec-decision-ref-missing', ref,
+      msg: `${locations.join(', ')} cites ${ref}, but Tower has no decision record` });
   return findings;
 }
 
@@ -225,6 +294,6 @@ export function ruleUnhomedCard(s) {
 export function lint(s, history, { docs = false, docsRoot } = {}) {
   let findings = CORE_RULES.flatMap(fn => fn(s));
   findings = findings.concat(ruleOrphanBlockers(s, history));
-  if (docs) findings = findings.concat(ruleBallotDocGaps(s, history, { docsRoot }));
+  if (docs) findings = findings.concat(ruleSpecReferenceGaps(s, history, { docsRoot }));
   return findings;
 }

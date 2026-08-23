@@ -13,7 +13,7 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { UI, readJSON } from './paths.mjs';
+import { UI, projectRoot, readJSON } from './paths.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
@@ -370,7 +370,7 @@ export function serve(store, port = 7878, open = false) {
         const q = url.searchParams;
         const s = store.load();
         const history = store.loadHistory();
-        const docsRoot = join(dirname(store.dataDir), 'docs');
+        const docsRoot = join(projectRoot(store.dataDir), 'docs');
         return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }), { revision: s.meta.rev });
       }
       // #462 — one-shot agent work packet. ?card=&agent=&claim=0|1 (claim

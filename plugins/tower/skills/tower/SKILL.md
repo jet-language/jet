@@ -111,8 +111,8 @@ Run `tower lint` before or after a sweep to catch durability rot the guards
 don't: cards marked `done` with no criteria and integration evidence in the log, cards
 claimed and idle 3+ days, events missing `by`, decisions that would fail the
 ballot-ready gate, stale drafts, and dangling `blockedBy` refs. `--docs` also
-flags a ratified decision id still sitting in `docs/ballots/*.md`. Exit code
-1 means findings exist — fix them or raise a ballot, don't just clear the
+walks `docs/spec/**` and reports card or decision IDs with no Tower record. Exit
+code 1 means findings exist — fix them or raise a ballot, don't just clear the
 board and move on.
 
 ## Papercuts — log *recurring* tooling friction, don't push through it

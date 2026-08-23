@@ -9,7 +9,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
+import { findDataDir, projectRoot, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
@@ -778,12 +778,12 @@ function cmdNext(store, { flags }) {
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
-// extended with a docs/ballots/ scan (--docs). Read-only; exit 1 on any
-// finding so it's CI/pre-flight friendly, 0 clean.
+// extended with a docs/spec/** reference scan (--docs). Read-only; exit 1 on
+// any finding so it is CI/pre-flight friendly, 0 clean.
 function cmdLint(store, { flags }) {
   const s = store.load();
   const history = store.loadHistory();
-  const docsRoot = flags.docsRoot || join(dirname(store.dataDir), 'docs');
+  const docsRoot = flags.docsRoot || join(projectRoot(store.dataDir), 'docs');
   const findings = lint(s, history, { docs: !!flags.docs, docsRoot });
   if (flags.json) {
     console.log(JSON.stringify(findings, null, 2));

@@ -10,7 +10,7 @@ import { openStore, empty } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
-  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleBallotDocGaps,
+  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleSpecReferenceGaps,
   ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
@@ -183,56 +183,38 @@ test('orphan-blockers: a ref resolvable via history cards is not orphaned', () =
   assert.deepEqual(ruleOrphanBlockers(st.load(), history), []);
 });
 
-// ---- 7. --docs mode: ballot-doc-gaps -------------------------------------------------
+// ---- 7. --docs mode: spec-reference-gaps -----------------------------------------
 
-test('ruleBallotDocGaps: flags a ratified decision id still listed in docs/ballots/*.md', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-XYZ1', title: 't', ...ballot() }));
-  st.mutate((s) => db.ratify(s, 'D-XYZ1', 'A', null, 'owner'));
-
+test('ruleSpecReferenceGaps: reports missing card and decision records in docs/spec', () => {
   const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'ballots'), { recursive: true });
-  writeFileSync(join(docsRoot, 'ballots', 'open.md'), '# Open ballots\n\n- D-XYZ1 still needs owner sign-off\n');
+  mkdirSync(join(docsRoot, 'spec', 'nested'), { recursive: true });
+  writeFileSync(join(docsRoot, 'spec', 'law.md'),
+    'Card #999 and #998 own this law. D-MISSING1 has the decision.\n');
+  writeFileSync(join(docsRoot, 'spec', 'nested', 'example.md'),
+    'D-MISSING1 is repeated here.\n');
 
-  const findings = ruleBallotDocGaps(st.load(), { decisions: [] }, { docsRoot });
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].rule, 'ratified-in-open-ballot-doc');
-  assert.equal(findings[0].ref, 'D-XYZ1');
-
-  // A doc that declares itself decided history is skipped entirely.
-  writeFileSync(join(docsRoot, 'ballots', 'review.md'),
-    '# Review\n\nStatus: ratified 2026-07-06.\n\n- D-XYZ1 chosen option B\n');
-  const again = ruleBallotDocGaps(st.load(), { decisions: [] }, { docsRoot });
-  assert.equal(again.length, 1, 'historical doc adds no findings');
+  const findings = ruleSpecReferenceGaps(empty('T'), { cards: [], decisions: [] }, { docsRoot });
+  assert.deepEqual(findings.map(f => [f.rule, f.ref]), [
+    ['spec-card-ref-missing', '#998'],
+    ['spec-card-ref-missing', '#999'],
+    ['spec-decision-ref-missing', 'D-MISSING1'],
+  ]);
+  assert.match(findings[0].msg, /docs\/spec\/law\.md:1/);
 });
 
-test('ruleBallotDocGaps: clean when the doc only mentions an unratified id', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-OPEN1', title: 't', ...ballot() }));
-
+test('ruleSpecReferenceGaps: accepts live/history records and ignores code literals', () => {
   const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'ballots'), { recursive: true });
-  writeFileSync(join(docsRoot, 'ballots', 'open.md'), '# Open ballots\n\n- D-OPEN1 still pending\n');
-
-  assert.deepEqual(ruleBallotDocGaps(st.load(), { decisions: [] }, { docsRoot }), []);
+  mkdirSync(join(docsRoot, 'spec'), { recursive: true });
+  writeFileSync(join(docsRoot, 'spec', 'law.md'),
+    'Card #1 and card #2 are recorded.\nD-LIVE1 is recorded. D-XXX is a placeholder.\n`[U8#4096]` is a type.\n');
+  const s = { cards: [{ num: 1 }], decisions: [{ id: 'D-LIVE1' }] };
+  const history = { cards: [{ num: 2 }], decisions: [] };
+  assert.deepEqual(ruleSpecReferenceGaps(s, history, { docsRoot }), []);
 });
 
-test('ruleBallotDocGaps: a ratified id reachable via history decisions is also flagged', () => {
-  const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'ballots'), { recursive: true });
-  writeFileSync(join(docsRoot, 'ballots', 'open.md'), '# Open ballots\n\n- D-HIST1 pending\n');
-  const s = empty('T');
-  const history = { decisions: [{ id: 'D-HIST1', status: 'ratified' }] };
-  const findings = ruleBallotDocGaps(s, history, { docsRoot });
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].ref, 'D-HIST1');
-});
-
-test('ruleBallotDocGaps: no docs/ballots dir is clean, never throws', () => {
+test('ruleSpecReferenceGaps: no docs/spec dir is clean, never throws', () => {
   const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-nodocs-'));
-  assert.deepEqual(ruleBallotDocGaps(empty('T'), { decisions: [] }, { docsRoot }), []);
+  assert.deepEqual(ruleSpecReferenceGaps(empty('T'), { cards: [], decisions: [] }, { docsRoot }), []);
 });
 
 // ---- 8. criteria integrity ---------------------------------------------------
@@ -251,12 +233,25 @@ test('criteria-evidence-conflict: flags met and verified rows with disputed evid
   assert.match(findings[0].msg + findings[1].msg, /criterion #1|criterion #2/);
 });
 
-test('criteria-evidence-conflict: stays clean for open rows and positive evidence', () => {
+test('criteria-evidence-conflict: ignores historical and unrelated negative narration', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Clean criteria evidence' }, cfg));
   st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
-  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'ran the check; all cases pass', by: 'builder' }));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, {
+    evidence: 'PROOF: the suite passes. Before #2085 it could not finish; #2085 fixed the guard and it now fits. The unrelated rerun remains blocked.',
+    by: 'builder',
+  }));
   assert.deepEqual(ruleCriteriaEvidenceConflicts(st.load()), []);
+});
+
+test('criteria-evidence-conflict: flags a present negative admission without proof', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Open proof' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'The check could not be run in this environment.', by: 'builder' }));
+  const findings = ruleCriteriaEvidenceConflicts(st.load());
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].ref, '#1');
 });
 
 // ---- 9. duplicate-suspect ---------------------------------------------------
@@ -281,7 +276,7 @@ test('duplicate-suspect: flags shared test references only among open cards', ()
 
 // ---- 9. lint() aggregator ------------------------------------------------------------
 
-test('lint(): combines core rules; --docs adds the doc-gap rule only when asked', () => {
+test('lint(): combines core rules; --docs adds the spec scan only when asked', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-XYZ2', title: 't', ...ballot() }));
@@ -289,17 +284,18 @@ test('lint(): combines core rules; --docs adds the doc-gap rule only when asked'
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg)); // owner bypass, no evidence → finding
 
   const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'ballots'), { recursive: true });
-  writeFileSync(join(docsRoot, 'ballots', 'open.md'), '- D-XYZ2 still open?\n');
+  mkdirSync(join(docsRoot, 'spec'), { recursive: true });
+  writeFileSync(join(docsRoot, 'spec', 'open.md'), 'Card #999 and D-MISSING2 still need a record.\n');
 
   const s = st.load();
   const history = st.loadHistory();
   const withoutDocs = lint(s, history, { docs: false, docsRoot });
   assert.ok(withoutDocs.some(f => f.rule === 'done-without-evidence'));
-  assert.ok(!withoutDocs.some(f => f.rule === 'ratified-in-open-ballot-doc'));
+  assert.ok(!withoutDocs.some(f => f.rule === 'spec-card-ref-missing'));
 
   const withDocs = lint(s, history, { docs: true, docsRoot });
-  assert.ok(withDocs.some(f => f.rule === 'ratified-in-open-ballot-doc'));
+  assert.ok(withDocs.some(f => f.rule === 'spec-card-ref-missing' && f.ref === '#999'));
+  assert.ok(withDocs.some(f => f.rule === 'spec-decision-ref-missing' && f.ref === 'D-MISSING2'));
 });
 
 // ---- 10. burndown scope --------------------------------------------------------------
@@ -365,21 +361,16 @@ test('cli: tower lint --json exits 1 for shared open test references', () => {
   assert.ok(findings.some(f => f.rule === 'duplicate-suspect' && f.ref === '#1,#2'));
 });
 
-test('cli: tower lint --docs finds a ratified id in a doc rooted at --docs-root', () => {
+test('cli: tower lint --docs finds missing references in docs/spec rooted at --docs-root', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-lint-cli-docs-'));
   run(cwd, ['init', '--name', 'Lint Docs Test']);
-  run(cwd, ['card', 'add', '--title', 'A', '--json']);
-  const bp = join(cwd, 'ballot.json');
-  writeFileSync(bp, JSON.stringify({ cardId: '#1', id: 'D-CLIDOC1', title: 't', ...ballot() }));
-  run(cwd, ['decision', 'add', '--file', bp, '--by', 'tester']);
-  run(cwd, ['decision', 'ratify', 'D-CLIDOC1', '--outcome', 'A', '--by', 'owner']);
-
-  mkdirSync(join(cwd, 'docs', 'ballots'), { recursive: true });
-  writeFileSync(join(cwd, 'docs', 'ballots', 'open.md'), '- D-CLIDOC1 open?\n');
+  mkdirSync(join(cwd, 'docs', 'spec'), { recursive: true });
+  writeFileSync(join(cwd, 'docs', 'spec', 'open.md'), 'Card #999 and D-CLIDOC1 have no record.\n');
 
   const r = run(cwd, ['lint', '--docs', '--json'], false);
   const findings = JSON.parse(r.out);
-  assert.ok(findings.some(f => f.rule === 'ratified-in-open-ballot-doc' && f.ref === 'D-CLIDOC1'));
+  assert.ok(findings.some(f => f.rule === 'spec-card-ref-missing' && f.ref === '#999'));
+  assert.ok(findings.some(f => f.rule === 'spec-decision-ref-missing' && f.ref === 'D-CLIDOC1'));
 });
 
 test('cli: tower next --burndown scopes to current epoch + sidequests', () => {

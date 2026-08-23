@@ -136,8 +136,6 @@ test('docs: Spec section, sidequests fold into Plans, archive hidden from list',
   writeFileSync(join(proj, 'docs', 'sidequests', 'web.md'), '# Web sidequest\n');
   writeFileSync(join(proj, 'docs', 'plans', 'e3.md'), '# Epoch 3\n');
   writeFileSync(join(proj, 'docs', 'archive', 'old.md'), '# Old\n');
-  mkdirSync(join(proj, 'docs', 'ballots'), { recursive: true });
-  writeFileSync(join(proj, 'docs', 'ballots', 'x.md'), '# Ballot\n');
 
   const index = docs.listDocs(dataDir);
   const ids = index.sections.map(s => s.id);
@@ -154,7 +152,6 @@ test('docs: Spec section, sidequests fold into Plans, archive hidden from list',
 
   const allPaths = index.sections.flatMap(s => s.files.map(f => f.path));
   assert.ok(!allPaths.some(p => p.startsWith('docs/archive/')));
-  assert.ok(!allPaths.some(p => p.startsWith('docs/ballots/')));
   assert.equal(allPaths.filter(p => p.includes('old.md')).length, 0);
 });
 

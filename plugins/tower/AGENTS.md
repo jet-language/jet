@@ -52,7 +52,7 @@ tower next --ready-across-epochs  # every unblocked card board-wide —
 tower docs list|show|add|update|archive|delete   # durable docs/*.md + scratchpad
                               # (archive → docs/archive/, hidden from Docs UI)
 tower lint [--json] [--docs] # durability sweeper over the live board (+
-                              # docs/ballots/*.md scan with --docs); exit 1
+                              # docs/spec/** reference scan with --docs); exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — answer these before building
 tower message list [--all]   # open card messages, or every one with --all
@@ -246,15 +246,14 @@ its own function, returning `{rule, ref, msg}` findings):
 | `orphan-blockers` | a `blockedBy` ref that resolves to no live card, history card, or live decision |
 | `blocker-unpopulated` | epoch-track `planning` card with a plan but empty `blockedBy` (and no `blockedBy: none` marker) — D-TWR-OPS2 |
 
-`--docs` adds `ratified-in-open-ballot-doc`: a decision id ratified in the
-live store (or history) but still listed in a `docs/ballots/*.md` file
-(deliberately scoped to `docs/ballots/` only — `docs/plans/` may legitimately
-reference a ratified id long after the fact).
+`--docs` scans every text spec file under `docs/spec/**`. It reports card and
+decision IDs that have no live or historical Tower record. This keeps Tower as
+the decision home while the spec remains its rendered reading surface.
 
 ```
 tower lint                 # human output: one line per finding, exit 1/0
 tower lint --json          # machine output
-tower lint --docs          # also scan docs/ballots/*.md
+tower lint --docs          # also scan docs/spec/** references
 tower lint --docs-root DIR # override the docs root (default: <project>/docs)
 ```
 

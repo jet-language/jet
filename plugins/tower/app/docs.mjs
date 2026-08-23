@@ -21,7 +21,7 @@ export const SECTIONS = [
   { id: 'references', label: 'References', dir: 'docs/reference' },
 ];
 /** Top-level docs/ dirs that never appear in the Docs UI or counts. */
-export const HIDDEN_TOP_DIRS = new Set(['archive', 'ballots']);
+export const HIDDEN_TOP_DIRS = new Set(['archive']);
 /** Fold these live dirs into another section id (no separate UI section). */
 export const SECTION_ALIASES = {
   sidequests: 'plans',
@@ -192,7 +192,7 @@ export function listDocs(dataDir) {
   ]);
   for (const f of files) {
     const sec = sectionForRel(f.path);
-    if (!sec) continue; // archived / ballots — hidden from UI and counts
+    if (!sec) continue; // archived — hidden from UI and counts
     bySection[sec].push(f);
   }
   for (const k of Object.keys(bySection)) {
