@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{have_rustc, panic_message, test_worker_count};
+use common::{have_rustc, panic_message, test_worker_count, unsafe_keyword_columns};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -615,7 +615,9 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     // same as `golden.rs::strip_vetted_prelude_modules`.
     let user_code = common::strip_vetted_prelude_modules(&compiled.rust);
     assert!(
-        !user_code.contains("unsafe"),
+        user_code
+            .lines()
+            .all(|line| unsafe_keyword_columns(line).is_empty()),
         "case `{}` generated unsafe outside the vetted prelude",
         label
     );

@@ -1729,7 +1729,7 @@ fn run_compile_probe(
             if detail.is_empty() {
                 format!("{} rejected the syntax probe", compiler.display())
             } else {
-                detail
+                format!("{}: {detail}", compiler.display())
             },
         )
     })
