@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 43060,
+    "rev": 43075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2483,7 +2483,7 @@
       "title": "M06 · Responsive large-project Canvas",
       "goal": "Canvas remains interactive on a deterministic 300-function multi-file project across open, pan, zoom, selection, palette search, and file switching, with measured budgets and preserved hit-testing and focus. Someone can use a large project at stable frame-time budgets, and the CI/browser ratchet fails when performance or interaction regresses.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:05:05.913Z"
     },
     {
@@ -8561,7 +8561,7 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e8-m06-responsive-scale",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Add a deterministic generated 300-function multi-file fixture and measure the real Chromium interaction loop. Record open-to-interactive time and frame durations for pan, zoom, select, palette, and file switching; add viewport culling or level of detail only where measurements require it, while preserving hit targets and exact source projection.",
       "blockedBy": [
@@ -8586,7 +8586,7 @@
         }
       ],
       "created": "2026-07-09T14:09:31.262Z",
-      "updated": "2026-08-23T18:31:04.335Z",
+      "updated": "2026-08-23T19:56:46.231Z",
       "criteria": [
         {
           "n": 1,
@@ -8600,29 +8600,29 @@
         {
           "n": 2,
           "text": "The Chromium harness measures open-to-interactive and frame-time distributions for pan, zoom, selection, palette search, and file switching using actual input events, with explicit stable budgets and no skipped sample path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T05:02:13.096Z"
+          "evidence": "evidence: passing big_project_perf_budget; Chromium measured open, pan, zoom, selection, palette, file-switch budgets twice. [lane y382]",
+          "at": "2026-08-23T19:56:43.197Z"
         },
         {
           "n": 3,
           "text": "Culling or low-detail rendering, if needed, preserves selection, pin and wire hit testing, keyboard focus, minimap, and source navigation when nodes enter or leave the viewport.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T05:02:13.096Z"
+          "evidence": "evidence: scripts/canvas-test/scenario.mjs:3680, :3697, :3715, :3739, :3747, :3749, :3766, :3774. [lane y382]",
+          "at": "2026-08-23T19:56:43.704Z"
         },
         {
           "n": 4,
           "text": "The parity matrix marks virtualization and level of detail shipped only after the measured interaction scenario passes on repeated clean runs; static timing assertions or one screenshot do not count.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T05:02:13.096Z"
+          "evidence": "evidence: tests/canvas_scenarios.rs:650; parity row shipped at docs/plans/epoch-6/canvas-blueprint-parity-matrix.md:55. [lane y382]",
+          "at": "2026-08-23T19:56:44.742Z"
         }
       ],
       "needsAcceptance": false,
@@ -8638,7 +8638,8 @@
       "workOrder": 5310,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T19:56:46.231Z"
     },
     {
       "id": "c0zti5r8",
@@ -16488,7 +16489,7 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e8-m03-structural-authoring",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Replace selection-specific Details HTML builders with one safe field-descriptor renderer. Variable, function, node, project, and diagnostic adapters return plain label, value, editability, and apply-operation records; the shared renderer creates DOM nodes without raw innerHTML, binds only canonical transactions or actions, and omits unavailable controls. #377 then fills and verifies the product field set.",
       "blockedBy": [],
@@ -16536,11 +16537,11 @@
         {
           "n": 4,
           "text": "Real-browser selection and edit scenarios plus a structural test prove legacy per-selection innerHTML and control duplication is removed while current Details behavior remains intact.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T05:13:11.459Z"
+          "evidence": "evidence: [canvas.rs:4418](/home/nate/Projects/Github/jet/tests/canvas.rs:4418), [canvas_scenarios.rs:576](/home/nate/Projects/Github/jet/tests/canvas_scenarios.rs:576); PASS chromium@Chrome/151.0.7922.137 details-scalar-enum-reference-editors current-bundle. [lane y493]",
+          "at": "2026-08-23T19:56:48.104Z"
         }
       ],
       "refs": [
@@ -16554,11 +16555,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-11T01:43:25.116Z",
-      "updated": "2026-08-23T19:14:08.296Z",
+      "updated": "2026-08-23T19:56:49.981Z",
       "workOrder": 5060,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T19:56:49.981Z"
     },
     {
       "id": "c0xede68",
@@ -32598,7 +32600,7 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e8-m03-structural-authoring",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "## Outcome\n\nShip **Canvas pattern arms: multi-input append transactions** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-devserver/src/Canvas/edit_actions.rs, crates/jet-devserver/src/Canvas/graph_projection.rs, scripts/canvas-test/scenario.mjs, tests/canvas.rs, tests/canvas_scenarios.rs, docs/plans/epoch-6/canvas-blueprint-parity-matrix.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Author the named Jet construct structurally while preserving its exact source meaning, safe beginner defaults, and explicit expert controls.\n6. Incomplete, ill-typed, ambiguous, or stale edits remain recoverable and never emit plausible but semantically different source.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 8 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -32632,29 +32634,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:11.537Z"
+          "evidence": "evidence: edit_actions.rs:1300, edit_actions.rs:1542, schema_api.rs:1051; passing canvas_pattern_arm_and_multi_input_transactions_write_source [lane y866]",
+          "at": "2026-08-23T19:56:51.281Z"
         },
         {
           "n": 2,
           "text": "Create, inspect, edit, format, undo, and reload preserve the construct's types, scopes, provenance, and canonical Jet spelling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:11.537Z"
+          "evidence": "evidence: graph_projection.rs:1280, graph_projection.rs:2110, transactions-catalog.js:296; scenario assertions at scenario.mjs:2418 and scenario.mjs:2502 [lane y866]",
+          "at": "2026-08-23T19:56:51.621Z"
         },
         {
           "n": 3,
           "text": "Incomplete, ill-typed, ambiguous, or stale edits remain recoverable and never emit plausible but semantically different source.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:11.537Z"
+          "evidence": "evidence: tests/canvas.rs:1470; passing canvas_multi_input_transactions_guard_nested_pattern_scope_and_stale_edits [lane y866]",
+          "at": "2026-08-23T19:56:52.887Z"
         },
         {
           "n": 4,
@@ -32668,11 +32670,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:11.537Z"
+          "evidence": "evidence: canvas-blueprint-parity-matrix.md:71, canvas-blueprint-parity-matrix.md:73, canvas-protocol.md:176, canvas-protocol.md:320 [lane y866]",
+          "at": "2026-08-23T19:56:53.955Z"
         }
       ],
       "refs": [
@@ -32685,8 +32687,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:27.156Z",
-      "updated": "2026-08-23T01:05:57.015Z",
-      "updatedBy": "mse8",
+      "updated": "2026-08-23T19:56:54.708Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -61834,7 +61836,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m03-process-sessions",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
@@ -61863,11 +61865,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:07.256Z"
+          "evidence": "evidence: shared Prelude pipeline timeout/limits in [Process.rs](/home/nate/Projects/Github/jet/crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1530), shared JIT inclusion [ambient_interp.rs](/home/nate/Projects/Github/jet/crates/jet-jit/src/ambient_interp.rs:900), passing pipeline timeout test. [lane y1183]",
+          "at": "2026-08-23T19:56:39.585Z"
         },
         {
           "n": 2,
@@ -61899,20 +61901,20 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:07.257Z"
+          "evidence": "evidence: docs [core-library.md](/home/nate/Projects/Github/jet/docs/reference/core-library.md:1617), executable example [process_builder.jet](/home/nate/Projects/Github/jet/examples/features/io/process_builder.jet:13), audit disposition [security-deep-scan-2026-08-03.md](/home/nate/Projects/Github/jet/docs/audits/security-deep-scan-2026-08-03.md:53). [lane y1183]",
+          "at": "2026-08-23T19:56:39.946Z"
         },
         {
           "n": 6,
           "text": "Binary-safe stdin/stdout/stderr streams, redirection targets, and backpressure limits behave per contract under large and pathological outputs; a slow consumer never deadlocks the child or the host; targeted failure tests cover overflow and closed-pipe paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:35:58.702Z"
+          "evidence": "evidence: per-stage budgets and drain cleanup [Process.rs](/home/nate/Projects/Github/jet/crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1530); overflow, slow-consumer, and closed-pipe tests passed. [lane y1183]",
+          "at": "2026-08-23T19:56:40.312Z"
         }
       ],
       "refs": [
@@ -61925,10 +61927,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:39.558Z",
-      "updated": "2026-08-23T17:05:55.211Z",
+      "updated": "2026-08-23T19:56:41.071Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T19:56:41.071Z"
     },
     {
       "id": "c0n5eu5p",
@@ -191488,6 +191491,111 @@
   ],
   "events": [
     {
+      "at": "2026-08-23T19:56:54.709Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00307he",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T19:56:53.955Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00307he",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T19:56:52.887Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00307he",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T19:56:51.621Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00307he",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T19:56:51.282Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00307he",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T19:56:49.981Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06eyg3s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T19:56:48.105Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06eyg3s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T19:56:46.231Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yl88cz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T19:56:44.743Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yl88cz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T19:56:43.704Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yl88cz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T19:56:43.197Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yl88cz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T19:56:41.071Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f07u66",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T19:56:40.312Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f07u66",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T19:56:39.946Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f07u66",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T19:56:39.585Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f07u66",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-23T19:14:08.297Z",
       "by": "Main",
       "action": "card.update",
@@ -194880,111 +194988,6 @@
       "by": "mse9",
       "action": "card.update",
       "ref": "c0bf48a4",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:23.514Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0aatck7",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:23.010Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c04ucjza",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:22.366Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c04phsyd",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:21.537Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0zbbsy1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:20.724Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0ttmmhd",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:20.172Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0m3ug2h",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:18.987Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0j57gh4",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:18.050Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c6q02qhw",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:17.540Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0kwxkks",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:17.036Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c013frzw",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:16.513Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0vquonw",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:15.984Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0x1bnix",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:15.474Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0gqfgov",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:14.977Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c08en8ex",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:13.434Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0xnjpjq",
       "note": "milestoneId"
     }
   ],
