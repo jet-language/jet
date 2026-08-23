@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 42770,
+    "rev": 42803,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2096,7 +2096,7 @@
       "title": "M02 · Reproducible foreign bridges",
       "goal": "Foreign bridges build from packages with stable cache identity, provenance, and provider resolution, then pass C, Rust, Python, and JavaScript conformance plus sidecar and capability reporting. Someone can inspect why a bridge was chosen, reproduce it from the package lock, and distinguish supported, unavailable, and unsafe capabilities without false success.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:02:03.637Z"
     },
     {
@@ -10501,7 +10501,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m01-native-isolation",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Build sandbox: native Linux isolation** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-JPK-SANDBOX2=D, D-JPK-EPOCHBOUNDARY1=B.\n2. Start with crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/Recipe.rs, crates/jetpack/src/CLI/trust_env_build.rs, crates/jetpack/src/CLI/services_secrets_config.rs, crates/jetpack/src/Trust.rs, tests/build_sandbox.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the same native isolation substrate and hostile corpus as hermetic builds and agent execution. Claims must match enforcement on each platform.\n6. Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 7 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
@@ -10544,52 +10544,52 @@
         }
       ],
       "created": "2026-07-09T18:16:39.573Z",
-      "updated": "2026-08-23T01:01:51.240Z",
+      "updated": "2026-08-23T06:12:41.670Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.119Z"
+          "evidence": "evidence: Recipe::run → native backend; Linux success/failure tests passed. [lane y398]",
+          "at": "2026-08-23T06:12:36.662Z"
         },
         {
           "n": 2,
           "text": "Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.119Z"
+          "evidence": "evidence: execution_runtime.rs:599,681; backend receipt asserts filesystem/process/network policy. [lane y398]",
+          "at": "2026-08-23T06:12:37.173Z"
         },
         {
           "n": 3,
           "text": "Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.119Z"
+          "evidence": "evidence: hostile corpus production test passed; hermetic corpus test passed. [lane y398]",
+          "at": "2026-08-23T06:12:38.385Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.119Z"
+          "evidence": "evidence: test lock fixed parallel env race; 20/20 integration tests pass. [lane y398]",
+          "at": "2026-08-23T06:12:39.693Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.119Z"
+          "evidence": "evidence: docs/spec lines match Bubblewrap, fallback, and E1275 behavior. [lane y398]",
+          "at": "2026-08-23T06:12:40.339Z"
         }
       ],
       "needsAcceptance": false,
@@ -10605,9 +10605,10 @@
         "docs/spec/syntax-decisions.md",
         "docs/spec/diagnostics.md"
       ],
-      "updatedBy": "mse7",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T06:12:41.670Z"
     },
     {
       "id": "c00wjjmo",
@@ -24410,7 +24411,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m06-safe-agent-execution",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Goal\nShip D-AGENT-EXEC1=A: one `Authority` model on `core.process` with safe workspace defaults, exact expert grants, dry-run plans, and redacted receipts. Application-facing consumer of #398/#893 native isolation — not a second sandbox.\n\n## Law (ratified)\n- Extend `ProcessSpec` / `ProcessChild`; no parallel agent executor or shell DSL.\n- Workspace constructor: useful read-only repo + private build writes; deny network, home, secrets, devices, inherited handles by default.\n- Experts widen exact rights on the same object (write paths, hosts, secrets, executables, limits).\n- Resolve executable identity before review; bind identity + policy + inputs + backend into one launch transaction.\n- Plan and receipt share a policy digest; unsupported enforcement fails closed before spawn.\n- CLI (`jet self exec --workspace …`) and MCP tools use the same engine.\n- Integrate D-WD1 grant graph and D-WD2 dossier facts for denied attempts, descendants, limits, outputs, redaction.\n\n## Scope\nIn: `Authority` API, workspace defaults, plan/receipt, CLI parity, grant/dossier wiring, hostile tests once #893 corpus is available.\nOut: building the isolation engine itself (#398 family); MCP protocol SDK (#768+); interactive terminal naming (#771 / D-PROCESS-SESSION2).\n\n## Owned paths\n- process corelib + jetpack runtime policy seams referenced on the card\n- CLI exec surface\n- hostile corpus consumption from #893 / #398\n- docs/reference/core-library.md, architecture notes, diagnostics as needed\n- focused success/failure/hostile/integration tests\n\n## Steps\n1. Confirm #398 engine + #893 shared hostile corpus are the only enforcement backends; fail closed when a grant cannot be enforced on the host.\n2. Add `process.workspace()` and exact grant builders on `ProcessSpec.under(policy)`.\n3. Implement dry-run `plan()` and final receipt with shared digest; redact secrets.\n4. Wire denied-attempt and tree facts into the existing grant/dossier path.\n5. CLI parity for workspace and expert grants.\n6. Hostile tests: ambient authority denied; TOCTOU bind; full-tree cleanup; API/CLI parity.\n7. Independent review against criteria.\n\n## Acceptance / proof\nExisting criteria 1–3. Proof: focused process/authority tests + hostile corpus cases; dossier facts visible via `jet inspect` where applicable.\n\n## Blockers\nblockedBy: #893 (and through it the #398 isolation delivery). D-AGENT-EXEC1 ratified (=A) — decision id kept for audit trail only; it does not block.\n",
       "blockedBy": [
@@ -24511,11 +24512,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.342Z"
+          "evidence": "policy docs updated in docs/reference/core-library.md:1467-1483. [lane y770]",
+          "at": "2026-08-23T06:12:42.975Z"
         },
         {
           "n": 6,
@@ -24538,11 +24539,11 @@
         {
           "n": 8,
           "text": "When a grant cannot be enforced on the host, plan() reports the refusal before any spawn.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:42.220Z"
+          "evidence": "authority_plan_refuses_before_spawn_on_all_hosted_tiers; refusal path ProcessPolicy.rs:205-215. [lane y770]",
+          "at": "2026-08-23T06:12:44.324Z"
         },
         {
           "n": 9,
@@ -24564,9 +24565,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-08-23T01:03:22.117Z",
+      "updated": "2026-08-23T06:12:45.819Z",
       "workOrder": 1660,
-      "updatedBy": "mse7",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -34814,7 +34815,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m01-native-isolation",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Build sandbox: native macOS isolation** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/Recipe.rs, crates/jetpack/src/CLI/trust_env_build.rs, crates/jetpack/src/CLI/services_secrets_config.rs, crates/jetpack/src/Trust.rs, tests/build_sandbox.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the same native isolation substrate and hostile corpus as hermetic builds and agent execution. Claims must match enforcement on each platform.\n6. Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 7 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -34848,20 +34849,20 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.580Z"
+          "evidence": "evidence: production path at Recipe.rs:968-992,1646-1654; shared Seatbelt seam at ProcessSandbox.rs:147-195; macOS cfg type-check passed. [lane y890]",
+          "at": "2026-08-23T06:12:47.268Z"
         },
         {
           "n": 2,
           "text": "Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.581Z"
+          "evidence": "evidence: policy receipt at ProcessSandbox.rs:36-45; enforcement profile at ProcessSandbox.rs:280-328; assertions at tests/build_sandbox.rs:534-545. [lane y890]",
+          "at": "2026-08-23T06:12:48.601Z"
         },
         {
           "n": 3,
@@ -34884,11 +34885,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.581Z"
+          "evidence": "evidence: plan world-class-package-manager.md:301-314; diagnostic diagnostics.md:2052; scoped rustfmt and git diff --check passed. [lane y890]",
+          "at": "2026-08-23T06:12:50.030Z"
         }
       ],
       "refs": [
@@ -34905,8 +34906,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:38.497Z",
-      "updated": "2026-08-23T01:01:52.950Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T06:12:51.775Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -34919,7 +34920,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m01-native-isolation",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Build sandbox: native Windows AppContainer isolation** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/Recipe.rs, crates/jetpack/src/CLI/trust_env_build.rs, crates/jetpack/src/CLI/services_secrets_config.rs, crates/jetpack/src/Trust.rs, tests/build_sandbox.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the same native isolation substrate and hostile corpus as hermetic builds and agent execution. Claims must match enforcement on each platform.\n6. Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 7 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -34943,29 +34944,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.814Z"
+          "evidence": "evidence: execution_runtime.rs:271, Recipe.rs:1662, windows_sandbox.rs:1046 [lane y891]",
+          "at": "2026-08-23T06:12:53.659Z"
         },
         {
           "n": 2,
           "text": "Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.814Z"
+          "evidence": "evidence: windows_sandbox.rs:595, :736, :964, :1098, :1212 [lane y891]",
+          "at": "2026-08-23T06:12:54.796Z"
         },
         {
           "n": 3,
           "text": "Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.814Z"
+          "evidence": "evidence: Recipe.rs:1252, tests/build_sandbox.rs:365, :513 [lane y891]",
+          "at": "2026-08-23T06:12:55.961Z"
         },
         {
           "n": 4,
@@ -34979,11 +34980,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.814Z"
+          "evidence": "evidence: world-class-package-manager.md:311, truth-matrix.md:53, existing E1275 at diagnostic-rows.md:693 [lane y891]",
+          "at": "2026-08-23T06:12:56.338Z"
         }
       ],
       "refs": [
@@ -35000,8 +35001,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:38.943Z",
-      "updated": "2026-08-23T01:01:54.452Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T06:12:57.240Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -40586,11 +40587,11 @@
         {
           "n": 3,
           "text": "The closeout finds no hidden Nix shell-out, mock-only proof, false-green skip, or compatibility path presented as full delivery.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T17:57:40.598Z"
+          "evidence": "evidence: [jetpack_engine.rs](/home/nate/Projects/Github/jet/tests/jetpack_engine.rs:4075) rejects active Nix fallback; docs mark compatibility non-canonical; skip records have explicit reasons; no hidden package/environment fallback found. [lane y956]",
+          "at": "2026-08-23T06:12:24.165Z"
         },
         {
           "n": 4,
@@ -40619,8 +40620,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:08.533Z",
-      "updated": "2026-08-23T01:09:36.462Z",
-      "updatedBy": "mse5",
+      "updated": "2026-08-23T06:12:24.166Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -55131,7 +55132,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m02-reproducible-foreign-bridges",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUse D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [
@@ -55155,11 +55156,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.107Z"
+          "evidence": "evidence: Python, JavaScript, Rust, and C production bridge tests pass. [lane y1123]",
+          "at": "2026-08-23T06:12:27.653Z"
         },
         {
           "n": 2,
@@ -55182,11 +55183,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.107Z"
+          "evidence": "evidence: corrected concurrency check passes; tests/cffi.rs:2774. [lane y1123]",
+          "at": "2026-08-23T06:12:27.998Z"
         },
         {
           "n": 5,
@@ -55217,10 +55218,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:04.780Z",
-      "updated": "2026-08-23T03:42:42.412Z",
+      "updated": "2026-08-23T06:12:28.690Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T06:12:28.689Z"
     },
     {
       "id": "c0nozhth",
@@ -55332,7 +55334,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m02-reproducible-foreign-bridges",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUse D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [
@@ -55356,11 +55358,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.593Z"
+          "evidence": "evidence: C, Rust, Python, JS production round-trips pass. [lane y1125]",
+          "at": "2026-08-23T06:12:29.248Z"
         },
         {
           "n": 2,
@@ -55383,11 +55385,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.593Z"
+          "evidence": "evidence: targeted production success/failure tests pass. [lane y1125]",
+          "at": "2026-08-23T06:12:30.384Z"
         },
         {
           "n": 5,
@@ -55401,11 +55403,11 @@
         {
           "n": 6,
           "text": "Slice proof: C, Rust, Python, and JavaScript conformance suites each pass against the one typed ABI contract; per-language negative fixtures prove typed failure on ABI mismatch.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:21:12.772Z"
+          "evidence": "evidence: all four conformance suites pass; negative fixtures included. [lane y1125]",
+          "at": "2026-08-23T06:12:31.676Z"
         }
       ],
       "refs": [
@@ -55418,10 +55420,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:05.754Z",
-      "updated": "2026-08-23T03:42:49.425Z",
+      "updated": "2026-08-23T06:12:32.480Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T06:12:32.480Z"
     },
     {
       "id": "c04rv5on",
@@ -57922,11 +57925,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.546Z"
+          "evidence": "evidence: fresh output vulkan:accepted, webgpu:rejected, [8.0], det:rejected; targeted backend tests pass. [lane y1146]",
+          "at": "2026-08-23T06:12:34.529Z"
         },
         {
           "n": 5,
@@ -57947,7 +57950,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:18.407Z",
-      "updated": "2026-08-23T05:23:14.784Z",
+      "updated": "2026-08-23T06:12:34.529Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -60262,11 +60265,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.554Z"
+          "evidence": "evidence: production smokes returned definitions=2, references=3, calls=3, exact marker/Git diffs, no-matches, and summary|added=0|modified=0|deleted=0; guard at tests/agent_workloads.rs:1159-1187. [lane y1165]",
+          "at": "2026-08-23T06:12:57.951Z"
         },
         {
           "n": 5,
@@ -60294,7 +60297,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:29.791Z",
-      "updated": "2026-08-23T05:23:17.335Z",
+      "updated": "2026-08-23T06:12:57.952Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -60373,20 +60376,20 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.803Z"
+          "evidence": "evidence: docs/audits/agent-workload-corpus.md:13, :90; tests/agent_workloads/expected/build-test-failure-recovery.out:1; tests/agent_workloads/SHA256SUMS:1; adapter syntax checks passed. [lane y1166]",
+          "at": "2026-08-23T06:12:58.803Z"
         },
         {
           "n": 6,
           "text": "The corpus contains frozen tasks covering builds, test runs, subprocess control, and failure recovery, each with frozen inputs, expected outcome, allowed dependencies, machine spec, and #769-schema scoring; hostile variants included; no new runner.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:35:15.112Z"
+          "evidence": "evidence: tests/agent_workloads/manifest.tsv:8, :18, :19, :20; tests/agent_workloads/domain_contract.tsv:2; hostile assertions at tests/agent_workloads.rs:1064; all frozen checksum rows verified OK. [lane y1166]",
+          "at": "2026-08-23T06:12:59.158Z"
         }
       ],
       "refs": [
@@ -60396,7 +60399,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:30.296Z",
-      "updated": "2026-08-23T05:23:19.316Z",
+      "updated": "2026-08-23T06:12:59.158Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -60410,7 +60413,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60498,8 +60501,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:30.800Z",
-      "updated": "2026-08-23T01:02:55.235Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T06:13:00.376Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -60845,7 +60848,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60938,8 +60941,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:33.991Z",
-      "updated": "2026-08-23T01:03:20.812Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T06:13:02.741Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -60952,7 +60955,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m06-safe-agent-execution",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-AGENT-EXEC1 must choose the API and CLI spelling. Extend core.process and consume #398's native isolation engine. Keep argv execution canonical. The policy must deny ambient authority, describe exact grants, and produce one dry-run plan plus one final receipt. After ratification, block implementation on #398 and reuse its Linux, macOS, and Windows hostile proof. Add no second sandbox, process API, shell DSL, or container fallback.",
       "blockedBy": [],
@@ -61037,8 +61040,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:35.250Z",
-      "updated": "2026-08-23T01:03:27.508Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T06:13:04.617Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -190900,6 +190903,237 @@
   ],
   "events": [
     {
+      "at": "2026-08-23T06:13:04.617Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0frfdwy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:13:02.741Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uy7emy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:13:00.376Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e68ggl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:59.158Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T06:12:58.804Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T06:12:57.952Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xha49b",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T06:12:57.240Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f0iuwx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:56.338Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f0iuwx",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T06:12:55.961Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f0iuwx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T06:12:54.797Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f0iuwx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T06:12:53.660Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f0iuwx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T06:12:51.775Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07n83cy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:50.030Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07n83cy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T06:12:48.601Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07n83cy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T06:12:47.269Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07n83cy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T06:12:45.819Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:44.324Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-23T06:12:42.975Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T06:12:41.670Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:40.339Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zqnb18",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T06:12:39.693Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zqnb18",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T06:12:38.385Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zqnb18",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T06:12:37.174Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zqnb18",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T06:12:36.662Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zqnb18",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T06:12:34.529Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0p7jo42",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T06:12:32.481Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vynz93",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:31.676Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vynz93",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T06:12:30.384Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vynz93",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T06:12:29.248Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vynz93",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T06:12:28.690Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fu9ovs",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T06:12:27.999Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fu9ovs",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T06:12:27.653Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fu9ovs",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T06:12:24.166Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00de14z",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-23T05:23:22.178Z",
       "by": "Main",
       "action": "card.update",
@@ -194166,237 +194400,6 @@
       "by": "mse5",
       "action": "card.update",
       "ref": "c06fcnkn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:03.805Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c00u5ldg",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:03.189Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0uwiswc",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:02.546Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0pigzyp",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:01.911Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ew5j65",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:01.320Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c08rq8yn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:00.763Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0yem9kl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:00.081Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0snpbxn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:59.412Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0n2wb0d",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:58.864Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ceddsp",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:57.721Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c06svqzk",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:56.329Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c00sdqmw",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:55.735Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0qpaec0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:55.179Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0l0xsll",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:54.068Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0fcsxlk",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:53.480Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c04x4oua",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:52.857Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0z655d9",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:52.194Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0thpu5d",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:51.565Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0o1h1be",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:50.981Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0eatnv2",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:50.441Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c08j7uxj",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:49.787Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c02rga4v",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:49.153Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0x88r1k",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:48.460Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0mdgv4b",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:48.121Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c04k992u",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:47.487Z",
-      "by": "mse11",
-      "action": "card.update",
-      "ref": "c00cnpnb",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:46.496Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0h39lhn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:45.541Z",
-      "by": "mse11",
-      "action": "card.update",
-      "ref": "c0jsiyel",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:45.220Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0bbivqe",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:44.487Z",
-      "by": "mse11",
-      "action": "card.update",
-      "ref": "c0q9cyd5",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:43.466Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c05n4gdz",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:43.136Z",
-      "by": "mse11",
-      "action": "card.update",
-      "ref": "c0gutf6c",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:42.657Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0vefrqa",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:42.319Z",
-      "by": "mse11",
-      "action": "card.update",
-      "ref": "c0bfcs5p",
       "note": "milestoneId"
     }
   ],
