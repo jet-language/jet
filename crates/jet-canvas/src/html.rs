@@ -150,7 +150,73 @@ body:not(.is-dev-mode) #graph-strip { display: none; }
 .graph-stat span { color: #84a8cf; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #source-view, #source-editor { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
 #source-editor { resize: none; outline: none; }
-#stage.is-code #jet-canvas-view, #stage.is-code #minimap, #stage.is-code #graph-strip, #stage.is-code #wire-status, #stage.is-code #graph-overview { display: none; }
+#review-view { position: absolute; inset: 0; display: none; grid-template-rows: auto minmax(0, 1fr); background: #0a1018; color: #dbeafe; overflow: hidden; }
+#stage.is-review #review-view { display: grid; }
+#stage.is-review #jet-canvas-view, #stage.is-review #source-view, #stage.is-review #source-editor, #stage.is-review #minimap, #stage.is-review #graph-strip, #stage.is-review #wire-status, #stage.is-review #graph-overview, #stage.is-review #hud { display: none; }
+#review-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 16px 18px 14px; border-bottom: 1px solid #263b55; background: linear-gradient(135deg, #111d2b, #0b131e 70%); box-shadow: 0 10px 28px rgba(0,0,0,.26); }
+.review-eyebrow { color: #65d4ff; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .16em; text-transform: uppercase; }
+#review-head h1 { margin: 3px 0 4px; color: #f8fbff; font: 700 21px "Inter", "Segoe UI", system-ui, sans-serif; letter-spacing: -.02em; }
+#review-head p { margin: 0; max-width: 620px; color: #94abc7; line-height: 1.45; }
+.review-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: end; }
+.review-summary { display: flex; gap: 6px; flex-wrap: wrap; justify-content: end; }
+.review-stat { display: grid; gap: 2px; min-width: 68px; padding: 6px 8px; border: 1px solid #29425f; background: rgba(7,16,28,.7); border-radius: 5px; }
+.review-stat b { color: #f2f8ff; font: 700 14px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-stat span { color: #86a5c8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+#review-refresh { min-height: 34px; }
+#review-dev-facts { display: none; color: #708bad; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+body.is-dev-mode #review-dev-facts { display: block; }
+#review-body { display: grid; grid-template-columns: minmax(180px, 23%) minmax(0, 1fr); min-height: 0; }
+#review-files { min-width: 0; overflow: auto; padding: 12px; border-right: 1px solid #263b55; background: #0b131e; }
+.review-file-list { display: grid; gap: 7px; }
+.review-file { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 9px; border: 1px solid #243b56; background: #0f1a27; border-radius: 5px; text-align: left; }
+.review-file:hover, .review-file:focus-visible { border-color: #65d4ff; background: #12283a; }
+.review-file.is-active { border-color: #65d4ff; background: #123044; box-shadow: inset 3px 0 0 #65d4ff; }
+.review-file-mark { width: 8px; height: 8px; border-radius: 50%; background: #f6d365; box-shadow: 0 0 11px rgba(246,211,101,.58); }
+.review-file-name { min-width: 0; overflow: hidden; color: #eef7ff; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.review-file-meta { color: #88a4c5; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-file-status { color: #f6d365; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+#review-pane { min-width: 0; min-height: 0; overflow: auto; padding: 16px 18px 36px; }
+.review-file-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.review-file-title { min-width: 0; }
+.review-file-title h2 { margin: 0 0 4px; color: #f8fbff; font: 700 17px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.review-file-title p { margin: 0; color: #8fa8c6; }
+.review-file-facts { display: grid; gap: 3px; min-width: 150px; text-align: right; color: #88a4c5; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-hunks { display: grid; gap: 14px; }
+.review-hunk { overflow: hidden; border: 1px solid #2b4663; background: #09131f; border-radius: 6px; box-shadow: 0 12px 30px rgba(0,0,0,.18); }
+.review-hunk.is-active { border-color: #65d4ff; box-shadow: 0 0 0 1px rgba(101,212,255,.24), 0 14px 34px rgba(0,0,0,.24); }
+.review-hunk-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 8px 10px; border-bottom: 1px solid #213853; background: #101e2d; }
+.review-hunk-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: #c6d8ed; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-hunk-title code { color: #8db3da; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-hunk-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.review-hunk-actions button { min-height: 26px; padding-inline: 8px; font-size: 11px; }
+.review-status { display: inline-flex; align-items: center; min-height: 20px; padding: 2px 7px; border: 1px solid currentColor; border-radius: 999px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .05em; text-transform: uppercase; }
+.review-status-added { color: #5eead4; background: rgba(45,212,191,.1); }
+.review-status-modified { color: #f6d365; background: rgba(246,211,101,.1); }
+.review-status-deleted { color: #fb7185; background: rgba(251,113,133,.1); }
+.review-status-unprojectable { color: #c084fc; background: rgba(192,132,252,.1); }
+.review-status-clean { color: #8fa8c6; background: rgba(143,168,198,.08); }
+.review-lines { display: grid; padding: 5px 0; font: 12px/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-line { display: grid; grid-template-columns: 44px 44px 20px minmax(0, 1fr) auto; align-items: baseline; min-width: 0; padding: 1px 10px 1px 0; }
+.review-line.is-add { background: rgba(45,212,191,.09); }
+.review-line.is-delete { background: rgba(251,113,133,.09); }
+.review-line.is-context { color: #9eb3cc; }
+.review-line-number { color: #5f7693; text-align: right; user-select: none; }
+.review-line-sign { color: #7089a7; text-align: center; user-select: none; }
+.review-line.is-add .review-line-sign { color: #5eead4; }
+.review-line.is-delete .review-line-sign { color: #fb7185; }
+.review-line-text { min-width: 0; overflow-x: auto; color: #dceafa; white-space: pre; }
+.review-line.is-delete .review-line-text { color: #fda4af; }
+.review-line-note { margin-left: 9px; color: #85a4c7; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+.review-map { padding: 8px 10px; border-top: 1px solid #213853; color: #94abc7; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-map strong { color: #eaf5ff; }
+.review-empty { display: grid; gap: 8px; place-content: center; min-height: 280px; max-width: 620px; margin: 30px auto; padding: 24px; border: 1px dashed #365a7f; background: rgba(12,24,39,.78); border-radius: 8px; text-align: center; }
+.review-empty h2 { margin: 0; color: #f8fbff; font-size: 18px; }
+.review-empty p { margin: 0; color: #9bb2cf; line-height: 1.55; }
+.review-legend { display: flex; flex-wrap: wrap; gap: 7px 12px; margin-bottom: 12px; color: #8fa8c6; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.review-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.review-legend i { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+body:not(.is-dev-mode) .review-dev { display: none !important; }
+body:not(.is-dev-mode) #wire-status { display: none; }
 #stage.is-code #source-view { display: block; }
 #stage.is-source-edit #source-view { display: none; }
 #stage.is-source-edit #source-editor { display: block; }
@@ -303,7 +369,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="fit" class="icon-button" title="Fit graph" aria-label="Fit graph"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
       <span class="zoom-readout" id="toolbar-zoom">100%</span>
     </div>
-    <div id="lens-switch" class="lens-switch toolbar-group" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button></div>
+    <div id="lens-switch" class="lens-switch toolbar-group" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button><button id="review-view-button" data-view-mode="review">Review</button></div>
     <div class="toolbar-group" aria-label="Edit controls">
       <button id="undo-edit" class="icon-button" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg></button>
       <button id="redo-edit" class="icon-button" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg></button>
@@ -360,6 +426,24 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="wire-status" role="status" aria-label="Canvas hover details" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Hover a node or pin for details</span></div>
       <div id="graph-overview" aria-label="Graph overview"></div>
       <div id="run-hud" aria-live="polite">run idle</div>
+      <section id="review-view" aria-label="Git text review">
+        <header id="review-head">
+          <div>
+            <div class="review-eyebrow">Canvas M3 · source truth</div>
+            <h1>Review changes</h1>
+            <p>Read the Git text diff first. Select a hunk to see its current source span and graph projection.</p>
+            <div id="review-dev-facts" class="review-dev" aria-label="Review developer facts"></div>
+          </div>
+          <div class="review-head-actions">
+            <div id="review-summary" class="review-summary" aria-label="Review summary"></div>
+            <button id="review-refresh" type="button">Refresh</button>
+          </div>
+        </header>
+        <div id="review-body">
+          <aside id="review-files" aria-label="Changed files"><div id="review-file-list" class="review-file-list"></div></aside>
+          <section id="review-pane" aria-live="polite"><div id="review-content"></div></section>
+        </div>
+      </section>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
       <pre id="source-view" aria-label="Jet source"></pre>
       <textarea id="source-editor" aria-label="Editable Jet source"></textarea>

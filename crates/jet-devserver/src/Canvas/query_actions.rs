@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::FixEngine;
@@ -9,10 +11,31 @@ use super::graph_helpers::{
     simple_diff, spans_overlap, text_matches,
 };
 use super::graph_json::node_catalog;
-use super::project_scan::{env_project_json, project_file};
+use super::project_scan::{env_project_json, project_context_for_entry, project_file};
 use super::project_transactions::rel_path;
-use super::schema_api::{ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, source_revision};
+use super::schema_api::{
+    ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, Projection, source_revision,
+};
 use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
+
+const PROJECT_QUERY_RESULT_LIMIT: usize = 200;
+
+struct ProjectSourceIndex {
+    path: PathBuf,
+    source_id: String,
+    source: String,
+    revision: String,
+    index: SemIndex,
+}
+
+struct ProjectQueryContext {
+    project_root: PathBuf,
+    project_revision: String,
+    selected_source_id: String,
+    selected_path: PathBuf,
+    selected_source: String,
+    sources: Vec<ProjectSourceIndex>,
+}
 
 pub(super) fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
@@ -80,6 +103,151 @@ pub(super) fn canvas_find(path: &Path, src: &str, query: &str) -> Result<String,
     ))
 }
 
+pub(super) fn canvas_project_find(
+    entry: &Path,
+    selected_path: &Path,
+    selected_src: &str,
+    query: &str,
+    expected_project_revision: Option<&str>,
+) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| {
+        let context = open_project_query_context(
+            entry,
+            selected_path,
+            selected_src,
+            expected_project_revision,
+        )?;
+        let needle = query.trim();
+        let projection = if needle.is_empty() {
+            None
+        } else {
+            Some(
+                project_file(selected_path)
+                    .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?,
+            )
+        };
+        let mut results = Vec::new();
+        let mut seen = HashSet::new();
+        if !needle.is_empty() {
+            for source in &context.sources {
+                for def in source.index.definitions() {
+                    if !module_belongs_to(&context.project_root, &source.path, &def.module_path)
+                        || !contains_ci(&def.name, needle) && !contains_ci(&def.identity, needle)
+                    {
+                        continue;
+                    }
+                    let owner = context
+                        .sources
+                        .iter()
+                        .find(|candidate| {
+                            module_belongs_to(
+                                &context.project_root,
+                                &candidate.path,
+                                &def.module_path,
+                            )
+                        })
+                        .unwrap_or(source);
+                    push_project_result(
+                        &mut results,
+                        &mut seen,
+                        "definition",
+                        &def.name,
+                        &def.name,
+                        &def.module_path,
+                        def.def_span,
+                        owner,
+                        projection.as_ref(),
+                        &context.selected_path,
+                    );
+                }
+                for reference in source.index.references() {
+                    if !module_belongs_to(
+                        &context.project_root,
+                        &source.path,
+                        &reference.module_path,
+                    ) || !contains_ci(&reference.name, needle)
+                    {
+                        continue;
+                    }
+                    let owner = context
+                        .sources
+                        .iter()
+                        .find(|candidate| {
+                            module_belongs_to(
+                                &context.project_root,
+                                &candidate.path,
+                                &reference.module_path,
+                            )
+                        })
+                        .unwrap_or(source);
+                    push_project_result(
+                        &mut results,
+                        &mut seen,
+                        "reference",
+                        &reference.name,
+                        &reference.name,
+                        &reference.module_path,
+                        reference.span,
+                        owner,
+                        projection.as_ref(),
+                        &context.selected_path,
+                    );
+                }
+                for span in text_matches(&source.source, needle) {
+                    push_project_result(
+                        &mut results,
+                        &mut seen,
+                        "source",
+                        needle,
+                        needle,
+                        &source.source_id,
+                        span,
+                        source,
+                        projection.as_ref(),
+                        &context.selected_path,
+                    );
+                }
+            }
+            if let Some(projection) = projection.as_ref() {
+                for node in &projection.node_refs {
+                    if contains_ci(&node.title, needle) || contains_ci(&node.kind, needle) {
+                        let Some(selected_source) = context
+                            .sources
+                            .iter()
+                            .find(|source| source.path == context.selected_path)
+                        else {
+                            return Err(query_error(
+                                "not_found",
+                                "Canvas query source is not in the projected project",
+                            ));
+                        };
+                        push_project_result(
+                            &mut results,
+                            &mut seen,
+                            "graph",
+                            &node.title,
+                            &node.title,
+                            &context.selected_source_id,
+                            node.span,
+                            selected_source,
+                            Some(projection),
+                            &context.selected_path,
+                        );
+                    }
+                }
+            }
+        }
+        let (results, truncated) = bounded_project_results(results);
+        Ok(project_query_ok(
+            "project_search",
+            &context,
+            &results,
+            truncated,
+            "\"impact\":null,\"diff\":null",
+        ))
+    })
+}
+
 pub(super) fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
     let mut results = Vec::new();
@@ -112,6 +280,289 @@ pub(super) fn canvas_references(path: &Path, src: &str, symbol: &str) -> Result<
         &format!("[{}]", results.join(",")),
         &format!("\"impact\":{},\"diff\":null", impact),
     ))
+}
+
+pub(super) fn canvas_project_references(
+    entry: &Path,
+    selected_path: &Path,
+    selected_src: &str,
+    symbol: &str,
+    expected_project_revision: Option<&str>,
+) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| {
+        let context = open_project_query_context(
+            entry,
+            selected_path,
+            selected_src,
+            expected_project_revision,
+        )?;
+        let projection = project_file(selected_path)
+            .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?;
+        let definitions = context
+            .sources
+            .iter()
+            .flat_map(|source| {
+                source
+                    .index
+                    .definitions()
+                    .iter()
+                    .filter(|def| def.name == symbol)
+                    .map(move |def| (source, def))
+            })
+            .collect::<Vec<_>>();
+        let definitions = definitions
+            .into_iter()
+            .map(|(source, def)| {
+                let owner = context
+                    .sources
+                    .iter()
+                    .find(|candidate| {
+                        module_belongs_to(
+                            &context.project_root,
+                            &candidate.path,
+                            &def.module_path,
+                        )
+                    })
+                    .unwrap_or(source);
+                (owner, def)
+            })
+            .collect::<Vec<_>>();
+        let mut results = Vec::new();
+        let mut seen = HashSet::new();
+        for (source, def) in &definitions {
+            push_project_result(
+                &mut results,
+                &mut seen,
+                "definition",
+                &def.name,
+                &def.name,
+                &def.module_path,
+                def.def_span,
+                source,
+                Some(&projection),
+                &context.selected_path,
+            );
+        }
+        for source in &context.sources {
+            for reference in source.index.references() {
+                if reference.name != symbol
+                    || !module_belongs_to(
+                        &context.project_root,
+                        &source.path,
+                        &reference.module_path,
+                    )
+                    || !reference_targets(reference, &definitions)
+                {
+                    continue;
+                }
+                let owner = context
+                    .sources
+                    .iter()
+                    .find(|candidate| {
+                        module_belongs_to(
+                            &context.project_root,
+                            &candidate.path,
+                            &reference.module_path,
+                        )
+                    })
+                    .unwrap_or(source);
+                push_project_result(
+                    &mut results,
+                    &mut seen,
+                    "reference",
+                    &reference.name,
+                    &reference.name,
+                    &reference.module_path,
+                    reference.span,
+                    owner,
+                    Some(&projection),
+                    &context.selected_path,
+                );
+            }
+        }
+        let impact = context
+            .sources
+            .iter()
+            .find(|source| {
+                source
+                    .index
+                    .definitions()
+                    .iter()
+                    .any(|def| def.name == symbol)
+            })
+            .map(|source| jet_impact::ImpactReport::analyze(&source.index, symbol, 3).to_json())
+            .unwrap_or_else(|| "null".to_string());
+        let (results, truncated) = bounded_project_results(results);
+        Ok(project_query_ok(
+            "references",
+            &context,
+            &results,
+            truncated,
+            &format!("\"impact\":{},\"diff\":null", impact),
+        ))
+    })
+}
+
+fn open_project_query_context(
+    entry: &Path,
+    selected_path: &Path,
+    selected_src: &str,
+    expected_project_revision: Option<&str>,
+) -> Result<ProjectQueryContext, String> {
+    let project = project_context_for_entry(entry);
+    if let Some(diagnostic) = project.authority_diagnostic.as_ref() {
+        return Err(query_error("stale", &diagnostic.what));
+    }
+    if let Some(expected) = expected_project_revision {
+        if expected != project.project_revision {
+            return Err(query_error(
+                "conflict",
+                "project changed since this Canvas query was drawn",
+            ));
+        }
+    }
+    let selected_source_id = rel_path(&project.project_root, selected_path);
+    let selected_revision = source_revision(selected_src);
+    let mut sources = Vec::new();
+    for file in project.files.iter().filter(|file| file.kind == "source") {
+        let path = project.project_root.join(&file.path);
+        if !project.parts.should_index(&path) {
+            continue;
+        }
+        let source = fs::read_to_string(&path).map_err(|error| {
+            query_error("stale", &format!("Canvas project source moved or unreadable: {error}"))
+        })?;
+        let revision = source_revision(&source);
+        if revision != file.revision {
+            return Err(query_error(
+                "conflict",
+                "project source changed while Canvas was building its query",
+            ));
+        }
+        let index = jet_semindex::open(&path)
+            .map_err(|error| query_error("check", &error.to_string()))?;
+        sources.push(ProjectSourceIndex {
+            path,
+            source_id: file.path.trim_start_matches("./").to_string(),
+            source,
+            revision,
+            index,
+        });
+    }
+    let Some(selected) = sources.iter().find(|source| source.source_id == selected_source_id) else {
+        return Err(query_error(
+            "not_found",
+            "Canvas query source is not in the projected project",
+        ));
+    };
+    if selected.revision != selected_revision {
+        return Err(query_error(
+            "conflict",
+            "source changed since this Canvas graph was drawn",
+        ));
+    }
+    let after = project_context_for_entry(entry);
+    if after.project_revision != project.project_revision {
+        return Err(query_error(
+            "conflict",
+            "project changed while Canvas was building its query",
+        ));
+    }
+    Ok(ProjectQueryContext {
+        project_root: project.project_root,
+        project_revision: project.project_revision,
+        selected_source_id,
+        selected_path: selected_path.to_path_buf(),
+        selected_source: selected_src.to_string(),
+        sources,
+    })
+}
+
+fn module_belongs_to(project_root: &Path, source_path: &Path, module_path: &str) -> bool {
+    let source_id = rel_path(project_root, source_path);
+    let source_id = source_id.trim_start_matches("./");
+    let module_path = module_path.replace('\\', "/");
+    module_path == source_id
+        || module_path == source_path.to_string_lossy().replace('\\', "/")
+        || module_path.ends_with(&format!("/{source_id}"))
+}
+
+fn reference_targets<'a>(
+    reference: &jet_semindex::SymbolRef,
+    definitions: &[(&'a ProjectSourceIndex, &'a jet_semindex::SymbolDef)],
+) -> bool {
+    let Some(target) = reference.target.as_ref() else {
+        return definitions.is_empty();
+    };
+    definitions.iter().any(|(_, definition)| {
+        target.semantic_identity.as_deref() == Some(definition.identity.as_str())
+            || (target.module_path == definition.module_path && target.def_span == definition.def_span)
+    })
+}
+
+fn push_project_result(
+    results: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    kind: &str,
+    title: &str,
+    symbol: &str,
+    module_path: &str,
+    span: SourceSpan,
+    source: &ProjectSourceIndex,
+    projection: Option<&Projection>,
+    selected_path: &Path,
+) {
+    let node = (source.path == selected_path)
+        .then(|| projection.and_then(|value| node_for_span(value, span)))
+        .flatten();
+    let key = format!("{kind}|{}|{}|{}|{title}", source.source_id, span.start, span.end);
+    if !seen.insert(key) {
+        return;
+    }
+    let mut result = query_result_json(
+        kind,
+        title,
+        symbol,
+        module_path,
+        span,
+        node.as_ref(),
+        &source.source,
+    );
+    result.pop();
+    result.push_str(&format!(
+        ",\"source_id\":{},\"revision\":{}}}",
+        json_str(&source.source_id),
+        json_str(&source.revision),
+    ));
+    results.push(result);
+}
+
+fn bounded_project_results(mut results: Vec<String>) -> (Vec<String>, bool) {
+    results.sort();
+    let truncated = results.len() > PROJECT_QUERY_RESULT_LIMIT;
+    results.truncate(PROJECT_QUERY_RESULT_LIMIT);
+    (results, truncated)
+}
+
+fn project_query_ok(
+    op: &str,
+    context: &ProjectQueryContext,
+    results: &[String],
+    truncated: bool,
+    extra_fields: &str,
+) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":true,\"op\":{},\"revision\":{},\"source_id\":{},\"project_revision\":{},\"results\":[{}],\"result_limit\":{},\"truncated\":{},{} }}",
+        super::schema_api::QUERY_SCHEMA_VERSION,
+        json_str(op),
+        json_str(&source_revision(&context.selected_source)),
+        json_str(&context.selected_source_id),
+        json_str(&context.project_revision),
+        results.join(","),
+        PROJECT_QUERY_RESULT_LIMIT,
+        if truncated { "true" } else { "false" },
+        extra_fields,
+    )
 }
 
 pub(super) fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -> Result<String, String> {
@@ -205,7 +656,7 @@ pub(super) fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &s
 }
 
 pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
-    let (_projection, index) = open_query_context(path, src)?;
+    let (projection, index) = open_query_context(path, src)?;
     let authority = canvas_authority_context(path);
     let mut entries = Vec::new();
     let mut project_functions = Vec::new();
@@ -214,6 +665,11 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
             continue;
         };
         if def.module_path.starts_with("core.") {
+            continue;
+        }
+        if !projection.callable_exports.iter().any(|export| {
+            export.module_path == def.module_path && export.span == def.def_span
+        }) {
             continue;
         }
         project_functions.push(project_function_catalog_json(
@@ -315,19 +771,19 @@ fn core_catalog_action_json(
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
         .collect::<Vec<_>>()
         .join(",");
-    let pins = core_member_pins_json(&params);
-    let unavailable = core_member_unavailable_json(member);
+    let receiver_type = (!member.receiver_type.is_empty()).then_some(member.receiver_type.as_str());
+    let pins = core_member_pins_json(&params, receiver_type);
+    let status = core_member_status_json(member);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":{},{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
         json_str(&format!("{} · {}", member.name, module_path)),
         json_str(module_path),
         json_str(&callee),
         json_str(&callee),
-        if member.available { "true" } else { "false" },
-        unavailable,
+        status,
         json_str(&authority.grant),
         json_str(&authority.package_id),
         json_str(&authority.version),
@@ -357,6 +813,10 @@ struct CoreCatalogMember {
     source: String,
     pure: bool,
     available: bool,
+    stageable: bool,
+    stage_reason_code: String,
+    stage_reason: String,
+    receiver_type: String,
     unavailable_reason_code: String,
     unavailable_reason: String,
 }
@@ -433,6 +893,10 @@ fn merge_sema_core_registry(modules: &mut Vec<CoreCatalogModule>, registry: &str
                 pure: core_member_pure(&path, &name),
                 name,
                 available: true,
+                stageable: false,
+                stage_reason_code: String::new(),
+                stage_reason: String::new(),
+                receiver_type: String::new(),
                 unavailable_reason_code: String::new(),
                 unavailable_reason: String::new(),
             });
@@ -448,22 +912,51 @@ fn mark_core_catalog_availability(
         for member in &mut module.members {
             if core_export_resolves(exports, &module.path, &member.name) {
                 if let Some((code, reason)) = core_member_direct_exclusion(&module.path, member) {
-                    member.available = false;
-                    member.unavailable_reason_code = code.to_string();
-                    member.unavailable_reason = reason;
+                    set_core_member_status(&module.path, member, code, reason);
                 } else {
-                    member.available = true;
-                    member.unavailable_reason_code.clear();
-                    member.unavailable_reason.clear();
+                    set_core_member_status(&module.path, member, "", String::new());
                 }
             } else {
                 let (code, reason) = core_member_unavailable_reason(&module.path, member);
-                member.available = false;
-                member.unavailable_reason_code = code.to_string();
-                member.unavailable_reason = reason;
+                set_core_member_status(&module.path, member, code, reason);
             }
         }
     }
+}
+
+fn set_core_member_status(
+    module_path: &str,
+    member: &mut CoreCatalogMember,
+    code: &str,
+    reason: String,
+) {
+    member.available = code.is_empty();
+    member.stageable = matches!(code, "needs_canvas_defaults" | "method_only");
+    member.stage_reason_code = if member.stageable {
+        code.to_string()
+    } else {
+        String::new()
+    };
+    member.stage_reason = if member.stageable {
+        reason.clone()
+    } else {
+        String::new()
+    };
+    member.receiver_type = if code == "method_only" {
+        core_member_receiver_type(module_path, &member.name, &member.signature)
+    } else {
+        String::new()
+    };
+    member.unavailable_reason_code = if member.available {
+        String::new()
+    } else {
+        code.to_string()
+    };
+    member.unavailable_reason = if member.available {
+        String::new()
+    } else {
+        reason
+    };
 }
 
 fn core_member_direct_exclusion(
@@ -487,24 +980,30 @@ fn core_member_direct_exclusion(
             "Needs an #Unsafe region before Canvas can insert it.".to_string(),
         ));
     }
-    if !core_module_has_canvas_defaults(module_path) {
-        return Some((
-            "needs_canvas_defaults",
-            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
-        ));
-    }
-    if module_path.starts_with("core.encoding.") && !core_encoding_member_has_canvas_defaults(module_path, &member.name) {
-        return Some((
-            "needs_canvas_defaults",
-            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
-        ));
-    }
     let params = core_member_params(module_path, &member.name, &member.signature);
     let generated_signature = member.signature == format!("{module_path}.{}", member.name);
     if generated_signature && params.is_empty() {
         return Some((
             "needs_signature",
             "Needs parameter details before Canvas can insert it.".to_string(),
+        ));
+    }
+    if !core_module_has_canvas_defaults(module_path) {
+        if params.is_empty() {
+            return None;
+        }
+        return Some((
+            "needs_canvas_defaults",
+            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
+        ));
+    }
+    if module_path.starts_with("core.encoding.") && !core_encoding_member_has_canvas_defaults(module_path, &member.name) {
+        if params.is_empty() {
+            return None;
+        }
+        return Some((
+            "needs_canvas_defaults",
+            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
         ));
     }
     if !member.signature.contains('(') && params.is_empty() {
@@ -561,7 +1060,7 @@ fn core_member_unavailable_reason(
             "Use this as a method on an ArgsSpec value.".to_string(),
         );
     }
-    if sig.starts_with('.') || sig.contains(").") || sig.contains("::") {
+    if sig.starts_with('.') || sig.contains(").") {
         return (
             "method_only",
             "Use this from the value shown in the signature.".to_string(),
@@ -577,6 +1076,29 @@ fn core_member_unavailable_reason(
         "not_direct_call",
         "This Core entry is documentation only; it has no direct module call.".to_string(),
     )
+}
+
+fn core_member_receiver_type(module_path: &str, member_name: &str, signature: &str) -> String {
+    if module_path == "core.args" {
+        let arity = core_member_params(module_path, member_name, signature).len();
+        return match member_name {
+            "flag" | "option" | "option_int" | "option_float" | "positional"
+                if arity == 1 => "ParsedArgs".to_string(),
+            "options" | "subcommand" if arity <= 1 => "ParsedArgs".to_string(),
+            _ => "ArgsSpec".to_string(),
+        };
+    }
+    match module_path {
+        "core.mod" => "Option".to_string(),
+        "core.reflect" if matches!(member_name, "name" | "value") => "Field".to_string(),
+        "core.reflect" => "Value".to_string(),
+        "core.net.tls" => "TLSClientConfig".to_string(),
+        "core.http" => "HTTPClient".to_string(),
+        // The ambient String rows sit under the preceding `core.perf` heading
+        // in the reference document; their receiver remains a real String.
+        "core.perf" => "String".to_string(),
+        _ => String::new(),
+    }
 }
 
 fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
@@ -777,11 +1299,15 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         signature: signature.to_string(),
         summary,
         source: "docs/reference/core-library.md".to_string(),
-        pure: core_member_pure_for_signature(signature),
-        available: true,
-        unavailable_reason_code: String::new(),
-        unavailable_reason: String::new(),
-    })
+                pure: core_member_pure_for_signature(signature),
+                available: true,
+                stageable: false,
+                stage_reason_code: String::new(),
+                stage_reason: String::new(),
+                receiver_type: String::new(),
+                unavailable_reason_code: String::new(),
+                unavailable_reason: String::new(),
+            })
 }
 
 fn core_source_callee(src: &str, module_path: &str) -> String {
@@ -877,6 +1403,7 @@ fn project_function_catalog_json(
 ) -> String {
     let pure = !call_has_effects(index, &def.name);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
+    let callee = &def.qualified_name;
     let default_args = params
         .iter()
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
@@ -894,17 +1421,18 @@ fn project_function_catalog_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{},\"signature\":{},\"callee\":{},\"node_descriptor_id\":{},\"module_path\":{},\"pure\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}],\"available\":true,\"source_span\":{},\"insert_op\":\"insert_call\"}}",
-        json_str(&def.name),
-        json_str(&function_signature_from_parts(&def.name, params, ret)),
-        json_str(&def.name),
-        json_str(descriptor_id),
-        json_str(&def.module_path),
-        if pure { "true" } else { "false" },
-        json_str(ret.unwrap_or("Void")),
-        pins,
-        default_args,
-        span_json(def.def_span)
+        "{{\"name\":{name},\"signature\":{signature},\"callee\":{callee},\"insert_callee\":{insert_callee},\"node_descriptor_id\":{descriptor},\"module_path\":{module},\"pure\":{pure},\"ret\":{ret},\"pins\":[{pins}],\"default_args\":[{defaults}],\"available\":true,\"source_span\":{span},\"insert_op\":\"insert_call\"}}",
+        name = json_str(&def.name),
+        signature = json_str(&function_signature_from_parts(&def.name, params, ret)),
+        callee = json_str(callee),
+        insert_callee = json_str(callee),
+        descriptor = json_str(descriptor_id),
+        module = json_str(&def.module_path),
+        pure = if pure { "true" } else { "false" },
+        ret = json_str(ret.unwrap_or("Void")),
+        pins = pins,
+        defaults = default_args,
+        span = span_json(def.def_span),
     )
 }
 
@@ -948,26 +1476,31 @@ fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
         .collect::<Vec<_>>()
         .join(",");
-    let pins = core_member_pins_json(&params);
-    let unavailable = core_member_unavailable_json(member);
+    let receiver_type = (!member.receiver_type.is_empty()).then_some(member.receiver_type.as_str());
+    let pins = core_member_pins_json(&params, receiver_type);
+    let status = core_member_status_json(member);
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
     format!(
-        "{{\"name\":{},\"node_descriptor_id\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",\"available\":{},{}\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"name\":{},\"node_descriptor_id\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
         json_str(descriptor_id),
         json_str(&member.signature),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
-        if member.available { "true" } else { "false" },
-        unavailable,
+        status,
         pins,
         default_args
     )
 }
 
-fn core_member_unavailable_json(member: &CoreCatalogMember) -> String {
-    if member.available {
+fn core_member_status_json(member: &CoreCatalogMember) -> String {
+    let receiver = if member.receiver_type.is_empty() {
+        String::new()
+    } else {
+        format!("\"receiver_type\":{},", json_str(&member.receiver_type))
+    };
+    let unavailable = if member.available {
         String::new()
     } else {
         format!(
@@ -975,21 +1508,34 @@ fn core_member_unavailable_json(member: &CoreCatalogMember) -> String {
             json_str(&member.unavailable_reason_code),
             json_str(&member.unavailable_reason)
         )
-    }
+    };
+    format!(
+        "\"available\":{},\"stageable\":{},\"stage_reason_code\":{},\"stage_reason\":{},{}{}",
+        if member.available { "true" } else { "false" },
+        if member.stageable { "true" } else { "false" },
+        json_str(&member.stage_reason_code),
+        json_str(&member.stage_reason),
+        receiver,
+        unavailable
+    )
 }
 
-fn core_member_pins_json(params: &[(String, String)]) -> String {
-    params
-        .iter()
-        .map(|(name, ty)| {
-            format!(
-                "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
-                json_str(name),
-                json_str(ty)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",")
+fn core_member_pins_json(params: &[(String, String)], receiver_type: Option<&str>) -> String {
+    let mut pins = Vec::new();
+    if let Some(receiver_type) = receiver_type.filter(|ty| !ty.is_empty()) {
+        pins.push(format!(
+            "{{\"name\":\"receiver\",\"direction\":\"input\",\"type\":{}}}",
+            json_str(receiver_type)
+        ));
+    }
+    pins.extend(params.iter().map(|(name, ty)| {
+        format!(
+            "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+            json_str(name),
+            json_str(ty)
+        )
+    }));
+    pins.join(",")
 }
 
 fn strip_markdown_heading(line: &str) -> String {
@@ -1012,7 +1558,8 @@ fn canvas_action_json(
     authority: &CanvasAuthority,
 ) -> String {
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", pure);
-    let action_id = format!("canvas.action:{}:{}", def.module_path, def.name);
+    let action_id = format!("canvas.action:{}:{}", def.module_path, def.qualified_name);
+    let callee = &def.qualified_name;
     let default_args = params
         .iter()
         .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
@@ -1030,11 +1577,12 @@ fn canvas_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"module_path\":{},\"insert_op\":\"insert_call\",\"pure\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":{},\"insert_op\":\"insert_call\",\"pure\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
         json_str(&def.name),
-        json_str(&def.name),
+        json_str(callee),
+        json_str(callee),
         json_str(&def.module_path),
         if pure { "true" } else { "false" },
         json_str(&authority.grant),

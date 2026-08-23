@@ -355,9 +355,14 @@ fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 fn comparable_path(path: &Path) -> Option<PathBuf> {
-    AuthorityResolver::open(path)
-        .ok()
-        .map(|resolver| resolver.root().to_path_buf())
+    // Discovered source paths are files, while AuthorityResolver::open
+    // accepts directories. Compare existing files directly and retain the
+    // authority fallback for paths that are not on disk yet.
+    fs::canonicalize(path).ok().or_else(|| {
+        AuthorityResolver::open(path)
+            .ok()
+            .map(|resolver| resolver.root().to_path_buf())
+    })
 }
 
 fn collect_project_files(
@@ -613,6 +618,12 @@ pub(super) fn packages_project_json(
 ) -> String {
     let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
         Ok(dirs) => dirs,
+        Err(_diagnostic) if workspace_root.is_some() => {
+            // Keep malformed workspace projections well-formed. The selected
+            // package manifest remains authoritative; workspace diagnostics
+            // are exposed by the workspace and project diagnostic fields.
+            package_dirs_without_workspace(manifest_root, ecosystem_root)
+        }
         Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
     };
     dirs
@@ -627,13 +638,7 @@ fn package_dirs(
     ecosystem_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> Result<Vec<PathBuf>, Diagnostic> {
-    let mut dirs = Vec::new();
-    if let Some(root) = manifest_root {
-        dirs.push(root.to_path_buf());
-    }
-    if let Some(root) = ecosystem_root {
-        dirs.push(root.to_path_buf());
-    }
+    let mut dirs = package_dirs_without_workspace(manifest_root, ecosystem_root);
     if let Some(root) = workspace_root {
         if let Some((resolver, source)) = workspace_source_path(root)? {
             if source.role == jet_env_model::WorkspacePlan::WorkspaceSourceRole::Index {
@@ -649,6 +654,22 @@ fn package_dirs(
     Ok(dirs)
 }
 
+fn package_dirs_without_workspace(
+    manifest_root: Option<&Path>,
+    ecosystem_root: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(root) = manifest_root {
+        dirs.push(root.to_path_buf());
+    }
+    if let Some(root) = ecosystem_root {
+        dirs.push(root.to_path_buf());
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
 pub(super) fn targets_project_json(
     project_root: &Path,
     entry_path: &Path,
@@ -658,6 +679,9 @@ pub(super) fn targets_project_json(
 ) -> String {
     let dirs = match package_dirs(manifest_root, ecosystem_root, workspace_root) {
         Ok(dirs) => dirs,
+        Err(_diagnostic) if workspace_root.is_some() => {
+            package_dirs_without_workspace(manifest_root, ecosystem_root)
+        }
         Err(diagnostic) => return projection_diagnostic_json(&diagnostic),
     };
     dirs
@@ -844,25 +868,48 @@ fn canonical_package_targets_project_json(
     };
     let package_path = rel_path(project_root, dir);
     let manifest_rel = rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE));
-    Some(
-        facts
-            .outputs
-            .iter()
-            .map(|(name, output)| {
-                format!(
-                    "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":{}}}",
-                    json_str(&facts.name),
-                    json_str(&package_path),
-                    json_str(&manifest_rel),
-                    json_str(&output.name),
-                    json_str(output_kind_label(&output.kind)),
-                    json_optional_str(output.entry.as_deref()),
-                    output_payload_json(&output.payload),
-                    field_provenance_json(&facts, &format!("outputs.{name}")),
-                )
-            })
-            .collect(),
-    )
+    let mut targets = facts
+        .outputs
+        .iter()
+        .map(|(name, output)| {
+            format!(
+                "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":{},\"payload\":{},\"provenance\":{}}}",
+                json_str(&facts.name),
+                json_str(&package_path),
+                json_str(&manifest_rel),
+                json_str(&output.name),
+                json_str(output_kind_label(&output.kind)),
+                json_optional_str(output.entry.as_deref()),
+                output_payload_json(&output.payload),
+                field_provenance_json(&facts, &format!("outputs.{name}")),
+            )
+        })
+        .collect::<Vec<_>>();
+    for package in &facts.packages {
+        for target in &package.targets {
+            let kind = legacy_target_label(target);
+            targets.push(format!(
+                "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{},\"kind\":{},\"entry\":null,\"payload\":null,\"provenance\":null}}",
+                json_str(&facts.name),
+                json_str(&package_path),
+                json_str(&manifest_rel),
+                json_str(kind),
+                json_str(kind),
+            ));
+        }
+    }
+    Some(targets)
+}
+
+fn legacy_target_label(target: &jet_driver::Package::Target) -> &'static str {
+    use jet_driver::Package::Target;
+    match target {
+        Target::Library => "library",
+        Target::Executable => "executable",
+        Target::Test => "test",
+        Target::Example => "example",
+        Target::Plugin { .. } => "plugin",
+    }
 }
 
 fn canonical_package_project_json(
@@ -899,6 +946,16 @@ fn canonical_package_project_json(
         })
         .collect::<Vec<_>>()
         .join(",");
+    let mut package_targets = facts
+        .outputs
+        .values()
+        .map(|output| output.name.clone())
+        .collect::<Vec<_>>();
+    for package in &facts.packages {
+        if !package_targets.iter().any(|name| name == &package.name) {
+            package_targets.push(package.name.clone());
+        }
+    }
     Some(format!(
         "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
         json_str(&rel_path(project_root, dir)),
@@ -907,12 +964,7 @@ fn canonical_package_project_json(
         json_optional_str(facts.version.as_deref()),
         json_str(facts.target.as_deref().unwrap_or("native")),
         deps,
-        facts
-            .outputs
-            .values()
-            .map(|output| json_str(&output.name))
-            .collect::<Vec<_>>()
-            .join(","),
+        package_targets.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(","),
         canonical_outputs_json(&facts),
         canonical_environments_json(&facts),
         facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(","),

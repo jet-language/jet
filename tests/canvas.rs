@@ -356,11 +356,28 @@ fn run() {
 "#;
 
 const CANVAS_TRAIT_INTERFACE_FIXTURE: &str = r#"trait Drawable {
-    fn render(self) String
+    fn render(self) String -[IO]>
+    fn label(self) String -> {
+        return "drawable"
+    }
 }
 
 struct Badge {
     label: String
+}
+
+fn run() {
+    print("ready")
+}
+"#;
+
+const CANVAS_TRAIT_ASSOC_TYPE_FIXTURE: &str = r#"trait Indexed {
+    type Elem
+    fn at(self, i: Int) Elem
+}
+
+struct Nums {
+    values: [Int]
 }
 
 fn run() {
@@ -1731,6 +1748,61 @@ fn canvas_query_search_references_source_jump_and_rename_preview() {
 }
 
 #[test]
+fn canvas_project_search_and_references_share_project_revision() {
+    let dir = temp_dir("project_query");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"project_query\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(
+        &entry,
+        "fn helper() Int -> {\n    return 1\n}\n\nfn run() {\n    helper()\n}\n",
+    )
+    .unwrap();
+    let other = dir.join("helper.jet");
+    fs::write(
+        &other,
+        "fn helper() Int -> {\n    return 2\n}\n\nfn use_helper() {\n    helper()\n}\n",
+    )
+    .unwrap();
+
+    let project_revision = json_field(&jet::Canvas::project_json_for_entry(&entry), "project_revision");
+    let entry_src = fs::read_to_string(&entry).unwrap();
+    let entry_revision = jet::Canvas::source_revision(&entry_src);
+    let search = format!(
+        "{{\"schema_version\":1,\"op\":\"project_search\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"query\":\"helper\"}}",
+        entry_revision, project_revision
+    );
+    let found = jet::Canvas::query_json_for_entry(&entry, &search).expect("project search");
+    for field in [
+        "\"op\":\"project_search\"",
+        "\"project_revision\":\"sha256-",
+        "\"source_id\":\"main.jet\"",
+        "\"source_id\":\"helper.jet\"",
+        "\"kind\":\"definition\"",
+    ] {
+        assert!(found.contains(field), "project search missing {field}: {found}");
+    }
+
+    let references = format!(
+        "{{\"schema_version\":1,\"op\":\"references\",\"source_id\":\"main.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\"}}",
+        entry_revision, project_revision
+    );
+    let refs = jet::Canvas::query_json_for_entry(&entry, &references).expect("project references");
+    assert!(refs.contains("\"op\":\"references\""), "{refs}");
+    assert!(refs.contains("\"impact\""), "{refs}");
+    assert!(refs.matches("\"kind\":\"definition\"").count() >= 2, "{refs}");
+    assert!(refs.matches("\"kind\":\"reference\"").count() >= 2, "{refs}");
+
+    fs::write(&other, "fn helper() Int -> {\n    return 3\n}\n").unwrap();
+    let stale = jet::Canvas::query_json_for_entry(&entry, &search).expect_err("stale project query");
+    assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
+    assert!(fs::read_to_string(&other).unwrap().contains("return 3"));
+}
+
+#[test]
 fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions() {
     let path = write_fixture("actions", CANVAS_FIXTURE);
     let src = fs::read_to_string(&path).unwrap();
@@ -2015,6 +2087,10 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
     assert!(args_catalog.contains("\"path\":\"core.args\""), "{args_catalog}");
     assert!(args_catalog.contains("\"name\":\"help\""), "{args_catalog}");
     assert!(args_catalog.contains("\"available\":false"), "{args_catalog}");
+    assert!(args_catalog.contains("\"stageable\":true"), "{args_catalog}");
+    assert!(args_catalog.contains("\"stage_reason_code\":\"method_only\""), "{args_catalog}");
+    assert!(args_catalog.contains("\"receiver_type\":\"ArgsSpec\""), "{args_catalog}");
+    assert!(args_catalog.contains("\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\""), "{args_catalog}");
     assert!(
         args_catalog.contains("\"unavailable_reason_code\":\"method_only\""),
         "{args_catalog}"
@@ -2863,7 +2939,7 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     assert!(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}");
     assert!(json.contains("\"target\":\"executable\""), "{json}");
     assert!(json.contains("\"target\":\"library\""), "{json}");
-    assert!(json.contains("\"source\":\"version:0.1.0\""), "{json}");
+    assert!(json.contains("\"version\":\"0.1.0\""), "{json}");
     assert!(json.contains("\"path\":\"packages/ranker/lib.jet\""), "{json}");
     assert!(json.contains("\"kind\":\"source\""), "{json}");
 }
@@ -2984,8 +3060,22 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
 
     fs::write(app.join("helper.jet"), "fn helper() Int -> {\n    return 2\n}\n").unwrap();
     let apply = req.replace("\"preview\":true", "\"preview\":false");
-    let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
-        .expect("unrelated project change should not block touched-file-safe apply");
+    let stale_project = jet::Canvas::apply_project_transaction_json(&entry, &apply)
+        .expect_err("any changed projected file should conflict before writing");
+    assert!(stale_project.contains("\"kind\":\"conflict\""), "{stale_project}");
+    let after_stale = fs::read_to_string(app.join("package.jet")).unwrap();
+    assert!(!after_stale.contains("logging"), "{after_stale}");
+
+    let fresh_project = jet::Canvas::project_json_for_entry(&entry);
+    let fresh_project_revision = json_field(&fresh_project, "project_revision");
+    let fresh_manifest = fs::read_to_string(app.join("package.jet")).unwrap();
+    let fresh_manifest_revision = jet::Canvas::source_revision(&fresh_manifest);
+    let fresh_apply = format!(
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}",
+        fresh_project_revision, fresh_manifest_revision
+    );
+    let applied = jet::Canvas::apply_project_transaction_json(&entry, &fresh_apply)
+        .expect("fresh project revision should permit apply");
     assert!(applied.contains("\"preview\":false"), "{applied}");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
     let after_apply = fs::read_to_string(app.join("package.jet")).unwrap();
@@ -3337,6 +3427,16 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     assert!(result.contains("\"protocol\":\"jet.canvas.query\""), "{result}");
     assert!(result.contains("\"title\":\"helper\""), "{result}");
 
+    let command = format!(
+        "{{\"schema_version\":1,\"action_id\":\"canvas.command:check\",\"source_id\":\"helper.jet\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let receipt = jet::Canvas::command_receipt_json_for_entry(&entry, &command)
+        .expect("selected helper command receipt");
+    assert!(receipt.contains("\"source_id\":\"helper.jet\""), "{receipt}");
+    assert!(receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"), "{receipt}");
+    assert!(receipt.contains(&format!("\"revision\":\"{}\"", revision)), "{receipt}");
+
     let missing = jet::Canvas::graph_json_for_entry_source(&entry, Some("missing.jet"))
         .expect_err("bad source_id should be rejected");
     assert!(missing.contains("\"kind\":\"not_found\""), "{missing}");
@@ -3347,6 +3447,40 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     let err = jet::Canvas::query_json_for_entry(&entry, &missing_query)
         .expect_err("bad query source_id should be rejected");
     assert!(err.contains("\"kind\":\"not_found\""), "{err}");
+}
+
+#[test]
+fn canvas_project_source_id_selects_debug_session_and_revision() {
+    let dir = temp_dir("project_source_id_debug");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"source_id_debug\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"entry\")\n}\n").unwrap();
+    let helper = dir.join("helper.jet");
+    fs::write(&helper, CANVAS_DEBUG_FIXTURE).unwrap();
+    let src = fs::read_to_string(&helper).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let req = format!(
+        "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"commands\":[\"c\"],\"watches\":[\"total\"]}}",
+        revision
+    );
+    let debug_path = entry.clone();
+    let out = std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(move || jet::Canvas::debug_session_json_for_entry(&debug_path, &req))
+        .expect("spawn Canvas debug embedder")
+        .join()
+        .expect("Canvas debug embedder must not overflow")
+        .expect("selected helper debug session");
+    assert!(out.contains("\"protocol\":\"jet.canvas.debug\""), "{out}");
+    assert!(out.contains(&format!("\"revision\":\"{}\"", revision)), "{out}");
+    assert!(out.contains("\"debug_overlay\":\"finished\""), "{out}");
+    assert!(out.contains("program finished"), "{out}");
+    assert!(!out.contains("entry"), "debug selected the entry source instead of helper: {out}");
+    assert_eq!(fs::read_to_string(&helper).unwrap(), src);
 }
 
 #[test]
@@ -3427,6 +3561,9 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "comment_boxes",
         "staged_nodes",
         "jet.canvas.query",
+        "project_search",
+        "result_limit",
+        "truncated",
         "source_to_graph",
         "preview_rename",
         "actions",
@@ -3439,6 +3576,9 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "source_transaction_only",
         "external adapter",
         "jet.canvas.source_control",
+        "Review Lens M3",
+        "text diff first",
+        "semantic sidecars",
         "dirty",
         "dirty_files",
         "files",
@@ -3533,6 +3673,11 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(!js.contains("\" =[\" + effects + \"]=>\""), "retired effect signature arrow leaked into Canvas: {js}");
     assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
+    assert!(js.contains("const sourceFiles = (project.files || []).filter"), "{js}");
+    assert!(js.contains("Showing first ${visibleResults.length}"), "{js}");
+    assert!(js.contains("const requestedSourceId = selectedSourceId || latestDoc.source_id || null"), "{js}");
+    assert!(js.contains("Command result is stale; current source was kept"), "{js}");
+    assert!(js.contains("Debug result is stale; current source was kept"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("function nodeDescriptorForAction"), "{js}");
     assert!(js.contains("descriptor.palette.insertable"), "{js}");
@@ -3551,6 +3696,12 @@ fn canvas_editor_shell_matches_round3_contract() {
         "browser must not infer action descriptors from transaction/purity: {js}"
     );
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
+    assert!(js.contains("function syncTraitsPanel"), "{js}");
+    assert!(js.contains("data-canvas-traits"), "{js}");
+    assert!(js.contains("data-trait-create"), "{js}");
+    assert!(js.contains("function traitMethodActions"), "{js}");
+    assert!(js.contains("\"Interfaces\""), "{js}");
+    assert!(js.contains("create_trait_impl"), "{js}");
     assert!(js.contains("Add connected node"), "{js}");
     assert!(js.contains("Canvas actions"), "{js}");
     assert!(!js.contains("Graph actions"), "{js}");
@@ -3571,6 +3722,7 @@ fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
         "inspector-connections.js",
         "input-events.js",
         "transactions-catalog.js",
+        "review.js",
         "bootstrap.js",
     ];
 
@@ -3941,7 +4093,15 @@ fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
         "\"interfaces\"",
         "\"kind\":\"trait_interface\"",
         "\"trait\":\"Drawable\"",
-        "\"signature\":\"fn render(self) String\"",
+        "\"scope\":\"\"",
+        "\"associated_types\":[]",
+        "\"signature\":\"fn render(self) String -[IO]>\"",
+        "\"required\":true",
+        "\"default\":false",
+        "\"pure\":false",
+        "\"effects\":[\"IO\"]",
+        "\"required\":false",
+        "\"default\":true",
         "\"create_trait_impl\"",
     ] {
         assert!(
@@ -3962,12 +4122,33 @@ fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
     assert!(after.contains("impl Badge.Drawable"), "{after}");
     assert!(after.contains("fn render(self) String"), "{after}");
     assert!(after.contains("return \"canvas\""), "{after}");
+    assert_eq!(after.matches("fn label(self) String").count(), 1, "{after}");
     let graph = jet::Canvas::graph_json_for_file(&path).expect("trait impl graph");
     assert!(graph.contains("\"kind\":\"trait_impl\""), "{graph}");
     assert!(
         graph.contains("\"diagnostic_affordance\":\"surface_missing_trait_members\""),
         "{graph}"
     );
+
+    let before_stale = after.clone();
+    let stale = r#"{"schema_version":1,"op":"create_trait_impl","revision":"sha256-stale","type_name":"Badge","trait_name":"Drawable"}"#;
+    let err = jet::Canvas::apply_transaction_json(&path, stale).unwrap_err();
+    assert!(err.contains("\"kind\":\"conflict\""), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before_stale);
+}
+
+#[test]
+fn canvas_refuses_trait_impl_guess_for_associated_types() {
+    let path = write_fixture("trait_associated_type", CANVAS_TRAIT_ASSOC_TYPE_FIXTURE);
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"create_trait_impl\",\"revision\":\"{}\",\"type_name\":\"Nums\",\"trait_name\":\"Indexed\"}}",
+        revision
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &edit).unwrap_err();
+    assert!(err.contains("needs_associated_types"), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]

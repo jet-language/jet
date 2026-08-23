@@ -297,11 +297,17 @@
   favoriteAction.addEventListener("click", toggleFavoriteAction);
   if (checkCurrent) checkCurrent.addEventListener("click", checkCurrentSource);
   runCurrent.addEventListener("click", runCurrentGraph);
-  tourDismiss.addEventListener("click", () => {
-    editorState.tourDismissed = true;
-    saveEditorState();
-    firstRunTour.classList.remove("is-open");
-  });
+  const onboardingDismiss = document.getElementById("tour-dismiss");
+  if (onboardingDismiss) onboardingDismiss.addEventListener("click", finishTour);
+  const onboardingNext = document.getElementById("tour-next");
+  if (onboardingNext) onboardingNext.addEventListener("click", nextTourStep);
+  const onboardingBack = document.getElementById("tour-back");
+  if (onboardingBack) onboardingBack.addEventListener("click", previousTourStep);
+  const onboardingAction = document.getElementById("tour-action");
+  if (onboardingAction) onboardingAction.addEventListener("click", runTourAction);
+  const onboardingOpen = document.getElementById("tour-open");
+  if (onboardingOpen) onboardingOpen.addEventListener("click", startTour);
+  if (sourceEditor) sourceEditor.addEventListener("input", () => saveSourceDraft(sourceEditor.value));
   debugStep.addEventListener("click", () => runDebug(["s"]));
   debugNext.addEventListener("click", () => runDebug(["n"]));
   debugContinue.addEventListener("click", () => runDebug(["c"]));

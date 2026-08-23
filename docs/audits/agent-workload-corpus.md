@@ -156,14 +156,16 @@ The old six-test run note is obsolete. The current source also checks the interp
 
 ### Derived plan
 
-The comparison set is the 29 rows in `tests/agent_workloads/manifest.tsv`, frozen by the manifest and checksum tests. Run one Jet candidate and one Node candidate for every task on `linux-x86_64:nix-core`. Hold the model, system prompt, user prompt, temperature, top-p, output limit, seed policy, tool policy, and repair limit constant. The model ID and settings are not recorded in this checkout, so the comparison has not started.
+The comparison set is all 29 rows in `tests/agent_workloads/manifest.tsv`, frozen by the manifest and checksum tests. Run one Jet candidate and one Node candidate for every task on `linux-x86_64:nix-core`. Hold the matched task prompt, model, system context, tool policy, and repair limit constant. Do not give expected-output feedback before the candidate reaches a clean check.
 
-Use these two planned runs:
+The fixed run declaration is `codex-cli 0.144.5`, profile `luna`, model `gpt-5.6-luna`, and `model_reasoning_effort=medium`. The profile fixes `approval_policy=never` and `sandbox_mode=danger-full-access`. Temperature, top-p, seed, and output-limit overrides are unset in both arms and use the same CLI defaults. The Jet arm writes `candidate.jet`, uses `scripts/agent/jet-env jet check`, then the existing corpus scoring path. The Node arm writes `candidate.mjs`, uses `node --check`, then the same scoring path. Each task starts in a fresh agent session. This declaration adds no runner and no scoring model.
+
+Use these two runs:
 
 | Run | Candidate | State |
 | --- | --- | --- |
-| Jet | `jet` adapter, one initial generation plus compiler-feedback repairs | not recorded |
-| Node | `node` adapter, one initial generation plus the same repairs | not recorded |
+| Jet | `jet` candidate, one initial generation plus compiler-feedback repairs | declared; result not recorded |
+| Node | `node` candidate, one initial generation plus the same repairs | declared; result not recorded |
 
 Use the existing `#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed` scoring string. Do not add an agent scorer. Do not give expected-output feedback before the candidate reaches a clean check.
 
@@ -180,7 +182,7 @@ Count repair rounds as edits after the initial candidate. Count the initial cand
 
 ### Current evidence and limit
 
-The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2088`). No fixed model/settings record, agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
+The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2088`). The targeted corpus tests pass for the frozen manifest, interpreter receipt, and Jet-loss ownership. No completed 29-row agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
 
 The existing six-task Jet/Node note is evidence for a different card and a different task set: [`docs/research/agent-codegen-benchmark-2026-08-23.md`](../research/agent-codegen-benchmark-2026-08-23.md). It reports Jet `1/6` compile-first-try, repair rounds `2, 1, 1, 1, 1, 0`, green `6/6`, and semantic correctness `6/6`; Node reports compile-first-try `6/6`, zero repair rounds, and semantic correctness `2/6`. This is the available case where Jet wins after repair. It is not evidence for this card because it does not use the 29 frozen workload rows or the #769 scoring.
 

@@ -78,7 +78,9 @@ function jet_compute_web_placement(device, profile, reason) {
 function jet_compute_web_tensor(shape, values, device = "cpu", profile = JET_WEBGPU_CPU_PROFILE, reason = "policy=explicit") {
   return {
     shape: shape.slice(),
-    values: values == null ? null : Array.from(values, Number),
+    values: values == null ? null : profile === JET_WEBGPU_PROFILE
+      ? Array.from(jet_compute_web_f32_values(values, "Tensor values"))
+      : Array.from(values, Number),
     buffer: null,
     device,
     profile,
@@ -187,6 +189,7 @@ async function jet_compute_webgpu_dispatch(source, key, inputs, params, output_l
   pass.dispatchWorkgroups(Math.max(1, Math.ceil(output_len / 64)));
   pass.end();
   device.queue.submit([encoder.finish()]);
+  await jet_compute_webgpu_read(output, output_len);
   return output;
 }
 
@@ -203,6 +206,7 @@ async function jet_compute_webgpu_read(buffer, length) {
   const values = Array.from(new Float32Array(readback.getMappedRange()).slice(0, length));
   readback.unmap();
   readback.destroy();
+  if (!values.every(Number.isFinite)) throw new Error("WebGPU kernel produced a non-finite F32 value");
   return values;
 }
 
@@ -381,14 +385,19 @@ async function jet_compute_web_binary(operation, left, right) {
   if (left.device === "webgpu") {
     const left_values = jet_compute_web_broadcast_values(await jet_compute_web_values(left), left.shape, shape);
     const right_values = jet_compute_web_broadcast_values(await jet_compute_web_values(right), right.shape, shape);
+    if (operation === "div" && right_values.some((value) => value === 0)) throw new Error("division by zero in compute operation");
     return jet_compute_web_gpu_binary(operation, left, right, shape, left_values, right_values);
   }
   const left_values = jet_compute_web_broadcast_values(await jet_compute_web_values(left), left.shape, shape);
   const right_values = jet_compute_web_broadcast_values(await jet_compute_web_values(right), right.shape, shape);
-  const out = left_values.map((value, index) => ({
-    add: value + right_values[index], mul: value * right_values[index], sub: value - right_values[index],
-    div: value / right_values[index], maximum: Math.max(value, right_values[index]), minimum: Math.min(value, right_values[index]),
-  }[operation]));
+  if (operation === "div" && right_values.some((value) => value === 0)) throw new Error("division by zero in compute operation");
+  const out = left_values.map((value, index) => {
+    const result = ({
+      add: value + right_values[index], mul: value * right_values[index], sub: value - right_values[index],
+      div: value / right_values[index], maximum: Math.max(value, right_values[index]), minimum: Math.min(value, right_values[index]),
+    }[operation]);
+    return left.profile === JET_WEBGPU_PROFILE ? Math.fround(result) : result;
+  });
   return jet_compute_web_tensor(shape, out, "cpu", left.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
@@ -397,7 +406,8 @@ async function jet_compute_web_unary(operation, tensor) {
   const values = await jet_compute_web_values(tensor);
   const f = { negate: (x) => -x, abs: Math.abs, exp: Math.exp, log: Math.log, sqrt: Math.sqrt }[operation];
   if (!f) throw new Error(`unary operation ${operation} is unsupported`);
-  return jet_compute_web_tensor(tensor.shape, values.map(f), "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
+  const output = values.map((value) => tensor.profile === JET_WEBGPU_PROFILE ? Math.fround(f(value)) : f(value));
+  return jet_compute_web_tensor(tensor.shape, output, "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
 async function jet_compute_web_matmul(left, right, f32_tile = false) {
@@ -408,9 +418,12 @@ async function jet_compute_web_matmul(left, right, f32_tile = false) {
   const a = f32_tile ? jet_compute_web_f32_values(await jet_compute_web_values(left), "matmul input") : await jet_compute_web_values(left);
   const b = f32_tile ? jet_compute_web_f32_values(await jet_compute_web_values(right), "matmul input") : await jet_compute_web_values(right);
   const out = new Array(rows * cols).fill(0);
+  const f32 = left.profile === JET_WEBGPU_PROFILE;
   for (let row = 0; row < rows; row += 1) for (let col = 0; col < cols; col += 1) {
     let total = 0;
-    for (let k = 0; k < inner; k += 1) total = f32_tile ? Math.fround(Math.fround(total) + Math.fround(a[row * inner + k] * b[k * cols + col])) : total + a[row * inner + k] * b[k * cols + col];
+    for (let k = 0; k < inner; k += 1) total = f32 || f32_tile
+      ? Math.fround(Math.fround(total) + Math.fround(Math.fround(a[row * inner + k]) * Math.fround(b[k * cols + col])))
+      : total + a[row * inner + k] * b[k * cols + col];
     out[row * cols + col] = total;
   }
   return jet_compute_web_tensor([rows, cols], f32_tile ? jet_compute_web_f32_values(out, "matmul output") : out, "cpu", f32_tile ? JET_WEBGPU_PROFILE : left.profile, f32_tile ? "algorithm=blocked-matmul;arithmetic=f32;reduction=ordered;dispatch=scalar" : "policy=explicit;selected=cpu;ability=cpu-oracle");
@@ -441,7 +454,11 @@ async function jet_compute_web_sum(tensor) {
     result.buffer = output;
     return result;
   }
-  return jet_compute_web_tensor([1], [(await jet_compute_web_values(tensor)).reduce((a, b) => a + b, 0)], "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
+  const values = await jet_compute_web_values(tensor);
+  const sum = tensor.profile === JET_WEBGPU_PROFILE
+    ? values.reduce((total, value) => Math.fround(Math.fround(total) + Math.fround(value)), 0)
+    : values.reduce((total, value) => total + value, 0);
+  return jet_compute_web_tensor([1], [sum], "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
 async function jet_compute_web_mse(left, right) {
@@ -456,7 +473,17 @@ async function jet_compute_web_mse(left, right) {
     return result;
   }
   const a = await jet_compute_web_values(left); const b = await jet_compute_web_values(right);
-  return jet_compute_web_tensor([1], [a.reduce((sum, value, i) => sum + (value - b[i]) ** 2, 0) / length], "cpu", left.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
+  let total = 0;
+  for (let i = 0; i < length; i += 1) {
+    const difference = left.profile === JET_WEBGPU_PROFILE
+      ? Math.fround(Math.fround(a[i]) - Math.fround(b[i]))
+      : a[i] - b[i];
+    const next = left.profile === JET_WEBGPU_PROFILE
+      ? Math.fround(Math.fround(total) + Math.fround(difference * difference))
+      : total + difference * difference;
+    total = next;
+  }
+  return jet_compute_web_tensor([1], [total / length], "cpu", left.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
 async function jet_compute_web_sgd(parameter, gradient, rate) {
@@ -472,7 +499,10 @@ async function jet_compute_web_sgd(parameter, gradient, rate) {
     return result;
   }
   const a = await jet_compute_web_values(parameter); const b = await jet_compute_web_values(gradient);
-  return jet_compute_web_tensor(parameter.shape, a.map((value, i) => value - scalar * b[i]), "cpu", parameter.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
+  const output = a.map((value, i) => parameter.profile === JET_WEBGPU_PROFILE
+    ? Math.fround(Math.fround(value) - Math.fround(Math.fround(scalar) * Math.fround(b[i])))
+    : value - scalar * b[i]);
+  return jet_compute_web_tensor(parameter.shape, output, "cpu", parameter.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
 async function jet_compute_web_set(tensor, indices, value) {
@@ -481,7 +511,10 @@ async function jet_compute_web_set(tensor, indices, value) {
   if (coords.length !== tensor.shape.length || coords.some((index, axis) => index >= tensor.shape[axis])) throw new Error("Tensor index is out of bounds");
   let flat = 0;
   for (let axis = 0; axis < coords.length; axis += 1) flat = flat * tensor.shape[axis] + coords[axis];
-  values[flat] = jet_compute_web_float(value, "Tensor value");
+  const numeric = jet_compute_web_float(value, "Tensor value");
+  values[flat] = tensor.profile === JET_WEBGPU_PROFILE
+    ? jet_compute_web_f32_values([numeric], "Tensor value")[0]
+    : numeric;
   tensor.values = values;
   if (tensor.device === "webgpu") tensor.buffer = jet_compute_webgpu_buffer(await jet_compute_webgpu_device(), jet_compute_web_f32_values(values, "Tensor value"));
   return jet_compute_web_ok(undefined);

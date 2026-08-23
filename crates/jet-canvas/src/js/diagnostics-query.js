@@ -39,6 +39,38 @@
     problemsPanel.scrollIntoView({ block: "nearest" });
   }
 
+  function openSourceRecovery() {
+    const base = window.__JET_CANVAS_BASE__ || "/canvas";
+    const source = latestDoc && latestDoc.source_id;
+    const query = source ? "?source_id=" + encodeURIComponent(source) : "";
+    return fetch(base + "/source" + query, { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("source request failed (" + response.status + ")");
+        return response.text();
+      })
+      .then((text) => {
+        setViewMode("split");
+        setSourceEditMode(true);
+        if (sourceEditor) {
+          sourceEditor.value = text;
+          saveSourceDraft(text);
+        }
+        sourceView.textContent = text;
+        setCanvasState("recovery", "Source is available", "Edit the Jet source, then check it before applying a change.", [
+          { label: "Close", run: clearCanvasState }
+        ]);
+        return text;
+      })
+      .catch((error) => {
+        setCanvasState("error", "Source unavailable", "Canvas could not read Jet source. Retry when the server is reachable.", [
+          { label: "Retry", primary: true, run: openSourceRecovery }
+        ]);
+        setSaveState("source unavailable", "error");
+        showToast(String(error), { isError: true });
+        return null;
+      });
+  }
+
   function diagnosticFullText(entry) {
     return entry.rendered || `Error [${entry.code || "diagnostic"}]: ${entry.what || entry.message || ""}\n Why: ${entry.why || ""}\n Fix: ${entry.fix || ""}`;
   }
@@ -87,8 +119,15 @@
     renderProblemsPanel();
     if (entries.length) {
       const first = entries[0];
+      setCanvasState("invalid", "Source needs a fix", "Canvas kept the last valid source. Fix the diagnostic in Code view, then check again.", [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Dismiss", run: clearCanvasState }
+      ]);
+      setSaveState("source unchanged", "error");
       showToast(`${entries.length} ${entries.length === 1 ? "problem" : "problems"}: ${first.code} ${first.what}`, { isError: true, showDetails: true });
     } else {
+      if (window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === "invalid") clearCanvasState();
+      setSaveState("source saved");
       showToast("Check passed");
     }
     if (latestDoc) drawGraph(latestDoc);
@@ -96,12 +135,18 @@
   }
 
   function clearDiagnosticsForRevision(revision) {
-    if (!diagnosticsState.entries.length) return;
+    if (!diagnosticsState.entries.length) {
+      if (window.__jetCanvasCanvasState && ["invalid", "error"].includes(window.__jetCanvasCanvasState.kind)) clearCanvasState();
+      setSaveState("source saved");
+      return;
+    }
     diagnosticsState.entries = [];
     diagnosticsState.dismissed = new Set();
     diagnosticsState.baseRevision = revision || null;
     diagnosticsState.diagnosticRevision = revision || null;
     renderProblemsPanel();
+    if (window.__jetCanvasCanvasState && ["invalid", "error"].includes(window.__jetCanvasCanvasState.kind)) clearCanvasState();
+    setSaveState("source saved");
     if (latestDoc) drawGraph(latestDoc);
   }
 
@@ -295,19 +340,24 @@
   }
 
   function setViewMode(mode) {
-    viewMode = mode === "code" || mode === "split" ? mode : "graph";
-    if (viewMode === "graph") setSourceEditMode(false);
+    viewMode = mode === "code" || mode === "split" || mode === "review" ? mode : "graph";
+    if (viewMode === "graph" || viewMode === "review") setSourceEditMode(false);
     stage.classList.toggle("is-code", viewMode === "code");
     stage.classList.toggle("is-split", viewMode === "split");
+    stage.classList.toggle("is-review", viewMode === "review");
     viewToggle.textContent = viewMode === "graph" ? "Code" : "Graph";
     viewToggle.classList.toggle("is-active", viewMode !== "graph");
     for (const button of lensButtons) {
       button.classList.toggle("is-active", button.getAttribute("data-view-mode") === viewMode);
     }
     sourceView.textContent = latestDoc && latestDoc.source_text ? latestDoc.source_text : "";
-    if (sourceEditor && !sourceEditMode) sourceEditor.value = latestDoc && latestDoc.source_text ? latestDoc.source_text : "";
+    if (sourceEditor && !sourceEditMode) {
+      const draft = latestDoc ? readSourceDraft(latestDoc) : null;
+      sourceEditor.value = draft !== null ? draft : (latestDoc && latestDoc.source_text ? latestDoc.source_text : "");
+    }
     window.__jetCanvasLensMode = viewMode;
-    if (viewMode !== "code" && latestDoc) drawGraph(latestDoc);
+    if (viewMode === "review") loadReview();
+    else if (viewMode !== "code" && latestDoc) drawGraph(latestDoc);
   }
 
   function setSourceEditMode(active) {
@@ -318,7 +368,9 @@
       stage.classList.toggle("is-code", viewMode === "code");
       stage.classList.toggle("is-split", viewMode === "split");
       if (sourceEditor) {
-        sourceEditor.value = latestDoc.source_text || "";
+        const draft = readSourceDraft(latestDoc);
+        sourceEditor.value = draft !== null ? draft : (latestDoc.source_text || "");
+        setSaveState(draft !== null && draft !== latestDoc.source_text ? "local draft" : "source saved", draft !== null && draft !== latestDoc.source_text ? "draft" : "saved");
         sourceEditor.focus();
       }
     }
@@ -350,12 +402,30 @@
     return a.start <= b.end && b.start <= a.end;
   }
 
+  function currentCanvasSourceId() {
+    return selectedSourceId || (latestDoc && latestDoc.source_id) || null;
+  }
+
+  function syncSearchSpans() {
+    const sourceId = currentCanvasSourceId();
+    searchState.spans = (searchState.results || [])
+      .filter((result) => !result.source_id || result.source_id === sourceId)
+      .map((result) => result.source_span)
+      .filter(Boolean);
+  }
+
   function postQuery(body) {
     if (!latestDoc) return Promise.resolve(null);
+    const querySourceId = currentCanvasSourceId();
+    const queryRevision = latestDoc.revision;
+    const queryProjectRevision = latestProject && latestProject.project_revision;
+    const request = { schema_version: 1, revision: queryRevision };
+    if (querySourceId) request.source_id = querySourceId;
+    if (queryProjectRevision) request.project_revision = queryProjectRevision;
     return fetch(queryUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(Object.assign({ schema_version: 1, revision: latestDoc.revision }, body))
+      body: JSON.stringify(Object.assign(request, body))
     })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
@@ -363,11 +433,22 @@
           showToast(result.json.message || "Canvas query rejected");
           return null;
         }
+        if (latestDoc && (
+          latestDoc.revision !== queryRevision
+          || currentCanvasSourceId() !== querySourceId
+          || (queryProjectRevision && (!latestProject || latestProject.project_revision !== queryProjectRevision))
+          || (queryProjectRevision && result.json.project_revision !== queryProjectRevision)
+        )) {
+          showToast("Canvas query result is stale; reload the current source");
+          return null;
+        }
         searchState.results = result.json.results || [];
-        searchState.spans = searchState.results.map((r) => r.source_span).filter(Boolean);
+        syncSearchSpans();
         searchState.active = searchState.results.length ? 0 : -1;
         searchState.diff = result.json.diff || null;
         searchState.impact = result.json.impact || null;
+        searchState.truncated = result.json.truncated === true;
+        searchState.resultLimit = result.json.result_limit || 0;
         renderSearchResults();
         if (searchState.results[0]) selectQueryResult(searchState.results[0], false);
         if (latestDoc) drawGraph(latestDoc);
@@ -377,15 +458,21 @@
   }
 
   function renderSearchResults() {
-    const rows = (searchState.results || []).slice(0, 24).map((result, i) => {
+    const allResults = searchState.results || [];
+    const visibleResults = allResults.slice(0, 24);
+    const rows = visibleResults.map((result, i) => {
       const active = i === searchState.active ? " is-active" : "";
       const label = escapeHtml(result.title || result.symbol || result.kind || "match");
-      const where = `${result.kind || "match"} · line ${result.line || "?"}`;
+      const source = result.source_id ? `${result.source_id} · ` : "";
+      const where = `${source}${result.kind || "match"} · line ${result.line || "?"}`;
       return `<button class="search-item${active}" data-search-hit="${i}">${label}<small>${escapeHtml(where)} ${escapeHtml(result.excerpt || "")}</small></button>`;
     }).join("");
+    const limit = searchState.truncated || allResults.length > visibleResults.length
+      ? `<div class="tag">Showing first ${visibleResults.length} of ${searchState.resultLimit || allResults.length} results; narrow search</div>`
+      : "";
     const diff = searchState.diff && searchState.diff.text ? `<div class="inline-row"><b>Preview diff</b><code>${escapeHtml(searchState.diff.text)}</code></div>` : "";
     const impact = searchState.impact && searchState.impact.found ? `<div class="pin-row"><b>Impact</b><br><span class="tag">${(searchState.impact.references || []).length} refs / ${(searchState.impact.call_sites || []).length} calls</span></div>` : "";
-    searchResults.innerHTML = rows || diff || impact ? rows + diff + impact : "<div class=\"tag\">no matches</div>";
+    searchResults.innerHTML = rows || diff || impact || limit ? limit + rows + diff + impact : "<div class=\"tag\">no matches</div>";
     searchResults.querySelectorAll("[data-search-hit]").forEach((button) => {
       button.addEventListener("click", () => {
         const index = Number(button.getAttribute("data-search-hit"));
@@ -398,13 +485,19 @@
   }
 
   function loadSourceControl() {
+    const requestedSourceId = currentCanvasSourceId();
+    const requestedProjectRevision = latestProject && latestProject.project_revision;
     return fetch(sourceControlUrl, { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
+        if (currentCanvasSourceId() !== requestedSourceId || (latestProject && latestProject.project_revision !== requestedProjectRevision)) {
+          return null;
+        }
         scm = doc;
         const dirtyCount = doc.dirty_files ? " · " + doc.dirty_files + " files" : "";
         scmState.textContent = doc.available ? (doc.dirty ? "git dirty" + dirtyCount : "git clean") : "no git";
         scmState.style.color = doc.dirty ? "#fde68a" : "#8fb2dc";
+        if (typeof syncReviewFromSourceControl === "function") syncReviewFromSourceControl(doc);
         return doc;
       })
       .catch(() => {
@@ -420,9 +513,16 @@
 
   function loadProofRail() {
     if (!proofRail) return Promise.resolve(null);
-    return fetch(proofRequestUrl(selectedSourceId), { cache: "no-store" })
+    const requestedSourceId = currentCanvasSourceId();
+    const requestedRevision = latestDoc && latestDoc.revision;
+    return fetch(proofRequestUrl(requestedSourceId), { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
+        if (currentCanvasSourceId() !== requestedSourceId || (latestDoc && latestDoc.revision !== requestedRevision) || (doc.revision && doc.revision !== requestedRevision)) {
+          proofState.textContent = "stale — reload";
+          proofState.style.color = "#f8c76a";
+          return null;
+        }
         proofDoc = doc;
         const proof = doc.proof || {};
         const check = doc.check || {};
@@ -468,6 +568,27 @@
 
   function selectQueryResult(result, fitView) {
     if (!result) return;
+    const sourceId = currentCanvasSourceId();
+    if (result.source_id && result.source_id !== sourceId) {
+      const results = searchState.results;
+      const active = searchState.active;
+      const truncated = searchState.truncated;
+      const resultLimit = searchState.resultLimit;
+      return loadGraph(result.source_id).then(() => {
+        if (!latestDoc || latestDoc.revision !== result.revision) {
+          showToast("Search result is stale; reload the project");
+          return;
+        }
+        searchState.results = results;
+        searchState.active = active;
+        searchState.truncated = truncated;
+        searchState.resultLimit = resultLimit;
+        syncSearchSpans();
+        selectQueryResult(result, fitView);
+        renderSearchResults();
+        drawGraph(latestDoc);
+      });
+    }
     if (result.graph_id) selectedGraphId = result.graph_id;
     if (result.node_id) {
       selectedNodeId = result.node_id;
@@ -480,12 +601,12 @@
   function runCanvasSearch() {
     const query = canvasSearch.value.trim();
     if (!query) {
-      searchState = { results: [], spans: [], active: -1, diff: null, impact: null };
+      searchState = { results: [], spans: [], active: -1, diff: null, impact: null, truncated: false, resultLimit: 0 };
       renderSearchResults();
       if (latestDoc) drawGraph(latestDoc);
       return;
     }
-    postQuery({ op: "find", query });
+    postQuery({ op: "project_search", query });
   }
 
   function sourceHashSpan() {

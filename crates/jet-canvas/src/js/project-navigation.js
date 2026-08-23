@@ -1,13 +1,188 @@
 
 // Project panels, graph navigation, variables, source-backed actions, and debugger state.
+  function ensureCanvasChrome() {
+    const stage = document.getElementById("stage");
+    if (stage && !document.getElementById("canvas-state")) {
+      const state = document.createElement("section");
+      state.id = "canvas-state";
+      state.setAttribute("role", "status");
+      state.setAttribute("aria-live", "polite");
+      state.style.cssText = "position:absolute;z-index:28;left:50%;top:12px;transform:translateX(-50%);display:none;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;width:min(520px,calc(100% - 24px));padding:10px 12px;border:1px solid #365a7f;border-radius:7px;background:rgba(7,16,28,.96);box-shadow:0 18px 52px rgba(0,0,0,.48);color:#c9dcf2";
+      state.innerHTML = "<div><b id=\"canvas-state-title\" style=\"display:block;color:#f8fbff\"></b><span id=\"canvas-state-detail\" style=\"display:block;margin-top:3px;color:#9fb9d8;line-height:1.35\"></span></div><div id=\"canvas-state-actions\" style=\"display:flex;gap:6px;flex-wrap:wrap;justify-content:end\"></div>";
+      stage.appendChild(state);
+    }
+    const statusbar = document.getElementById("statusbar");
+    if (statusbar && !document.getElementById("save-state")) {
+      const saved = document.createElement("span");
+      saved.id = "save-state";
+      saved.textContent = "source saved";
+      saved.style.color = "#8fb2dc";
+      statusbar.appendChild(saved);
+    }
+    const tour = document.getElementById("first-run-tour");
+    if (tour && !document.getElementById("tour-next")) {
+      tour.innerHTML = "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:8px\"><span id=\"tour-progress\" style=\"color:#8fb2dc;font:10px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase\"></span><button id=\"tour-dismiss\" type=\"button\" style=\"min-height:26px;padding:0 8px\">Finish</button></div><b id=\"tour-title\"></b><span id=\"tour-detail\" style=\"line-height:1.45\"></span><div style=\"display:flex;gap:6px;justify-content:end;flex-wrap:wrap\"><button id=\"tour-back\" type=\"button\">Back</button><button id=\"tour-action\" class=\"primary\" type=\"button\"></button><button id=\"tour-next\" class=\"primary\" type=\"button\">Next</button></div>";
+    }
+    const more = document.querySelector("#more-tools-toggle + .toolbar-popover");
+    if (more && !document.getElementById("tour-open")) {
+      const open = document.createElement("button");
+      open.id = "tour-open";
+      open.type = "button";
+      open.textContent = "Tour";
+      more.appendChild(open);
+    }
+  }
+
+  function setSaveState(label, kind = "saved") {
+    const saved = document.getElementById("save-state");
+    if (!saved) return;
+    saved.textContent = label;
+    saved.style.color = kind === "error" ? "#fecaca" : kind === "draft" ? "#fde68a" : "#8fb2dc";
+    saved.dataset.state = kind;
+  }
+
+  function setCanvasState(kind, title, detail, actions = []) {
+    ensureCanvasChrome();
+    const state = document.getElementById("canvas-state");
+    const titleEl = document.getElementById("canvas-state-title");
+    const detailEl = document.getElementById("canvas-state-detail");
+    const actionsEl = document.getElementById("canvas-state-actions");
+    if (!state || !titleEl || !detailEl || !actionsEl) return;
+    state.dataset.state = kind || "info";
+    titleEl.textContent = title || "Canvas";
+    detailEl.textContent = detail || "";
+    actionsEl.innerHTML = "";
+    for (const action of actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = action.label;
+      button.style.cssText = "min-height:27px;padding:0 8px";
+      if (action.primary) button.classList.add("primary");
+      button.addEventListener("click", () => action.run && action.run());
+      actionsEl.appendChild(button);
+    }
+    state.style.display = "grid";
+    window.__jetCanvasCanvasState = { kind: kind || "info", title: title || "Canvas", detail: detail || "", actions: actions.map((action) => action.label) };
+  }
+
+  function clearCanvasState() {
+    const state = document.getElementById("canvas-state");
+    if (!state) return;
+    state.style.display = "none";
+    state.dataset.state = "";
+    window.__jetCanvasCanvasState = null;
+  }
+
+  const TOUR_STEPS = [
+    { title: "Read the graph", detail: "Files, functions, and variables live in the left rail. Select a node to inspect its source-backed details. The graph is a view of Jet source, not a second file.", target: "left-drawer" },
+    { title: "Edit, then save", detail: "Use the palette or an inline value. Accepted edits are checked, formatted, and written to Jet source immediately. Code and Split keep the source in reach.", action: "Open source", target: "jet-canvas-view" },
+    { title: "Check and fix", detail: "Check runs Jet diagnostics. Problems stay in the panel with what, why, and fix text. Rejected edits leave the last valid source intact.", action: "Check source", target: "check-current" },
+    { title: "Run and inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare run", target: "run-current" },
+    { title: "Undo and keep control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Finish tour", target: "undo-edit" }
+  ];
+  let tourStep = 0;
+
+  function renderTour() {
+    const tour = document.getElementById("first-run-tour");
+    if (!tour) return;
+    const dismissed = !!editorState.tourDismissed;
+    tourStep = Math.max(0, Math.min(TOUR_STEPS.length - 1, Number(editorState.tourStep) || 0));
+    const step = TOUR_STEPS[tourStep];
+    const progress = document.getElementById("tour-progress");
+    const title = document.getElementById("tour-title");
+    const detail = document.getElementById("tour-detail");
+    const action = document.getElementById("tour-action");
+    const back = document.getElementById("tour-back");
+    const next = document.getElementById("tour-next");
+    if (!step || !progress || !title || !detail || !action || !back || !next) return;
+    progress.textContent = `Step ${tourStep + 1} of ${TOUR_STEPS.length}`;
+    title.textContent = step.title;
+    detail.textContent = step.detail;
+    action.textContent = step.action || "";
+    action.style.display = step.action ? "inline-block" : "none";
+    back.disabled = tourStep === 0;
+    next.textContent = tourStep === TOUR_STEPS.length - 1 ? "Done" : "Next";
+    next.disabled = tourStep === TOUR_STEPS.length - 1;
+    tour.dataset.tourStep = String(tourStep);
+    tour.setAttribute("aria-hidden", dismissed ? "true" : "false");
+    tour.classList.toggle("is-open", !dismissed);
+    window.__jetCanvasTourState = { step: tourStep, total: TOUR_STEPS.length, title: step.title, target: step.target, dismissed };
+  }
+
+  function finishTour() {
+    editorState.tourDismissed = true;
+    saveEditorState();
+    renderTour();
+  }
+
+  function startTour() {
+    editorState.tourDismissed = false;
+    editorState.tourStep = 0;
+    tourStep = 0;
+    saveEditorState();
+    renderTour();
+  }
+
+  function nextTourStep() {
+    if (tourStep >= TOUR_STEPS.length - 1) return;
+    tourStep += 1;
+    editorState.tourStep = tourStep;
+    saveEditorState();
+    renderTour();
+  }
+
+  function previousTourStep() {
+    if (tourStep <= 0) return;
+    tourStep -= 1;
+    editorState.tourStep = tourStep;
+    saveEditorState();
+    renderTour();
+  }
+
+  function runTourAction() {
+    const step = TOUR_STEPS[tourStep];
+    if (!step) return;
+    if (step.action === "Open source") setViewMode("split");
+    else if (step.action === "Check source") showCheckAuthority();
+    else if (step.action === "Prepare run") runCurrentGraph();
+    else if (step.action === "Finish tour") finishTour();
+    renderTour();
+  }
+
+  ensureCanvasChrome();
+  window.addEventListener("offline", () => {
+    setCanvasState("offline", "Offline", "Canvas cannot write while disconnected. Jet source stays visible; reconnect, then retry.", [
+      { label: "Show source", run: openSourceRecovery },
+      { label: "Retry", primary: true, run: loadGraph }
+    ]);
+    setSaveState("source unchanged", "error");
+  });
+  window.addEventListener("online", () => {
+    const state = window.__jetCanvasCanvasState;
+    if (state && state.kind === "offline") loadGraph();
+  });
+
   function richestGraph(doc) {
     if (!doc.graphs || doc.graphs.length === 0) return null;
     return doc.graphs.slice().sort((a, b) => b.nodes.length - a.nodes.length || a.title.localeCompare(b.title))[0];
   }
 
+  let graphPickerKey = null;
+  let graphListKey = null;
+  let graphStripKey = null;
+  let variablesListKey = null;
+  let traitsPanelKey = null;
+
+  function graphNavigationKey(doc) {
+    return `${doc && doc.source_id || ""}:${doc && doc.revision || ""}:${selectedGraphId || ""}`;
+  }
+
   function syncGraphPicker(doc) {
     const best = richestGraph(doc);
     if (!selectedGraphId && best) selectedGraphId = best.graph_id;
+    const key = graphNavigationKey(doc);
+    if (graphPickerKey === key) return;
+    graphPickerKey = key;
     graphSelect.innerHTML = "";
     for (const graph of doc.graphs || []) {
       const opt = document.createElement("option");
@@ -19,6 +194,9 @@
   }
 
   function syncGraphList(doc) {
+    const key = graphNavigationKey(doc);
+    if (graphListKey === key) return;
+    graphListKey = key;
     graphList.innerHTML = "";
     for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
@@ -93,6 +271,9 @@
 
   function syncVariablesList(graph) {
     if (!variablesList) return;
+    const key = `${graph && graph.graph_id || ""}:${latestDoc && latestDoc.revision || ""}:${selectedVariableName || ""}`;
+    if (variablesListKey === key) return;
+    variablesListKey = key;
     const vars = graphVariables(graph);
     if (variableCount) variableCount.textContent = String(vars.length);
     variablesList.innerHTML = vars.map((v) => {
@@ -104,6 +285,132 @@
       button.addEventListener("click", () => selectVariable(button.getAttribute("data-variable-name")));
     });
     window.__jetCanvasVariablesSidebar = vars.length;
+  }
+
+  function canvasInterfaceFacts(doc) {
+    const blueprint = doc && doc.facts && doc.facts.blueprint;
+    return blueprint && Array.isArray(blueprint.interfaces) ? blueprint.interfaces : [];
+  }
+
+  function traitScope(fact) {
+    return Array.isArray(fact && fact.scope) ? fact.scope.join(".") : String(fact && fact.scope || "");
+  }
+
+  function traitQualifiedName(fact) {
+    const scope = traitScope(fact);
+    return scope ? scope + "." + fact.trait : String(fact && fact.trait || "trait");
+  }
+
+  function traitMethodRequired(method) {
+    return method && method.required !== false && !method.default;
+  }
+
+  function syncTraitsPanel(doc) {
+    const canvasPanel = document.getElementById("canvas-panel");
+    if (!canvasPanel) return;
+    const key = `${doc && doc.source_id || ""}:${doc && doc.revision || ""}`;
+    if (traitsPanelKey === key) return;
+    traitsPanelKey = key;
+    let panel = canvasPanel.querySelector("[data-canvas-traits]");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.setAttribute("data-canvas-traits", "true");
+      canvasPanel.appendChild(panel);
+    }
+
+    const facts = canvasInterfaceFacts(doc);
+    const traits = facts.filter((fact) => fact && fact.kind === "trait_interface");
+    const implementations = facts.filter((fact) => fact && fact.kind === "trait_impl");
+    const jumps = [];
+    const jumpButton = (span, label) => {
+      if (!span || !Number.isFinite(span.start)) return "";
+      const index = jumps.push({ span, label }) - 1;
+      return `<button type="button" data-trait-jump="${index}">${escapeHtml(label || "Open source")}</button>`;
+    };
+    const implsFor = (trait) => implementations.filter((impl) => {
+      return impl.trait === trait.trait && traitScope(impl) === traitScope(trait);
+    });
+    const stateTraits = [];
+    let requiredMethodCount = 0;
+    let implementedMethodCount = 0;
+    const traitRows = traits.map((trait, traitIndex) => {
+      const methods = Array.isArray(trait.methods) ? trait.methods : [];
+      const associatedTypes = Array.isArray(trait.associated_types) ? trait.associated_types : [];
+      const requiredMethods = methods.filter(traitMethodRequired);
+      requiredMethodCount += requiredMethods.length;
+      const impls = implsFor(trait);
+      const implRows = impls.map((impl) => {
+        const methodNames = new Set((impl.methods || []).map((name) => String(name)));
+        const implemented = requiredMethods.filter((method) => methodNames.has(method.name));
+        implementedMethodCount += implemented.length;
+        const methodStatus = requiredMethods.map((method) => {
+          const present = methodNames.has(method.name);
+          return `<div class="pin-row"><div class="lane-head"><b>${escapeHtml(method.name)}</b><span class="tag">${present ? "Implemented" : "Required"}</span></div><code>${escapeHtml(method.signature || "")}</code></div>`;
+        }).join("");
+        const assocStatus = associatedTypes.map((name) => {
+          const present = (impl.associated_types || []).includes(name);
+          return `<div class="pin-row"><div class="lane-head"><b>type ${escapeHtml(name)}</b><span class="tag">${present ? "Implemented" : "Required"}</span></div></div>`;
+        }).join("");
+        return `<div class="signature-board" data-trait-implementation="${escapeAttr(String(impl.type || ""))}"><div class="signature-head"><div><span class="sig-eyebrow">Implementation</span><b>${escapeHtml(impl.type || "Type")}</b><code>${escapeHtml(traitQualifiedName(trait))}</code></div>${jumpButton(impl.source_span, "Open source")}</div><div class="lane-meta">${implemented.length}/${requiredMethods.length} required methods</div><div class="pin-list">${methodStatus || "<div class=\"pin-empty\">No required methods</div>"}${assocStatus}</div></div>`;
+      }).join("");
+      const methodRows = methods.map((method) => {
+        const label = traitMethodRequired(method) ? "Required" : "Default";
+        return `<div class="pin-row"><div class="lane-head"><b>${escapeHtml(method.name || "method")}</b><span class="tag">${label}</span></div><code>${escapeHtml(method.signature || "")}</code>${jumpButton(method.source_span, "Open source")}</div>`;
+      }).join("");
+      const assocRows = associatedTypes.length
+        ? `<div class="tag">Associated types: ${escapeHtml(associatedTypes.join(", "))}</div>`
+        : "";
+      const create = associatedTypes.length
+        ? `<div class="tag">Add associated type choices in source before creating an implementation.</div>`
+        : `<div class="edit-grid"><label><span>Type name</span><input data-trait-type="${traitIndex}" placeholder="${escapeAttr(traitScope(trait) ? "Type in " + traitScope(trait) : "Type name")}"></label><button class="primary" type="button" data-trait-create="${traitIndex}">Add implementation</button></div>`;
+      stateTraits.push({
+        name: trait.trait,
+        scope: traitScope(trait),
+        requiredMethods: requiredMethods.map((method) => method.name),
+        methods: methods.map((method) => method.name),
+        implementations: impls.map((impl) => ({ type: impl.type, methods: (impl.methods || []).slice() }))
+      });
+      return `<div class="signature-board" data-trait="${escapeAttr(traitQualifiedName(trait))}"><div class="signature-head"><div><span class="sig-eyebrow">Trait</span><b>${escapeHtml(trait.trait || "Trait")}</b><code>${escapeHtml(traitScope(trait) || "file scope")}</code></div>${jumpButton(trait.source_span, "Open source")}</div><div class="lane-head"><b>Methods</b><span class="lane-meta">${requiredMethods.length} required · ${methods.length - requiredMethods.length} default</span></div><div class="pin-list">${methodRows || "<div class=\"pin-empty\">No methods</div>"}</div>${assocRows}${implRows || "<div class=\"pin-empty\">No implementation</div>"}${create}</div>`;
+    }).join("");
+
+    panel.innerHTML = `<section class="project-section"><div class="lane-head"><h3>Traits</h3><span class="lane-meta">${traits.length}</span></div>${traitRows || "<div class=\"tag\">no traits</div>"}</section>`;
+    panel.querySelectorAll("[data-trait-jump]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = jumps[Number(button.getAttribute("data-trait-jump"))];
+        if (!target) return;
+        setSourceHash(target.span);
+        setViewMode("code");
+        showToast(target.label + " selected");
+      });
+    });
+    panel.querySelectorAll("[data-trait-create]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = button.getAttribute("data-trait-create");
+        const trait = traits[Number(index)];
+        const input = panel.querySelector(`[data-trait-type="${cssEscape(index)}"]`);
+        const typeName = input ? input.value.trim() : "";
+        if (!trait || !/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(typeName)) {
+          showToast("Type name must be a Jet name", { isError: true });
+          return;
+        }
+        postTransaction({
+          schema_version: 1,
+          op: "create_trait_impl",
+          revision: latestDoc.revision,
+          type_name: typeName,
+          trait_name: traitQualifiedName(trait)
+        });
+      });
+    });
+    window.__jetCanvasTraitsPanel = {
+      rendered: true,
+      traitCount: traits.length,
+      implementationCount: implementations.length,
+      requiredMethodCount,
+      implementedMethodCount,
+      traits: stateTraits,
+      revision: doc && doc.revision || ""
+    };
   }
 
   function projectMiniCard(title, small, code) {
@@ -176,10 +483,11 @@
   function syncProjectRail(project) {
     if (!projectRail || !project) return;
     latestProject = project;
-    projectMode.textContent = project.mode || "file";
+    const sourceFiles = (project.files || []).filter((f) => f.kind === "source");
+    projectMode.textContent = `${project.mode || "file"} · ${sourceFiles.length} source files`;
     const cards = [];
     const fileCount = (project.files || []).length;
-    for (const file of (project.files || []).filter((f) => f.kind === "source").slice(0, 12)) {
+    for (const file of sourceFiles) {
       const active = (selectedSourceId || project.entry) === file.path ? " is-active" : "";
       cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(active ? "open" : "click to open")}</small><code class="dev-only">${escapeHtml(file.revision || "")}</code></button>`);
     }
@@ -489,6 +797,9 @@
   }
 
   function syncGraphStrip(doc) {
+    const key = graphNavigationKey(doc);
+    if (graphStripKey === key) return;
+    graphStripKey = key;
     graphStrip.innerHTML = "";
     if (graphCount) graphCount.textContent = String((doc.graphs || []).length);
     for (const graph of doc.graphs || []) {
@@ -530,8 +841,9 @@
       { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
     ];
     actions.push(...variableActionsForGraph(graph));
+    actions.push(...traitMethodActions(latestDoc));
     for (const item of palette.concat(actionEntries)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, stageable: item.stageable, stage_reason_code: item.stage_reason_code, stage_reason: item.stage_reason, receiver_type: item.receiver_type, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
     }
     return actions;
   }
@@ -565,6 +877,10 @@
         insert_callee: item.insert_callee,
         args: item.args,
         available: item.available,
+        stageable: item.stageable,
+        stage_reason_code: item.stage_reason_code,
+        stage_reason: item.stage_reason,
+        receiver_type: item.receiver_type,
         denied_reason: item.denied_reason,
         unavailable_reason_code: item.unavailable_reason_code,
         run: () => runPalette(item)
@@ -708,17 +1024,24 @@
   function runDebug(commands) {
     if (!latestDoc) return;
     loadDebugState(latestDoc);
+    const requestedRevision = latestDoc.revision;
+    const requestedSourceId = selectedSourceId || latestDoc.source_id || null;
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
     const body = {
       schema_version: 1,
-      revision: latestDoc.revision,
+      revision: requestedRevision,
       commands,
       breakpoint_spans: (debugState.breakpoints || []).map((b) => b.anchor),
       watches: debugState.watches || []
     };
+    if (requestedSourceId) body.source_id = requestedSourceId;
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
+        if (latestDoc && (latestDoc.revision !== requestedRevision || (selectedSourceId || latestDoc.source_id || null) !== requestedSourceId)) {
+          showToast("Debug result is stale; current source was kept", { isError: true });
+          return;
+        }
         if (!result.ok) {
           debugOverlay = null;
           syncDebugActive();

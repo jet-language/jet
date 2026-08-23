@@ -88,11 +88,17 @@
   function transactionForPaletteInsert(item, pin, graphPoint) {
     const descriptor = nodeDescriptorForAction(item);
     if (!descriptor || descriptor.transaction !== "insert_call") return null;
-    const callee = item.insert_callee || item.callee || (item.op === "insert_print" ? "print" : null);
-    if (!callee) return null;
+    const baseCallee = item.insert_callee || item.callee || (item.op === "insert_print" ? "print" : null);
+    if (!baseCallee) return null;
     const target = wireTargetForAction(item, pin);
     const graph = currentGraph(latestDoc);
-    const body = { schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: wiredArgsForAction(item, pin) };
+    const args = wiredArgsForAction(item, pin);
+    const receiverIndex = (item.pins || []).filter((p) => p.direction === "input").findIndex((p) => p.name === "receiver");
+    const receiverExpr = item.receiver_type && receiverIndex === 0 && target && target.pin === "receiver" && target.expr;
+    if (item.receiver_type && !receiverExpr) return null;
+    const methodName = String(baseCallee).split(".").pop();
+    const callee = receiverExpr ? receiverExpr + "." + methodName : baseCallee;
+    const body = { schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: receiverExpr ? args.slice(1) : args };
     const ret = actionReturnType(item) || item.ret || "Void";
     if ((!pin || isExecPin(pin)) && ret && ret !== "Void") body.bind = "canvas_value";
     if (pin && target) {
@@ -117,7 +123,7 @@
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
     const descriptor = nodeDescriptorForAction(item);
-    if (!pin && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
+    if ((item.stageable || !pin) && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
       if (item.op === "insert_call" && !item.insert_callee && !item.callee) {
         const callee = window.prompt("Call function", "print");
         if (!callee) return;
@@ -172,6 +178,7 @@
     if (!body) return showToast("Action needs a source transaction");
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
+    setSaveState("saving", "draft");
     window.__jetCanvasLastTx = body;
     window.__jetCanvasLastTxResult = null;
     return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -179,7 +186,14 @@
       .then((result) => {
         if (!result.ok) {
           window.__jetCanvasLastTxResult = result.json;
-          if (!acceptDiagnosticsPayload(result.json, "Transaction")) showToast(result.json.message || "Edit rejected");
+          if (!acceptDiagnosticsPayload(result.json, "Transaction")) {
+            setCanvasState("error", "Edit not saved", "Jet source stayed unchanged. Review the request, then retry or open Code.", [
+              { label: "Open source", run: openSourceRecovery },
+              { label: "Retry", primary: true, run: () => postTransaction(body) }
+            ]);
+            setSaveState("source unchanged", "error");
+            showToast(result.json.message || "Edit rejected", { isError: true });
+          }
           return;
         }
         if (result.json.protocol === "jet.canvas.action") {
@@ -205,13 +219,21 @@
           });
         }
         if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
+        if (result.json.changed) clearSourceDraft();
         clearDiagnosticsForRevision(result.json.revision);
         showToast(result.json.changed ? "Source updated" : "No change");
         return loadGraph().then(() => {
           window.__jetCanvasLastTxResult = result.json;
         });
       })
-      .catch((e) => showToast(String(e)));
+      .catch((e) => {
+        setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Edit failed", "Jet source was not changed. Keep the source visible, then retry when the connection is ready.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => postTransaction(body) }
+        ]);
+        setSaveState("source unchanged", "error");
+        showToast(String(e), { isError: true });
+      });
   }
 
   function restoreSource(source, redoEntry, undoEntry, action) {
@@ -233,6 +255,7 @@
             source_text: result.json.source_text || latestDoc.source_text
           });
         }
+        clearSourceDraft();
         if (redoEntry) pushHistory(redoStack, redoEntry);
         if (undoEntry) pushHistory(undoStack, undoEntry);
         clearDiagnosticsForRevision(result.json.revision);
@@ -242,7 +265,14 @@
           window.__jetCanvasLastTxResult = result.json;
         });
       })
-      .catch((e) => showToast(String(e)));
+      .catch((e) => {
+        setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Restore failed", "Jet source was not changed. Retry when the connection is ready.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => restoreSource(source, redoEntry, undoEntry, action) }
+        ]);
+        setSaveState("source unchanged", "error");
+        showToast(String(e), { isError: true });
+      });
   }
 
   function undoTransaction() {
@@ -265,29 +295,69 @@
   function loadGraph(sourceId) {
     const loadToken = (window.__jetCanvasGraphLoadGeneration || 0) + 1;
     window.__jetCanvasGraphLoadGeneration = loadToken;
-    if (typeof sourceId === "string") {
-      selectedSourceId = sourceId || null;
-      selectedVariableName = null;
-    }
-    return fetch(graphRequestUrl(selectedSourceId), { cache: "no-store" })
+    const requestedSourceId = typeof sourceId === "string" ? (sourceId || null) : selectedSourceId;
+    const previousSourceId = selectedSourceId;
+    setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", latestDoc ? [
+      { label: "Show source", run: openSourceRecovery },
+      { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
+    ] : [
+      { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
+    ]);
+    setSaveState("loading", "draft");
+    return fetch(graphRequestUrl(requestedSourceId), { cache: "no-store" })
       .then((r) => r.json().then((doc) => ({ ok: r.ok, doc })))
       .then((result) => {
         if (loadToken !== window.__jetCanvasGraphLoadGeneration) return;
         if (!result.ok) {
-          acceptDiagnosticsPayload(result.doc, "Graph");
+          const hasDiagnostics = acceptDiagnosticsPayload(result.doc, "Graph");
           jump.textContent = "Canvas graph has problems";
           details.textContent = result.doc && result.doc.message || "Graph check failed";
+          if (!hasDiagnostics) setCanvasState("error", "Canvas could not open", "The last source remains available. Fix the request or retry the graph projection.", [
+            { label: "Open source", run: openSourceRecovery },
+            { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
+          ]);
+          setSaveState("source unchanged", "error");
           return;
         }
         const doc = result.doc;
+        const sourceChanged = previousSourceId !== requestedSourceId;
+        if (sourceChanged) {
+          selectedSourceId = requestedSourceId;
+          selectedVariableName = null;
+          graphBackStack = [];
+          graphForwardStack = [];
+          selectedGraphId = null;
+          selectedNodeId = null;
+          selectedNodeIds = new Set();
+          debugOverlay = null;
+          searchState.results = [];
+          searchState.spans = [];
+          searchState.active = -1;
+          searchState.diff = null;
+          searchState.impact = null;
+          searchState.truncated = false;
+          searchState.resultLimit = 0;
+          if (typeof renderSearchResults === "function") renderSearchResults();
+        }
         latestDoc = doc;
-        clearStaleDiagnostics(doc);
+        if (sourceChanged) clearDiagnosticsForRevision(doc.revision);
+        else clearStaleDiagnostics(doc);
         loadEditorState(doc);
         loadDetailToggles(doc);
         applyPendingInsertPlacement(doc);
         sourceView.textContent = doc.source_text || "";
         const firstLoad = selectedGraphId === null;
         drawGraph(doc);
+        if (doc.graphs && doc.graphs.length) {
+          clearCanvasState();
+        } else {
+          setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
+            { label: "Open source", run: openSourceRecovery },
+          { label: "Reload", primary: true, run: () => loadGraph(requestedSourceId) }
+          ]);
+        }
+        const draft = readSourceDraft(doc);
+        setSaveState(draft !== null && draft !== doc.source_text ? "local draft" : "source saved", draft !== null && draft !== doc.source_text ? "draft" : "saved");
         setViewMode(viewMode);
         loadProject();
         loadSourceControl();
@@ -296,7 +366,16 @@
         applySourceHash();
         if (firstLoad) fitGraph();
       })
-      .catch((e) => { jump.textContent = "Canvas graph failed"; details.textContent = String(e); });
+      .catch((e) => {
+        const offline = navigator.onLine === false;
+        jump.textContent = offline ? "Canvas is offline" : "Canvas graph failed";
+        details.textContent = String(e);
+        setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Canvas could not load", offline ? "Jet source stays visible. Reconnect, then retry the graph." : "Jet source stays visible. Retry the graph projection when the server is ready.", [
+          { label: "Show source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => loadGraph(requestedSourceId) }
+        ]);
+        setSaveState("source unchanged", "error");
+      });
   }
 
   function escapeHtml(s) {
@@ -310,6 +389,7 @@
   function loadCanvasActions() {
     if (!latestDoc) return Promise.resolve(actionEntries);
     const loadRevision = latestDoc.revision;
+    const loadSourceId = latestDoc.source_id || selectedSourceId;
     if (canvasActionsLoading) {
       if (canvasActionsLoadingRevision === loadRevision) return canvasActionsLoading;
       return canvasActionsLoading.then(() => loadCanvasActions());
@@ -318,11 +398,11 @@
     canvasActionsLoading = fetch(queryUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ schema_version: 1, revision: loadRevision, op: "actions" })
+      body: JSON.stringify(Object.assign({ schema_version: 1, revision: loadRevision, op: "actions" }, loadSourceId ? { source_id: loadSourceId } : {}))
     })
       .then((r) => r.json())
       .then((doc) => {
-        if (!latestDoc || latestDoc.revision !== loadRevision) return actionEntries;
+        if (!latestDoc || latestDoc.revision !== loadRevision || (latestDoc.source_id || selectedSourceId) !== loadSourceId) return actionEntries;
         if (!doc || !doc.actions) return;
         const projectFunctions = (doc.project_functions || []).map((fn) => withNodeDescriptor({
           title: fn.name || fn.callee,
@@ -333,6 +413,9 @@
           op: fn.insert_op || "insert_call",
           callee: fn.callee || fn.name,
           insert_callee: fn.insert_callee || fn.callee || fn.name,
+          rank: Number(fn.rank || 0),
+          rank_terms: fn.rank_terms || [],
+          source_span: fn.source_span || null,
           module_path: fn.module_path || "project",
           action_id: "project:" + (fn.callee || fn.name),
           signature: fn.signature || "",
@@ -340,6 +423,10 @@
           pins: fn.pins || [],
           ret: actionReturnType(fn) || fn.ret || "Void",
           available: fn.available !== false,
+          stageable: !!fn.stageable,
+          stage_reason_code: fn.stage_reason_code || "",
+          stage_reason: fn.stage_reason || "",
+          receiver_type: fn.receiver_type || "",
           denied_reason: fn.denied_reason || "",
           unavailable_reason_code: fn.unavailable_reason_code || "",
           args: fn.default_args || []
@@ -355,6 +442,9 @@
           callee: action.callee,
           module_path: action.module_path || "",
           insert_callee: action.insert_callee || action.callee,
+          rank: Number(action.rank || 0),
+          rank_terms: action.rank_terms || [],
+          source_span: action.source_span || null,
           signature: action.signature || "",
           summary: action.summary || "",
           command: action.command || [],
@@ -362,6 +452,10 @@
           writes: action.writes || "none",
           requires_confirmation: !!action.requires_confirmation,
           available: action.available !== false,
+          stageable: !!action.stageable,
+          stage_reason_code: action.stage_reason_code || "",
+          stage_reason: action.stage_reason || "",
+          receiver_type: action.receiver_type || "",
           denied_reason: action.denied_reason || "",
           unavailable_reason_code: action.unavailable_reason_code || "",
           pins: action.pins || [],
@@ -415,9 +509,15 @@
               module_path: module.path || "core",
               callee,
               insert_callee: callee,
+              rank: Number(member.rank || 0),
+              rank_terms: member.rank_terms || [],
               signature: member.signature || "",
               summary: member.summary || module.summary || "",
               available: member.available !== false,
+              stageable: !!member.stageable,
+              stage_reason_code: member.stage_reason_code || "",
+              stage_reason: member.stage_reason || "",
+              receiver_type: member.receiver_type || "",
               denied_reason: member.denied_reason || "",
               unavailable_reason_code: member.unavailable_reason_code || "",
               pure: !!member.pure,

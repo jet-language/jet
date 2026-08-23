@@ -11,6 +11,7 @@ pub fn canvas_js() -> String {
         include_str!("js/inspector-connections.js"),
         include_str!("js/input-events.js"),
         include_str!("js/transactions-catalog.js"),
+        include_str!("js/review.js"),
         include_str!("js/bootstrap.js"),
         "})();\n",
     )

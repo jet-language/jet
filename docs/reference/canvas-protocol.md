@@ -128,7 +128,11 @@ program meaning, plus an optional live Event projection:
   backpressure counts, priority, failures, and lifecycle. Source calls that did
   not execute never appear.
 - `interfaces`: trait and trait-impl facts for Canvas interface views and
-  create-impl transactions.
+  create-impl transactions. Each fact carries its module scope, associated
+  types, canonical method signatures, required/default status, effect row, and
+  source span. The Traits panel exposes source jumps and a checked
+  implementation action for traits without associated-type choices; it does
+  not guess those choices.
 - `task_flows`: `task` spawn/join/channel/`task.group` facts for async rails.
 
 Each graph contains source-backed records:
@@ -217,6 +221,7 @@ Request fields:
 | Field | Meaning |
 |---|---|
 | `schema_version` | Integer debug schema version. Current value: `1`. |
+| `source_id` | Optional project-relative `.jet` source selected in the Canvas file rail. The revision, breakpoints, values, and execution state apply to this file. |
 | `revision` | Source revision from the graph document. |
 | `commands` | Debugger commands using the `jet debug` vocabulary: `step`, `next`, `continue`, `finish`, `locals`, `print`, `backtrace`. |
 | `breakpoint_spans` | Local source-span anchors encoded as `start:end`. |
@@ -266,7 +271,7 @@ Current transactions:
 | `toggle_switch_state` | `graph_id`, `node_start`, `node_end` | Removes an existing `#Off`/`#DebugOnly` marker or adds `#Off` to a checked statement, then formats, checks, and reprojects. State-contained nodes are refused without changing source. |
 | `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
 | `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
-| `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
+| `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked stubs for required members. Default-body members are not regenerated; traits with associated types are refused until their choices exist in source. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
 | `replace_source` | `source` | Replaces the file with exact prior/future Jet source after formatting and front-end validation. Used by local undo/redo. |
@@ -331,11 +336,16 @@ Queries are read-only. They use the shared semindex facts that LSP uses for
 definitions, references, rename ranges, and impact analysis.
 Requests may include `source_id` to query a different source file inside the
 opened project. The `revision` must match that selected source file.
+`project_search` and `references` snapshot every projected source file, return
+each result's `source_id` and file `revision`, and reject a changed project
+before returning mixed-source results. `project_revision` may bind the query to
+the project document already shown by the client.
 
 | `op` | Extra fields | Effect |
 |---|---|---|
-| `find` / `project_search` | `query` | Finds matching graph nodes, definitions, references, and source text. |
-| `references` | `symbol` | Returns definition/reference sites plus impact facts. |
+| `find` | `query` | Finds matching graph nodes, definitions, references, and source text in the selected file. |
+| `project_search` | `query` | Finds matching graph nodes, definitions, references, and source text across the projected source files. |
+| `references` | `symbol` | Returns project-wide definition/reference sites plus impact facts. |
 | `source_to_graph` | `start`, `end` | Maps a source byte span to matching graph nodes/inline expressions. |
 | `preview_rename` | `symbol`, `to` | Returns the exact text diff for a rename without writing source. |
 | `actions` / `palette_entries` | none | Returns source-backed palette entries, `project_functions`, and ratified Canvas actions derived from checked semindex facts. |
@@ -347,7 +357,10 @@ Successful response:
 {"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"find","revision":"sha256-...","results":[{"kind":"definition","title":"run","graph_id":"...","node_id":"...","source_span":{"start":0,"end":3}}],"impact":null,"diff":null}
 ```
 
-A stale `revision` fails with `kind:"conflict"` before any query result is used.
+A stale `revision` or `project_revision` fails with `kind:"conflict"` before
+any query result is used. Project responses include `result_limit` and
+`truncated`; the server keeps at most 200 results and the client discloses when
+it must narrow the search.
 
 ## Canvas Actions V1
 
@@ -412,8 +425,10 @@ Execute an approved command:
 Endpoint: `POST /__jet_canvas/command` or `POST /canvas/command`.
 
 The endpoint accepts only whitelisted Canvas command actions (`run`, `check`,
-`build`). `build` writes build outputs and requires `confirmed:true`. The server
-does not accept arbitrary argv.
+`build`). Requests may include the graph's `source_id`; the command, checked
+revision, diagnostics, and receipt then refer to that selected project file.
+`build` writes build outputs and requires `confirmed:true`. The server does not
+accept arbitrary argv.
 
 Successful receipt:
 
@@ -482,6 +497,19 @@ Successful response:
 ```json
 {"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","project_revision":"sha256-...","project_root":"/repo","available":true,"dirty":true,"dirty_files":2,"status":"M packages/app/main.jet\n?? packages/app/helper.jet","diff":"","history":["abc123 initial"],"files":[{"path":"packages/app/main.jet","revision":"sha256-...","kind":"source","available":true,"dirty":true,"status":"M packages/app/main.jet","diff":"diff --git ..."}]}
 ```
+
+## Review Lens M3
+
+The Review lens reads this response and keeps the text diff first. Git already
+defines file and hunk additions and deletions, so Canvas does not need a custom
+binary-asset diff model. Each current added or modified hunk may link to a
+source span and graph node when the current graph exposes an overlapping span.
+
+Review marks deleted text as deleted because it has no current source span. It
+marks other changes without a matching current node as text only. These labels
+keep source truth visible without fabricating graph history or semantic
+sidecars. Refresh reads the response and current graph again; Review actions do
+not write Jet source or Git state.
 
 ## Proof V1
 

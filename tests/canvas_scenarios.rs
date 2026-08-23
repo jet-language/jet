@@ -2,6 +2,7 @@
 
 mod common;
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -15,6 +16,11 @@ use std::time::{Duration, Instant};
 static BUILD_JET: Once = Once::new();
 static NEXT_CANVAS_CASE: AtomicU64 = AtomicU64::new(0);
 const MAX_CANVAS_BROWSERS: usize = 4;
+const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
+const BIG_FUNCTION_COUNT: usize = 300;
+const BIG_MODULE_COUNT: usize = 12;
+const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
+const BIG_FILE_COUNT: usize = BIG_MODULE_COUNT + 1;
 static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
 
 struct CanvasTools {
@@ -289,9 +295,136 @@ fn run() {
 }
 "#;
 
+struct BigFixtureFacts {
+    file_count: usize,
+    function_count: usize,
+    source_bytes: usize,
+    source_sha256: String,
+}
+
+fn write_big_fixture(dir: &Path) -> BigFixtureFacts {
+    let mut main = String::new();
+    for module in 0..BIG_MODULE_COUNT {
+        writeln!(
+            &mut main,
+            "use \"./part_{module:02}\" as p{module:02}"
+        )
+        .unwrap();
+    }
+    main.push('\n');
+    main.push_str("fn run() {\n");
+    for function in 0..BIG_FUNCTION_COUNT {
+        let module = function / BIG_FUNCTIONS_PER_MODULE;
+        writeln!(
+            &mut main,
+            "    value_{function:03} :: p{module:02}.function_{function:03}()"
+        )
+        .unwrap();
+    }
+    main.push_str("    print(value_299)\n}\n");
+
+    let mut canonical = String::new();
+    fs::write(dir.join("main.jet"), &main).expect("write generated Canvas entry source");
+    canonical.push_str("main.jet\n");
+    canonical.push_str(&main);
+    for module in 0..BIG_MODULE_COUNT {
+        let first = module * BIG_FUNCTIONS_PER_MODULE;
+        let mut source = String::new();
+        for function in first..first + BIG_FUNCTIONS_PER_MODULE {
+            writeln!(
+                &mut source,
+                "pub fn function_{function:03}() Int -[]> {{ return 1 }}\n"
+            )
+            .unwrap();
+        }
+        let name = format!("part_{module:02}.jet");
+        fs::write(dir.join(&name), &source).expect("write generated Canvas module source");
+        canonical.push_str(&name);
+        canonical.push('\n');
+        canonical.push_str(&source);
+    }
+
+    BigFixtureFacts {
+        file_count: BIG_FILE_COUNT,
+        function_count: BIG_FUNCTION_COUNT,
+        source_bytes: canonical.len(),
+        source_sha256: jet::SHA256::sha256_hex(canonical.as_bytes()),
+    }
+}
+
+fn read_big_fixture_facts(dir: &Path) -> BigFixtureFacts {
+    let mut canonical = String::new();
+    for name in std::iter::once("main.jet".to_owned()).chain(
+        (0..BIG_MODULE_COUNT).map(|module| format!("part_{module:02}.jet")),
+    ) {
+        let source = fs::read_to_string(dir.join(&name)).expect("read generated Canvas source");
+        canonical.push_str(&name);
+        canonical.push('\n');
+        canonical.push_str(&source);
+    }
+    BigFixtureFacts {
+        file_count: BIG_FILE_COUNT,
+        function_count: BIG_FUNCTION_COUNT,
+        source_bytes: canonical.len(),
+        source_sha256: jet::SHA256::sha256_hex(canonical.as_bytes()),
+    }
+}
+
+fn assert_big_fixture_preflight(repo: &Path, case: &CanvasCase, port: u16) {
+    let expected = case
+        .big_fixture
+        .as_ref()
+        .expect("big fixture facts for big-project-perf");
+    let actual = read_big_fixture_facts(&case.dir);
+    assert_eq!(actual.file_count, expected.file_count, "generated file count changed");
+    assert_eq!(actual.function_count, expected.function_count, "generated function count changed");
+    assert_eq!(actual.source_bytes, expected.source_bytes, "generated source bytes changed");
+    assert_eq!(actual.source_sha256, expected.source_sha256, "generated source changed");
+
+    let jet = cargo_target_dir(repo).join("debug/jet");
+    let check = Command::new(jet)
+        .current_dir(&case.dir)
+        .args(["check", "main.jet", "--target=web"])
+        .output()
+        .expect("check generated Canvas fixture with Jet");
+    assert!(
+        check.status.success(),
+        "generated Canvas fixture failed Jet check\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let graph = http_body(port, "/canvas/graph");
+    let graph_count = graph.matches("\"graph_id\":").count();
+    assert_eq!(
+        graph_count,
+        BIG_FUNCTION_COUNT + 1,
+        "Jet served an unexpected generated graph count"
+    );
+    assert!(graph.contains("\"title\":\"run\""), "generated entry graph is missing");
+    eprintln!(
+        "BIG_PROJECT_PREFLIGHT files={} functions={} source_bytes={} source_sha256={} graphs={} jet_check=passed",
+        actual.file_count,
+        actual.function_count,
+        actual.source_bytes,
+        actual.source_sha256,
+        graph_count
+    );
+}
+
+#[test]
+fn canvas_onboarding_tour() {
+    run_canvas_scenario("canvas-onboarding-tour");
+}
+
 #[test]
 fn open_and_render() {
     run_canvas_scenario("open-and-render");
+}
+
+#[test]
+fn review_diff_overlays() {
+    run_canvas_scenario("review-diff-overlays");
 }
 
 #[test]
@@ -420,6 +553,11 @@ fn details_scalar_enum_reference_editors() {
 }
 
 #[test]
+fn traits_panel_authoring() {
+    run_canvas_scenario("traits-panel-authoring");
+}
+
+#[test]
 fn fallible_context() {
     run_canvas_scenario("fallible-context");
 }
@@ -480,6 +618,22 @@ fn harness_click_noop_selftest() {
 }
 
 #[test]
+fn big_project_perf_budget() {
+    let tools = canvas_tools().unwrap_or_else(|| {
+        panic!("big-project-perf needs dev-shell Chromium and Node; no skipped sample path")
+    });
+    for clean_run in 1..=2 {
+        eprintln!("BIG_PROJECT_PERF clean_run={clean_run}/2");
+        run_browser_scenario(
+            BIG_PROJECT_SCENARIO,
+            "chromium",
+            &tools.node,
+            &[("CHROMIUM", tools.chromium.as_path())],
+        );
+    }
+}
+
+#[test]
 fn gecko_smoke() {
     if std::env::var_os("JET_CANVAS_GECKO_SMOKE").as_deref()
         != Some(std::ffi::OsStr::new("1"))
@@ -534,6 +688,7 @@ fn run_canvas_scenario(name: &str) {
         eprintln!("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node");
         return;
     };
+
     run_browser_scenario(
         name,
         "chromium",
@@ -555,10 +710,14 @@ fn run_browser_scenario(
     let case = CanvasCase::new(&repo, name);
     let port = free_port();
     let mut server = DevServer::start(&repo, &case.dir, &case.entry, port);
+    if case.big_fixture.is_some() {
+        assert_big_fixture_preflight(&repo, &case, port);
+    }
     let mut command = Command::new(node);
     command
         .current_dir(&repo)
         .envs(environment.iter().copied())
+        .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
         .arg("scripts/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
@@ -687,10 +846,11 @@ struct CanvasCase {
     dir: PathBuf,
     entry: PathBuf,
     screenshots: PathBuf,
+    big_fixture: Option<BigFixtureFacts>,
 }
 
 impl CanvasCase {
-    fn new(_repo: &Path, name: &str) -> CanvasCase {
+    fn new(repo: &Path, name: &str) -> CanvasCase {
         let root = std::env::var("JET_VERIFY_TMPDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::temp_dir().join("jet-test-tmp"));
@@ -704,13 +864,26 @@ impl CanvasCase {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create Canvas scenario dir");
         let entry = dir.join("main.jet");
-        fs::write(&entry, DEMO).expect("write Canvas scenario source");
+        let big_fixture = if name == BIG_PROJECT_SCENARIO {
+            Some(write_big_fixture(&dir))
+        } else if name == "canvas-onboarding-tour" {
+            fs::copy(
+                repo.join("examples/features/tooling/canvas_blueprint_demo.jet"),
+                &entry,
+            )
+            .expect("copy Canvas onboarding example source");
+            None
+        } else {
+            fs::write(&entry, DEMO).expect("write Canvas scenario source");
+            None
+        };
         let screenshots = dir.join("screenshots");
         fs::create_dir_all(&screenshots).expect("create Canvas screenshot dir");
         CanvasCase {
             dir,
             entry,
             screenshots,
+            big_fixture,
         }
     }
 }
@@ -807,6 +980,23 @@ fn http_ok(port: u16, path: &str) -> bool {
         return false;
     }
     response.starts_with("HTTP/1.1 200")
+}
+
+fn http_body(port: u16, path: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to Jet Canvas server");
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .expect("request Jet Canvas preflight body");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("read Jet Canvas preflight body");
+    assert!(response.starts_with("HTTP/1.1 200"), "Jet Canvas preflight failed: {response}");
+    response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_owned())
+        .expect("Jet Canvas response missing body separator")
 }
 
 fn free_port() -> u16 {

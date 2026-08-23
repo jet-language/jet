@@ -90,21 +90,31 @@ pub(super) fn apply_create_trait_impl(
             "Canvas could not read checked trait facts",
         ));
     };
-    let Some(trait_def) = find_trait_def(&bundle, trait_name) else {
+    let Some(location) = find_trait_location(&bundle, path, trait_name) else {
         return Err(edit_error(
             "not_found",
             "Canvas trait was not found in source",
         ));
     };
+    let trait_def = location.trait_def;
+    if !trait_def.assoc_types.is_empty() {
+        return Err(edit_error(
+            "needs_associated_types",
+            "Canvas will not guess associated type implementations; add each associated type in source first",
+        ));
+    }
     let mut body = String::new();
-    for method in &trait_def.methods {
-        let sig = trait_method_signature(method);
+    for method in trait_def
+        .methods
+        .iter()
+        .filter(|method| method.default_body.is_none())
+    {
+        let sig = trait_method_signature(src, method);
         body.push_str("    ");
         body.push_str(&sig);
-        if method
-            .return_type
-            .as_ref()
-            .is_some_and(|ret| ret.name() != "Void")
+        if method.return_type.as_ref().is_some_and(|ret| ret.name() != "Void")
+            && method.declared_effects.is_none()
+            && !method.is_pure
         {
             body.push_str(" ->");
         }
@@ -118,13 +128,35 @@ pub(super) fn apply_create_trait_impl(
         }
         body.push_str("    }\n");
     }
-    let impl_block = format!("\nimpl {type_name}.{trait_name} {{\n{body}}}\n");
+    let local_trait_name = trait_name.rsplit('.').next().unwrap_or(trait_name);
+    let insert_at = if location.scope.is_empty() {
+        src.len()
+    } else {
+        line_start(src, location.module_close)
+    };
+    let item_indent = if location.scope.is_empty() {
+        String::new()
+    } else {
+        indentation_at(src, trait_def.span.start)
+    };
+    let prefix = if insert_at == 0 || src[..insert_at].ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    let method_body = body
+        .lines()
+        .map(|line| format!("{item_indent}{line}\n"))
+        .collect::<String>();
+    let impl_block = format!(
+        "{prefix}{item_indent}impl {type_name}.{local_trait_name} {{\n{method_body}{item_indent}}}\n"
+    );
     let changed = FixEngine::apply_edits(
         src,
         &[edit(
             SourceSpan {
-                start: src.len(),
-                end: src.len(),
+                start: insert_at,
+                end: insert_at,
             },
             &impl_block,
         )],
@@ -133,19 +165,54 @@ pub(super) fn apply_create_trait_impl(
     write_checked_formatted(path, src, &changed)
 }
 
-fn find_trait_def<'a>(
+struct TraitLocation<'a> {
+    trait_def: &'a AST::TraitDef,
+    scope: Vec<String>,
+    module_close: usize,
+}
+
+fn find_trait_location<'a>(
     bundle: &'a AST::ProgramBundle,
+    path: &Path,
     trait_name: &str,
-) -> Option<&'a AST::TraitDef> {
-    fn find_in_items<'a>(items: &'a [Item], trait_name: &str) -> Option<&'a AST::TraitDef> {
+) -> Option<TraitLocation<'a>> {
+    let parts = trait_name.split('.').collect::<Vec<_>>();
+    let local_name = parts.last().copied().unwrap_or(trait_name);
+    let requested_scope = &parts[..parts.len().saturating_sub(1)];
+    let source_path = canonical_path(path);
+
+    fn find_in_items<'a>(
+        items: &'a [Item],
+        scope: &mut Vec<String>,
+        requested_scope: &[&str],
+        trait_name: &str,
+        module_close: usize,
+    ) -> Option<TraitLocation<'a>> {
         for item in items {
             match item {
-                Item::Trait(t) if t.name == trait_name => return Some(t),
+                Item::Trait(t)
+                    if t.name == trait_name
+                        && scope.iter().map(String::as_str).eq(requested_scope.iter().copied()) =>
+                {
+                    return Some(TraitLocation {
+                        trait_def: t,
+                        scope: scope.clone(),
+                        module_close,
+                    });
+                }
                 Item::CodeModule(m) => {
                     if let Some(body) = &m.body {
-                        if let Some(t) = find_in_items(body, trait_name) {
+                        scope.push(m.name.clone());
+                        if let Some(t) = find_in_items(
+                            body,
+                            scope,
+                            requested_scope,
+                            trait_name,
+                            m.span.end.saturating_sub(1),
+                        ) {
                             return Some(t);
                         }
+                        scope.pop();
                     }
                 }
                 _ => {}
@@ -154,7 +221,16 @@ fn find_trait_def<'a>(
         None
     }
     for module in &bundle.modules {
-        if let Some(t) = find_in_items(&module.items, trait_name) {
+        if canonical_path(&module.path) != source_path {
+            continue;
+        }
+        if let Some(t) = find_in_items(
+            &module.items,
+            &mut Vec::new(),
+            requested_scope,
+            local_name,
+            module.source.len(),
+        ) {
             return Some(t);
         }
     }
@@ -185,6 +261,12 @@ pub(super) fn apply_inline_edit(
     inline_id: &str,
     new_expr: &str,
 ) -> Result<String, String> {
+    if new_expr.contains('\n') || new_expr.contains('\r') {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas inline expression must stay on one line",
+        ));
+    }
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
         return Err(edit_error(

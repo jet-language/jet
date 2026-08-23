@@ -1,6 +1,17 @@
 
 // Graph layout, node and wire rendering, minimap, comments, and hit maps.
   let lastDrawnSource = null;
+  let autoLayoutKey = null;
+  let cachedGraphBoundsKey = null;
+  let cachedGraphBounds = null;
+  let nodeSizeCacheKey = null;
+  let nodeSizeCache = new Map();
+  let minimapCacheKey = null;
+  let minimapCache = null;
+
+  function graphLayoutKey(graph) {
+    return `${latestDoc && latestDoc.source_id || ""}:${latestDoc && latestDoc.revision || ""}:${graph && graph.graph_id || ""}:${detailToggles.types ? "types" : "compact"}:${developerMode ? "developer" : "user"}`;
+  }
 
   function rankedGraphLayout(graph) {
     const nodes = graph.nodes || [];
@@ -66,8 +77,14 @@
   function reflowGraph(graph) {
     if (!graph || !graph.nodes || graph.nodes.length === 0) return;
     if (drag && drag.mode === "node") return;
+    const key = graphLayoutKey(graph);
+    if (hasSavedNodePositions(graph)) {
+      autoNodeOffsets = new Map();
+      autoLayoutKey = `saved:${key}`;
+      return;
+    }
+    if (autoLayoutKey === key) return;
     autoNodeOffsets = new Map();
-    if (hasSavedNodePositions(graph)) return;
     const colGap = 40;
     const ranked = rankedGraphLayout(graph);
     for (const node of graph.nodes) {
@@ -94,12 +111,16 @@
       autoNodeOffsets.set(node.node_id, { x: offset.x, y: box.y - rawNodeY(node) });
       placed.push(box);
     }
+    autoLayoutKey = key;
   }
 
   function graphBounds(graph) {
     if (!graph || graph.nodes.length === 0) return { minX: 0, minY: 0, maxX: 600, maxY: 360 };
     restoreNodePositions(graph);
     reflowGraph(graph);
+    const cacheable = !(drag && drag.mode === "node");
+    const cacheKey = `${graphLayoutKey(graph)}:${hasSavedNodePositions(graph) ? "saved" : autoLayoutKey}:${detailToggles.types ? "types" : "compact"}`;
+    if (cacheable && cachedGraphBoundsKey === cacheKey && cachedGraphBounds) return cachedGraphBounds;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of graph.nodes) {
       const size = nodeSize(graph, n);
@@ -114,7 +135,12 @@
       maxX = Math.max(maxX, (box.x || 0) + (box.w || 260));
       maxY = Math.max(maxY, (box.y || 0) + (box.h || 160));
     }
-    return { minX, minY, maxX, maxY };
+    const bounds = { minX, minY, maxX, maxY };
+    if (cacheable) {
+      cachedGraphBoundsKey = cacheKey;
+      cachedGraphBounds = bounds;
+    }
+    return bounds;
   }
 
   function fitGraph() {
@@ -239,7 +265,7 @@
   }
 
   function nodeBadgeText(node) {
-    return nodeStateBadge(node) || (developerMode && node && node.kind ? String(node.kind).toUpperCase() : "");
+    return nodeStateBadge(node) || (developerMode && !!node && !!node.kind ? String(node.kind).toUpperCase() : "");
   }
 
   function shouldDrawNodeBadge(node) {
@@ -328,7 +354,16 @@
 
   function nodeSize(graph, node) {
     window.__jetCanvasMeasuredNodeSizing = true;
-    return measureNodeLayout(graph, node);
+    const key = `${graphLayoutKey(graph)}:${detailToggles.types ? "types" : "compact"}:${developerMode ? "developer" : "user"}`;
+    if (nodeSizeCacheKey !== key) {
+      nodeSizeCacheKey = key;
+      nodeSizeCache = new Map();
+    }
+    const cached = nodeSizeCache.get(node.node_id);
+    if (cached) return cached;
+    const measured = measureNodeLayout(graph, node);
+    nodeSizeCache.set(node.node_id, measured);
+    return measured;
   }
 
   function bezierPoint(from, to, t) {
@@ -755,6 +790,7 @@
     syncGraphList(doc);
     syncGraphStrip(doc);
     syncVariablesList(graph);
+    syncTraitsPanel(doc);
     fit();
     const size = cssSize();
     drawGrid(size);
@@ -798,6 +834,8 @@
     }
 
     drawRerouteKnots(graph);
+
+    if (typeof drawReviewGraphOverlay === "function") drawReviewGraphOverlay(graph, visibleNodes);
 
     for (const node of visibleNodes) {
       drawNode(graph, node, inlineByNode, false);
@@ -930,6 +968,7 @@
       selectedNodeTitle: selectedNode && selectedNode.title || "",
       selectedVariableName,
       view: { x: view.x, y: view.y, zoom: view.zoom },
+      virtualizationStats: Object.assign({}, window.__jetCanvasVirtualizationStats || {}),
       sourceText: doc.source_text || "",
       doc: latestDoc,
       nodeDescriptors: latestDoc.node_descriptors || [],
@@ -955,6 +994,7 @@
       hoveredNodeTitle: hoverNode && hoverNode.title || "",
       hoveredNodeDescription: hoverNode ? nodeDescription(hoverNode, graph) : "",
       graphTitle: graph.title || graph.graph_id,
+      review: typeof reviewTestState === "function" ? reviewTestState() : null,
       selectedNodeIds: Array.from(selectedNodeIds),
       savedNodePositions: JSON.parse(JSON.stringify((editorState.nodePositions || {})[graph.graph_id] || {})),
       renderedCommentRegions: renderedCommentRegions.map((region) => Object.assign({}, region)),
@@ -999,6 +1039,10 @@
           insert_callee: entry.insert_callee || entry.callee || "",
           args: entry.args || entry.default_args || [],
           available: availability.available,
+          stageable: !!entry.stageable,
+          stage_reason_code: entry.stage_reason_code || "",
+          stage_reason: entry.stage_reason || "",
+          receiver_type: entry.receiver_type || "",
           denied_reason: availability.reason,
           unavailable_reason_code: availability.code
         };
@@ -1032,6 +1076,10 @@
           insert_callee: entry.insert_callee,
           args: entry.args,
           available: entry.available,
+          stageable: !!entry.stageable,
+          stage_reason_code: entry.stage_reason_code || "",
+          stage_reason: entry.stage_reason || "",
+          receiver_type: entry.receiver_type || "",
           denied_reason: entry.denied_reason,
           unavailable_reason_code: entry.unavailable_reason_code,
           run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
@@ -1088,17 +1136,43 @@
     mini.clearRect(0, 0, minimap.width, minimap.height);
     mini.fillStyle = "#07101c";
     mini.fillRect(0, 0, minimap.width, minimap.height);
-    const b = graphBounds(graph);
-    const scale = Math.min((minimap.width - 20) / Math.max(1, b.maxX - b.minX), (minimap.height - 20) / Math.max(1, b.maxY - b.minY));
-    for (const box of graphCommentBoxes(graph)) {
-      mini.fillStyle = hexToRgba(box.color || COMMENT_TINTS[0], .58);
-      mini.fillRect(10 + ((box.x || 0) - b.minX) * scale, 10 + ((box.y || 0) - b.minY) * scale, Math.max(12, (box.w || 260) * scale), Math.max(8, (box.h || 160) * scale));
+    const cacheable = !(drag && drag.mode === "node");
+    const key = `${graphLayoutKey(graph)}:${autoLayoutKey}:${detailToggles.types ? "types" : "compact"}`;
+    if (!cacheable || minimapCacheKey !== key || !minimapCache) {
+      const b = graphBounds(graph);
+      const scale = Math.min((minimap.width - 20) / Math.max(1, b.maxX - b.minX), (minimap.height - 20) / Math.max(1, b.maxY - b.minY));
+      minimapCache = {
+        b,
+        scale,
+        boxes: graphCommentBoxes(graph).map((box) => ({
+          color: box.color || COMMENT_TINTS[0],
+          x: 10 + ((box.x || 0) - b.minX) * scale,
+          y: 10 + ((box.y || 0) - b.minY) * scale,
+          w: Math.max(12, (box.w || 260) * scale),
+          h: Math.max(8, (box.h || 160) * scale),
+        })),
+        nodes: graph.nodes.map((node) => {
+          const size = nodeSize(graph, node);
+          return {
+            node_id: node.node_id,
+            accent: nodeStyle(node, graph).accent,
+            x: 10 + (nodeX(node) - b.minX) * scale,
+            y: 10 + (nodeY(node) - b.minY) * scale,
+            w: Math.max(16, size.w * scale),
+            h: Math.max(9, size.h * scale),
+          };
+        }),
+      };
+      if (cacheable) minimapCacheKey = key;
     }
-    for (const n of graph.nodes) {
-      const size = nodeSize(graph, n);
-      const style = nodeStyle(n, graph);
-      mini.fillStyle = n.node_id === selectedNodeId ? "#f5a623" : style.accent;
-      mini.fillRect(10 + (nodeX(n) - b.minX) * scale, 10 + (nodeY(n) - b.minY) * scale, Math.max(16, size.w * scale), Math.max(9, size.h * scale));
+    const { b, scale, boxes, nodes } = minimapCache;
+    for (const box of boxes) {
+      mini.fillStyle = hexToRgba(box.color || COMMENT_TINTS[0], .58);
+      mini.fillRect(box.x, box.y, box.w, box.h);
+    }
+    for (const node of nodes) {
+      mini.fillStyle = node.node_id === selectedNodeId ? "#f5a623" : node.accent;
+      mini.fillRect(node.x, node.y, node.w, node.h);
     }
   }
 

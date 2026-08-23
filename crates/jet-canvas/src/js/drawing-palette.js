@@ -294,12 +294,40 @@
     return !!(descriptor && descriptor.palette.insertable);
   }
 
+  function traitMethodActions(doc = latestDoc) {
+    const interfaces = doc && doc.facts && doc.facts.blueprint && doc.facts.blueprint.interfaces;
+    if (!Array.isArray(interfaces)) return [];
+    return interfaces
+      .filter((fact) => fact && fact.kind === "trait_interface")
+      .flatMap((trait) => {
+        const scope = Array.isArray(trait.scope) ? trait.scope.join(".") : String(trait.scope || "");
+        const name = scope ? scope + "." + trait.trait : String(trait.trait || "Trait");
+        return (trait.methods || []).map((method) => ({
+          title: name + "." + method.name,
+          detail: method.signature || "trait method",
+          group: "Interfaces",
+          kind: "canvas.trait_method",
+          action_id: "canvas.trait:" + name + "." + method.name,
+          signature: method.signature || "",
+          available: true,
+          run: () => {
+            setSourceHash(method.source_span || trait.source_span);
+            setViewMode("code");
+            showToast("Trait source selected");
+          }
+        }));
+      });
+  }
+
   function graphHasFailureRail(graph) {
     const returns = graph && graph.function && String(graph.function.returns || "");
     return returns.includes("?");
   }
 
   function actionAvailability(action, graph = currentGraphOrNull()) {
+    if (action && action.stageable) {
+      return { available: true, code: action.stage_reason_code || "", reason: action.stage_reason || "" };
+    }
     if (action && action.available === false) {
       return { available: false, code: action.unavailable_reason_code || "unavailable", reason: action.denied_reason || "This action is unavailable here." };
     }
@@ -381,18 +409,21 @@
     if (!query) return 0;
     const descriptor = nodeDescriptorForAction(action);
     return Math.max(...[action.title, action.detail, action.group, action.kind, action.signature, action.summary, action.module_path, action.callee, action.ret, action.type]
+      .concat(action.rank_terms || [])
       .concat(descriptor && descriptor.palette.rank_terms || [])
       .map((value) => fuzzyScoreText(value, query)));
   }
   window.__jetCanvasFuzzyScore = fuzzyScoreText;
 
   function paletteCategoryForAction(action) {
+    const group = String(action.group || "").toLowerCase();
+    if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
+    if (action.kind === "canvas.command" || group.includes("command")) return "Commands";
     const descriptor = nodeDescriptorForAction(action);
     if (descriptor && descriptor.palette.category) return descriptor.palette.category;
-    const group = String(action.group || "").toLowerCase();
     if (group.includes("flow") || group.includes("execution")) return "Execution";
     if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
-    if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
+    if (group.includes("interface") || group.includes("trait")) return "Interfaces";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
     return "Execution";
   }
@@ -430,7 +461,7 @@
         return !descriptor || descriptor.palette.visible;
       })
       .filter((action) => action.__score > -Infinity)
-      .sort((a, b) => b.__score - a.__score || rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
+      .sort((a, b) => b.__score - a.__score || rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)) || String(a.action_id || a.callee || "").localeCompare(String(b.action_id || b.callee || "")));
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : `All nodes · ${matches.length}/${contextMenuState.actions.length}`;
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
@@ -443,7 +474,7 @@
       const reason = disabled ? availability.reason : "";
       return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
-    const categories = ["Execution", "Variables", "Project", "Core", "Commands"].map((category) => {
+    const categories = ["Execution", "Variables", "Interfaces", "Project", "Core", "Commands"].map((category) => {
       const limit = category === "Core" ? 1000 : category === "Project" ? 500 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
@@ -496,7 +527,12 @@
         const action = contextMenuState && contextMenuState.actions.find((item) => String(item.index) === button.getAttribute("data-menu-action"));
         const availability = actionAvailability(action);
         if (!availability.available) {
-          showToast(availability.reason);
+          const reason = availability.reason || "This action is unavailable here.";
+          setCanvasState("permission", "Action unavailable", `${action && action.title ? action.title + ": " : ""}${reason} Jet source stayed unchanged.`, [
+            { label: "Open source", run: openSourceRecovery },
+            { label: "Close", primary: true, run: closeContextMenu }
+          ]);
+          showToast(reason, { isError: true });
           return;
         }
         closeContextMenu();
@@ -562,6 +598,10 @@
       insert_callee: entry.insert_callee,
       args: entry.args,
       available: entry.available,
+      stageable: entry.stageable,
+      stage_reason_code: entry.stage_reason_code,
+      stage_reason: entry.stage_reason,
+      receiver_type: entry.receiver_type,
       denied_reason: entry.denied_reason,
       unavailable_reason_code: entry.unavailable_reason_code,
       run: entry.run ? () => entry.run() : () => runPalette(entry, pin)

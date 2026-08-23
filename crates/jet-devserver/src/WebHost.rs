@@ -1118,7 +1118,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match crate::Canvas::debug_session_json_for_file(Path::new(canvas_file), &request) {
+        return match crate::Canvas::debug_session_json_for_entry(Path::new(canvas_file), &request) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",

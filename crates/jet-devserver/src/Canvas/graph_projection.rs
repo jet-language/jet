@@ -16,8 +16,8 @@ use super::graph_json::{
     node_catalog, set_pin_append, set_pin_source_span,
 };
 use super::schema_api::{
-    GRAPH_SCHEMA_VERSION, GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef, NodeRec,
-    PinRec, Projection, source_revision,
+    CanvasCallableExport, GRAPH_SCHEMA_VERSION, GraphBuilder, GraphEditAnchor, InlineExpr,
+    NodeQueryRef, NodeRec, PinRec, Projection, source_revision,
 };
 use super::validation_json::{json_str, span_json};
 
@@ -41,6 +41,7 @@ pub(super) fn project_checked(
     let mut inline_spans = Vec::new();
     let mut anchors = Vec::new();
     let mut node_refs = Vec::new();
+    let callable_exports = canvas_callable_exports(bundle, facts);
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         collect_item_graphs(
             path,
@@ -79,7 +80,40 @@ pub(super) fn project_checked(
         inline_exprs: inline_spans,
         graph_anchors: anchors,
         node_refs,
+        callable_exports,
     }
+}
+
+/// Project the checked name ledger's callable surface for the current entry.
+///
+/// Entry-local private functions are callable from Canvas because the editor
+/// is editing that module. Imported functions must satisfy the same visibility
+/// law as source code (`pub` or package-visible within the package). Matching
+/// by module path and declaration span keeps this projection tied to the
+/// checked AST instead of reconstructing names from SemIndex strings.
+fn canvas_callable_exports(
+    bundle: &AST::ProgramBundle,
+    facts: &SemIndexEffectFacts,
+) -> Vec<CanvasCallableExport> {
+    facts
+        .name_ledger
+        .declarations()
+        .filter(|declaration| declaration.kind == "function")
+        .filter(|declaration| {
+            facts
+                .name_ledger
+                .visible(bundle.entry, declaration.module, &declaration.name)
+        })
+        .filter_map(|declaration| {
+            bundle
+                .modules
+                .get(declaration.module)
+                .map(|module| CanvasCallableExport {
+                    module_path: module.display.clone(),
+                    span: declaration.span.into(),
+                })
+        })
+        .collect()
 }
 
 fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {
@@ -254,6 +288,8 @@ fn canvas_blueprint_facts_json(
             .flat_map(|m| m.items.iter())
             .collect::<Vec<_>>(),
         &mut interfaces,
+        &[],
+        src,
     );
     let task_flows = task_flow_facts(src).join(",");
     let outputs = index.outputs().iter().map(output_fact_json).collect::<Vec<_>>().join(",");
@@ -290,25 +326,32 @@ fn output_fact_json(output: &jet_semindex::OutputFact) -> String {
     )
 }
 
-fn collect_interface_facts(items: &[&Item], out: &mut Vec<String>) {
+fn collect_interface_facts(
+    items: &[&Item],
+    out: &mut Vec<String>,
+    scope: &[String],
+    src: &str,
+) {
     for item in items {
         match item {
-            Item::Trait(t) => out.push(trait_fact_json(t)),
-            Item::Impl(i) if i.trait_name.is_some() => out.push(impl_fact_json(i)),
+            Item::Trait(t) => out.push(trait_fact_json(src, t, scope)),
+            Item::Impl(i) if i.trait_name.is_some() => out.push(impl_fact_json(i, scope)),
             Item::Struct(s) => {
                 for block in &s.trait_impls {
-                    out.push(inline_trait_impl_fact_json(&s.name, block));
+                    out.push(inline_trait_impl_fact_json(&s.name, block, scope));
                 }
             }
             Item::Enum(e) => {
                 for block in &e.trait_impls {
-                    out.push(inline_trait_impl_fact_json(&e.name, block));
+                    out.push(inline_trait_impl_fact_json(&e.name, block, scope));
                 }
             }
             Item::CodeModule(m) => {
                 if let Some(body) = &m.body {
                     let nested = body.iter().collect::<Vec<_>>();
-                    collect_interface_facts(&nested, out);
+                    let mut nested_scope = scope.to_vec();
+                    nested_scope.push(m.name.clone());
+                    collect_interface_facts(&nested, out, &nested_scope, src);
                 }
             }
             _ => {}
@@ -316,40 +359,75 @@ fn collect_interface_facts(items: &[&Item], out: &mut Vec<String>) {
     }
 }
 
-fn trait_fact_json(t: &AST::TraitDef) -> String {
+fn scope_json(scope: &[String]) -> String {
+    json_str(&scope.join("."))
+}
+
+fn trait_fact_json(src: &str, t: &AST::TraitDef, scope: &[String]) -> String {
+    let associated_types = t
+        .assoc_types
+        .iter()
+        .map(|(name, _)| json_str(name))
+        .collect::<Vec<_>>()
+        .join(",");
     let methods = t
         .methods
         .iter()
         .map(|m| {
+            let effects = m
+                .declared_effects
+                .as_ref()
+                .map(|effects| {
+                    effects
+                        .iter()
+                        .map(|(name, _)| json_str(name))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
             format!(
-                "{{\"name\":{},\"signature\":{},\"source_span\":{}}}",
+                "{{\"name\":{},\"signature\":{},\"required\":{},\"default\":{},\"pure\":{},\"effects\":[{}],\"source_span\":{}}}",
                 json_str(&m.name),
-                json_str(&trait_method_signature(m)),
+                json_str(&trait_method_signature(src, m)),
+                if m.default_body.is_none() { "true" } else { "false" },
+                if m.default_body.is_some() { "true" } else { "false" },
+                if m.is_pure { "true" } else { "false" },
+                effects,
                 span_json(m.span.into())
             )
         })
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"kind\":\"trait_interface\",\"trait\":{},\"methods\":[{}],\"source_span\":{},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}",
+        "{{\"kind\":\"trait_interface\",\"trait\":{},\"scope\":{},\"associated_types\":[{}],\"methods\":[{}],\"source_span\":{},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}",
         json_str(&t.name),
+        scope_json(scope),
+        associated_types,
         methods,
         span_json(t.name_span.into())
     )
 }
 
-fn impl_fact_json(i: &AST::ImplDef) -> String {
+fn impl_fact_json(i: &AST::ImplDef, scope: &[String]) -> String {
     let methods = i
         .methods
         .iter()
         .map(|m| json_str(&m.name))
         .collect::<Vec<_>>()
         .join(",");
+    let associated_types = i
+        .assoc_type_impls
+        .iter()
+        .map(|(name, _, _)| json_str(name))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"methods\":[{}],\"delegation_field\":{},\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":{},\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
         json_str(&i.type_name),
         json_str(i.trait_name.as_deref().unwrap_or("")),
+        scope_json(scope),
         methods,
+        associated_types,
         i.delegation_field
             .as_deref()
             .map(json_str)
@@ -358,32 +436,57 @@ fn impl_fact_json(i: &AST::ImplDef) -> String {
     )
 }
 
-fn inline_trait_impl_fact_json(type_name: &str, block: &AST::TraitImplBlock) -> String {
+fn inline_trait_impl_fact_json(
+    type_name: &str,
+    block: &AST::TraitImplBlock,
+    scope: &[String],
+) -> String {
     let methods = block
         .methods
         .iter()
         .map(|m| json_str(&m.name))
         .collect::<Vec<_>>()
         .join(",");
+    let associated_types = block
+        .assoc_type_impls
+        .iter()
+        .map(|(name, _, _)| json_str(name))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"methods\":[{}],\"delegation_field\":null,\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":null,\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
         json_str(type_name),
         json_str(&block.trait_name),
+        scope_json(scope),
         methods,
+        associated_types,
         span_json(block.trait_span.into())
     )
 }
 
-pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
+pub(super) fn trait_method_signature(src: &str, m: &AST::TraitMethodSig) -> String {
     let params = m
         .params
         .iter()
-        .map(|p| {
-            if p.name == "self" {
-                format!("{}self", p.convention.sigil())
-            } else {
-                format!("{}{}: {}", p.convention.sigil(), p.name, p.ty.name())
+        .enumerate()
+        .flat_map(|(i, p)| {
+            let mut parts = Vec::new();
+            if p.zone == AST::ParamZone::LabelOnly
+                && !m.params[..i]
+                    .iter()
+                    .any(|previous| previous.zone == AST::ParamZone::LabelOnly)
+            {
+                parts.push("*".to_string());
             }
+            parts.push(trait_param_signature(src, p));
+            if p.zone == AST::ParamZone::PositionalOnly
+                && m.params
+                    .get(i + 1)
+                    .is_none_or(|next| next.zone != AST::ParamZone::PositionalOnly)
+            {
+                parts.push("/".to_string());
+            }
+            parts
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -392,7 +495,127 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
         .as_ref()
         .map(|t| format!(" {}", t.name()))
         .unwrap_or_default();
-    format!("fn {}({}){}", m.name, params, ret)
+    let provenance = trait_return_view_from(m, &m.params);
+    let effects = if let Some(row) = &m.declared_effects {
+        format!(
+            " -[{}]>",
+            row.iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else if m.is_pure {
+        " -[]>".to_string()
+    } else {
+        String::new()
+    };
+    format!("fn {}({}){}{}{}", m.name, params, ret, provenance, effects)
+}
+
+fn trait_param_signature(src: &str, p: &AST::Param) -> String {
+    let is_self = p.name == "self" && p.ty.name().is_empty();
+    let mut out = String::new();
+    if p.root {
+        out.push_str("#Root ");
+    }
+    if is_self {
+        out.push_str(p.convention.sigil());
+        out.push_str(&p.name);
+        return out;
+    }
+    if let Some((label, _)) = &p.public_label {
+        out.push_str(label);
+        out.push(' ');
+    }
+    out.push_str(&p.name);
+    out.push_str(": ");
+    out.push_str(p.convention.sigil());
+    if p.variadic {
+        out.push_str("...");
+    }
+    if let Some(bounds) = &p.variadic_bound_list {
+        out.push('[');
+        out.push_str(&bounds.join(", "));
+        out.push(']');
+    } else {
+        out.push_str(&p.ty.name());
+    }
+    if let Some(names) = &p.declared_view_from_names {
+        if !names.is_empty() {
+            out.push_str(" from ");
+            out.push_str(&names.join(" | "));
+        }
+    }
+    if let Some(default) = &p.default {
+        out.push('{');
+        out.push_str(&snippet(src, default.span()));
+        out.push('}');
+    }
+    out
+}
+
+fn trait_return_view_from(
+    m: &AST::TraitMethodSig,
+    params: &[AST::Param],
+) -> String {
+    let Some(map) = &m.declared_return_view_provenance else {
+        return String::new();
+    };
+    if map.is_empty() {
+        return String::new();
+    }
+    let source_union = |provenance: &AST::ViewProvenance| {
+        provenance
+            .sources
+            .iter()
+            .map(|path| {
+                let mut source = match &path.source {
+                    AST::ViewSource::Receiver => "self".to_string(),
+                    AST::ViewSource::Parameter(index) => params
+                        .iter()
+                        .filter(|param| param.name != "self")
+                        .nth(*index)
+                        .map(|param| param.name.clone())
+                        .unwrap_or_else(|| format!("param{index}")),
+                    AST::ViewSource::Static { module_path, name } => {
+                        if module_path.is_empty() {
+                            format!("static.{name}")
+                        } else {
+                            format!("static.{module_path}.{name}")
+                        }
+                    }
+                };
+                for projection in &path.projections {
+                    if let AST::ViewSourceProjection::Field(field) = projection {
+                        source.push('.');
+                        source.push_str(field);
+                    }
+                }
+                source
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    let body = if map.len() == 1 {
+        let (path, provenance) = map.iter().next().expect("non-empty view map");
+        if path.is_empty() {
+            source_union(provenance)
+        } else {
+            format!("{}: {}", path.join("."), source_union(provenance))
+        }
+    } else {
+        map.iter()
+            .map(|(path, provenance)| {
+                format!("{}: {}", path.join("."), source_union(provenance))
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if map.len() == 1 && map.iter().next().is_some_and(|(path, _)| path.is_empty()) {
+        format!(" from {body}")
+    } else {
+        format!(" from ({body})")
+    }
 }
 
 fn task_flow_facts(src: &str) -> Vec<String> {

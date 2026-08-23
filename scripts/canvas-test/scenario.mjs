@@ -1,9 +1,224 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { createDriver } from "./driver.mjs";
 
+const execFileAsync = (file, args, options) => new Promise((resolve, reject) => {
+  execFile(file, args, options, (error, stdout, stderr) => {
+    if (error) reject(Object.assign(error, { stdout, stderr }));
+    else resolve({ stdout, stderr });
+  });
+});
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function prepareReviewGitProject(ctx) {
+  const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+  const root = project.project_root;
+  const baselineMain = `fn helper() Int -> {
+    return 1
+}
+
+fn run() {
+    print("old")
+    print("remove")
+    print("keep-1")
+    print("keep-2")
+    print("keep-3")
+    print("keep-4")
+    print("keep-5")
+}
+`;
+  const baselineHelper = `fn helper_file() Int -> {
+    return 3
+}
+`;
+  await writeFile(join(root, "package.jet"), "name: \"review_demo\"\nversion: \"0.1.0\"\n");
+  await writeFile(join(root, "main.jet"), baselineMain);
+  await writeFile(join(root, "helper.jet"), baselineHelper);
+  await execFileAsync("git", ["init"], { cwd: root });
+  await execFileAsync("git", ["config", "user.email", "canvas@example.invalid"], { cwd: root });
+  await execFileAsync("git", ["config", "user.name", "Canvas Review"], { cwd: root });
+  await execFileAsync("git", ["add", "package.jet", "main.jet", "helper.jet"], { cwd: root });
+  await execFileAsync("git", ["commit", "-m", "baseline"], { cwd: root });
+  const dirtyMain = baselineMain
+    .replace('print("old")', 'print("new")')
+    .replace('print("remove")', 'print("added")');
+  const dirtyHelper = baselineHelper.replace("return 3", "return 4");
+  await writeFile(join(root, "main.jet"), dirtyMain);
+  await writeFile(join(root, "helper.jet"), dirtyHelper);
+  return { root, dirtyMain, dirtyHelper };
+}
+
+const BIG_PROJECT = Object.freeze({
+  functions: 300,
+  files: 13,
+  graphs: 301,
+  openBudgetMs: 10000,
+  frameP95BudgetMs: 50,
+  frameMaxBudgetMs: 120,
+  frameCaptureMs: 3000,
+  minimumFrameSamples: 12,
+});
+let bigPerfSerial = 0;
+
+function percentile(values, fraction) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1))];
+}
+
+async function bigFrameMeasure(ctx, label, action) {
+  const key = `big-project-perf:${label}:${bigPerfSerial++}`;
+  await ctx.driver.evaluate(`(() => {
+    const key = ${JSON.stringify(key)};
+    window.__jetCanvasPerfRuns ||= {};
+    const started = performance.now();
+    const frames = [];
+    const eventTypes = {};
+    let last = null;
+    let raf = 0;
+    const types = ["pointerdown", "pointermove", "pointerup", "wheel", "click", "keydown", "keyup", "input", "change"];
+    const onEvent = (event) => { eventTypes[event.type] = (eventTypes[event.type] || 0) + 1; };
+    const finish = () => {
+      for (const type of types) window.removeEventListener(type, onEvent, true);
+      window.__jetCanvasPerfRuns[key] = {
+        done: true,
+        elapsed_ms: performance.now() - started,
+        frames,
+        events: Object.values(eventTypes).reduce((sum, count) => sum + count, 0),
+        event_types: eventTypes,
+      };
+    };
+    const sample = (now) => {
+      if (last !== null) frames.push(now - last);
+      last = now;
+      if (now - started >= ${BIG_PROJECT.frameCaptureMs}) finish();
+      else raf = requestAnimationFrame(sample);
+    };
+    for (const type of types) window.addEventListener(type, onEvent, true);
+    window.__jetCanvasPerfRuns[key] = { done: false, frames, events: 0, event_types: {} };
+    raf = requestAnimationFrame(sample);
+  })()`);
+  await action();
+  await ctx.waitFor(async () => await ctx.driver.evaluate(`!!(window.__jetCanvasPerfRuns && window.__jetCanvasPerfRuns[${JSON.stringify(key)}] && window.__jetCanvasPerfRuns[${JSON.stringify(key)}].done)`), `${label} frame capture`, 5000);
+  const result = await ctx.driver.evaluate(`window.__jetCanvasPerfRuns[${JSON.stringify(key)}]`);
+  const frames = (result.frames || []).filter((value) => Number.isFinite(value) && value > 0);
+  if (frames.length < BIG_PROJECT.minimumFrameSamples) {
+    throw new Error(`${label} captured too few frame samples: ${frames.length}`);
+  }
+  if (!result.events) throw new Error(`${label} captured no real input events: ${JSON.stringify(result)}`);
+  const metrics = {
+    frames: frames.length,
+    events: result.events,
+    p50_ms: percentile(frames, 0.50),
+    p95_ms: percentile(frames, 0.95),
+    p99_ms: percentile(frames, 0.99),
+    max_ms: Math.max(...frames),
+    event_types: result.event_types,
+  };
+  console.log(`BIG_PROJECT_PERF ${label} ${JSON.stringify(metrics)}`);
+  if (metrics.p95_ms > BIG_PROJECT.frameP95BudgetMs || metrics.max_ms > BIG_PROJECT.frameMaxBudgetMs) {
+    throw new Error(`${label} exceeded frame budget: ${JSON.stringify({ metrics, budget: BIG_PROJECT })}`);
+  }
+  return metrics;
+}
+
+async function bigElementPoint(ctx, selector, label) {
+  const point = await ctx.driver.evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!point) throw new Error(`${label} element missing: ${selector}`);
+  return point;
+}
+
+async function bigClickSelector(ctx, selector, label) {
+  const point = await bigElementPoint(ctx, selector, label);
+  await ctx.driver.click(point.x, point.y);
+}
+
+async function bigClickGraphTab(ctx, title) {
+  const point = await ctx.driver.evaluate(`(() => {
+    const element = Array.from(document.querySelectorAll(".graph-tab")).find((candidate) => candidate.querySelector(".graph-tab-title")?.textContent === ${JSON.stringify(title)});
+    if (!element) return null;
+    element.scrollIntoView({ block: "nearest", inline: "center" });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!point) throw new Error(`graph tab missing: ${title}`);
+  await ctx.driver.click(point.x, point.y);
+  await ctx.waitFor(async () => (await ctx.state()).graphTitle === title, `graph tab ${title}`);
+}
+
+async function bigClickProjectFile(ctx, path) {
+  const point = await ctx.driver.evaluate(`(() => {
+    const element = document.querySelector('[data-project-file="${path}"]');
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!point) throw new Error(`project file card missing: ${path}`);
+  await ctx.driver.click(point.x, point.y);
+}
+
+async function bigFit(ctx) {
+  await bigClickSelector(ctx, "#fit", "fit button");
+  await sleep(160);
+}
+
+async function bigMiddleDrag(ctx, dx, dy, steps = 24) {
+  const rect = await ctx.canvasRect();
+  const from = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  const to = { x: from.x + dx, y: from.y + dy };
+  const session = ctx.driver.pageSession;
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: from.x, y: from.y, button: "middle", buttons: 4, clickCount: 1,
+  }, session);
+  for (let step = 1; step <= steps; step++) {
+    const fraction = step / steps;
+    await ctx.driver.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.x + (to.x - from.x) * fraction,
+      y: from.y + (to.y - from.y) * fraction,
+      button: "none",
+      buttons: 4,
+    }, session);
+  }
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: to.x, y: to.y, button: "middle", buttons: 0, clickCount: 1,
+  }, session);
+}
+
+async function bigClickNode(ctx, node) {
+  const rect = await ctx.canvasRect();
+  await ctx.driver.click(rect.left + node.x + node.w / 2, rect.top + node.y + node.h / 2);
+}
+
+async function bigClickPin(ctx, pin) {
+  const point = await ctx.state();
+  const rect = await ctx.canvasRect();
+  const hit = point.pinPoints && point.pinPoints[pin.pin_id];
+  await ctx.driver.click(
+    hit && Number.isFinite(hit.client_x) ? hit.client_x : rect.left + pin.cx,
+    hit && Number.isFinite(hit.client_y) ? hit.client_y : rect.top + pin.cy,
+  );
+}
+
+async function bigMinimapInk(ctx) {
+  return await ctx.driver.evaluate(`(() => {
+    const canvas = document.getElementById("minimap");
+    if (!canvas) return 0;
+    const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    let ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 0 && (data[i] + data[i + 1] + data[i + 2]) > 90) ink++;
+    }
+    return ink;
+  })()`);
 }
 
 export class CanvasScenario {
@@ -30,6 +245,10 @@ export class CanvasScenario {
   async openCanvas(port = this.port) {
     await this.driver.navigate(`http://127.0.0.1:${port}/canvas`);
     await this.waitForCanvas();
+    return await this.driver.evaluate(`(() => {
+      const navigation = performance.getEntriesByType("navigation")[0];
+      return performance.now() - (navigation ? navigation.startTime : 0);
+    })()`);
   }
 
   async waitForCanvas() {
@@ -388,6 +607,9 @@ async function scratchGraph(ctx) {
 async function runInsertAttempt(ctx, baseSource, entry, origin) {
   await ctx.replaceSource(baseSource);
   const { doc, graph } = await scratchGraph(ctx);
+  if (entry.stageable) {
+    return { state: "stageable", id: entry.action_id || entry.callee || entry.title, reason: entry.stage_reason_code };
+  }
   if (entry.available === false) {
     if (!entry.unavailable_reason_code || !entry.denied_reason) {
       throw new Error(`excluded entry missing reason: ${entry.action_id || entry.callee || entry.title}`);
@@ -428,15 +650,83 @@ async function runInsertAttempt(ctx, baseSource, entry, origin) {
   return { state: "inserted", id };
 }
 
+const STAGEABLE_CATALOG_REASONS = new Set(["needs_canvas_defaults", "method_only"]);
+const EXCLUDED_CATALOG_REASONS = new Set([
+  "needs_unsafe_region",
+  "type_member",
+  "type_only",
+  "value_only",
+  "needs_signature",
+  "not_direct_call",
+]);
+
+function catalogEntryId(entry) {
+  return entry.action_id || entry.callee || entry.title;
+}
+
+async function assertStageablePaletteEntry(ctx, baseSource, entry) {
+  const name = String(entry.title || entry.callee).split(" · ")[0];
+  await ctx.replaceSource(baseSource);
+  await ctx.loadCoreCatalog(name);
+  await ctx.openCoreCatalogPalette(name);
+  await ctx.expectMenu(name);
+  const row = await ctx.driver.evaluate(`(() => {
+    const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
+    const button = buttons.find((candidate) => candidate.textContent.includes(${JSON.stringify(name)}));
+    if (!button) return null;
+    return {
+      available: button.dataset.available,
+      code: button.dataset.unavailableReasonCode,
+      disabled: button.disabled,
+      className: button.className,
+      text: button.textContent,
+    };
+  })()`);
+  if (!row || row.available !== "true" || row.disabled || row.className.includes("is-disabled") || row.code !== entry.stage_reason_code) {
+    throw new Error(`stageable palette row is not active: ${JSON.stringify({ entry: catalogEntryId(entry), row })}`);
+  }
+  const before = await ctx.source();
+  await ctx.pickEntry(name);
+  await ctx.waitFor(async () => {
+    const state = await ctx.state();
+    return (state.stagedRegistry || []).some((node) => String(node.title || "").includes(name));
+  }, `staged ${name}`);
+  const after = await ctx.source();
+  if (after !== before) throw new Error(`staging ${name} changed source`);
+  const state = await ctx.state();
+  const staged = (state.stagedRegistry || []).find((node) => String(node.title || "").includes(name));
+  const inputs = (staged && staged.pins || []).filter((pin) => pin.direction === "input");
+  if (!inputs.length || inputs.some((pin) => !pin.type || pin.type === "Value")) {
+    throw new Error(`staged ${name} lacks typed inputs: ${JSON.stringify(staged)}`);
+  }
+  if (entry.stage_reason_code === "method_only") {
+    const receiver = inputs.find((pin) => pin.name === "receiver");
+    if (!entry.receiver_type || !receiver || receiver.type !== entry.receiver_type) {
+      throw new Error(`staged method ${name} lacks typed receiver: ${JSON.stringify({ entry, staged })}`);
+    }
+  }
+}
+
 async function catalogSweep(ctx) {
   await ctx.openCanvas();
   const baseSource = await ctx.source();
   await ctx.switchGraph("scratch");
+  await ctx.waitFor(async () => {
+    const entries = await ctx.driver.evaluate("window.__jetCanvasTest.actionEntries()");
+    return entries.some((entry) => entry.title === "square")
+      || entries.some((entry) => String(entry.title || "").startsWith("abs ·"));
+  }, "catalog smoke action");
+  const smoke = await ctx.driver.evaluate(`(() => {
+    const entries = window.__jetCanvasTest.actionEntries();
+    return entries.find((entry) => entry.title === "square")
+      || entries.find((entry) => String(entry.title || "").startsWith("abs ·"));
+  })()`);
+  const smokeName = smoke.title === "square" ? "square" : "abs";
   await ctx.openPinActionMenu("scratch", "limit");
-  await ctx.type("square");
-  await ctx.expectMenu("square");
-  await ctx.pickEntry("square");
-  await ctx.expectSourceContains("square(limit)");
+  await ctx.type(smokeName);
+  await ctx.expectMenu(smokeName);
+  await ctx.pickEntry(smokeName);
+  await ctx.waitFor(async () => (await ctx.source()).includes(`${smokeName}(limit)`), `${smokeName}(limit)`);
   await ctx.replaceSource(baseSource);
   const actionDocGraph = await ctx.graph();
   const actionDoc = await ctx.query({ schema_version: 1, op: "actions", revision: actionDocGraph.revision });
@@ -465,8 +755,31 @@ async function catalogSweep(ctx) {
     seen.add(id);
     return true;
   });
-  const summary = { total: unique.length, inserted: 0, excluded: 0, dataInserted: 0, noDataOrigin: 0, failures: [] };
+  const summary = { total: unique.length, inserted: 0, staged: 0, excluded: 0, dataInserted: 0, noDataOrigin: 0, failures: [] };
+  const stageable = [];
   for (const entry of unique) {
+    if (entry.kind === "canvas.core_catalog") {
+      if (entry.stageable) {
+        if (entry.available !== false || !STAGEABLE_CATALOG_REASONS.has(entry.stage_reason_code) || !entry.stage_reason) {
+          summary.failures.push({ id: catalogEntryId(entry), state: "invalid-stage-status", reason: entry.stage_reason_code });
+          continue;
+        }
+        const inputs = (entry.pins || []).filter((pin) => pin.direction === "input");
+        if (!inputs.length || inputs.some((pin) => !pin.type || pin.type === "Value")) {
+          summary.failures.push({ id: catalogEntryId(entry), state: "stageable-without-typed-inputs", pins: entry.pins });
+          continue;
+        }
+        if (entry.stage_reason_code === "method_only" && (!entry.receiver_type || !inputs.some((pin) => pin.name === "receiver" && pin.type === entry.receiver_type))) {
+          summary.failures.push({ id: catalogEntryId(entry), state: "method-without-receiver", receiver_type: entry.receiver_type, pins: entry.pins });
+          continue;
+        }
+        stageable.push(entry);
+        continue;
+      } else if (entry.available === false && (!EXCLUDED_CATALOG_REASONS.has(entry.unavailable_reason_code) || !entry.denied_reason)) {
+        summary.failures.push({ id: catalogEntryId(entry), state: "unstable-exclusion", reason: entry.unavailable_reason_code });
+        continue;
+      }
+    }
     const exec = await runInsertAttempt(ctx, baseSource, entry, "exec");
     if (exec.state === "inserted") summary.inserted++;
     else if (exec.state === "excluded") summary.excluded++;
@@ -478,10 +791,19 @@ async function catalogSweep(ctx) {
     else if (data.state === "failed") summary.failures.push(data);
   }
   await ctx.replaceSource(baseSource);
+  const needsDefaults = stageable.find((entry) => entry.stage_reason_code === "needs_canvas_defaults");
+  const methodOnly = stageable.find((entry) => entry.stage_reason_code === "method_only");
+  if (!needsDefaults || !methodOnly) {
+    summary.failures.push({ state: "missing-stageable-representative", needsDefaults: !!needsDefaults, methodOnly: !!methodOnly });
+  } else {
+    await assertStageablePaletteEntry(ctx, baseSource, needsDefaults);
+    await assertStageablePaletteEntry(ctx, baseSource, methodOnly);
+  }
+  summary.staged = stageable.length;
   if (summary.failures.length) {
     throw new Error(`catalog sweep failed ${JSON.stringify(summary.failures.slice(0, 12), null, 2)}\nsummary ${JSON.stringify(summary)}`);
   }
-  console.log(`palette_insert_catalog_sweep total=${summary.total} inserted=${summary.inserted} data_inserted=${summary.dataInserted} excluded=${summary.excluded} no_data_origin=${summary.noDataOrigin}`);
+  console.log(`palette_insert_catalog_sweep total=${summary.total} inserted=${summary.inserted} staged=${summary.staged} data_inserted=${summary.dataInserted} excluded=${summary.excluded} no_data_origin=${summary.noDataOrigin}`);
   return summary;
 }
 
@@ -950,6 +1272,96 @@ async function assertSourceUnchangedAfterReload(ctx, before, label) {
 }
 
 export const scenarios = {
+  "canvas-onboarding-tour": async (ctx) => {
+    await ctx.openCanvas();
+    const original = await ctx.source();
+    const tour = await visibleSurface(ctx, `document.getElementById("first-run-tour")`, "first-run tour");
+    if (!tour.ok || !tour.text.includes("Read the graph")) {
+      throw new Error(`first-run tour did not open with useful guidance: ${JSON.stringify(tour)}`);
+    }
+    const initialTour = await ctx.driver.evaluate("window.__jetCanvasTourState || null");
+    if (!initialTour || initialTour.step !== 0 || initialTour.total < 4) {
+      throw new Error(`tour state missing or too short: ${JSON.stringify(initialTour)}`);
+    }
+
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour source step");
+    await clickElement(ctx, `document.getElementById("tour-action")`, "tour source action");
+    await ctx.waitFor(async () => {
+      const mode = await ctx.driver.evaluate("window.__jetCanvasLensMode");
+      const source = await ctx.driver.evaluate("document.getElementById('source-view').textContent");
+      return mode === "split" && source.includes("fn run");
+    }, "tour source view");
+    if (await ctx.source() !== original) throw new Error("tour source view changed Jet source");
+
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour check step");
+    await clickElement(ctx, `document.getElementById("tour-action")`, "tour check action");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.getElementById('execute-command-authority')"), "tour check authority");
+    await clickElement(ctx, `document.getElementById("execute-command-authority")`, "tour check command");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("document.getElementById('run-hud').textContent.includes('passed')"), "tour check receipt", 15000);
+
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour run step");
+    await clickElement(ctx, `document.getElementById("tour-action")`, "tour run action");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.getElementById('execute-command-authority')"), "tour run authority");
+    await clickElement(ctx, `document.getElementById("execute-command-authority")`, "tour run command");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("document.getElementById('run-hud').textContent.includes('passed')"), "tour run receipt", 15000);
+    const receipt = await ctx.driver.evaluate("document.getElementById('details').textContent");
+    if (!receipt.includes("stdout") || !receipt.includes("16")) throw new Error(`tour run output missing: ${receipt}`);
+
+    await clickElement(ctx, `document.getElementById("tour-next")`, "tour finish step");
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "finish onboarding tour");
+    await ctx.waitFor(async () => !(await ctx.driver.evaluate("document.getElementById('first-run-tour').classList.contains('is-open')")), "tour dismissal");
+    await ctx.openCanvas();
+    if (await ctx.driver.evaluate("document.getElementById('first-run-tour').classList.contains('is-open')")) {
+      throw new Error("tour dismissal did not persist in local editor state");
+    }
+
+    await ctx.switchGraph("summarize");
+    const beforeEdit = await ctx.source();
+    const editDoc = await ctx.graph();
+    const summarize = graphByTitle(editDoc, "summarize");
+    const limit = firstInline(summarize, (expr) => String(expr.source || "").includes("limit"), "onboarding limit");
+    await ctx.uiTransaction({
+      schema_version: 1,
+      op: "edit_inline_expr",
+      revision: editDoc.revision,
+      inline_expr_id: limit.inline_expr_id,
+      new_expr: "limit + 1"
+    });
+    if (await ctx.source() === beforeEdit) throw new Error("onboarding edit did not write Jet source");
+    const saveState = await ctx.driver.evaluate("document.getElementById('save-state').textContent");
+    if (!saveState.includes("saved")) throw new Error(`accepted edit did not show saved state: ${saveState}`);
+    await ctx.undo();
+    if (await ctx.source() !== beforeEdit) throw new Error("onboarding undo did not restore exact source");
+
+    await ctx.setSourceEditor(beforeEdit.replace("square(limit)", "square(missing_value)"));
+    await ctx.checkCurrentSource();
+    const problem = await ctx.expectProblem("E0107");
+    if (!String(problem.rendered || "").includes("Why:") || !String(problem.rendered || "").includes("Fix:")) {
+      throw new Error(`onboarding diagnostic missing guidance: ${JSON.stringify(problem)}`);
+    }
+    const invalidState = await ctx.driver.evaluate("window.__jetCanvasCanvasState || null");
+    if (!invalidState || invalidState.kind !== "invalid") throw new Error(`invalid source state missing: ${JSON.stringify(invalidState)}`);
+    await ctx.setSourceEditor(beforeEdit);
+    await ctx.checkCurrentSource();
+    await ctx.waitFor(async () => !(await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'invalid'")), "diagnostic recovery");
+
+    await ctx.driver.evaluate("window.dispatchEvent(new Event('offline'))");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'offline'"), "offline state");
+    const offlineSource = await ctx.driver.evaluate("document.getElementById('source-editor').value");
+    if (!offlineSource.includes("fn run")) throw new Error("offline state hid editable source");
+    await ctx.driver.evaluate("window.dispatchEvent(new Event('online'))");
+    await ctx.waitFor(async () => !(await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'offline'")), "offline recovery");
+
+    await ctx.openGraphActionPalette("service");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!document.querySelector('#context-menu [data-available=\"false\"]')"), "permission-denied action");
+    await ctx.driver.evaluate("document.querySelector('#context-menu [data-available=\"false\"]').click()");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === 'permission'"), "permission state");
+    const permissionState = await ctx.driver.evaluate("window.__jetCanvasCanvasState");
+    if (!permissionState.detail || !permissionState.detail.toLowerCase().includes("service")) {
+      throw new Error(`permission state lacked next action: ${JSON.stringify(permissionState)}`);
+    }
+  },
+
   "open-and-render": async (ctx) => {
     await ctx.openCanvas();
     await ctx.expectNodeCount(3);
@@ -962,6 +1374,82 @@ export const scenarios = {
     const pixels = await ctx.nonblankPixels();
     if (pixels < 100) throw new Error(`canvas looked blank: ${pixels} colored pixels`);
     await ctx.screenshot("rendered");
+  },
+
+  "review-diff-overlays": async (ctx) => {
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("review-view-button")`, "single-file Review lens");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      return review && review.active && review.available === false;
+    }, "single-file Review empty state");
+    const singleEmpty = await ctx.driver.evaluate(`(() => ({
+      text: document.getElementById("review-content").textContent,
+      devText: document.getElementById("review-dev-facts").textContent,
+      devDisplay: getComputedStyle(document.getElementById("review-dev-facts")).display,
+    }))()`);
+    if (!singleEmpty.text.includes("single-file") || !singleEmpty.text.includes("no Git text baseline")) {
+      throw new Error(`single-file Review state was not plain: ${JSON.stringify(singleEmpty)}`);
+    }
+    if (singleEmpty.devText || singleEmpty.devDisplay !== "none") {
+      throw new Error(`single-file Review exposed developer facts: ${JSON.stringify(singleEmpty)}`);
+    }
+
+    const prepared = await prepareReviewGitProject(ctx);
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("review-view-button")`, "Review lens");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      return review && review.active && review.dirtyFiles === 2 && review.files.length === 2 && review.selectedHunkId;
+    }, "dirty two-file Review lens");
+    const first = await ctx.driver.evaluate("window.__jetCanvasTest.review");
+    const hunks = first.files.flatMap((file) => file.hunks || []);
+    if (!hunks.some((hunk) => hunk.added.some((line) => line.includes('print("new")')))) {
+      throw new Error(`Review missed Git addition: ${JSON.stringify(first)}`);
+    }
+    if (!hunks.some((hunk) => hunk.deleted.some((line) => line.includes('print("old")')))) {
+      throw new Error(`Review missed Git deletion: ${JSON.stringify(first)}`);
+    }
+    const mapped = hunks.find((hunk) => hunk.nodeIds && hunk.nodeIds.length);
+    if (!mapped) throw new Error(`Review did not map a changed hunk to a graph node: ${JSON.stringify(first)}`);
+    await clickAttribute(ctx, "data-review-graph", mapped.id, "review graph action");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      return review && !review.active && review.overlayHunkId === mapped.id && review.selectedNodeIds.length > 0;
+    }, "review graph overlay");
+    const sourceBeforeRefresh = await ctx.source();
+    if (sourceBeforeRefresh !== prepared.dirtyMain) throw new Error("Review graph action changed source bytes");
+
+    const refreshedMain = prepared.dirtyMain.replace('print("new")', 'print("refreshed")');
+    await writeFile(join(prepared.root, "main.jet"), refreshedMain);
+    await clickElement(ctx, `document.getElementById("review-view-button")`, "Review lens after external edit");
+    await clickElement(ctx, `document.getElementById("review-refresh")`, "Review refresh");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      return review && review.dirtyFiles === 2 && review.files.some((file) => file.hunks.some((hunk) => hunk.added.some((line) => line.includes('print("refreshed")')))) && review.overlayHunkId === null;
+    }, "recomputed Review after external edit");
+    const after = await ctx.driver.evaluate("window.__jetCanvasTest.review");
+    if (after.files.some((file) => file.hunks.some((hunk) => hunk.added.some((line) => line.includes('print("new")'))))) {
+      throw new Error(`Review kept stale hunk after refresh: ${JSON.stringify(after)}`);
+    }
+
+    await execFileAsync("git", ["add", "main.jet", "helper.jet"], { cwd: prepared.root });
+    await execFileAsync("git", ["commit", "-m", "review-clean"], { cwd: prepared.root });
+    await clickElement(ctx, `document.getElementById("review-refresh")`, "Review clean refresh");
+    await ctx.waitFor(async () => {
+      const review = await ctx.driver.evaluate("window.__jetCanvasTest && window.__jetCanvasTest.review");
+      const text = await ctx.driver.evaluate("document.getElementById('review-content').textContent");
+      return review && review.active && review.available && review.dirtyFiles === 0 && text.includes("Git text truth reports a clean project");
+    }, "clean project Review empty state");
+    const cleanEmpty = await ctx.driver.evaluate(`(() => ({
+      text: document.getElementById("review-content").textContent,
+      devText: document.getElementById("review-dev-facts").textContent,
+      devDisplay: getComputedStyle(document.getElementById("review-dev-facts")).display,
+    }))()`);
+    if (cleanEmpty.devText || cleanEmpty.devDisplay !== "none") {
+      throw new Error(`clean Review exposed developer facts: ${JSON.stringify(cleanEmpty)}`);
+    }
+    await ctx.screenshot("review-refreshed");
   },
 
   "pan-zoom-fit": async (ctx) => {
@@ -1879,10 +2367,12 @@ fn run() {
     Slow
 }
 
-fn edit() {
+fn edit(choice: Mode) {
     #Meta(category: "Tuning", tunable)
     amount :: 3
     other :: 9
+    flag :: true
+    label :: "start"
     mode :: Mode.Fast
     alias :: amount
     needs_int(amount)
@@ -1892,7 +2382,7 @@ fn edit() {
 fn needs_int(value: Int) {}
 
 fn run() {
-    edit()
+    edit(Mode.Fast)
 }
 `);
     await ctx.openCanvas();
@@ -1916,7 +2406,8 @@ fn run() {
         const apply = document.getElementById("apply-variable-details");
         if (!input || !apply) return { ok: false };
         if (${JSON.stringify(expectedKind)} && input.dataset.detailKind !== ${JSON.stringify(expectedKind)}) return { ok: false, kind: input.dataset.detailKind };
-        input.value = ${JSON.stringify(value)};
+        if (input.type === "checkbox") input.checked = ${JSON.stringify(value)} === "true";
+        else input.value = ${JSON.stringify(value)};
         apply.click();
         return { ok: true, kind: input.dataset.detailKind, tag: input.tagName };
       })()`);
@@ -1924,6 +2415,22 @@ fn run() {
       await ctx.waitFor(async () => (await ctx.source()) !== before, `${label} source change`);
       await ctx.waitForCanvas();
     };
+
+    await selectVariable("choice");
+    const beforeIncompleteEnum = await ctx.source();
+    const incompleteEnum = await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      const apply = document.getElementById("apply-variable-details");
+      if (!input || !apply) return { ok: false };
+      const before = input.value;
+      apply.click();
+      return { ok: true, tag: input.tagName, kind: input.dataset.detailKind, value: before };
+    })()`);
+    if (!incompleteEnum.ok || incompleteEnum.tag !== "SELECT" || incompleteEnum.value !== "") {
+      throw new Error(`incomplete enum editor changed its default: ${JSON.stringify(incompleteEnum)}`);
+    }
+    await ctx.waitFor(async () => !!(await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null")), "incomplete enum result");
+    if (await ctx.source() !== beforeIncompleteEnum) throw new Error("incomplete enum edit changed source");
 
     await selectVariable("amount");
     const metadata = await ctx.driver.evaluate(`(() => {
@@ -1935,11 +2442,13 @@ fn run() {
       throw new Error(`binding metadata missing from Details: ${JSON.stringify(metadata)}`);
     }
     if (metadata.kind !== "scalar" || metadata.type !== "number") throw new Error(`scalar editor missing: ${JSON.stringify(metadata)}`);
+    await applyValue("flag", "false", "scalar", "boolean Details edit");
+    await applyValue("label", "done", "scalar", "string Details edit");
     await applyValue("amount", "7", "scalar", "scalar Details edit");
     await applyValue("mode", "Mode.Slow", "enum", "enum Details edit");
     await applyValue("alias", "other", "reference", "reference Details edit");
     const edited = await ctx.source();
-    for (const text of ["amount :: 7", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
+    for (const text of ["amount :: 7", "flag :: false", "label :: \"done\"", "mode :: Mode.Slow", "alias :: other", "print(alias)"]) {
       if (!edited.includes(text)) throw new Error(`Details edit missing ${text}:\n${edited}`);
     }
 
@@ -1973,6 +2482,89 @@ fn run() {
       return result && result.ok === false;
     }, "incomplete scalar refusal");
     await assertSourceUnchangedAfterReload(ctx, beforeInvalid, "incomplete scalar edit");
+  },
+
+  "traits-panel-authoring": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`trait Drawable {
+    fn render(self) String -[IO]>
+    fn label(self) String -> {
+        return "drawable"
+    }
+}
+
+struct Badge {
+    label: String
+}
+
+fn run() {
+    print("ready")
+}
+`);
+    await ctx.waitFor(async () => {
+      const panel = await ctx.driver.evaluate(`document.querySelector("[data-canvas-traits]")?.textContent || ""`);
+      const state = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel || null");
+      return panel.includes("Drawable") && state && state.traitCount === 1 && state.implementationCount === 0 && state.requiredMethodCount === 1;
+    }, "traits panel projection");
+    const initial = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel");
+    if (!initial.traits[0].requiredMethods.includes("render") || !initial.traits[0].methods.includes("label")) {
+      throw new Error(`traits panel did not mark render required: ${JSON.stringify(initial)}`);
+    }
+    await clickElement(ctx, `document.querySelector('[data-trait-jump]')`, "trait source jump");
+    await ctx.waitFor(async () => String(await ctx.driver.evaluate("location.hash")).startsWith("#span-"), "trait source navigation");
+
+    await ctx.driver.evaluate(`window.__jetCanvasTest.openGraphActionPalette("Drawable.render")`);
+    await ctx.expectMenu("Drawable.render");
+    const menuAction = await ctx.driver.evaluate(`(() => Array.from(document.querySelectorAll("#context-menu [data-menu-action]"))
+      .some((button) => button.textContent.includes("Drawable.render")))()`);
+    if (!menuAction) throw new Error("trait method was not offered in the Canvas action palette");
+    await ctx.driver.press("Escape");
+
+    const beforeInvalid = await ctx.source();
+    await clickElement(ctx, `document.querySelector('[data-trait-create="0"]')`, "trait implementation button");
+    await expectVisibleRefusal(ctx, "Jet name", "invalid trait type");
+    if (await ctx.source() !== beforeInvalid) throw new Error("invalid trait type changed source");
+
+    await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-trait-type="0"]');
+      input.value = "Badge";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await clickElement(ctx, `document.querySelector('[data-trait-create="0"]')`, "create trait implementation");
+    await ctx.waitFor(async () => (await ctx.source()).includes("impl Badge.Drawable"), "trait implementation source");
+    await ctx.expectSourceContains("fn render(self) String -[IO]>");
+    await ctx.expectSourceContains('return "canvas"');
+    const created = await ctx.source();
+    const createdState = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel");
+    if (createdState.implementationCount !== 1 || createdState.implementedMethodCount !== 1) {
+      throw new Error(`traits panel did not reflect implementation: ${JSON.stringify(createdState)}`);
+    }
+
+    await ctx.undo();
+    if ((await ctx.source()).includes("impl Badge.Drawable")) throw new Error("trait implementation undo did not remove impl");
+    const undoneState = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel");
+    if (undoneState.implementationCount !== 0) throw new Error(`traits panel undo state is stale: ${JSON.stringify(undoneState)}`);
+    await ctx.redo();
+    if (await ctx.source() !== created) throw new Error("trait implementation redo did not restore exact source");
+
+    const stale = await ctx.transaction({
+      schema_version: 1,
+      op: "create_trait_impl",
+      revision: "sha256-stale",
+      type_name: "Badge",
+      trait_name: "Drawable"
+    });
+    if (stale.ok || !String(stale.json && stale.json.message || "").toLowerCase().includes("revision")) {
+      throw new Error(`stale trait edit was not refused: ${JSON.stringify(stale)}`);
+    }
+    if (await ctx.source() !== created) throw new Error("stale trait edit changed source");
+
+    await ctx.openCanvas();
+    await ctx.waitFor(async () => {
+      const state = await ctx.driver.evaluate("window.__jetCanvasTraitsPanel || null");
+      return state && state.implementationCount === 1 && state.implementedMethodCount === 1;
+    }, "traits panel reload");
+    if (await ctx.source() !== created) throw new Error("trait implementation reload changed source");
   },
 
   "fallible-context": async (ctx) => {
@@ -2016,11 +2608,18 @@ fn run() {
       const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
       const button = buttons.find((b) => b.textContent.includes("help"));
       if (!button) return null;
-      return { available: button.dataset.available, code: button.dataset.unavailableReasonCode, title: button.getAttribute("title"), text: button.textContent };
+      return { available: button.dataset.available, code: button.dataset.unavailableReasonCode, disabled: button.disabled, className: button.className, title: button.getAttribute("title"), text: button.textContent };
     })()`);
-    if (!row || row.available !== "false" || row.code !== "method_only" || !row.title.includes("ArgsSpec")) {
-      throw new Error(`excluded help row missing hover reason: ${JSON.stringify(row)}`);
+    if (!row || row.available !== "true" || row.disabled || row.className.includes("is-disabled") || row.code !== "method_only") {
+      throw new Error(`stageable help row is not active: ${JSON.stringify(row)}`);
     }
+    const before = await ctx.source();
+    await ctx.pickEntry("help");
+    await ctx.waitFor(async () => (await ctx.state()).stagedRegistry.some((node) => String(node.title || "").includes("help")), "staged help");
+    if (await ctx.source() !== before) throw new Error("staged help changed source");
+    const staged = (await ctx.state()).stagedRegistry.find((node) => String(node.title || "").includes("help"));
+    const receiver = (staged && staged.pins || []).find((pin) => pin.name === "receiver");
+    if (!receiver || receiver.type !== "ArgsSpec") throw new Error(`staged help receiver missing: ${JSON.stringify(staged)}`);
   },
 
   "no-dead-end-ad-hoc-insert": async (ctx) => {
@@ -2230,6 +2829,153 @@ fn run() {
         throw new Error(`random op failed with seed ${ctx.seed}\nops:\n${opLog.join("\n")}\n${err && err.stack || err}`);
       }
     }
+  },
+
+  "big-project-perf": async (ctx) => {
+    await ctx.driver.send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    }, ctx.driver.pageSession);
+    const openMs = await ctx.openCanvas();
+    const doc = await ctx.graph();
+    const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((response) => response.json())`);
+    const sourceFiles = (project.files || []).filter((file) => file.kind === "source");
+    const graphs = doc.graphs || [];
+    const run = graphs.find((graph) => graph.title === "run");
+    const functionGraphs = graphs.filter((graph) => /^function_\d{3}$/.test(String(graph.title || "")));
+    if (sourceFiles.length !== BIG_PROJECT.files || graphs.length !== BIG_PROJECT.graphs || functionGraphs.length !== BIG_PROJECT.functions || !run) {
+      throw new Error(`generated project shape mismatch: ${JSON.stringify({ files: sourceFiles.length, graphs: graphs.length, functionGraphs: functionGraphs.length, run: !!run })}`);
+    }
+    if (!run.nodes || run.nodes.length < BIG_PROJECT.functions) {
+      throw new Error(`generated run graph is too small: ${run.nodes && run.nodes.length}`);
+    }
+    console.log(`BIG_PROJECT_FIXTURE ${JSON.stringify({ files: sourceFiles.length, graphs: graphs.length, functions: functionGraphs.length, run_nodes: run.nodes.length, run_wires: (run.wires || []).length, open_to_interactive_ms: openMs })}`);
+    if (openMs > BIG_PROJECT.openBudgetMs) {
+      throw new Error(`open-to-interactive budget exceeded: ${openMs}ms > ${BIG_PROJECT.openBudgetMs}ms`);
+    }
+
+    if ((await ctx.state()).graphTitle !== "run") await bigClickGraphTab(ctx, "run");
+    await bigFit(ctx);
+    let state = await ctx.state();
+    if (!state.virtualizationStats || state.virtualizationStats.total !== run.nodes.length || state.virtualizationStats.visible >= state.virtualizationStats.total) {
+      throw new Error(`large graph was not culled at fit: ${JSON.stringify(state.virtualizationStats)}`);
+    }
+    const sourceBefore = await ctx.source();
+    const canvas = await ctx.canvasRect();
+    const center = { x: canvas.left + canvas.width / 2, y: canvas.top + canvas.height / 2 };
+
+    await bigFrameMeasure(ctx, "pan", async () => {
+      await bigMiddleDrag(ctx, 460, -120, 32);
+    });
+
+    const zoomBefore = (await ctx.state()).view.zoom;
+    await bigFrameMeasure(ctx, "zoom", async () => {
+      for (let index = 0; index < 5; index++) await ctx.driver.wheel(center.x, center.y, 160);
+      await ctx.waitFor(async () => (await ctx.state()).view.zoom < zoomBefore, "zoom input");
+    });
+    state = await ctx.state();
+    if (!state.virtualizationStats.lod) throw new Error(`zoom did not enter low-detail mode: ${JSON.stringify(state.virtualizationStats)}`);
+
+    await bigFit(ctx);
+    state = await ctx.state();
+    const selectable = run.nodes.find((node) => String(node.title || "").startsWith("value_") && state.nodeBounds[node.node_id]);
+    if (!selectable) throw new Error("no visible generated value node for selection");
+    await bigFrameMeasure(ctx, "selection", async () => {
+      await bigClickNode(ctx, state.nodeBounds[selectable.node_id]);
+      await ctx.waitFor(async () => (await ctx.state()).selectedNodeId === selectable.node_id, "generated node selection");
+    });
+
+    await bigFrameMeasure(ctx, "palette", async () => {
+      await ctx.driver.shortcut(["Control", "p"]);
+      await ctx.waitFor(async () => await ctx.driver.evaluate(`!!document.getElementById("action-palette-search")`), "action palette open");
+      await ctx.driver.type("function_299");
+      await ctx.waitFor(async () => await ctx.driver.evaluate(`document.getElementById("action-palette-search")?.value === "function_299"`), "palette search input");
+    });
+    const paletteFocus = await ctx.driver.evaluate(`document.activeElement?.id`);
+    if (paletteFocus !== "action-palette-search") throw new Error(`palette search lost keyboard focus: ${paletteFocus}`);
+    await ctx.driver.press("Escape");
+
+    state = await ctx.state();
+    const cullTarget = run.nodes.find((node) => !state.nodeBounds[node.node_id]);
+    if (!cullTarget) throw new Error("large graph had no off-viewport node to re-enter");
+    const panDirections = [[-640, 0], [0, -480], [640, 0], [0, 480]];
+    let entered = false;
+    for (const [dx, dy] of panDirections) {
+      for (let step = 0; step < 32 && !entered; step++) {
+        await bigMiddleDrag(ctx, dx, dy, 20);
+        await sleep(45);
+        state = await ctx.state();
+        if (state.nodeBounds[cullTarget.node_id]) entered = true;
+      }
+      if (entered) break;
+    }
+    if (!entered) throw new Error(`off-viewport node did not re-enter hit map: ${cullTarget.node_id}`);
+    await bigClickNode(ctx, state.nodeBounds[cullTarget.node_id]);
+    await ctx.waitFor(async () => (await ctx.state()).selectedNodeId === cullTarget.node_id, "re-entered node selection");
+    state = await ctx.state();
+    const pin = (state.hitMap && state.hitMap.pins || []).find((candidate) => candidate.node_id === cullTarget.node_id);
+    if (!pin) throw new Error(`re-entered node has no hit-testable pin: ${cullTarget.node_id}`);
+    await bigClickPin(ctx, pin);
+    await ctx.waitFor(async () => (await ctx.driver.evaluate("window.__jetCanvasPendingPin && window.__jetCanvasPendingPin.pin_id")) === pin.pin_id, "pin hit test after culling");
+    if (await ctx.source() !== sourceBefore) throw new Error("pin hit test changed generated source");
+    await ctx.driver.press("Escape");
+    state = await ctx.state();
+    const wire = (state.wireEndpoints || []).find((endpoint) => endpoint.pin_id === pin.pin_id || endpoint.other_pin_id === pin.pin_id);
+    if (!wire) throw new Error(`re-entered node has no wire hit endpoint: ${cullTarget.node_id}`);
+    await ctx.driver.click(wire.client_x, wire.client_y);
+    await ctx.waitFor(async () => (await ctx.driver.evaluate("window.__jetCanvasPendingPin && window.__jetCanvasPendingPin.pin_id")) === wire.pin_id, "wire endpoint hit test after culling");
+    if (await ctx.source() !== sourceBefore) throw new Error("wire hit test changed generated source");
+    await ctx.driver.press("Escape");
+    if (await bigMinimapInk(ctx) < 50) throw new Error("minimap lost graph ink while culling nodes");
+
+    let left = false;
+    const leavePath = [];
+    for (let pass = 0; pass < 8 && !left; pass++) {
+      for (const [dx, dy] of [[-640, 0], [0, -480], [640, 0], [0, 480]]) {
+        leavePath.push([dx, dy]);
+        await bigMiddleDrag(ctx, dx, dy, 20);
+        await sleep(45);
+        state = await ctx.state();
+        if (!state.nodeBounds[cullTarget.node_id]) {
+          left = true;
+          break;
+        }
+      }
+    }
+    if (!left) throw new Error(`selected node never left the virtualized viewport: ${cullTarget.node_id}`);
+    if ((await ctx.state()).selectedNodeId !== cullTarget.node_id) throw new Error("selection was lost when node left viewport");
+    for (const [dx, dy] of leavePath.reverse()) {
+      await bigMiddleDrag(ctx, -dx, -dy, 20);
+      await sleep(45);
+      state = await ctx.state();
+      if (state.nodeBounds[cullTarget.node_id]) break;
+    }
+    if (!state.nodeBounds[cullTarget.node_id] || state.selectedNodeId !== cullTarget.node_id) {
+      throw new Error("selection was not restored when node re-entered viewport");
+    }
+    await bigClickSelector(ctx, "#source-jump", "source navigation");
+    await ctx.waitFor(async () => String(await ctx.driver.evaluate("location.hash")).startsWith("#span-"), "source navigation hash");
+    if (await ctx.source() !== sourceBefore) throw new Error("source navigation changed generated source");
+
+    const projectPath = await ctx.driver.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll("[data-project-file]")).find((element) => element.getAttribute("data-project-file")?.endsWith("part_10.jet"));
+      return card && card.getAttribute("data-project-file");
+    })()`);
+    if (!projectPath) throw new Error("visible generated project file card missing");
+    await bigFrameMeasure(ctx, "file-switch", async () => {
+      await bigClickProjectFile(ctx, projectPath);
+      await ctx.waitFor(async () => String((await ctx.state()).doc?.source_id || "").endsWith("part_10.jet"), "generated file switch");
+    });
+    const mainPath = await ctx.driver.evaluate(`(() => {
+      const card = Array.from(document.querySelectorAll("[data-project-file]")).find((element) => element.getAttribute("data-project-file")?.endsWith("main.jet"));
+      return card && card.getAttribute("data-project-file");
+    })()`);
+    if (!mainPath) throw new Error("generated entry file card missing after switch");
+    await bigClickProjectFile(ctx, mainPath);
+    await ctx.waitFor(async () => String((await ctx.state()).doc?.source_id || "").endsWith("main.jet"), "generated entry file restore");
+    console.log(`BIG_PROJECT_PERF_BUDGETS ${JSON.stringify({ open_to_interactive_ms: BIG_PROJECT.openBudgetMs, frame_p95_ms: BIG_PROJECT.frameP95BudgetMs, frame_max_ms: BIG_PROJECT.frameMaxBudgetMs, repeated_clean_runs: 2 })}`);
   },
 
   "harness-click-noop-selftest": async (ctx) => {

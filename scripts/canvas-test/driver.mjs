@@ -10,7 +10,7 @@ export class CdpDriver {
   constructor(options = {}) {
     this.chrome = options.chrome || process.env.CHROMIUM || "chromium";
     this.headless = options.headless !== false;
-    this.chromeTempRoot = options.chromeTempRoot || (process.platform === "win32" ? tmpdir() : "/tmp");
+    this.chromeTempRoot = options.chromeTempRoot || process.env.TMPDIR || (process.platform === "win32" ? tmpdir() : "/tmp");
     this.userDataDir = options.userDataDir || null;
     this.child = null;
     this.exited = null;
@@ -271,7 +271,7 @@ export class GeckoDriver {
     this.firefox = options.firefox || process.env.FIREFOX || "firefox";
     this.geckodriver = options.geckodriver || process.env.GECKODRIVER || "geckodriver";
     this.headless = options.headless !== false;
-    this.tempRoot = options.tempRoot || (process.platform === "win32" ? tmpdir() : "/tmp");
+    this.tempRoot = options.tempRoot || process.env.TMPDIR || (process.platform === "win32" ? tmpdir() : "/tmp");
     this.profileRoot = null;
     this.child = null;
     this.exited = null;

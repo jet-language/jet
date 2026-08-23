@@ -42,7 +42,7 @@ machinery.
 | Compiler Results panel + node error bubbles | Jet diagnostics (I4 quality) | build the panel + bubbles (M1) |
 | Function/Macro libraries | ordinary Jet modules + jetpack packages | palette already lists; browsing UX (M3) |
 | Blueprint namespaces (editor perf + visibility) | Jet modules + import surface | palette scoping (M4) |
-| Interfaces panel | Jet traits (projection shipped #316) | surface panel UI (M3) |
+| Interfaces panel | Jet traits (projection shipped #316) | surface panel shipped #380 |
 | Event dispatchers | core.event (projection shipped #311) | surface panel UI (M3) |
 | Call In Editor | `jet run` / `#Test` + Canvas run HUD (#317) | verify interactively (M1) |
 | Variable metadata (instance-editable, tooltips, categories) | doc comments + ratified `#Meta` typed fields (D-CANVASMETA1=B) — implementation remains partial | metadata implementation (M3) |
@@ -127,8 +127,9 @@ The known unfinished graph work, now interaction-verified:
 - Project-wide find/references/rename UI (semindex exists; make the UX real).
 - Review view: git diff panel with per-hunk graph highlight (our answer to
   the BP diff tool — text diff plus graph overlay).
-- Traits panel (implemented/required methods, impl stub creation — #316
-  machinery) and Events panel (core.event dispatchers — #311 machinery).
+- Events panel (core.event dispatchers — #311 machinery); the Traits panel is
+  shipped in #380 with required/default method status, source jumps, checked
+  impl creation, undo/redo, and reload proof.
 - Module/package browser: jetpack deps + core modules as a navigable library
   view with docs.
 - Exit: ecosystem scenario suite + owner script #3.
@@ -152,6 +153,14 @@ The known unfinished graph work, now interaction-verified:
 - `jet dev --canvas-demo` (or equivalent) one-command demo entry.
 - Exit: a new user (owner proxy) goes from `jet new` to a working two-function
   graph program without touching a text editor or any doc outside the tool.
+
+The Canvas onboarding tour slice uses
+`examples/features/tooling/canvas_blueprint_demo.jet` as its source-backed
+project and `tests/canvas_scenarios.rs::canvas_onboarding_tour` as its real
+browser proof. The tour teaches graph reading, source editing, checking,
+running, inspection, and undo. Its state is local editor state; Jet source
+remains the semantic truth. Loading, empty, invalid, offline, and permission
+states keep source recovery or retry actions visible.
 
 ### M6 — Beyond parity (only after M1–M5)
 

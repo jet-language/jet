@@ -833,6 +833,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"graph-back\""));
     assert!(html.contains("id=\"graph-forward\""));
     assert!(html.contains("id=\"source-diff\""));
+    assert!(html.contains("id=\"review-view\""));
+    assert!(html.contains("id=\"review-view-button\""));
+    assert!(html.contains("id=\"review-file-list\""));
+    assert!(html.contains("id=\"review-content\""));
+    assert!(html.contains("id=\"review-refresh\""));
     assert!(html.contains("id=\"edit-source\""));
     assert!(html.contains("id=\"apply-source-edit\""));
     assert!(html.contains("id=\"cancel-source-edit\""));
@@ -946,6 +951,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("sourceControlUrl"));
     assert!(js.contains("loadSourceControl"));
     assert!(js.contains("showSourceDiff"));
+    assert!(js.contains("function renderReview"));
+    assert!(js.contains("function reviewParseDiff"));
+    assert!(js.contains("function drawReviewGraphOverlay"));
+    assert!(js.contains("deleted · no current span"));
+    assert!(js.contains("unprojectable · no current graph span"));
     assert!(js.contains("proofUrl"));
     assert!(js.contains("loadProofRail"));
     assert!(js.contains("__JET_CANVAS_PROOF__"));
@@ -1361,6 +1371,26 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
 
     let helper_src = fs::read_to_string(dir.join("helper.jet")).unwrap();
     let helper_revision = jet::Canvas::source_revision(&helper_src);
+    let helper_command = format!(
+        "{{\"schema_version\":1,\"action_id\":\"canvas.command:check\",\"source_id\":\"helper.jet\",\"revision\":\"{}\"}}",
+        helper_revision
+    );
+    let (status, helper_receipt) =
+        http_post(port, "/canvas/command", &helper_command).expect("POST helper command");
+    assert_eq!(status, 200);
+    let helper_receipt = String::from_utf8_lossy(&helper_receipt);
+    assert!(helper_receipt.contains("\"source_id\":\"helper.jet\""), "{helper_receipt}");
+    assert!(helper_receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"), "{helper_receipt}");
+    let helper_debug = format!(
+        "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"commands\":[\"c\"]}}",
+        helper_revision
+    );
+    let (status, helper_debug_body) =
+        http_post(port, "/canvas/debug", &helper_debug).expect("POST helper debug");
+    assert_eq!(status, 200);
+    let helper_debug_body = String::from_utf8_lossy(&helper_debug_body);
+    assert!(helper_debug_body.contains("\"protocol\":\"jet.canvas.debug\""), "{helper_debug_body}");
+    assert!(helper_debug_body.contains(&format!("\"revision\":\"{}\"", helper_revision)), "{helper_debug_body}");
     let helper_query = format!(
         "{{\"schema_version\":1,\"op\":\"find\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"query\":\"run\"}}",
         helper_revision
@@ -1395,6 +1425,91 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(body.contains("\"writes\":\"preview_only\""), "{body}");
     assert!(body.contains("+    logging: \\\"0.1.0\\\","), "{body}");
     assert!(!fs::read_to_string(dir.join("package.jet")).unwrap().contains("logging"));
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping jet_dev_web_project_queries_round_trip_and_reject_stale_revision (need rustc)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_dev_canvas_project_query_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("app.jet");
+    fs::write(
+        &entry,
+        "fn helper() Int -> {\n    return 1\n}\n\nfn run() {\n    helper()\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("helper.jet"),
+        "fn helper() Int -> {\n    return 2\n}\n\nfn use_helper() {\n    helper()\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"canvas_project_query\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start project query dev server");
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_port(stdout);
+
+    let (status, project) = http_get(port, "/canvas/project").expect("GET project");
+    assert_eq!(status, 200);
+    let project_revision = json_field(&String::from_utf8_lossy(&project), "project_revision");
+    let source = fs::read_to_string(&entry).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let search = format!(
+        "{{\"schema_version\":1,\"op\":\"project_search\",\"source_id\":\"app.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"query\":\"helper\"}}",
+        revision, project_revision
+    );
+    let (status, body) = http_post(port, "/canvas/query", &search).expect("POST project search");
+    assert_eq!(status, 200, "project search response: {}", String::from_utf8_lossy(&body));
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("\"op\":\"project_search\""), "{body}");
+    assert!(body.contains("\"source_id\":\"helper.jet\""), "{body}");
+
+    let references = format!(
+        "{{\"schema_version\":1,\"op\":\"references\",\"source_id\":\"app.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\"}}",
+        revision, project_revision
+    );
+    let (status, body) = http_post(port, "/canvas/query", &references).expect("POST project references");
+    assert_eq!(status, 200);
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("\"op\":\"references\""), "{body}");
+    assert!(body.contains("\"kind\":\"reference\""), "{body}");
+
+    fs::write(
+        dir.join("helper.jet"),
+        "fn helper() Int -> {\n    return 3\n}\n",
+    )
+    .unwrap();
+    let (status, body) = http_post(port, "/canvas/query", &search).expect("POST stale search");
+    assert_eq!(status, 409);
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("\"kind\":\"conflict\""), "{body}");
+    assert!(fs::read_to_string(dir.join("helper.jet")).unwrap().contains("return 3"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);

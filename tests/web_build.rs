@@ -3414,6 +3414,9 @@ fn run() {
         js.contains("navigator.gpu")
             && js.contains("jet_compute_web_call(\"device_webgpu\"")
             && js.contains("await jet_compute_web_call(\"add\"")
+            && js.contains("WebGPU kernel produced a non-finite F32 value")
+            && js.contains("await jet_compute_webgpu_read(output, output_len)")
+            && js.contains("Math.fround")
             && js.contains("backend=webgpu"),
         "WebGPU calls must stay on the browser Prelude rail:\n{js}"
     );

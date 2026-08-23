@@ -107,12 +107,17 @@
     const key = field.key || "value";
     const id = field.id ? ` id="${escapeAttr(field.id)}"` : "";
     const inlineId = field.inlineId ? ` data-inline-id="${escapeAttr(field.inlineId)}"` : "";
-    const attrs = ` data-details-input="${escapeAttr(key)}" data-detail-kind="${escapeAttr(field.kind || "expression")}" data-detail-type="${escapeAttr(field.type || "Value")}"`;
+    const sourceSpan = field.sourceSpan;
+    const spanAttrs = sourceSpan && Number.isFinite(sourceSpan.start) && Number.isFinite(sourceSpan.end)
+      ? ` data-detail-source-start="${sourceSpan.start}" data-detail-source-end="${sourceSpan.end}"`
+      : "";
+    const attrs = ` data-details-input="${escapeAttr(key)}" data-detail-kind="${escapeAttr(field.kind || "expression")}" data-detail-type="${escapeAttr(field.type || "Value")}"${spanAttrs}`;
     let control;
     if (!field.editable) {
       control = `<span class="details-value" data-details-value="${escapeAttr(key)}">${escapeHtml(field.displayValue !== undefined ? field.displayValue : field.source || "")}</span>`;
     } else if (field.kind === "enum" || field.kind === "reference") {
-      const options = (field.options || []).map((option) => `<option value="${escapeAttr(option.source)}"${option.source === field.source ? " selected" : ""}>${escapeHtml(option.name || option.source)}</option>`).join("");
+      const source = String(field.source || "").trim();
+      const options = (field.options || []).map((option) => `<option value="${escapeAttr(option.source)}"${option.disabled ? " disabled" : ""}${option.source === source ? " selected" : ""}>${escapeHtml(option.name || option.source)}</option>`).join("");
       control = `<select${id}${inlineId}${attrs}>${options}</select>`;
     } else if (field.kind === "scalar" && field.type === "Bool") {
       control = `<input${id}${inlineId}${attrs} type="checkbox"${String(field.source).trim() === "true" ? " checked" : ""}>`;
@@ -132,15 +137,20 @@
     return value.trim();
   }
 
-  function enumOptions(type) {
-    return enumVariantsForType(type).map((variant) => ({ name: variant.name, source: variant.source }));
+  function enumOptions(type, source) {
+    const current = String(source || "").trim();
+    const options = enumVariantsForType(type).map((variant) => ({ name: variant.name, source: variant.source }));
+    if (!current) return [{ name: "Select a value…", source: "", disabled: true }, ...options];
+    if (!options.some((option) => option.source === current)) options.unshift({ name: current, source: current });
+    return options;
   }
 
   function referenceOptions(graph, variable, source) {
+    const current = String(source || "").trim();
     const options = graphVariables(graph)
       .filter((candidate) => candidate.name !== variable.name && candidate.type === variable.type)
       .map((candidate) => ({ name: candidate.name, source: candidate.name }));
-    if (source && !options.some((option) => option.source === source)) options.unshift({ name: source, source });
+    if (current && !options.some((option) => option.source === current)) options.unshift({ name: current, source: current });
     return options;
   }
 
@@ -156,8 +166,9 @@
       type: variable.type,
       kind,
       source,
+      sourceSpan: expr && expr.source_span || null,
       value: detailFieldValue({ type: variable.type, kind, source }),
-      options: kind === "enum" ? enumOptions(variable.type) : kind === "reference" ? referenceOptions(graph, variable, source) : [],
+      options: kind === "enum" ? enumOptions(variable.type, source) : kind === "reference" ? referenceOptions(graph, variable, source) : [],
       editable: Boolean(inlineId || variable.source === "input" || expr),
       placeholder: variable.source === "input" && !source ? "optional" : ""
     };

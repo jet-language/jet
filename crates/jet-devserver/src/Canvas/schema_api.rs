@@ -40,7 +40,8 @@ use super::project_transactions::{
 };
 use super::query_actions::{
     canvas_actions, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
-    canvas_preview_rename, canvas_references, canvas_source_to_graph,
+    canvas_preview_rename, canvas_project_find, canvas_project_references, canvas_references,
+    canvas_source_to_graph,
 };
 use super::validation_json::{
     json_bool_field, json_str, json_string_array, json_string_field, json_usize_array,
@@ -80,12 +81,24 @@ pub(super) struct NodeQueryRef {
     pub(super) span: SourceSpan,
 }
 
+/// One source-backed callable that the entry module can actually name.
+///
+/// The semantic ledger owns visibility. Canvas keeps only the source anchor so
+/// the action query cannot mistake every SemIndex function-shaped row for a
+/// palette export (for example a foreign or generated helper).
+#[derive(Debug, Clone)]
+pub(super) struct CanvasCallableExport {
+    pub(super) module_path: String,
+    pub(super) span: SourceSpan,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct Projection {
     pub(super) json: String,
     pub(super) inline_exprs: Vec<InlineExpr>,
     pub(super) graph_anchors: Vec<GraphEditAnchor>,
     pub(super) node_refs: Vec<NodeQueryRef>,
+    pub(super) callable_exports: Vec<CanvasCallableExport>,
 }
 
 #[derive(Default)]
@@ -422,7 +435,13 @@ pub fn apply_project_transaction_json(path: &Path, request: &str) -> Result<Stri
             "Canvas project transaction schema_version must be 1",
         ));
     }
-    let _project_revision = required_project_string(request, "project_revision")?;
+    let project_revision = required_project_string(request, "project_revision")?;
+    if project_revision != ctx.project_revision {
+        return Err(project_edit_error(
+            "conflict",
+            "project changed since this Canvas transaction was drawn",
+        ));
+    }
     let op = required_project_string(request, "op")?;
     let touched = required_project_touched_files(request)?;
     validate_touched_project_files(&ctx, &touched)?;
@@ -489,6 +508,49 @@ pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String>
 pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
     let source_id = json_string_field(request, "source_id");
     let path = resolve_entry_source_path(entry, source_id.as_deref())?;
+    let schema = json_usize_field(request, "schema_version").unwrap_or(0);
+    if schema != QUERY_SCHEMA_VERSION as usize {
+        return Err(query_error(
+            "schema",
+            "Canvas query schema_version must be 1",
+        ));
+    }
+    let op = json_string_field(request, "op");
+    let expected_project_revision = json_string_field(request, "project_revision");
+    if op.as_deref() == Some("project_search") {
+        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let revision = required_query_string(request, "revision")?;
+        if revision != source_revision(&src) {
+            return Err(query_error(
+                "conflict",
+                "source changed since this Canvas graph was drawn",
+            ));
+        }
+        return canvas_project_find(
+            entry,
+            &path,
+            &src,
+            &required_query_string(request, "query")?,
+            expected_project_revision.as_deref(),
+        );
+    }
+    if op.as_deref() == Some("references") {
+        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        let revision = required_query_string(request, "revision")?;
+        if revision != source_revision(&src) {
+            return Err(query_error(
+                "conflict",
+                "source changed since this Canvas graph was drawn",
+            ));
+        }
+        return canvas_project_references(
+            entry,
+            &path,
+            &src,
+            &required_query_string(request, "symbol")?,
+            expected_project_revision.as_deref(),
+        );
+    }
     query_json_for_file(&path, request)
 }
 
@@ -713,7 +775,9 @@ pub fn proof_json_for_entry_with_receipt(
 }
 
 pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
-    let src = fs::read_to_string(entry).map_err(|e| query_error("io", &e.to_string()))?;
+    let source_id = json_string_field(request, "source_id");
+    let source_path = resolve_entry_source_path(entry, source_id.as_deref())?;
+    let src = fs::read_to_string(&source_path).map_err(|e| query_error("io", &e.to_string()))?;
     let revision = required_string(request, "revision")?;
     if revision != source_revision(&src) {
         return Err(query_error(
@@ -722,10 +786,14 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
         ));
     }
     let action_id = required_string(request, "action_id")?;
-    let source = entry
+    let source = source_path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(jet_driver::Syntax::DEFAULT_ENTRY_FILE);
+    let source_label = source_id.clone().unwrap_or_else(|| {
+        let ctx = project_context_for_entry(entry);
+        rel_path(&ctx.project_root, &source_path)
+    });
     let (label, args, writes, requires_confirmation) = match action_id.as_str() {
         "canvas.command:run" => ("Run program", vec!["run", source], "none", false),
         "canvas.command:check" => ("Check project", vec!["check", source], "none", false),
@@ -748,10 +816,10 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
     let check_src = source_override.as_deref().unwrap_or(&src);
     let check_revision = source_revision(check_src);
     let (success, exit_code, stdout, stderr, diagnostics) = if action_id == "canvas.command:check" {
-        let abs = canonical_path(entry);
+        let abs = canonical_path(&source_path);
         let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
         let (diags, _bundle, _facts) =
-            jet_driver::Driver::check_file_with_effect_facts(&entry.display().to_string(), overlay, true);
+            jet_driver::Driver::check_file_with_effect_facts(&source_path.display().to_string(), overlay, true);
         let errors: Vec<Diagnostic> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)
@@ -764,12 +832,12 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
                 false,
                 Some(1),
                 String::new(),
-                jet_driver::Diagnostics::render_all(&entry.display().to_string(), check_src, &errors),
-                diagnostics_json(entry, check_src, &errors),
+                jet_driver::Diagnostics::render_all(&source_path.display().to_string(), check_src, &errors),
+                diagnostics_json(&source_path, check_src, &errors),
             )
         }
     } else {
-        let output = run_jet_command(entry, &args)?;
+        let output = run_jet_command(&source_path, &args)?;
         (
             output.status.success(),
             output.status.code(),
@@ -787,9 +855,10 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
         .collect::<Vec<_>>()
         .join(",");
     Ok(format!(
-        "{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{},\"title\":{},\"revision\":{},\"checked_revision\":{},\"command\":[{}],\"writes\":{},\"success\":{},\"exit_code\":{},\"elapsed_ms\":{},\"stdout\":{},\"stderr\":{},\"diagnostics\":[{}]}}",
+        "{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{},\"title\":{},\"source_id\":{},\"revision\":{},\"checked_revision\":{},\"command\":[{}],\"writes\":{},\"success\":{},\"exit_code\":{},\"elapsed_ms\":{},\"stdout\":{},\"stderr\":{},\"diagnostics\":[{}]}}",
         json_str(&action_id),
         json_str(label),
+        json_str(&source_label),
         json_str(&revision),
         json_str(&check_revision),
         command,
@@ -1107,6 +1176,13 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
         }
         _ => Err(edit_error("unsupported", "unknown Canvas edit operation")),
     }
+}
+
+/// Run the debugger against the source selected by a project-relative id.
+pub fn debug_session_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    let source_id = json_string_field(request, "source_id");
+    let path = resolve_entry_source_path(entry, source_id.as_deref())?;
+    debug_session_json_for_file(&path, request)
 }
 
 /// Run one source-level debugger slice and project it onto Canvas graph spans.

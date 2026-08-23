@@ -54,11 +54,36 @@
     return "jet.canvas.editor:" + ((doc && doc.source_id) || "source");
   }
 
+  function sourceDraftKey(doc) {
+    return "jet.canvas.source-draft:" + ((doc && doc.source_id) || "source");
+  }
+
+  function readSourceDraft(doc) {
+    try {
+      const value = localStorage.getItem(sourceDraftKey(doc));
+      return value === null ? null : value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveSourceDraft(text) {
+    if (!latestDoc) return;
+    try { localStorage.setItem(sourceDraftKey(latestDoc), String(text || "")); }
+    catch (_) {}
+    setSaveState("local draft", "draft");
+  }
+
+  function clearSourceDraft(doc = latestDoc) {
+    try { localStorage.removeItem(sourceDraftKey(doc)); }
+    catch (_) {}
+  }
+
   function loadEditorState(doc) {
     try {
       editorState = JSON.parse(localStorage.getItem(projectStateKey(doc)) || "null") || editorState;
     } catch (_) {
-      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
+      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false, tourStep: 0 };
     }
     editorState.bookmarks ||= [];
     editorState.favorites ||= [];
@@ -69,7 +94,9 @@
     editorState.stagedNodes ||= [];
     editorState.stagedWires ||= [];
     editorState.tourDismissed = !!editorState.tourDismissed;
-    if (firstRunTour) firstRunTour.classList.toggle("is-open", !editorState.tourDismissed);
+    editorState.tourStep = Number.isFinite(Number(editorState.tourStep)) ? Number(editorState.tourStep) : 0;
+    if (typeof renderTour === "function") renderTour();
+    else if (firstRunTour) firstRunTour.classList.toggle("is-open", !editorState.tourDismissed);
   }
 
   function saveEditorState() {
@@ -238,6 +265,10 @@
         pure: !!action.pure,
         pins: action.pins || [],
         ret: action.ret || actionReturnType(action) || "",
+        stageable: !!action.stageable,
+        stage_reason_code: action.stage_reason_code || "",
+        stage_reason: action.stage_reason || "",
+        receiver_type: action.receiver_type || "",
         type: action.type || "",
         callee: action.callee || "",
         insert_callee: action.insert_callee || action.callee || "",
@@ -621,7 +652,21 @@
       || null;
     if (!run) {
       runHud.textContent = "run permission loading";
-      loadCanvasActions();
+      loadCanvasActions().then(() => {
+        const ready = actionEntries.find((item) => item.action_id === "canvas.command:run")
+          || actionEntries.find((item) => item.action_id === "canvas.command:dev");
+        if (ready) renderCommandAuthority(ready);
+        else setCanvasState("permission", "Run is unavailable", "Canvas could not load run authority. Jet source stays unchanged; retry the action catalog.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: runCurrentGraph }
+        ]);
+      }).catch((error) => {
+        setCanvasState("error", "Run is unavailable", "Canvas could not load run authority. Jet source stays unchanged.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: runCurrentGraph }
+        ]);
+        showToast(String(error), { isError: true });
+      });
       return;
     }
     renderCommandAuthority(run);
@@ -637,34 +682,68 @@
     runHud.textContent = item.available ? runState.last : (item.denied_reason || "command unavailable");
     runHud.classList.remove("is-running");
     window.__jetCanvasRunLoop = { graph_id: selectedGraphId, state: "authority_required", action_id: item.action_id, command: item.command || [] };
-    details.innerHTML = `<h2>Command</h2><div class="signature-source"><code>${escapeHtml(command)}</code><span>${escapeHtml(item.writes || "none")} · ${item.requires_confirmation ? "confirmation required" : "read-only"}</span><button id="execute-command-authority">Run</button></div><div class="inline-row dev-only"><b>Permissions</b><code>${escapeHtml((item.authority || []).join("\n"))}</code></div>`;
+    details.innerHTML = `<h2>Command</h2><div class="signature-source"><code>${escapeHtml(command)}</code><span>${escapeHtml(item.writes || "none")} · ${item.requires_confirmation ? "confirmation required" : "read-only"}</span><button id="execute-command-authority"${item.available ? "" : " disabled"}>${item.available ? "Run" : "Unavailable"}</button></div><div class="inline-row dev-only"><b>Permissions</b><code>${escapeHtml((item.authority || []).join("\n"))}</code></div>`;
+    setDrawer("details");
     const execute = document.getElementById("execute-command-authority");
     if (execute) execute.addEventListener("click", () => executeCommandAuthority(item));
+    if (item.available) {
+      if (window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === "permission") clearCanvasState();
+    } else {
+      setCanvasState("permission", "Permission needed", `${item.title}: ${item.denied_reason || "This command is unavailable here."} Jet source stays unchanged.`, [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Try again", primary: true, run: () => renderCommandAuthority(item) }
+      ]);
+    }
     showToast(item.available ? item.title + " ready" : item.denied_reason || "Command unavailable");
     loadProofRail();
   }
 
   function executeCommandAuthority(item) {
-    if (!latestDoc || !item || !item.available) return;
+    if (!latestDoc || !item) return;
+    if (!item.available) {
+      setCanvasState("permission", "Permission needed", `${item.title}: ${item.denied_reason || "This command is unavailable here."} Jet source stays unchanged.`, [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Try again", primary: true, run: () => renderCommandAuthority(item) }
+      ]);
+      return;
+    }
     const confirmed = !item.requires_confirmation || window.confirm(item.title + " writes " + (item.writes || "outputs") + ". Continue?");
     if (!confirmed) return;
-    const body = { schema_version: 1, revision: latestDoc.revision, action_id: item.action_id, confirmed };
+    const requestedRevision = latestDoc.revision;
+    const requestedSourceId = selectedSourceId || latestDoc.source_id || null;
+    const body = { schema_version: 1, revision: requestedRevision, action_id: item.action_id, confirmed };
+    if (requestedSourceId) body.source_id = requestedSourceId;
     if (item.action_id === "canvas.command:check") body.source_text = sourceEditMode && sourceEditor ? sourceEditor.value : (latestDoc.source_text || "");
     runHud.textContent = item.title + " running";
     runHud.classList.add("is-running");
     fetch(commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((json) => ({ ok: r.ok, json })))
       .then((result) => {
+        if (latestDoc && (latestDoc.revision !== requestedRevision || (selectedSourceId || latestDoc.source_id || null) !== requestedSourceId)) {
+          runHud.classList.remove("is-running");
+          showToast("Command result is stale; current source was kept", { isError: true });
+          return;
+        }
         runHud.classList.remove("is-running");
         const doc = result.json || {};
         runHud.textContent = doc.success ? item.title + " passed" : item.title + " failed";
         details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "success" : "failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
         if (doc.action_id === "canvas.command:check") acceptDiagnosticsPayload(doc, "Check");
+        if (!doc.success) setCanvasState("error", item.title + " failed", "Jet source was not changed. Read the receipt, fix the source if needed, then retry.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => renderCommandAuthority(item) }
+        ]);
+        else if (doc.action_id !== "canvas.command:check") clearCanvasState();
         loadProofRail();
       })
       .catch((e) => {
         runHud.classList.remove("is-running");
         runHud.textContent = item.title + " failed";
+        setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : item.title + " failed", "Jet source stays visible and unchanged. Retry when the connection is ready.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => renderCommandAuthority(item) }
+        ]);
+        setSaveState("source unchanged", "error");
         showToast(String(e));
       });
   }
@@ -680,6 +759,19 @@
       available: true
     };
     executeCommandAuthority(item);
+  }
+
+  function showCheckAuthority() {
+    if (!latestDoc) return;
+    const item = actionEntries.find((entry) => entry.action_id === "canvas.command:check") || {
+      action_id: "canvas.command:check",
+      title: "Check project",
+      command: ["jet", "check"],
+      writes: "none",
+      requires_confirmation: false,
+      available: true
+    };
+    renderCommandAuthority(item);
   }
 
   function setDeveloperMode(on) {

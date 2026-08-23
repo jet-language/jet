@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 42986,
+    "rev": 42989,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60991,8 +60991,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:33.991Z",
-      "updated": "2026-08-23T08:42:34.355Z",
-      "updatedBy": "Main",
+      "updated": "2026-08-23T16:34:21.264Z",
+      "updatedBy": "codex",
       "tags": [],
       "parentId": null
     },
@@ -127820,8 +127820,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:11.431Z",
-      "updated": "2026-08-23T01:11:13.469Z",
-      "updatedBy": "mse5"
+      "updated": "2026-08-23T16:33:20.493Z",
+      "updatedBy": "codex"
     },
     {
       "id": "c0eexc32",
@@ -127876,8 +127876,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:13.293Z",
-      "updated": "2026-08-23T07:52:09.481Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-23T16:33:53.298Z",
+      "updatedBy": "codex"
     },
     {
       "id": "c0i0wm0m",
@@ -189428,6 +189428,230 @@
       "created": "2026-08-23T12:50:57.938Z",
       "outcome": "D",
       "ratifiedAt": "2026-08-23"
+    },
+    {
+      "id": "D-1912-NAME1",
+      "cardId": "c0jmdp7v",
+      "group": "safety",
+      "title": "Registry name thresholds and near-match action",
+      "gist": "Choose the registry thresholds and response for names that resemble an existing package.",
+      "lesson": "The publish gate already folds case and common Unicode lookalikes into a skeleton. It blocks exact confusable matches and reserved suffixes. The owner must set distance bands, warning behavior, and tier scope.",
+      "explainer": "",
+      "story": "Nora maintains the curated registry. A package called `librewolf-fixed-bin` arrives beside `librewolf`. She needs a rule that stops an attack without rejecting ordinary names.",
+      "inWild": "registry names: [librewolf, cargo]\ncandidate: librewolf-fixed-bin\nresult: refuse E2608 reserved suffix -bin\ncandidate: cagro\nreference: cargo\ndistance: 2\nresult: warn L2608 and allow publish",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Uniform warn then block",
+          "detail": "Set block distance to 1 and warning distance to 2. Block exact confusable matches and reserved suffixes. Show a warning at distance 2 but allow publish. Apply the same rule to core and community.",
+          "technical": "Use Levenshtein distance over the case-folded confusable skeleton. Distances 0 and 1 refuse. Distance 2 warns and allows. Distance 3 or more allows. Core review remains an additional gate.",
+          "code": "candidate: cagro\nreference: cargo\ndistance: 2\ncore: warning, publish allowed\ncommunity: warning, publish allowed"
+        },
+        {
+          "key": "B",
+          "name": "Block the warning band",
+          "detail": "Set block distance to 2 and warning distance to 3. Block exact confusable matches, reserved suffixes, and distances 1 or 2. Warn at distance 3. Apply the same rule to both tiers.",
+          "technical": "Use Levenshtein distance over the same skeleton. Distances 0, 1, and 2 refuse. Distance 3 warns and allows. Distance 4 or more allows.",
+          "code": "candidate: cagro\nreference: cargo\ndistance: 2\ncore: refuse E2608\ncommunity: refuse E2608"
+        },
+        {
+          "key": "C",
+          "name": "Human confirmation band",
+          "detail": "Set block distance to 1 and warning distance to 2. Block exact confusable matches and reserved suffixes. Require a named maintainer confirmation for a core distance-two name. Refuse a community distance-two name because that tier has no human review.",
+          "technical": "The core confirmation uses the existing review receipt and records the reviewed name pair. Community keeps distance 2 closed. This creates one extra tier-specific rule.",
+          "code": "candidate: cagro\nreference: cargo\ndistance: 2\ncore: publish after named review\ncommunity: refuse E2608"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unicode confusable practice",
+          "note": "A confusable skeleton turns visual lookalikes into one comparison form. Jet already uses this idea in the publish gate.",
+          "code": "librewоlf -> librewolf"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the shipped warn-then-block flow, blocks the clearest attacks, and gives both tiers one predictable name rule. Core review remains an extra check.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B blocks more legitimate names because distance two is common in short names. It also leaves less room for the curated review step."
+          },
+          {
+            "key": "C",
+            "reason": "C creates two answers for the same name and adds a confirmation record that the current gate does not define."
+          }
+        ],
+        "tradeoff": "A permits a distance-two name after a visible warning. That leaves residual typosquat risk, but it limits false rejects and preserves the built policy flow."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The draft compared uniform thresholds, a stricter block band, and a tier-specific review band. It recommended the current warn=2 and block=1 behavior.",
+        "boilOcean": "The breadth pass tested no distance rule, a package allowlist, and a manual review for every near-match. Those choices either weaken the safety wall or add a second policy mechanism.",
+        "hybrid": "The hybrid pass paired strict community blocking with core review. It kept that design as an option, but rejected it as the default because the tiers would teach different name laws.",
+        "cooperative": "Cooperative review strengthened each option. A stays simple, B maximizes collision blocking, and C uses the existing core review receipt for its human confirmation band.",
+        "adversarial": "Adversarial review tested short names, Unicode lookalikes, reserved suffixes, and a two-edit typosquat. A still leaves distance-two risk, so the ballot records that cost for the owner."
+      },
+      "checkInstructions": "After ratification, make Source/Publish/NamePolicy.rs and docs/spec/registry-tiers.md match the selected rule.",
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-23T16:33:20.493Z"
+    },
+    {
+      "id": "D-1913-LIVENESS1",
+      "cardId": "c0eexc32",
+      "group": "safety",
+      "title": "Maintainer dormancy and package takeover rules",
+      "gist": "Choose when a maintainer is dormant and how the registry handles a takeover.",
+      "lesson": "The registry already exposes liveness and rejects a changed signing key without review and a new signature. It lacks time, evidence, notice, approval, and objection rules. These rules decide whether authors keep control or users keep a safe package.",
+      "explainer": "",
+      "story": "Ilya maintains a small package in spare time. A security fix is needed after months of silence, but an unknown publisher asks to take the name. The registry needs a fair path.",
+      "inWild": "package: image-tools\nlast signed release: 2026-01-01\nlast signed response: 2026-01-01\nrequest date: 2026-07-01\nnotice: 30 days\napproval: 2 independent registry maintainers\nactive objection: blocks ordinary takeover\nverified compromise: 3-maintainer security override\nresult: takeover may enter after a new-key signature",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Six-month structured takeover",
+          "detail": "Mark a package dormant after 180 days without a signed release or liveness response. Require two recorded contact attempts, a verified requester identity, a new signing key, and a maintenance plan. Give the maintainer 30 days notice. Let two independent registry maintainers approve the takeover. An active objection blocks ordinary reclaim, with a narrow security override for proven key compromise or active malicious release.",
+          "technical": "Dormancy starts 180 days after the last signed release or signed liveness response. Contact evidence must name dates, channels, and results. The requester cannot approve their own request. A security override needs three independent maintainers, recorded evidence, and an appeal path.",
+          "code": "dormant_after: 180 days\ncontact_evidence: 2 attempts on 2 channels\nnotice: 30 days\napproval: 2 independent maintainers\nactive objection: blocks ordinary reclaim\nsecurity override: 3-maintainer finding"
+        },
+        {
+          "key": "B",
+          "name": "Fast safety takeover",
+          "detail": "Mark a package dormant after 90 days without a signed release or response. Require one recorded contact attempt and 14 days notice. Let one registry maintainer approve a takeover when the requester gives a new key and a maintenance plan. Permit reclaim over an objection when the package has a critical security issue.",
+          "technical": "Dormancy starts at 90 days. One maintainer signs the decision. A critical security issue can override an active objection after the notice period. The registry records the reason and the old key.",
+          "code": "dormant_after: 90 days\ncontact_evidence: 1 attempt\nnotice: 14 days\napproval: 1 registry maintainer\nactive objection: may lose to critical security need"
+        },
+        {
+          "key": "C",
+          "name": "Rights-first no forced reclaim",
+          "detail": "Mark a package dormant after 365 days without a signed release or response. Require three contact attempts and 90 days notice. Let three independent registry maintainers approve a voluntary transfer only. Never reclaim the package against an active maintainer objection. A new maintainer must publish under a new name when transfer fails.",
+          "technical": "Dormancy starts at 365 days. A valid objection blocks every takeover path. The registry can show a dormant warning and can suspend a malicious release, but it cannot transfer the package name without consent.",
+          "code": "dormant_after: 365 days\ncontact_evidence: 3 attempts\nnotice: 90 days\napproval: 3 independent maintainers\nactive objection: always blocks reclaim\nfallback: publish under a new name"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Registry maintainer practice",
+          "note": "A signed key anchors release authority. A separate review record gives the registry a place to record a transfer and its evidence.",
+          "code": "old key -> notice -> review -> new key"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives a volunteer maintainer time to return, gives the requester a clear evidence burden, and needs two independent approvals. Its security override stays narrow.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can reclaim too quickly after travel, illness, or a missed contact. One approver also makes capture easier."
+          },
+          {
+            "key": "C",
+            "reason": "C protects ownership best, but abandoned packages can remain unsafe and users must move to a new name."
+          }
+        ],
+        "tradeoff": "A makes a safe transfer slower and requires maintainers to keep contact records. It accepts that cost to reduce false takeovers while preserving an emergency safety path."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The draft compared a six-month process, a fast safety process, and a rights-first process. It recommended six months with two approvals and a narrow security override.",
+        "boilOcean": "The breadth pass tested automatic transfer, paid arbitration, and a community vote. Those choices add unclear authority or invite capture, so the ballot keeps registry maintainers responsible.",
+        "hybrid": "The hybrid pass combined the long dormancy period from C with the security override from A. It kept that stronger delay as a possible owner edit, but retained A for a usable default.",
+        "cooperative": "Cooperative review strengthened every option. A protects volunteers and users, B serves urgent fixes, and C gives authors the strongest ownership wall.",
+        "adversarial": "Adversarial review tested lost contact, maintainer illness, hostile requests, key compromise, and malicious releases. A needs recorded evidence and two approvals, while its override handles the narrow emergency case."
+      },
+      "checkInstructions": "After ratification, make the liveness record, takeover review, and docs/spec/registry-tiers.md match the selected rule.",
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-23T16:33:53.298Z"
+    },
+    {
+      "id": "D-PLATFORM-EVIDENCE1",
+      "cardId": "c0uy7emy",
+      "group": "tooling",
+      "title": "Evidence rule for unavailable native platforms",
+      "gist": "Choose the evidence that closes a platform-gated criterion when this host lacks the platform.",
+      "lesson": "Four cards need native proof that Linux cannot run. The workflow has generic Linux, macOS, and Windows jobs. It has no named job for the AppContainer, ConPTY, agent corpus, or process-session criteria. The owner must choose whether CI, exclusions, or open criteria count.",
+      "explainer": "",
+      "story": "Mara runs the closeout wave on Linux. The code and tests are ready, but Windows and a second native host are absent. She needs a board rule that stays honest after the wave ends.",
+      "inWild": "cards and native surfaces:\n#891 c4: Windows AppContainer\n#1182 c6: Windows ConPTY\n#1173 c6: Linux and macOS agent corpus\n#1186 c6: native process fixtures\nlocal host: linux-x86_64\nlocal result: platform unavailable",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named CI proof",
+          "detail": "Close a criterion only when a named CI job runs the real production path on the named platform and passes. Record the run URL, commit, job name, and uploaded report on the card. This is cheap after CI exists, but it depends on retained CI history. The current workflow has no matching job for these four criteria, so this rule is aspirational for them today.",
+          "technical": "The generic `jetpack-platform` matrix at `.github/workflows/ci.yml:54-65` proves host runners only. Its steps at `.github/workflows/ci.yml:70-88` do not name `tests/build_sandbox.rs`, the ConPTY criterion, `agent-workload-gate.sh`, or the process fixture matrix.",
+          "code": "job: windows-appcontainer\nrunner: windows-latest\nchecks: tests/build_sandbox.rs\ncriterion: #891 c4\nstatus: pass\ncard evidence: run 123 and appcontainer-report"
+        },
+        {
+          "key": "B",
+          "name": "Per-platform explicit exclusion",
+          "detail": "Record one exclusion for each missing platform and close the criterion here. Name the host limit, the missing platform, and the event that reopens the criterion. This moves the wave forward, but it treats unrun behavior as accepted absence and can hide a regression.",
+          "technical": "An exclusion is owner-ratified evidence of unavailable hardware. It is not a passing test. The card must name a concrete reopen trigger such as the first reachable Windows runner.",
+          "code": "card: #891\nplatform: windows\nstatus: excluded-here\nreopen: first reachable Windows runner\nevidence: owner-ratified platform exclusion"
+        },
+        {
+          "key": "C",
+          "name": "Open criteria with epoch carve-out",
+          "detail": "Keep each platform row open until hardware or CI proof exists. The epoch may close with a named carve-out for the open rows, but the cards keep their criteria open. This preserves truth and makes the gap visible, but the epoch cannot claim full platform completion.",
+          "technical": "The carve-out names every card, platform, missing proof, and owner. It does not convert an open criterion into passing evidence. Later native proof reopens the closeout path.",
+          "code": "criterion: #1182 c6\nstatus: open\nplatform: windows\nproof: unavailable on this host\nepoch note: named carve-out"
+        },
+        {
+          "key": "D",
+          "name": "Native rows with pass or exclusion",
+          "detail": "Split each criterion into platform rows. A matching CI pass closes a row. An owner-ratified exclusion may close only a row that the owner names, and it must keep an expiry or reopen trigger. Generic host jobs never close a native row.",
+          "technical": "A card closes when every row is either a matching CI pass or an owner-ratified exclusion. The report keeps pass, excluded, and open distinct. A newly reachable platform reopens its excluded row.",
+          "code": "criterion: #1173 c6\nlinux: ci-pass\nmacos: ci-pass\nwindows: excluded-here\nreopen: first Windows corpus runner\ncard result: owner-ratified mixed evidence"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "GitHub Actions matrix",
+          "note": "A matrix names runners, but a runner name alone does not prove that a card-specific test ran. The job step must name the production proof.",
+          "code": "matrix.os: [ubuntu-latest, macos-latest, windows-latest]"
+        }
+      ],
+      "rec": "D",
+      "recommendation": {
+        "why": "D separates real platform proof from host availability and gives the owner a visible exception path. It prevents generic CI jobs from closing native criteria by accident.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A is the clean long-term rule, but no current job matches these four criteria, so it cannot resolve this wave."
+          },
+          {
+            "key": "B",
+            "reason": "B closes unrun behavior as if absence were enough. A later regression could remain hidden until the platform returns."
+          },
+          {
+            "key": "C",
+            "reason": "C is the most conservative, but it leaves every card open and gives the epoch no useful completion signal."
+          }
+        ],
+        "tradeoff": "D adds platform rows and owner records. That board work is accepted because it keeps pass, exclusion, and missing proof distinct."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The draft compared CI proof, explicit exclusion, and an open criterion with an epoch carve-out. It added a row-based option to make mixed platform evidence precise.",
+        "boilOcean": "The breadth pass tested local mocks, hosted manual screenshots, and a single aggregate green result. Those choices cannot prove native behavior or show which platform is missing.",
+        "hybrid": "The hybrid pass combined CI proof with an explicit exclusion that never becomes a pass. It became option D, with a reopen trigger for every excluded row.",
+        "cooperative": "Cooperative review strengthened each option. A gives durable automation, B gives fast closure, C gives the strongest truth signal, and D gives precise mixed status.",
+        "adversarial": "Adversarial review tested generic jobs, stale CI links, unavailable runners, and later platform reachability. D survives because generic jobs do not count and exclusions reopen."
+      },
+      "checkInstructions": "After ratification, apply the selected evidence rule to #891, #1182, #1173, and #1186 without changing implementation in this ballot.",
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-23T16:34:21.264Z"
     }
   ],
   "questions": [
@@ -191255,6 +191479,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-23T16:34:21.264Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-PLATFORM-EVIDENCE1",
+      "note": "Evidence rule for unavailable native platforms"
+    },
+    {
+      "at": "2026-08-23T16:33:53.298Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-1913-LIVENESS1",
+      "note": "Maintainer dormancy and package takeover rules"
+    },
+    {
+      "at": "2026-08-23T16:33:20.493Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-1912-NAME1",
+      "note": "Registry name thresholds and near-match action"
+    },
     {
       "at": "2026-08-23T16:22:16.814Z",
       "by": "Main",
@@ -194732,27 +194977,6 @@
       "by": "mse9",
       "action": "card.update",
       "ref": "c0ptq2fy",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:57:17.973Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0fttoym",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:57:16.408Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c09hoi6l",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:57:15.708Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0i0ho3h",
       "note": "milestoneId"
     }
   ],
