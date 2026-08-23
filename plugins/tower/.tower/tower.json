@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 42825,
+    "rev": 42887,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24411,7 +24411,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m06-safe-agent-execution",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nShip D-AGENT-EXEC1=A: one `Authority` model on `core.process` with safe workspace defaults, exact expert grants, dry-run plans, and redacted receipts. Application-facing consumer of #398/#893 native isolation — not a second sandbox.\n\n## Law (ratified)\n- Extend `ProcessSpec` / `ProcessChild`; no parallel agent executor or shell DSL.\n- Workspace constructor: useful read-only repo + private build writes; deny network, home, secrets, devices, inherited handles by default.\n- Experts widen exact rights on the same object (write paths, hosts, secrets, executables, limits).\n- Resolve executable identity before review; bind identity + policy + inputs + backend into one launch transaction.\n- Plan and receipt share a policy digest; unsupported enforcement fails closed before spawn.\n- CLI (`jet self exec --workspace …`) and MCP tools use the same engine.\n- Integrate D-WD1 grant graph and D-WD2 dossier facts for denied attempts, descendants, limits, outputs, redaction.\n\n## Scope\nIn: `Authority` API, workspace defaults, plan/receipt, CLI parity, grant/dossier wiring, hostile tests once #893 corpus is available.\nOut: building the isolation engine itself (#398 family); MCP protocol SDK (#768+); interactive terminal naming (#771 / D-PROCESS-SESSION2).\n\n## Owned paths\n- process corelib + jetpack runtime policy seams referenced on the card\n- CLI exec surface\n- hostile corpus consumption from #893 / #398\n- docs/reference/core-library.md, architecture notes, diagnostics as needed\n- focused success/failure/hostile/integration tests\n\n## Steps\n1. Confirm #398 engine + #893 shared hostile corpus are the only enforcement backends; fail closed when a grant cannot be enforced on the host.\n2. Add `process.workspace()` and exact grant builders on `ProcessSpec.under(policy)`.\n3. Implement dry-run `plan()` and final receipt with shared digest; redact secrets.\n4. Wire denied-attempt and tree facts into the existing grant/dossier path.\n5. CLI parity for workspace and expert grants.\n6. Hostile tests: ambient authority denied; TOCTOU bind; full-tree cleanup; API/CLI parity.\n7. Independent review against criteria.\n\n## Acceptance / proof\nExisting criteria 1–3. Proof: focused process/authority tests + hostile corpus cases; dossier facts visible via `jet inspect` where applicable.\n\n## Blockers\nblockedBy: #893 (and through it the #398 isolation delivery). D-AGENT-EXEC1 ratified (=A) — decision id kept for audit trail only; it does not block.\n",
       "blockedBy": [
@@ -24476,38 +24476,38 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.342Z"
+          "evidence": "evidence: passing authority, executor, hostile-corpus tests; CLI smoke output cli [lane y770]",
+          "at": "2026-08-23T07:52:12.126Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.342Z"
+          "evidence": "evidence: ProcessPolicy.rs:263-345,451-479; Process.rs:221-298,362-391 [lane y770]",
+          "at": "2026-08-23T07:52:13.231Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.342Z"
+          "evidence": "evidence: hostile filesystem, cancellation, scoped-network, redaction, and corpus tests passed [lane y770]",
+          "at": "2026-08-23T07:52:13.560Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:01.342Z"
+          "evidence": "evidence: focused production-path tests passed [lane y770]",
+          "at": "2026-08-23T07:52:13.905Z"
         },
         {
           "n": 5,
@@ -24521,20 +24521,20 @@
         {
           "n": 6,
           "text": "plan() on the authority object returns the exact executable identity, policy, inputs, and backend the launch transaction would bind, without spawning anything.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:41.305Z"
+          "evidence": "evidence: ProcessPolicy.rs:351-385,451-489; plan/exact-grant tests passed [lane y770]",
+          "at": "2026-08-23T07:52:14.250Z"
         },
         {
           "n": 7,
           "text": "Plan and final receipt carry the same policy digest (receipt implementation itself is #1179's).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:41.739Z"
+          "evidence": "evidence: ProcessPolicy.rs:336-345; digest parity test passed [lane y770]",
+          "at": "2026-08-23T07:52:14.616Z"
         },
         {
           "n": 8,
@@ -24548,11 +24548,11 @@
         {
           "n": 9,
           "text": "Targeted tests prove plan-vs-receipt digest equality and that a plan run creates no process.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:42.817Z"
+          "evidence": "evidence: tests/authority.rs:125-152; no-spawn and digest tests passed [lane y770]",
+          "at": "2026-08-23T07:52:14.982Z"
         }
       ],
       "refs": [
@@ -24565,11 +24565,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-08-23T06:12:45.819Z",
+      "updated": "2026-08-23T07:52:15.696Z",
       "workOrder": 1660,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:15.696Z"
     },
     {
       "id": "c0ft6gme",
@@ -35015,7 +35016,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m02-sandbox-proof",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Build sandbox: substitute-first and fail-closed policy** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/Recipe.rs, crates/jetpack/src/CLI/trust_env_build.rs, crates/jetpack/src/CLI/services_secrets_config.rs, crates/jetpack/src/Trust.rs, tests/build_sandbox.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the same native isolation substrate and hostile corpus as hermetic builds and agent execution. Claims must match enforcement on each platform.\n6. Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 7 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -35039,20 +35040,20 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.047Z"
+          "evidence": "evidence: Recipe.rs:1662, Provider.rs:1832, Store.rs:2091; production output reports substitution or refuses. [lane y892]",
+          "at": "2026-08-23T07:52:18.221Z"
         },
         {
           "n": 2,
           "text": "Declared filesystem, process, network, environment, device, and resource policy is enforced and recorded by the actual platform backend.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.047Z"
+          "evidence": "evidence: ProcessSandbox.rs:36, ProcessWindowsSandbox.rs:1044; receipt tests passed. [lane y892]",
+          "at": "2026-08-23T07:52:19.448Z"
         },
         {
           "n": 3,
@@ -35066,29 +35067,29 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.047Z"
+          "evidence": "evidence: 1 substituted; build sandbox outcome: trusted substitution (no local executable launched); refusal emitted E1275. [lane y892]",
+          "at": "2026-08-23T07:52:20.874Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.047Z"
+          "evidence": "evidence: RuntimePolicy.rs:454, docs/plans/epoch-4/world-class-package-manager.md:310, docs/spec/diagnostics.md:2052. [lane y892]",
+          "at": "2026-08-23T07:52:22.177Z"
         },
         {
           "n": 6,
           "text": "When native isolation is unavailable on the host, the build takes the ratified D-JPK-SANDBOX2=D substitute-first/fail-closed path: the chosen outcome (substitute or refusal) is recorded in build output and receipts, no advisory-only or silently-degraded mode exists, and a test proves an unenforceable declaration never yields an unsandboxed local build.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:35:22.908Z"
+          "evidence": "evidence: unavailable backend emitted L0205 then E1275; substitution output recorded the non-local outcome. [lane y892]",
+          "at": "2026-08-23T07:52:23.197Z"
         }
       ],
       "refs": [
@@ -35105,8 +35106,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:39.259Z",
-      "updated": "2026-08-23T01:01:56.965Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T07:52:23.930Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -60249,11 +60250,11 @@
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.554Z"
+          "evidence": "evidence: policy contract tests/agent_workloads/policy.tsv:1-8; digest/receipt wiring tests/agent_workloads.rs:474-492, 2010-2043. [lane y1165]",
+          "at": "2026-08-23T07:52:24.538Z"
         },
         {
           "n": 3,
@@ -60285,11 +60286,11 @@
         {
           "n": 6,
           "text": "The corpus contains frozen tasks covering repository discovery, search, semantic inspection, edits/patches, and Git; each task carries frozen inputs, expected outcome, allowed dependencies, machine spec, and scoring per #769's shipped schema; hostile variants included; every task executes under the existing harness with no new runner.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:35:14.054Z"
+          "evidence": "evidence: frozen rows tests/agent_workloads/manifest.tsv:2-7; contracts tests/agent_workloads/domain_contract.tsv:22-27; harness tests/agent_workloads.rs:1893-2008. [lane y1165]",
+          "at": "2026-08-23T07:52:24.896Z"
         }
       ],
       "refs": [
@@ -60299,7 +60300,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:29.791Z",
-      "updated": "2026-08-23T06:12:57.952Z",
+      "updated": "2026-08-23T07:52:24.896Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -60313,7 +60314,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60342,38 +60343,38 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.802Z"
+          "evidence": "evidence: build_test_recovery.jet:16, process_batch.jet:24, tests/agent_workloads.rs:1871 [lane y1166]",
+          "at": "2026-08-23T07:52:25.734Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.803Z"
+          "evidence": "evidence: tests/agent_workloads.rs:477, :1141, :1890, :2026; shared digest 32dda970174e8b48d2419f1bc4432520d424d34785ad79e0e48377465f093b3a [lane y1166]",
+          "at": "2026-08-23T07:52:26.075Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.803Z"
+          "evidence": "evidence: tests/agent_workloads.rs:1678, :1700, :1717, :1796 [lane y1166]",
+          "at": "2026-08-23T07:52:26.425Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:02.803Z"
+          "evidence": "evidence: focused production tests passed; owned corpus rows passed through build recovery and subprocess hostile cases [lane y1166]",
+          "at": "2026-08-23T07:52:27.533Z"
         },
         {
           "n": 5,
@@ -60401,10 +60402,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:30.296Z",
-      "updated": "2026-08-23T06:12:59.158Z",
+      "updated": "2026-08-23T07:52:28.882Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:28.881Z"
     },
     {
       "id": "c0e68ggl",
@@ -60415,7 +60417,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60444,29 +60446,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.048Z"
+          "evidence": "evidence: tests/agent_workloads.rs:1503; six Jet production cases exercised with exact success/hostile outputs. [lane y1167]",
+          "at": "2026-08-23T07:52:29.469Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.048Z"
+          "evidence": "evidence: tests/agent_workloads/policy.tsv:1, tests/agent_workloads.rs:477, passing policy test and gate self-check. [lane y1167]",
+          "at": "2026-08-23T07:52:30.662Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.048Z"
+          "evidence": "evidence: tests/agent_workloads.rs:650, :731, :1540; bounded execution, input preservation, and residue checks. [lane y1167]",
+          "at": "2026-08-23T07:52:31.821Z"
         },
         {
           "n": 4,
@@ -60480,11 +60482,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.048Z"
+          "evidence": "evidence: docs/audits/agent-workload-corpus.md:34,105,132; frozen baseline receipt. [lane y1167]",
+          "at": "2026-08-23T07:52:32.164Z"
         },
         {
           "n": 6,
@@ -60503,10 +60505,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:30.800Z",
-      "updated": "2026-08-23T07:02:24.882Z",
+      "updated": "2026-08-23T07:52:32.858Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:32.858Z"
     },
     {
       "id": "c0mh8cme",
@@ -60517,7 +60520,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60555,20 +60558,20 @@
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.293Z"
+          "evidence": "evidence: tests/agent_workloads/policy.tsv:1-8, tests/agent_workloads.rs:467-505,1186-1217, tools/ci/agent-workload-gate.sh:37-148; agent workload gate self-check: pass [lane y1168]",
+          "at": "2026-08-23T07:52:34.422Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.293Z"
+          "evidence": "evidence: authority/denial tests/agent_workloads.rs:498-503,1209-1217,1260-1328; cleanup and limits :445-453,668-709,1684-1797; escape checks :1221-1226 [lane y1168]",
+          "at": "2026-08-23T07:52:35.789Z"
         },
         {
           "n": 4,
@@ -60605,10 +60608,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:31.302Z",
-      "updated": "2026-08-23T05:23:22.178Z",
+      "updated": "2026-08-23T07:52:36.883Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:36.883Z"
     },
     {
       "id": "c0vjriuo",
@@ -60619,7 +60623,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60648,47 +60652,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.542Z"
+          "evidence": "evidence: frozen rows manifest.tsv:25-30; six direct production runs returned ok. [lane y1169]",
+          "at": "2026-08-23T07:52:37.823Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.542Z"
+          "evidence": "evidence: policy.tsv:1-8; policy_digest_covers_authority_and_receipt_contract passed. [lane y1169]",
+          "at": "2026-08-23T07:52:38.153Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.542Z"
+          "evidence": "evidence: hostile checks at tests/agent_workloads.rs:1221,1711,1728; denied, closed, and timeout rows passed. [lane y1169]",
+          "at": "2026-08-23T07:52:38.493Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.542Z"
+          "evidence": "evidence: production-path guard at tests/agent_workloads.rs:1453-1511; six exact-output runs passed. [lane y1169]",
+          "at": "2026-08-23T07:52:38.832Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.542Z"
+          "evidence": "evidence: audit/docs at docs/audits/agent-workload-corpus.md:15,34,98-100,132; git diff --check passed. [lane y1169]",
+          "at": "2026-08-23T07:52:39.186Z"
         },
         {
           "n": 6,
@@ -60707,10 +60711,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:31.851Z",
-      "updated": "2026-08-23T07:02:26.832Z",
+      "updated": "2026-08-23T07:52:39.892Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:39.892Z"
     },
     {
       "id": "c04i1z4x",
@@ -60721,7 +60726,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m05-agent-corpus",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [
@@ -60759,74 +60764,74 @@
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.781Z"
+          "evidence": "evidence: policy_digest_covers_authority_and_receipt_contract ... ok; receipt digest drift 0. [lane y1170]",
+          "at": "2026-08-23T07:52:40.479Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.781Z"
+          "evidence": "evidence: production_process_limits_authority_and_descendant_cleanup ... ok; process_output_limit_fails_closed ... ok. [lane y1170]",
+          "at": "2026-08-23T07:52:41.503Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.781Z"
+          "evidence": "evidence: production-path and hostile tests passed in focused run. [lane y1170]",
+          "at": "2026-08-23T07:52:42.620Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:03.781Z"
+          "evidence": "evidence: docs/audits/agent-workload-corpus.md:7; tests/agent_workloads/baselines/README.md:3. [lane y1170]",
+          "at": "2026-08-23T07:52:43.001Z"
         },
         {
           "n": 6,
           "text": "Every frozen corpus task has a recorded Bash, Python, and Node run with pinned tool versions, declared machine, and frozen inputs per #769's shipped schema.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:38.083Z"
+          "evidence": "evidence: receipt has 87 rows: 29 tasks × Bash/Python/Node; pinned run ID, machine, and versions. [lane y1170]",
+          "at": "2026-08-23T07:52:44.165Z"
         },
         {
           "n": 7,
           "text": "Each run is scored by the corpus's existing scoring — no new runner or scoring model.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:38.496Z"
+          "evidence": "evidence: domain_contract.tsv:2; scoring_drift=0. [lane y1170]",
+          "at": "2026-08-23T07:52:45.086Z"
         },
         {
           "n": 8,
           "text": "Raw transcripts and outputs are stored so a later Jet run can be scored without re-running baselines.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:38.922Z"
+          "evidence": "evidence: 174 raw stdout/stderr files; receipt paths and hashes validated. [lane y1170]",
+          "at": "2026-08-23T07:52:46.106Z"
         },
         {
           "n": 9,
           "text": "Tasks a baseline language cannot express are recorded per task as explicit findings, never silently skipped.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:34:39.358Z"
+          "evidence": "evidence: tests/agent_workloads.rs:1170; unsupported rows require findings; current count unsupported=0. [lane y1170]",
+          "at": "2026-08-23T07:52:47.536Z"
         }
       ],
       "refs": [
@@ -60836,8 +60841,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:32.392Z",
-      "updated": "2026-08-23T01:06:00.536Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T07:52:49.206Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -60957,7 +60962,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m06-safe-agent-execution",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-AGENT-EXEC1 must choose the API and CLI spelling. Extend core.process and consume #398's native isolation engine. Keep argv execution canonical. The policy must deny ambient authority, describe exact grants, and produce one dry-run plan plus one final receipt. After ratification, block implementation on #398 and reuse its Linux, macOS, and Windows hostile proof. Add no second sandbox, process API, shell DSL, or container fallback.",
       "blockedBy": [],
@@ -60989,47 +60994,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:04.998Z"
+          "evidence": "evidence: production CLI path at tests/build_sandbox.rs:1103 and tests/build_sandbox.rs:1199; native sandbox launch at Process.rs:414. [lane y1175]",
+          "at": "2026-08-23T07:52:50.552Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:04.998Z"
+          "evidence": "evidence: shared digest/plan/receipt fields at ProcessPolicy.rs:260, ProcessPolicy.rs:466, and Process.rs:221; launch revalidation at Process.rs:362; Linux limit enforced at ProcessSandbox.rs:427. [lane y1175]",
+          "at": "2026-08-23T07:52:51.626Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:04.998Z"
+          "evidence": "evidence: fail-closed checks at ProcessPolicy.rs:200; hostile corpus protections at tests/build_sandbox.rs:1109; timeout, limits, cancellation, and descendant cleanup at tests/agent_workloads.rs:1730. [lane y1175]",
+          "at": "2026-08-23T07:52:52.610Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:04.998Z"
+          "evidence": "evidence: passing authority, hostile-corpus, and process-policy production tests below. [lane y1175]",
+          "at": "2026-08-23T07:52:53.878Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:04.998Z"
+          "evidence": "evidence: docs at docs/reference/core-library.md:1454, goldens at tests/authority.rs:231, example parity at tests/authority.rs:444, diagnostics at crates/jet-codegen/src/Prelude/Diagnostics.jet:690, audit contract at docs/audits/agent-workload-corpus.md:126. [lane y1175]",
+          "at": "2026-08-23T07:52:55.088Z"
         }
       ],
       "refs": [
@@ -61042,10 +61047,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:35.250Z",
-      "updated": "2026-08-23T06:13:04.617Z",
+      "updated": "2026-08-23T07:52:56.592Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T07:52:56.592Z"
     },
     {
       "id": "c0o45fur",
@@ -61191,29 +61197,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:05.707Z"
+          "evidence": "evidence: Process.rs:1022-1025; ProcessWindowsSandbox.rs:1133-1370; Windows authority tests at tests/authority.rs:365-425 [lane y1177]",
+          "at": "2026-08-23T07:52:58.251Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:05.707Z"
+          "evidence": "evidence: shared digest at ProcessPolicy.rs:316-322; plan/receipt reuse at Process.rs:241-297 [lane y1177]",
+          "at": "2026-08-23T07:52:59.632Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:05.707Z"
+          "evidence": "evidence: bounded output and Job cleanup at ProcessWindowsSandbox.rs:994-1002,1314-1353; source remains read-only at Process.rs:457-465,609-617,954-962,1096-1104 [lane y1177]",
+          "at": "2026-08-23T07:53:00.357Z"
         },
         {
           "n": 4,
@@ -61227,11 +61233,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:05.707Z"
+          "evidence": "evidence: docs/reference/core-library.md:1454-1513; docs/plans/epoch-4/world-class-package-manager.md:320-332 [lane y1177]",
+          "at": "2026-08-23T07:53:00.753Z"
         }
       ],
       "refs": [
@@ -61244,7 +61250,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:36.258Z",
-      "updated": "2026-08-23T07:02:33.837Z",
+      "updated": "2026-08-23T07:53:00.753Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -61359,7 +61365,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m06-safe-agent-execution",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-AGENT-EXEC1 must choose the API and CLI spelling. Extend core.process and consume #398's native isolation engine. Keep argv execution canonical. The policy must deny ambient authority, describe exact grants, and produce one dry-run plan plus one final receipt. After ratification, block implementation on #398 and reuse its Linux, macOS, and Windows hostile proof. Add no second sandbox, process API, shell DSL, or container fallback.",
       "blockedBy": [
@@ -61393,29 +61399,29 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:06.337Z"
+          "evidence": "evidence: ProcessPolicy.rs:220-234, Process.rs:221-298 [lane y1179]",
+          "at": "2026-08-23T07:53:02.152Z"
         },
         {
           "n": 2,
           "text": "Plan, launch transaction, descendants, limits, outputs, and receipt share one policy digest and accurately record the enforced authority.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:06.337Z"
+          "evidence": "evidence: CommonTypes.rs:463-478,510-511, Process.rs:252-296 [lane y1179]",
+          "at": "2026-08-23T07:53:02.514Z"
         },
         {
           "n": 3,
           "text": "Unsupported enforcement, denied access, escape attempts, limit exhaustion, cancellation, and child-process abuse fail closed without leaked handles, secrets, or processes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:06.337Z"
+          "evidence": "evidence: ProcessPolicy.rs:196-234, Process.rs:1149-1154, tests/build_sandbox.rs:1101-1104 [lane y1179]",
+          "at": "2026-08-23T07:53:02.887Z"
         },
         {
           "n": 4,
@@ -61429,11 +61435,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:06.337Z"
+          "evidence": "evidence: docs/reference/core-library.md:1485-1497, tests/authority_receipts.rs:1-58, tests/suites.txt:179-187 [lane y1179]",
+          "at": "2026-08-23T07:53:03.256Z"
         }
       ],
       "refs": [
@@ -61446,8 +61452,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:37.252Z",
-      "updated": "2026-08-23T01:03:30.286Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T07:53:04.056Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -61561,7 +61567,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m03-process-sessions",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
@@ -61652,8 +61658,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:38.546Z",
-      "updated": "2026-08-23T01:04:23.583Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T07:53:06.025Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -61666,7 +61672,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m03-process-sessions",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
@@ -61757,8 +61763,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:39.059Z",
-      "updated": "2026-08-23T01:04:25.430Z",
-      "updatedBy": "mse7",
+      "updated": "2026-08-23T07:53:06.999Z",
+      "updatedBy": "Main",
       "tags": [],
       "parentId": null
     },
@@ -127793,11 +127799,11 @@
         {
           "n": 2,
           "text": "A takeover path requires review and re-signing, with a test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:08:14.751Z"
+          "evidence": "evidence: review and new-key signature gates (Source/Publish/Tier.rs:178-186, Source/Publish/Registry.rs:2460-2479); passing takeover_requires_review_and_resigning. [lane y1913]",
+          "at": "2026-08-23T07:52:09.480Z"
         },
         {
           "n": 3,
@@ -127818,8 +127824,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:13.293Z",
-      "updated": "2026-08-23T01:11:13.953Z",
-      "updatedBy": "mse5"
+      "updated": "2026-08-23T07:52:09.481Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0i0wm0m",
@@ -190906,6 +190912,440 @@
   ],
   "events": [
     {
+      "at": "2026-08-23T07:53:06.999Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06r4us6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:53:06.025Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y9u5wy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:53:04.057Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cvrfl7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:53:03.256Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cvrfl7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:53:02.887Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cvrfl7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:53:02.515Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cvrfl7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:53:02.153Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cvrfl7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:53:00.753Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wfhchp",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:53:00.358Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wfhchp",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:59.633Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wfhchp",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:58.251Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wfhchp",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:56.592Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0frfdwy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:55.088Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0frfdwy",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:52:53.879Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0frfdwy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:52.610Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0frfdwy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:51.626Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0frfdwy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:50.552Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0frfdwy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:49.207Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04i1z4x",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:47.536Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-23T07:52:46.107Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-23T07:52:45.087Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-23T07:52:44.165Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T07:52:43.001Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:52:42.620Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:41.503Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:40.480Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04i1z4x",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:39.892Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vjriuo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:39.186Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vjriuo",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:52:38.833Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vjriuo",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:38.493Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vjriuo",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:38.153Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vjriuo",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:37.823Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vjriuo",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:36.883Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mh8cme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:35.789Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mh8cme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:34.422Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mh8cme",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:32.858Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e68ggl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:32.164Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e68ggl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:52:31.821Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e68ggl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:30.662Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e68ggl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:29.470Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0e68ggl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:28.882Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05twn4k",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:27.534Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:26.426Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:26.076Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:25.735Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05twn4k",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:24.896Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xha49b",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T07:52:24.538Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xha49b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:23.930Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0k8mz9e",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:23.197Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k8mz9e",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T07:52:22.177Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k8mz9e",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T07:52:20.874Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k8mz9e",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:19.448Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k8mz9e",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:18.222Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k8mz9e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:15.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T07:52:14.983Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-23T07:52:14.616Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-23T07:52:14.250Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T07:52:13.905Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T07:52:13.560Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T07:52:13.231Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T07:52:12.127Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vrs94y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T07:52:09.481Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0eexc32",
+      "note": "#2"
+    },
+    {
       "at": "2026-08-23T07:02:35.138Z",
       "by": "Main",
       "action": "card.update",
@@ -193969,440 +194409,6 @@
       "by": "mse6",
       "action": "card.update",
       "ref": "c04rv5on",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:43.509Z",
-      "by": "mse6",
-      "action": "card.update",
-      "ref": "c0vynz93",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:42.685Z",
-      "by": "mse6",
-      "action": "card.update",
-      "ref": "c0nozhth",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:41.853Z",
-      "by": "mse6",
-      "action": "card.update",
-      "ref": "c0znklrg",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:33.864Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ecmozp",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:33.370Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c091xiz7",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:32.871Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ew5j65",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:32.339Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c08rq8yn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:31.850Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0mdgv4b",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:31.316Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0h39lhn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:30.794Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0bbivqe",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:30.286Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c05n4gdz",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:29.671Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0vefrqa",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:29.033Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0piczky",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:28.051Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0k6n1yj",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:17.743Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0crgq0c",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:17.243Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c07drezi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:15.801Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0wfu1py",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:14.404Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0qliotl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:13.910Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ks54hq",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:13.399Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c09zkaun",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:11.991Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c04ayg28",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:10.834Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ym1mdj",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:10.320Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0mr4e37",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:08.976Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0gg1r1f",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:07.449Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0au3zde",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:06.478Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c05eyj7q",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:10:05.134Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0zpd6dp",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:54.425Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c08tygso",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:53.840Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c02zkxoe",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:53.332Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0x6p0ku",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:52.829Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0rwk4s1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:52.290Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c030t7mo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:51.795Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0s602tp",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:51.306Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0mu1nmx",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:50.629Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0cu58x5",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:50.112Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c076x73b",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:49.610Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ovxe5a",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:49.079Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0jebh01",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:39.436Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0y82zyl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:38.947Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0s6ntn0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:38.438Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0li2g5o",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:37.949Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0g4ojoy",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:37.445Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0a2zqpr",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:36.948Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0c369sk",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:36.462Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c00de14z",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:35.941Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0tqgl1r",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:35.416Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lz10ao",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:34.912Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0d2uwy7",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:34.427Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lqvdtv",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:33.915Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0gcdx0k",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:32.682Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0b35mgo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:26.231Z",
-      "by": "mse6",
-      "action": "card.update",
-      "ref": "c05t5bb1",
-      "note": "track,milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:25.246Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0cl0ccy",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:24.728Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0twdzxi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:24.234Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0c369sk",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:23.703Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c030t7mo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:23.018Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0twqtzl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:22.341Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0tilidq",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:21.979Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0r9091q",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:21.568Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0awen6y",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:20.346Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lgdhb0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:09:19.493Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0eexc32",
       "note": "milestoneId"
     }
   ],
