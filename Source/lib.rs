@@ -616,7 +616,12 @@ pub fn prepare_programmable_build_front_end(
         plugin_target,
         cross_target: cross_target.map(str::to_string),
     };
-    with_compiler_stack(move || Driver::prepare_build_front_end(inputs))
+    with_compiler_stack(move || {
+        let mut prepared = Driver::prepare_build_front_end(inputs)?;
+        let program = Compiler::program_info_value(prepared.bundle(), prepared.effect_facts());
+        prepared.set_program_value(program);
+        Ok(prepared)
+    })
 }
 
 fn file_selects_programmable_build(file: &str) -> bool {
@@ -633,7 +638,7 @@ fn file_selects_programmable_build(file: &str) -> bool {
 /// Run the selected build entry's compile-time checks for tiered run/dev
 /// paths. `execute: false` still evaluates `fn build` and returns its
 /// diagnostics, but never adds build actions or generated sources to runtime.
-pub(crate) fn check_programmable_build_for_tier(
+pub fn check_programmable_build_for_tier(
     file: &str,
     gates: Policy::GateSet,
     profile: &str,
@@ -647,7 +652,16 @@ pub(crate) fn check_programmable_build_for_tier(
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        Driver::compile_bundle_path_build(
+        let prepared = prepare_programmable_build_front_end(
+            file,
+            false,
+            false,
+            false,
+            None,
+            profile,
+            setting_overrides,
+        )?;
+        Driver::compile_bundle_path_build_with_front_end(
             file,
             Driver::BuildRunOptions {
                 grants,
@@ -665,6 +679,7 @@ pub(crate) fn check_programmable_build_for_tier(
                 setting_overrides: setting_overrides.clone(),
                 remote: None,
             },
+            Some(prepared),
         )
         .map(|_| ())
     }))
@@ -718,6 +733,18 @@ fn compile_programmable_build_opts_inner(
                 setting_overrides,
                 checked_workspace,
             );
+        }
+        let mut prepared = prepared;
+        if prepared.is_none() {
+            prepared = Some(prepare_programmable_build_front_end(
+                file,
+                locked,
+                web_target,
+                plugin_target,
+                cross_target,
+                profile,
+                setting_overrides,
+            )?);
         }
         let grants = resolve_build_grants(file, grants)?;
         let grants = grants

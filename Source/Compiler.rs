@@ -605,6 +605,77 @@ fn compiler_call_value(call: &jet_semindex::CallEdge) -> CtValue {
     )
 }
 
+fn compiler_structural_node_value(node: &jet_semindex::StructuralNode) -> CtValue {
+    ct_struct(
+        "CompilerStructuralNode",
+        vec![
+            ("id", CtValue::Int(node.id as i64)),
+            ("parent", compiler_option_int(node.parent)),
+            ("slot", CtValue::Str(node.slot.clone())),
+            (
+                "slot_kind",
+                CtValue::Str(match node.slot_kind {
+                    jet_semindex::StructuralSlotKind::Scalar => "scalar",
+                    jet_semindex::StructuralSlotKind::List => "list",
+                }.to_string()),
+            ),
+            ("ordinal", CtValue::Int(node.ordinal as i64)),
+            ("class", CtValue::Str(node.class.clone())),
+            ("shape", CtValue::Str(node.shape.clone())),
+            ("module", CtValue::Str(node.module_path.clone())),
+            ("span", compiler_semantic_span(node.span)),
+        ],
+    )
+}
+
+struct SemIndexProgramIndex<'a> {
+    index: &'a jet_semindex::SemIndex,
+}
+
+impl crate::Comptime::ProgramIndexView for SemIndexProgramIndex<'_> {
+    fn definitions(&self) -> Vec<CtValue> {
+        self.index
+            .definitions()
+            .iter()
+            .map(compiler_definition_value)
+            .collect()
+    }
+
+    fn references(&self) -> Vec<CtValue> {
+        self.index
+            .references()
+            .iter()
+            .map(compiler_reference_value)
+            .collect()
+    }
+
+    fn call_edges(&self) -> Vec<CtValue> {
+        self.index
+            .call_edges()
+            .iter()
+            .map(compiler_call_value)
+            .collect()
+    }
+
+    fn structural_nodes(&self) -> Vec<CtValue> {
+        self.index
+            .structural_nodes()
+            .iter()
+            .map(compiler_structural_node_value)
+            .collect()
+    }
+}
+
+pub(crate) fn program_info_value(
+    bundle: &AST::ProgramBundle,
+    effect_facts: &crate::Sema::SemIndexEffectFacts,
+) -> CtValue {
+    let semantic_facts = crate::Driver::program_semantic_facts(bundle, effect_facts);
+    let index = jet_semindex::from_checked(bundle, effect_facts);
+    let view = SemIndexProgramIndex { index: &index };
+    crate::Comptime::build_program_info_with_index(bundle, &semantic_facts, Some(&view))
+}
+
 fn compiler_effect_value(effect: &jet_semindex::EffectFact) -> CtValue {
     let provenance = effect
         .provenance
@@ -714,6 +785,16 @@ fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -
                 CtValue::List(index.call_edges().iter().map(compiler_call_value).collect()),
             ),
             (
+                "structural_nodes",
+                CtValue::List(
+                    index
+                        .structural_nodes()
+                        .iter()
+                        .map(compiler_structural_node_value)
+                        .collect(),
+                ),
+            ),
+            (
                 "effects",
                 CtValue::List(index.effects().iter().map(compiler_effect_value).collect()),
             ),
@@ -752,11 +833,16 @@ fn checked_value_from_parts(
         .any(|diagnostic| diagnostic.severity == Severity::Error);
     let syntax_value = syntax_tree_value(&syntax);
     let (functions, effects, semantic_index) = if let Some(bundle) = bundle {
+        let index = jet_semindex::from_checked(bundle, effect_facts);
         let semantic_facts = crate::Driver::program_semantic_facts(bundle, effect_facts);
-        let program = crate::Comptime::build_program_info(bundle, &semantic_facts);
+        let view = SemIndexProgramIndex { index: &index };
+        let program = crate::Comptime::build_program_info_with_index(
+            bundle,
+            &semantic_facts,
+            Some(&view),
+        );
         let functions = field_value(&program, "functions")
             .unwrap_or_else(|| CtValue::List(Vec::new()));
-        let index = jet_semindex::from_checked(bundle, effect_facts);
         let effects = CtValue::List(
             index
                 .effects()

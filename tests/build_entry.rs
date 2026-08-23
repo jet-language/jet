@@ -1414,6 +1414,38 @@ fn run() { left.same(); right.same() }
 }
 
 #[test]
+fn program_info_reads_shared_semindex_rows() {
+    let worker = std::thread::Builder::new()
+        .name("build-entry-program-semindex".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(run_program_info_reads_shared_semindex_rows)
+        .expect("start build_entry program-semindex worker");
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_program_info_reads_shared_semindex_rows() {
+    let root = project("program-semindex");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn helper() Int -> { return 1 }
+fn build(b: BuildContext) BuildPlan ! -> {
+    if b.program.definitions().len() == 0 || b.program.references().len() == 0 || b.program.call_edges().len() == 0 || b.program.structural_nodes().len() == 0 {
+        b.error(b.program.functions()[0].span, "SEMINDEX", "empty semantic index projection", "the build read surface must expose checked program rows", "keep all four projections backed by the checked SemIndex")
+    }
+    return b.plan()
+}
+fn run() { helper() }
+"#,
+    );
+    let result = jet::compile_programmable_build(entry.to_str().unwrap(), &[]);
+    assert!(result.is_ok(), "shared SemIndex rows were not readable: {result:#?}");
+}
+
+#[test]
 fn programmable_build_executes_destination_owned_distinct_conversion() {
     // Programmable-build / distinct-conversion frames exceed the default test
     // thread stack under full-suite parallelism. Match LSP incremental diag

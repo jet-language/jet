@@ -5,8 +5,6 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet_impact::ImpactReport;
-use jet_semindex::{open, SemIndexError};
-
 pub(crate) fn run_impact(args: &[String], json: bool) {
     let mut depth = 3usize;
     let mut positional: Vec<&str> = Vec::new();
@@ -35,31 +33,21 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     }
 
     let abs = absolutize(path);
-    match open(&abs) {
-        Ok(idx) => {
-            let report = ImpactReport::analyze(&idx, symbol, depth);
-            if json {
-                println!("{}", report.to_json());
-            } else {
-                print!("{}", report.render_text());
-            }
-            if !report.found {
-                exit(ExitCodes::USER_ERROR);
-            }
-        }
-        Err(SemIndexError::Load(diags)) => {
-            for d in &diags {
-                eprintln!(
-                    "{}",
-                    jet::render_diagnostics(
-                        &abs.display().to_string(),
-                        "",
-                        std::slice::from_ref(d)
-                    )
-                );
-            }
-            exit(ExitCodes::USER_ERROR);
-        }
+    let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
+        crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+    });
+    let report = ImpactReport::analyze(&checked.index, symbol, depth);
+    if json {
+        println!(
+            "{}",
+            crate::CmdInspect::with_check_json(report.to_json(), &checked.check)
+        );
+    } else {
+        print!("{}", crate::CmdInspect::check_result_text(&checked.check));
+        print!("{}", report.render_text());
+    }
+    if !report.found {
+        exit(ExitCodes::USER_ERROR);
     }
 }
 

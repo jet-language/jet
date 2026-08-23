@@ -2271,7 +2271,15 @@ pub fn apply_method(
         }
         (CtValue::Struct { type_name, fields }, method)
             if type_name == crate::Syntax::TYPE_PROGRAM_INFO
-                && matches!(method, "functions" | "packages") =>
+                && matches!(
+                    method,
+                    "functions"
+                        | "packages"
+                        | "definitions"
+                        | "references"
+                        | "call_edges"
+                        | "structural_nodes"
+                ) =>
         {
             program_info_list(fields, method, span)
         }

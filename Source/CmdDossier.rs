@@ -5,30 +5,22 @@ use std::process::exit;
 
 use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
-use jet_semindex::{open, SemIndexError};
-
 /// D-CONF-MODULE1=A: explain a generic-module member's specialization input
 /// from the semantic index, including the profile/declaration chain for a
 /// build-fact value.
 pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json: bool) {
     let abs = absolutize(file);
     let module_name = subject.split('.').next().unwrap_or(subject);
-    let index = match jet_semindex::open_with_profile(&abs, profile) {
-        Ok(index) => index,
-        Err(SemIndexError::Load(diags)) => {
-            for diagnostic in &diags {
-                eprintln!(
-                    "{}",
-                    jet::render_diagnostics(
-                        &abs.display().to_string(),
-                        "",
-                        std::slice::from_ref(diagnostic),
-                    )
-                );
-            }
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
+    let checked = crate::CmdInspect::check_projection_with_options(
+        &abs,
+        jet::Policy::GateSet::default(),
+        profile,
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap_or_else(|diagnostics| {
+        crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+    });
+    let index = &checked.index;
     let Some(instance) = index.instances().iter().find(|instance| {
         instance.name == module_name
             || instance
@@ -58,11 +50,12 @@ pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json:
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"schema_version\":1,\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}]}}",
+            "{{\"schema_version\":1,\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}],\"check\":{}}}",
             json_string(subject),
             json_string(&instance.name),
             json_string(&instance.fingerprint),
-            arguments
+            arguments,
+            crate::CmdInspect::check_result_json(&checked.check),
         );
         return;
     }
@@ -79,6 +72,7 @@ pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json:
             println!("    from: {source}");
         }
     }
+    print!("{}", crate::CmdInspect::check_result_text(&checked.check));
 }
 
 pub(crate) fn run_dossier(args: &[String], json: bool) {
@@ -137,81 +131,57 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
     };
 
     let abs = absolutize(path);
-    match open(&abs) {
-        Ok(idx) => {
-            let target = target.unwrap_or_else(|| {
-                idx.definitions()
-                    .iter()
-                    .find(|d| matches!(d.kind, jet_semindex::SymbolKind::Struct { .. }))
-                    .or_else(|| idx.definitions().iter().find(|d| d.name == "run"))
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("run")
-            });
-            let dossier = idx.dossier(target);
-            let (budgets, command, allocator) = auxiliary_projections(&abs);
-            if json {
-                let mut value = dossier.to_json();
-                if value.ends_with('}') {
-                    value.pop();
-                    value.push_str(",\"program_allocator\":");
-                    value.push_str(&allocator.audit_json());
-                    value.push_str(",\"performance_budgets\":");
-                    value.push_str(&budgets.to_json());
-                    value.push_str(",\"command_schema\":");
-                    value.push_str(&command_json(command.as_ref()));
-                    value.push('}');
-                }
-                println!("{value}");
-            } else {
-                print!("{}", dossier.render_text());
-                print!("{}", allocator_text(&allocator));
-                print!("{}", command_text(command.as_ref()));
-                print!("{}", budgets.render_text());
-            }
-            if dossier.definition.is_none() {
-                exit(ExitCodes::USER_ERROR);
-            }
+    let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
+        crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+    });
+    let target = target.unwrap_or_else(|| {
+        checked
+            .index
+            .definitions()
+            .iter()
+            .find(|d| matches!(d.kind, jet_semindex::SymbolKind::Struct { .. }))
+            .or_else(|| checked.index.definitions().iter().find(|d| d.name == "run"))
+            .map(|d| d.name.as_str())
+            .unwrap_or("run")
+    });
+    let dossier = checked.index.dossier(target);
+    let (budgets, command, allocator) = auxiliary_projections(&abs, &checked.bundle);
+    if json {
+        let mut value = dossier.to_json();
+        if value.ends_with('}') {
+            value.pop();
+            value.push_str(",\"program_allocator\":");
+            value.push_str(&allocator.audit_json());
+            value.push_str(",\"performance_budgets\":");
+            value.push_str(&budgets.to_json());
+            value.push_str(",\"command_schema\":");
+            value.push_str(&command_json(command.as_ref()));
+            value.push_str(",\"check\":");
+            value.push_str(&crate::CmdInspect::check_result_json(&checked.check));
+            value.push('}');
         }
-        Err(SemIndexError::Load(diags)) => {
-            for d in &diags {
-                eprintln!(
-                    "{}",
-                    jet::render_diagnostics(
-                        &abs.display().to_string(),
-                        "",
-                        std::slice::from_ref(d)
-                    )
-                );
-            }
-            exit(ExitCodes::USER_ERROR);
-        }
+        println!("{value}");
+    } else {
+        print!("{}", dossier.render_text());
+        print!("{}", allocator_text(&allocator));
+        print!("{}", command_text(command.as_ref()));
+        print!("{}", budgets.render_text());
+        print!("{}", crate::CmdInspect::check_result_text(&checked.check));
+    }
+    if dossier.definition.is_none() {
+        exit(ExitCodes::USER_ERROR);
     }
 }
 
 fn auxiliary_projections(
     entry: &Path,
+    bundle: &jet::AST::ProgramBundle,
 ) -> (
     jet::BudgetView::BudgetProjection,
     Option<jet_foundation::CLISchema::CLICommandSchema>,
     jet::TargetMachine::AllocatorPolicy,
 ) {
-    let entry_text = entry.to_string_lossy();
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
-    if diagnostics.iter().any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error) {
-        return (
-            jet::BudgetView::BudgetProjection::default(),
-            None,
-            jet::TargetMachine::AllocatorPolicy::HostedDefault,
-        );
-    }
-    let Some(bundle) = bundle else {
-        return (
-            jet::BudgetView::BudgetProjection::default(),
-            None,
-            jet::TargetMachine::AllocatorPolicy::HostedDefault,
-        );
-    };
-    let command = entry_command_schema(&bundle);
+    let command = entry_command_schema(bundle);
     let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
         .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
     let sources = bundle.modules.iter().map(|module| {

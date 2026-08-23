@@ -366,7 +366,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerViewSourcePath" | "CompilerViewSource" | "CompilerViewProjection"
         | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
         | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
-        | "CompilerOutputEntry"
+        | "CompilerOutputEntry" | "CompilerStructuralNode"
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
@@ -639,6 +639,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "calls" => Some(Type::List(Box::new(Type::Named(
                 "CompilerCall".to_string(),
             )))),
+            "structural_nodes" => Some(Type::List(Box::new(Type::Named(
+                "CompilerStructuralNode".to_string(),
+            )))),
             "effects" => Some(Type::List(Box::new(Type::Named(
                 "CompilerEffect".to_string(),
             )))),
@@ -742,6 +745,15 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "CompilerCall" {
         return match field {
             "caller" | "callee" | "module" => Some(Type::String),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerStructuralNode" {
+        return match field {
+            "id" | "ordinal" => Some(Type::Int),
+            "parent" => Some(Type::Option(Box::new(Type::Int))),
+            "slot" | "slot_kind" | "class" | "shape" | "module" => Some(Type::String),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };

@@ -1120,6 +1120,7 @@ fn jet_dossier_cli_json_smoke() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("\"target\":\"Square\""));
     assert!(text.contains("\"members\""));
+    assert!(text.contains("\"check\":{\"status\":\"passed\""));
 }
 
 #[test]

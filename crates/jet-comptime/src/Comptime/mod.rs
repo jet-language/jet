@@ -261,6 +261,7 @@ pub use Reflect::{
     build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
     build_enum_layout_info_with_engine,
     build_function_type_info, build_maturity_info, build_movedness_info, build_program_info,
+    build_program_info_with_index,
     build_range_info, build_registered_fact_info, build_registered_fact_infos,
     build_sendability_info, build_state_infos, build_state_ref, build_state_refs,
     build_struct_layout_info, build_struct_layout_info_with_engine, build_struct_type_info,
@@ -270,7 +271,7 @@ pub use Reflect::{
     build_struct_type_info_with_states, build_track_origin_info,
     build_unit_scale_provenance_info, build_view_provenance_info, reflected_fact_field,
     program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
-    registered_fact_value, ProgramSemanticFacts,
+    registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
 };
 pub use crate::AST::{CtReport, CtValue};
 

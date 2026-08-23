@@ -2308,6 +2308,7 @@ pub struct PreparedBuildFrontEnd {
     inputs: FrontEndInputs,
     bundle: crate::AST::ProgramBundle,
     effect_facts: crate::Sema::SemIndexEffectFacts,
+    program_value: Option<crate::Comptime::CtValue>,
     lints: Vec<Diagnostic>,
     build_index: Option<usize>,
     build_span: Option<crate::Diagnostics::Span>,
@@ -2322,6 +2323,16 @@ pub struct PreparedBuildFrontEnd {
 }
 
 impl PreparedBuildFrontEnd {
+    /// The checked bundle used to build the read-only comptime snapshot.
+    pub fn bundle(&self) -> &crate::AST::ProgramBundle {
+        &self.bundle
+    }
+
+    /// Attach the snapshot built from the compiler-owned semantic index.
+    pub fn set_program_value(&mut self, value: crate::Comptime::CtValue) {
+        self.program_value = Some(value);
+    }
+
     /// The checked runtime program, when this front end checked it directly.
     ///
     /// `None` when a package build entry in another file was selected: the
@@ -2691,6 +2702,7 @@ fn prepare_build_front_end_on_compiler_stack(
         inputs,
         bundle,
         effect_facts,
+        program_value: None,
         lints,
         build_index,
         build_span,
@@ -2719,6 +2731,7 @@ fn compile_build_from_front_end(
         inputs: _,
         mut bundle,
         effect_facts,
+        program_value,
         mut lints,
         build_index,
         build_span,
@@ -2906,8 +2919,10 @@ fn compile_build_from_front_end(
             build_facts: bundle.build_facts.clone(),
             migrations,
         };
-        let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
-        let program_value = crate::Comptime::build_program_info(&bundle, &semantic_facts);
+        let program_value = program_value.unwrap_or_else(|| {
+            let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
+            crate::Comptime::build_program_info(&bundle, &semantic_facts)
+        });
         // Package and workspace entries may be selected from `src/` or from
         // a named source file. Build-relative inputs always belong to the
         // owning project root, which is also the root used by generated

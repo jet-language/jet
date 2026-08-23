@@ -150,26 +150,12 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     };
 
     let abs = absolutize(path);
-    let entry = abs.display().to_string();
-    let (diags, bundle, facts) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
-    let has_errors = diags
-        .iter()
-        .any(|d| d.severity == jet::Diagnostics::Severity::Error);
-    let Some(bundle) = (if has_errors { None } else { bundle }) else {
-        if json {
-            let source = std::fs::read_to_string(&abs).unwrap_or_default();
-            print_json_frontend_diagnostics(&entry, &source, &diags);
-        }
-        for d in &diags {
-            eprintln!(
-                "{}",
-                jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
-            );
-        }
-        exit(ExitCodes::USER_ERROR);
-    };
-
-    let index = jet_semindex::from_checked(&bundle, &facts);
+    let checked = crate::CmdInspect::check_projection(&abs).unwrap_or_else(|diagnostics| {
+        crate::CmdInspect::render_check_failure(&abs, &diagnostics, json, false);
+    });
+    let bundle = &checked.bundle;
+    let facts = &checked.facts;
+    let index = &checked.index;
 
     // JSON is the canonical semantic-index document with one additive
     // `expand` projection. The checked bundle and effect facts above are the
@@ -181,14 +167,17 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
             .map(|lens| ExpandLens {
                 name: lens.name.to_string(),
                 summary: lens.summary.to_string(),
-                facts: (lens.render_json)(&bundle, &facts, &index),
+                facts: (lens.render_json)(bundle, facts, index),
             })
             .collect();
         let expand = ExpandProjection {
             selection: selection.to_string(),
             lenses,
         };
-        println!("{}", index.to_json_with_expand(&expand));
+        println!(
+            "{}",
+            crate::CmdInspect::with_check_json(index.to_json_with_expand(&expand), &checked.check)
+        );
         exit(ExitCodes::OK);
     }
 
@@ -198,7 +187,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     let bare = lens_name.is_none();
     let mut printed_any = false;
     for lens in &selected {
-        let lines = (lens.render)(&bundle, &facts, &index);
+        let lines = (lens.render)(bundle, facts, index);
         if bare && lines.is_empty() {
             continue;
         }
@@ -224,17 +213,15 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     if !printed_any {
         println!("no facts for any lens in this program");
     }
+    // The JSON path above attaches the shared check record, and every sibling
+    // handler prints it. Text output must say the same thing from the same
+    // projection, or the two spellings of one command disagree.
+    print!("{}", crate::CmdInspect::check_result_text(&checked.check));
     exit(ExitCodes::OK);
 }
 
 fn print_json_cli_error(code: &str, what: &str, why: &str, fix: &str) -> ! {
     crate::emit_cli_report(code, what.to_string(), why.to_string(), fix.to_string(), true);
-    exit(ExitCodes::USER_ERROR);
-}
-
-fn print_json_frontend_diagnostics(file: &str, source: &str, diags: &[jet::Diagnostics::Diagnostic]) -> ! {
-    let machine_file = crate::machine_report_path_for_process(file);
-    print!("{}", jet::render_all_json(&machine_file, source, diags));
     exit(ExitCodes::USER_ERROR);
 }
 

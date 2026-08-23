@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 43105,
+    "rev": 43110,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,7 +32,7 @@
         "radar:e4"
       ]
     },
-    "completionCursor": "2026-08-23T20:29:37.166Z"
+    "completionCursor": "2026-08-23T21:40:36.328Z"
   },
   "epochs": [
     {
@@ -2258,7 +2258,7 @@
       "title": "M03 · Typed comptime and compiler facts",
       "goal": "Jet exposes one read-only typed compiler-value and reflection surface plus one typed comptime interpolation/check path over program facts, with schema-stable CLI mirroring, registered diagnostics, bounded execution, and equivalent results in every applicable tier.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:02:37.133Z"
     },
     {
@@ -130337,7 +130337,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-m03-comptime-introspection",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Define the boundary before code. #2131 owns structure-fact production, the registry, gates, and `jet inspect structure`; #1974 consumes that API. The only overlap is the typed fact carrier. Do not add a second fact plane or lint engine. 2. Extend the existing read side: `crates/jet-semindex/src/Types.rs` and `Build.rs` for definitions, references, call edges, structural nodes, and #2131 rows; `crates/jet-comptime/src/Comptime/Reflect.rs` and `mod.rs` for typed read-only access. 3. Use `Source/CmdInspect.rs` plus `CmdCompile.rs`, `CmdExpand.rs`, `CmdImpact.rs`, and `CmdDossier.rs` for query and provenance projections. 4. Stop for an owner ballot if a user-typeable check declaration or invocation is needed. Register its spelling in `crates/jet-foundation/src/Syntax.rs` with a decision ID, or record a decline. 5. If ratified, run checks in the existing bounded comptime path, report through the registered diagnostic system, and keep all checking in sema. 6. Prove AOT, Cranelift `jet run`/`jet dev`, interpreter/deopt, and web checking where applicable from the one front-end result; do not use `tests/jit_gaps.txt`. 7. Add one example, UI/golden output, and docs, then close with the ballot or decline record.",
       "blockedBy": [],
@@ -130365,11 +130365,11 @@
         {
           "n": 3,
           "text": "[3/8] The read surface reuses `crates/jet-semindex/src/Types.rs::SemIndex` for definitions, references, call edges, and structural nodes, `crates/jet-comptime/src/Comptime/Reflect.rs::ProgramSemanticFacts` for comptime access, and the existing inspect/query handlers rather than a parallel index.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T17:39:59.018Z"
+          "evidence": "Source/Compiler.rs:631-676 adapts the one SemIndex into all four projections (definitions, references, call edges, structural nodes); Reflect.rs:31-35 and :2228-2475 expose them to comptime; tests/build_entry.rs:1417-1445 passes. No second index is built.",
+          "at": "2026-08-23T22:13:33.649Z"
         },
         {
           "n": 4,
@@ -130392,20 +130392,20 @@
         {
           "n": 6,
           "text": "[6/8] `Source/CmdInspect.rs` plus `Source/CmdCompile.rs`, `CmdExpand.rs`, `CmdImpact.rs`, and `CmdDossier.rs` expose check inputs and results through existing build, expand, impact, and dossier projections, with stable provenance and no duplicated query service.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T17:40:00.581Z"
+          "evidence": "One shared CheckProjection (Source/CmdInspect.rs:20-26, built once at :36) is consumed by all five handlers: CmdInspect 13 references, CmdCompile:360 and :894, CmdExpand:153, CmdImpact:46, CmdDossier:58/:75/:160. CmdDossier no longer runs a second check pass. CmdExpand text output now prints the same shared record its JSON path attaches, so the two spellings of one command agree.",
+          "at": "2026-08-23T22:15:27.348Z"
         },
         {
           "n": 7,
           "text": "[7/8] The same check result is produced before AOT `jet build`, Cranelift `jet run`/`jet dev`, interpreter/deopt, and web checking when applicable; no engine rechecks policy, no runtime semantics are added, and no `tests/jit_gaps.txt` entry is used.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-21T17:40:01.086Z"
+          "evidence": "tests/run_tier_diagnostics.rs:356 covers AOT, Cranelift, interpreter, dev and web parity for the same check result; the shared execute:false preflight is at Source/lib.rs:636. No tier re-derives the result.",
+          "at": "2026-08-23T21:27:14.402Z"
         },
         {
           "n": 8,
@@ -130422,8 +130422,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-14T20:08:15.990Z",
-      "updated": "2026-08-23T01:08:07.581Z",
-      "updatedBy": "mse4"
+      "updated": "2026-08-23T22:15:28.108Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-23T22:15:28.108Z"
     },
     {
       "id": "c014nejk",
@@ -191502,6 +191503,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-23T22:15:28.108Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mbyz4d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T22:15:27.349Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mbyz4d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T22:13:33.650Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mbyz4d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T21:40:36.328Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-23T21:40:36.328Z"
+    },
+    {
+      "at": "2026-08-23T21:27:14.403Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mbyz4d",
+      "note": "#7"
+    },
+    {
       "at": "2026-08-23T20:39:18.477Z",
       "by": "Main",
       "action": "card.update",
@@ -194964,41 +195000,6 @@
       "by": "mse9",
       "action": "card.update",
       "ref": "c0bf48a4",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:59:27.277Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0aatck7",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:59:19.782Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c04ucjza",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:59:09.061Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c04phsyd",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:59:05.302Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0zbbsy1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:58:55.236Z",
-      "by": "mse9",
-      "action": "card.update",
-      "ref": "c0ttmmhd",
       "note": "milestoneId"
     }
   ],

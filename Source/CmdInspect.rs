@@ -1,5 +1,6 @@
 //! Read-only projections owned by `jet inspect`.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -10,6 +11,185 @@ use jet::Sema::GateLedger::{GateKind, GateLedger};
 use jet_foundation::JSON::json_escape;
 use jet_foundation::Policy::{AppliedRule, PolicyScope, RuleResolution, RuleStatus};
 use jet_foundation::Registry;
+
+/// One checked source projection shared by inspect and compile handlers.
+///
+/// The programmable-build preflight and ordinary sema check both feed this
+/// value. Consumers must project its bundle, facts, index, and check record;
+/// they must not reopen the entry file to answer the same question.
+pub(crate) struct CheckProjection {
+    pub(crate) bundle: jet::AST::ProgramBundle,
+    pub(crate) facts: jet::Sema::SemIndexEffectFacts,
+    pub(crate) index: jet_semindex::SemIndex,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) check: CheckResult,
+}
+
+pub(crate) struct CheckResult {
+    source: String,
+    profile: String,
+    front_end: &'static str,
+    programmable_build: &'static str,
+    diagnostics: usize,
+}
+
+pub(crate) fn check_projection(path: &Path) -> Result<CheckProjection, Vec<Diagnostic>> {
+    check_projection_with_options(
+        path,
+        jet::Policy::GateSet::default(),
+        "dev",
+        &BTreeMap::new(),
+    )
+}
+
+pub(crate) fn check_projection_with_options(
+    path: &Path,
+    gates: jet::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CheckProjection, Vec<Diagnostic>> {
+    check_projection_with_options_and_preflight(path, gates, profile, setting_overrides, true)
+}
+
+pub(crate) fn check_projection_for_effects(
+    path: &Path,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CheckProjection, Vec<Diagnostic>> {
+    check_projection_with_options_and_preflight(
+        path,
+        jet::Policy::GateSet::default(),
+        profile,
+        setting_overrides,
+        false,
+    )
+}
+
+fn check_projection_with_options_and_preflight(
+    path: &Path,
+    gates: jet::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    run_preflight: bool,
+) -> Result<CheckProjection, Vec<Diagnostic>> {
+    let entry = path.display().to_string();
+    let programmable_build = if run_preflight {
+        match jet::check_programmable_build_for_tier(&entry, gates, profile, setting_overrides) {
+            None => "not-selected",
+            Some(Ok(())) => "checked",
+            Some(Err(diagnostics)) => return Err(diagnostics),
+        }
+    } else {
+        "not-selected"
+    };
+    let (diagnostics, bundle, facts, front_end) = if setting_overrides.is_empty() {
+        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_profile(
+            &entry, None, false, profile,
+        );
+        (
+            diagnostics,
+            bundle,
+            facts,
+            "Driver::check_file_with_effect_facts_profile",
+        )
+    } else {
+        let (diagnostics, bundle, facts) =
+            jet::Driver::check_file_with_effect_facts_and_settings(
+                &entry,
+                None,
+                false,
+                setting_overrides,
+            );
+        (
+            diagnostics,
+            bundle,
+            facts,
+            "Driver::check_file_with_effect_facts_and_settings",
+        )
+    };
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        return Err(diagnostics);
+    }
+    let Some(bundle) = bundle else {
+        return Err(diagnostics);
+    };
+    let mut index = jet_semindex::from_checked(&bundle, &facts);
+    if let Some(package_facts) = jet_semindex::package_facts_for_entry(path)
+        .map_err(|error| vec![jet_semindex::package_facts_diagnostic(path, &error)])?
+    {
+        index.attach_package_facts(package_facts);
+    }
+    if let Some(policy) = jet_semindex::workspace_overlay_policy_for_entry(path)
+        .map_err(|diagnostic| vec![diagnostic])?
+    {
+        index.attach_workspace_overlay_policy(policy);
+    }
+    let check = CheckResult {
+        source: entry,
+        profile: profile.to_string(),
+        front_end,
+        programmable_build,
+        diagnostics: diagnostics.len(),
+    };
+    Ok(CheckProjection {
+        bundle,
+        facts,
+        index,
+        diagnostics,
+        check,
+    })
+}
+
+pub(crate) fn check_result_json(check: &CheckResult) -> String {
+    format!(
+        "{{\"status\":\"passed\",\"provenance\":{{\"source\":\"{}\",\"profile\":\"{}\",\"front_end\":\"{}\",\"programmable_build\":\"{}\",\"diagnostics\":{}}}}}",
+        json_escape(&check.source),
+        json_escape(&check.profile),
+        json_escape(check.front_end),
+        json_escape(check.programmable_build),
+        check.diagnostics,
+    )
+}
+
+pub(crate) fn with_check_json(mut document: String, check: &CheckResult) -> String {
+    if let Some(index) = document.rfind('}') {
+        document.insert_str(index, &format!(",\"check\":{}", check_result_json(check)));
+    }
+    document
+}
+
+pub(crate) fn check_result_text(check: &CheckResult) -> String {
+    format!(
+        "check: passed (source={}, profile={}, front_end={}, programmable_build={}, diagnostics={})\n",
+        check.source, check.profile, check.front_end, check.programmable_build, check.diagnostics,
+    )
+}
+
+pub(crate) fn render_check_failure(
+    path: &Path,
+    diagnostics: &[Diagnostic],
+    json: bool,
+    color: bool,
+) -> ! {
+    let entry = path.display().to_string();
+    let source = fs::read_to_string(path).unwrap_or_default();
+    if json {
+        let machine_file = crate::machine_report_path_for_process(&entry);
+        print!(
+            "{}",
+            jet::render_all_json(&machine_file, &source, diagnostics)
+        );
+    } else {
+        eprint!(
+            "{}",
+            jet::render_all_colored(&entry, &source, diagnostics, color)
+        );
+    }
+    exit(jet::ExitCodes::USER_ERROR);
+}
 
 /// `jet inspect digest` — emit the one-file language surface used by agents.
 /// Every registry-shaped section is projected from the same typed rows used by
@@ -520,44 +700,17 @@ pub(crate) fn run_guarantees(
         crate::cli_error!(@fix "E2104", "`jet inspect guarantees` needs an entry file", "jet inspect guarantees Source/main.jet");
         exit(jet::ExitCodes::USAGE);
     };
-    let bundle = jet::Loader::load_entry_with_diagnostics(&file).unwrap_or_else(|diagnostics| {
-        render_loader_diagnostics(&diagnostics, &file, json, color);
+    let checked = check_projection_with_options(
+        Path::new(&file),
+        gates,
+        profile,
+        &BTreeMap::new(),
+    )
+    .unwrap_or_else(|diagnostics| {
+        render_check_failure(Path::new(&file), &diagnostics, json, color);
     });
-    let package = match jet::Package::PackageFacts::load(&bundle.project_root) {
-        None => None,
-        Some(Ok(facts)) => Some(facts),
-        Some(Err(error)) => {
-            let file = bundle.project_root.join(jet::Syntax::PACKAGE_FILE);
-            let diagnostic = Diagnostic::error(
-                "E1206",
-                "invalid package manifest".to_string(),
-                error.to_string(),
-                "fix the fields in package.jet before inspecting guarantees".to_string(),
-                None,
-            );
-            if json {
-                print!(
-                    "{}",
-                    jet::render_all_json(
-                        &jet::Diagnostics::ReportPath::from_path(&file),
-                        "",
-                        std::slice::from_ref(&diagnostic),
-                    )
-                );
-            } else {
-                eprint!(
-                    "{}",
-                    jet::render_all_colored(
-                        &file.display().to_string(),
-                        "",
-                        std::slice::from_ref(&diagnostic),
-                        color,
-                    )
-                );
-            }
-            exit(jet::ExitCodes::USER_ERROR);
-        }
-    };
+    let bundle = &checked.bundle;
+    let package = checked.index.package_facts();
 
     let ledger = GateLedger::collect(&bundle, gates);
     if !ledger.diagnostics().is_empty() {
@@ -570,14 +723,14 @@ pub(crate) fn run_guarantees(
         .count();
     let dependencies = bundle.dep_roots.keys().cloned().collect::<Vec<_>>();
     let report = jet::Driver::guarantee_report(
-        package.as_ref(),
+        package,
         dependencies,
         unsafe_gates,
         profile,
         freestanding,
     );
     if json {
-        render_json(&report);
+        render_json(&report, &checked.check);
     } else {
         render_human(&report);
     }
@@ -758,43 +911,6 @@ fn entry_file(args: &[String]) -> Option<String> {
     None
 }
 
-fn render_loader_diagnostics(
-    diagnostics: &[jet::Loader::LoaderDiagnostic],
-    entry_file: &str,
-    json: bool,
-    color: bool,
-) -> ! {
-    if json {
-        for entry in diagnostics {
-            let machine_file = crate::machine_report_path_for_entry(entry_file, &entry.file);
-            print!(
-                "{}",
-                jet::render_all_json(
-                    &machine_file,
-                    &entry.source,
-                    std::slice::from_ref(&entry.diagnostic),
-                )
-            );
-        }
-    } else {
-        for (index, entry) in diagnostics.iter().enumerate() {
-            if index > 0 {
-                eprint!("\n");
-            }
-            eprint!(
-                "{}",
-                jet::render_all_colored(
-                    &entry.file,
-                    &entry.source,
-                    std::slice::from_ref(&entry.diagnostic),
-                    color,
-                )
-            );
-        }
-    }
-    exit(jet::ExitCodes::USER_ERROR);
-}
-
 fn render_ledger_diagnostics(
     ledger: &GateLedger,
     bundle: &jet::AST::ProgramBundle,
@@ -867,8 +983,8 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
     }
 }
 
-fn render_json(report: &jet::Driver::GuaranteeReport) {
-    print!(
+fn render_json(report: &jet::Driver::GuaranteeReport, check: &CheckResult) {
+    let mut document = format!(
         "{{\"schema_version\":1,\"profile\":\"{}\",\"package\":{},\"freestanding\":{},\"components\":[",
         json_escape(&report.profile),
         report.package,
@@ -876,21 +992,24 @@ fn render_json(report: &jet::Driver::GuaranteeReport) {
     );
     for (index, component) in report.components.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            document.push(',');
         }
-        print!(
+        write!(
+            document,
             "{{\"component\":\"{}\",\"guarantee\":\"{}\",\"evidence\":\"{}\"}}",
             json_escape(&component.name),
             component.status.label(),
             json_escape(&component.evidence),
-        );
+        )
+        .expect("write guarantee JSON");
     }
-    print!("],\"notes\":[");
+    document.push_str("],\"notes\":[");
     for (index, note) in report.notes.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            document.push(',');
         }
-        print!("\"{}\"", json_escape(note));
+        write!(document, "\"{}\"", json_escape(note)).expect("write guarantee JSON");
     }
-    println!("]}}");
+    document.push_str("]}");
+    println!("{}", with_check_json(document, check));
 }

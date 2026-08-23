@@ -357,7 +357,15 @@ pub(crate) fn run_compile_cmd(
     }
 
     if cmd == "check" {
-        let all_diags = jet::check_with_path_and_settings(file, setting_overrides);
+        let all_diags = match crate::CmdInspect::check_projection_with_options(
+            Path::new(file),
+            gates,
+            profile.budget_name(),
+            setting_overrides,
+        ) {
+            Ok(checked) => checked.diagnostics,
+            Err(diagnostics) => diagnostics,
+        };
         let errors: Vec<_> = all_diags
             .iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -883,18 +891,20 @@ pub(crate) fn run_compile_cmd(
         let effect_view = match reused_package_effects {
             Some(view) => Some(view),
             None => {
-                let (_effect_diags, effect_bundle, effect_facts) =
-                    jet::Driver::check_file_with_effect_facts(file, None, false);
-                match effect_bundle {
-                    Some(bundle) => Some((
+                match crate::CmdInspect::check_projection_for_effects(
+                    Path::new(file),
+                    profile.budget_name(),
+                    setting_overrides,
+                ) {
+                    Ok(checked) => Some((
                         jet::EffectBudget::compute_package_effects(
-                            &bundle,
-                            &effect_facts.solved,
-                            &effect_facts.summaries,
+                            &checked.bundle,
+                            &checked.facts.solved,
+                            &checked.facts.summaries,
                         ),
-                        effect_facts.fact_registry,
+                        checked.facts.fact_registry,
                     )),
-                    None => None,
+                    Err(_) => None,
                 }
             }
         };

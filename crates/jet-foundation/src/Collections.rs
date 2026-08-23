@@ -348,6 +348,18 @@ pub fn builtin_method_return(
             ("packages", 0) => Some(Some(Type::List(Box::new(Type::Named(
                 "PackageInfo".to_string(),
             ))))),
+            ("definitions", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerDefinition".to_string(),
+            ))))),
+            ("references", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerReference".to_string(),
+            ))))),
+            ("call_edges", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerCall".to_string(),
+            ))))),
+            ("structural_nodes", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "CompilerStructuralNode".to_string(),
+            ))))),
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_TYPE_INFO => match (method, arg_count) {

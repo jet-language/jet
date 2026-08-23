@@ -24,6 +24,17 @@ pub struct ProgramSemanticFacts {
     pub name_ledger: jet_foundation::Names::NameLedger,
 }
 
+/// Read-only projection of the checked semantic index for the comptime
+/// program snapshot. The compiler owns the concrete `SemIndex`; this seam
+/// keeps comptime independent of the loader crate while ensuring every row is
+/// read from that one index instead of rebuilt here.
+pub trait ProgramIndexView {
+    fn definitions(&self) -> Vec<CtValue>;
+    fn references(&self) -> Vec<CtValue>;
+    fn call_edges(&self) -> Vec<CtValue>;
+    fn structural_nodes(&self) -> Vec<CtValue>;
+}
+
 /// The source-qualified identity exposed by the build reflection surface.
 ///
 /// `NameLedger::semantic_identity` is the compiler's package/path key. Build
@@ -2207,6 +2218,18 @@ pub fn build_program_info(
     bundle: &crate::AST::ProgramBundle,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
+    build_program_info_with_index(bundle, facts, None)
+}
+
+/// Build the whole-program reflection value with the compiler's shared
+/// semantic index attached. `None` remains for lower seam consumers that only
+/// have the legacy reflection facts; production compiler entry points pass
+/// the checked index view.
+pub fn build_program_info_with_index(
+    bundle: &crate::AST::ProgramBundle,
+    facts: &ProgramSemanticFacts,
+    index: Option<&dyn ProgramIndexView>,
+) -> CtValue {
     let layout_engine = TargetLayoutEngine::new(
         bundle
             .modules
@@ -2430,12 +2453,27 @@ pub fn build_program_info(
             ],
         ));
     }
+    let (definitions, references, call_edges, structural_nodes) = index.map_or(
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+        |index| {
+            (
+                index.definitions(),
+                index.references(),
+                index.call_edges(),
+                index.structural_nodes(),
+            )
+        },
+    );
     ct_struct(
         crate::Syntax::TYPE_PROGRAM_INFO,
         &[
             ("packages", ct_list(packages)),
             ("types", ct_list(types)),
             ("functions", ct_list(functions)),
+            ("definitions", ct_list(definitions)),
+            ("references", ct_list(references)),
+            ("call_edges", ct_list(call_edges)),
+            ("structural_nodes", ct_list(structural_nodes)),
         ],
     )
 }

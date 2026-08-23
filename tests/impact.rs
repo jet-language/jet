@@ -42,6 +42,7 @@ fn impact_json_output() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("\"symbol\":\"square\""));
     assert!(text.contains("\"found\":true"));
+    assert!(text.contains("\"check\":{\"status\":\"passed\""));
 }
 
 #[test]
