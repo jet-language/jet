@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 42705,
+    "rev": 42748,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2492,7 +2492,7 @@
       "title": "M06 · Source imports preserve meaning",
       "goal": "jet import translates a source corpus into editable canonical Jet with typed TODO provenance for lossy constructs, then proves differential equivalence to the source oracle and idempotence on re-import. Someone can inspect every unresolved construct and trust that successful imports preserve behavior rather than silently mistranslate it.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:05:47.730Z"
     },
     {
@@ -3386,17 +3386,17 @@
         }
       ],
       "created": "2026-07-02T16:45:00.450Z",
-      "updated": "2026-08-23T03:42:20.365Z",
+      "updated": "2026-08-23T04:32:33.192Z",
       "workOrder": 1150,
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:55.721Z"
+          "evidence": "evidence: ForeignBridge.rs:309,561-574; C production test tests/cffi.rs:1013 [lane y180]",
+          "at": "2026-08-23T04:32:32.838Z"
         },
         {
           "n": 2,
@@ -3437,11 +3437,11 @@
         {
           "n": 6,
           "text": "Slice proof: one shared descriptor schema drives both stub and binder generation; an executable example calls a C function through the generated path, and changing one descriptor field regenerates stub and binder consistently (test).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:21:10.130Z"
+          "evidence": "evidence: shared descriptor mutation test ForeignBridge.rs:847; executable C path tests/cffi.rs:1013 [lane y180]",
+          "at": "2026-08-23T04:32:33.192Z"
         }
       ],
       "needsAcceptance": false,
@@ -16561,7 +16561,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m05-foreign-ecosystems-reachable",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nImplement COBOL and Octave as adapters on the shared checked FFI boundary, then implement D-MIGRATE-SRC1 as an importer that emits editable canonical Jet plus precise TODO diagnostics and provenance. Copybooks map to Codable records; matrices preserve shape/width; compiler/runtime errors stay typed. Importers never claim semantic equivalence without differential proof and never become a permanent second source of truth.",
       "blockedBy": [
@@ -16684,11 +16684,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:55.961Z"
+          "evidence": "evidence: tests/cffi.rs:71; real GnuCOBOL copybook binding and jet run passed. [lane y504]",
+          "at": "2026-08-23T04:32:34.034Z"
         },
         {
           "n": 2,
@@ -16702,11 +16702,11 @@
         {
           "n": 3,
           "text": "Unsupported constructs, toolchain failure, ABI mismatch, and non-equivalent imports produce precise diagnostics and TODO provenance rather than guessed translations.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:55.961Z"
+          "evidence": "evidence: tests/cli/bind_cobol_invalid_e3208.txt:2; compiler failure, unsupported usage, and ABI-mismatch tests passed. [lane y504]",
+          "at": "2026-08-23T04:32:35.048Z"
         },
         {
           "n": 4,
@@ -16736,11 +16736,12 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-12T00:54:48.527Z",
-      "updated": "2026-08-23T02:46:52.290Z",
+      "updated": "2026-08-23T04:32:36.385Z",
       "workOrder": 990,
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:36.385Z"
     },
     {
       "id": "c0qdl0gg",
@@ -43339,7 +43340,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m05-foreign-ecosystems-reachable",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n\nShip **Polyglot enterprise adapter: Tcl** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/spec/syntax-decisions.md, crates/jet-pkg-model/src/FFI.rs, crates/jet-pkg-model/src/DotNetBind.rs, tests/cffi_native_matrix.rs, examples/features/lowlevel/polyglot_dotnet/main.jet. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Reuse the unified FFI binder or canonical source-import contract. Preserve source provenance and never create a permanent second source of truth.\n6. Unsupported constructs, toolchain failure, ABI mismatch, and non-equivalent imports produce precise diagnostics and TODO provenance rather than guessed translations.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 6 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -43368,20 +43369,20 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:56.652Z"
+          "evidence": "evidence: crates/jet-pkg-model/src/TclBind.rs:14-103; passing tcl_bind_runs_one_shot_and_persistent_typed_sessions. [lane y988]",
+          "at": "2026-08-23T04:32:37.612Z"
         },
         {
           "n": 2,
           "text": "Foreign values, errors, shapes, widths, calling conventions, and imported source retain their declared meaning through the real adapter or importer.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:56.652Z"
+          "evidence": "evidence: crates/jet-pkg-model/src/TclBind.rs:80-102; typed parsing, width checks, bounded strings, thread-affine sessions. [lane y988]",
+          "at": "2026-08-23T04:32:38.715Z"
         },
         {
           "n": 3,
@@ -43395,11 +43396,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:56.652Z"
+          "evidence": "evidence: passing Tcl success and E3208 failure tests through real production binaries. [lane y988]",
+          "at": "2026-08-23T04:32:39.058Z"
         },
         {
           "n": 5,
@@ -43420,10 +43421,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:22.975Z",
-      "updated": "2026-08-23T02:47:03.438Z",
+      "updated": "2026-08-23T04:32:39.785Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:39.785Z"
     },
     {
       "id": "c0t5hjqu",
@@ -54918,7 +54920,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m01-safe-foreign-boundary",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUse D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [
@@ -54942,11 +54944,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:57.611Z"
+          "evidence": "evidence: tests/ffi_callbacks_tasks.rs:127, :130, :175, :183; targeted test passed. [lane y1121]",
+          "at": "2026-08-23T04:32:40.861Z"
         },
         {
           "n": 2,
@@ -54960,11 +54962,11 @@
         {
           "n": 3,
           "text": "Reject ABI, layout, lifetime, callback, toolchain, and capability mismatches before the foreign call. Contain panics and foreign failures without leaks or fabricated success.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:57.611Z"
+          "evidence": "evidence: Core.rs:745, ForeignBridge.rs:286, :556, tests/cffi.rs:120, :144, :1941. [lane y1121]",
+          "at": "2026-08-23T04:32:41.211Z"
         },
         {
           "n": 4,
@@ -55004,10 +55006,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:03.762Z",
-      "updated": "2026-08-23T03:42:36.884Z",
+      "updated": "2026-08-23T04:32:42.544Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:42.544Z"
     },
     {
       "id": "c07cg57p",
@@ -55048,11 +55051,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:57.854Z"
+          "evidence": "evidence: direct_calls.rs:1320, passing ffi_capability_boundary_is_safe_only_inside_unsafe. [lane y1122]",
+          "at": "2026-08-23T04:32:43.707Z"
         },
         {
           "n": 2,
@@ -55075,11 +55078,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:57.854Z"
+          "evidence": "evidence: tests/cffi.rs:159-195, passing production-path test. [lane y1122]",
+          "at": "2026-08-23T04:32:44.814Z"
         },
         {
           "n": 5,
@@ -55110,7 +55113,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:04.266Z",
-      "updated": "2026-08-23T03:42:37.712Z",
+      "updated": "2026-08-23T04:32:44.814Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -55224,7 +55227,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m02-reproducible-foreign-bridges",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUse D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [
@@ -55275,11 +55278,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.351Z"
+          "evidence": "evidence: foreign_package_provider_fetch_lock_and_locked_round_trip at [tests/pkg.rs:1909](/home/nate/Projects/Github/jet/tests/pkg.rs:1909). [lane y1124]",
+          "at": "2026-08-23T04:32:47.070Z"
         },
         {
           "n": 5,
@@ -55293,11 +55296,11 @@
         {
           "n": 6,
           "text": "Slice proof: a package declares a foreign dependency and the provider integration builds/links it through the shared boundary; lockfile and store round-trip proven by test.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:21:12.335Z"
+          "evidence": "evidence: provider declaration, Hangar/store ingest, lock round-trip, locked reuse, and fail-closed artifact check in [tests/pkg.rs:1929](/home/nate/Projects/Github/jet/tests/pkg.rs:1929). [lane y1124]",
+          "at": "2026-08-23T04:32:48.492Z"
         }
       ],
       "refs": [
@@ -55310,10 +55313,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:05.255Z",
-      "updated": "2026-08-23T03:42:47.403Z",
+      "updated": "2026-08-23T04:32:50.016Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:50.016Z"
     },
     {
       "id": "c0vynz93",
@@ -55424,7 +55428,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m02-reproducible-foreign-bridges",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nUse D-FFI-UNIFY1=A as one foreign-namespace architecture: generated typed stubs and binders feed a common checked FFI boundary, while each language adapter owns transport details. Finish canonical descriptor, ownership/error/layout conversion, safe-vs-#Unsafe boundary, build/cache/provenance, package provider integration, and per-language capability reporting. Reconcile Python A, external provider A, existing C/Rust/npm/JS/Swift law, and active polyglot phase cards. Keep compiler seams dependency-free; foreign dependencies live in generated bridge/runtime packages.",
       "blockedBy": [
@@ -55448,11 +55452,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:58.834Z"
+          "evidence": "evidence: passing python_sidecar_binds_runs_and_launders_failure [lane y1126]",
+          "at": "2026-08-23T04:32:51.412Z"
         },
         {
           "n": 2,
@@ -55493,11 +55497,11 @@
         {
           "n": 6,
           "text": "Slice proof: the sidecar adapter runs through the production path and the capability report reflects the real per-language support matrix; report content is golden-tested.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:21:13.192Z"
+          "evidence": "evidence: passing ffi_capability_report_is_golden_and_cli_backed [lane y1126]",
+          "at": "2026-08-23T04:32:52.156Z"
         }
       ],
       "refs": [
@@ -55510,10 +55514,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:06.287Z",
-      "updated": "2026-08-23T03:42:50.007Z",
+      "updated": "2026-08-23T04:32:52.877Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:52.876Z"
     },
     {
       "id": "c0hgat49",
@@ -57705,11 +57710,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.075Z"
+          "evidence": "evidence: Compute.rs:1174, tests/compute_cuda.rs:20 [lane y1144]",
+          "at": "2026-08-23T04:32:53.461Z"
         },
         {
           "n": 2,
@@ -57723,11 +57728,11 @@
         {
           "n": 3,
           "text": "Unsupported operations, device loss, allocation failure, kernel rejection, and precision limits fail or fall back only as declared, with truthful receipts and no silent drift.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.075Z"
+          "evidence": "evidence: Compute.rs:1763, Compute.rs:5193, Compute.rs:5436; output cuda:f64:rejected [lane y1144]",
+          "at": "2026-08-23T04:32:54.415Z"
         },
         {
           "n": 4,
@@ -57741,11 +57746,11 @@
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.075Z"
+          "evidence": "evidence: docs/reference/core-library.md:3784, compute_cuda.jet:1, tests/compute_cuda.rs:109; git diff --check: clean [lane y1144]",
+          "at": "2026-08-23T04:32:55.567Z"
         }
       ],
       "refs": [
@@ -57757,7 +57762,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:17.329Z",
-      "updated": "2026-08-23T02:47:16.794Z",
+      "updated": "2026-08-23T04:32:55.567Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -57771,7 +57776,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m04-portable-accelerator-compute",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nImplement all D-COMPUTE*=D outcomes as one core.compute operation family over an expert buffer/device/stream/kernel substrate. Tensor<T> is the owner; unified provenance-aware views and Vec/Matrix aliases share storage. Auto placement emits receipts; policy may narrow only. Safe kernels require sema proof; raw kernels stay @Unsafe/#Unsafe with typed contracts. Reverse autodiff defaults with jvp/vjp and definition-site rules. Portable precision/determinism profiles use CPU oracle differential tests; dev/AOT backend identity cannot drift. Integrate data/ML without a second graph or type system.",
       "blockedBy": [
@@ -57804,11 +57809,11 @@
         {
           "n": 2,
           "text": "Supported operations, precision, placement, streams, transfers, receipts, and autodiff match the CPU meaning on the declared device matrix.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.312Z"
+          "evidence": "evidence: Metal unit checks Compute.rs:210-285; placement, transfers, streams, arithmetic, autodiff. [lane y1145]",
+          "at": "2026-08-23T04:32:56.411Z"
         },
         {
           "n": 3,
@@ -57822,11 +57827,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.312Z"
+          "evidence": "evidence: tests/compute_extended.rs:208-212; AOT/JIT/interpreter output: metal:f64:rejected\\nmetal:f32:checked\\nstream:cpu-ok\\n [lane y1145]",
+          "at": "2026-08-23T04:32:57.388Z"
         },
         {
           "n": 5,
@@ -57847,10 +57852,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:17.868Z",
-      "updated": "2026-08-23T03:42:55.705Z",
+      "updated": "2026-08-23T04:32:59.058Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:32:59.058Z"
     },
     {
       "id": "c0p7jo42",
@@ -58990,7 +58996,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m05-foreign-ecosystems-reachable",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nImplement COBOL and Octave as adapters on the shared checked FFI boundary, then implement D-MIGRATE-SRC1 as an importer that emits editable canonical Jet plus precise TODO diagnostics and provenance. Copybooks map to Codable records; matrices preserve shape/width; compiler/runtime errors stay typed. Importers never claim semantic equivalence without differential proof and never become a permanent second source of truth.",
       "blockedBy": [
@@ -59019,11 +59025,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:14:59.797Z"
+          "evidence": "evidence: octave_sidecar_runs_real_matrix_round_trip; production adapter completed real Octave matrix round-trip. [lane y1154]",
+          "at": "2026-08-23T04:33:00.560Z"
         },
         {
           "n": 2,
@@ -59071,10 +59077,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:23.053Z",
-      "updated": "2026-08-23T03:43:02.014Z",
+      "updated": "2026-08-23T04:33:02.467Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:33:02.467Z"
     },
     {
       "id": "c0ayuct3",
@@ -59085,7 +59092,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m06-source-imports-proven",
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nImplement COBOL and Octave as adapters on the shared checked FFI boundary, then implement D-MIGRATE-SRC1 as an importer that emits editable canonical Jet plus precise TODO diagnostics and provenance. Copybooks map to Codable records; matrices preserve shape/width; compiler/runtime errors stay typed. Importers never claim semantic equivalence without differential proof and never become a permanent second source of truth.",
       "blockedBy": [],
@@ -59122,11 +59129,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.284Z"
+          "evidence": "evidence: Source/CmdImport.rs:168-184; production smoke: imported, checked, differential, rerun bytes identical [lane y1156]",
+          "at": "2026-08-23T04:33:03.623Z"
         },
         {
           "n": 2,
@@ -59149,11 +59156,11 @@
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:00.284Z"
+          "evidence": "evidence: owned source-import aggregate: 14 passed [lane y1156]",
+          "at": "2026-08-23T04:33:03.969Z"
         },
         {
           "n": 5,
@@ -59185,20 +59192,20 @@
         {
           "n": 8,
           "text": "Differential proof on a fixed corpus: the imported program matches the source-language oracle output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:22:31.683Z"
+          "evidence": "evidence: python_source_import_matches_python_oracle_fixed_corpus [lane y1156]",
+          "at": "2026-08-23T04:33:05.146Z"
         },
         {
           "n": 9,
           "text": "Re-importing the emitted Jet is idempotent, proven by test.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:22:32.112Z"
+          "evidence": "evidence: source_import_dry_run_idempotence_and_three_way_update_are_honest [lane y1156]",
+          "at": "2026-08-23T04:33:06.409Z"
         }
       ],
       "refs": [
@@ -59210,10 +59217,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:24.076Z",
-      "updated": "2026-08-23T03:43:06.786Z",
+      "updated": "2026-08-23T04:33:07.140Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-23T04:33:07.140Z"
     },
     {
       "id": "c0nkeu5t",
@@ -83083,7 +83091,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m03-hostable-jet-artifacts",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Decide how Jet reuses compiled dependency work and whether Jet ships its own static or dynamic libraries. Sourced from mining Low Level's 'why rust libraries may never exist' (2024): Rust's source-only distribution drives clean-build cost; comment corrections show version-keyed binary reuse works without a public stable ABI, and a public ABI is a permanent evolution tax (Swift). Jet already has the machinery: E4-JP2 action IR with complete cache identity, E4-JP5 binary caches, ratified D-JPK-CACHEAUTH1/CACHECONFIG1/REPROCACHE1/STOREBACKEND1. Open owner choice: reuse model and any Jet-to-Jet linking promise. Ballot D-LIB-REUSE1 attached.",
       "blockedBy": [],
@@ -83250,11 +83258,11 @@
         {
           "n": 5,
           "text": "An executable example builds a loadable Jet library and loads it from a host program, with golden-tested output proving one meaning on AOT and on default jet run (I5, I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:39:09.394Z"
+          "evidence": "evidence: tests/library_outputs.rs:82-140; passing test library_build_load_and_foreign_call_are_one_surface. [lane y1421]",
+          "at": "2026-08-23T04:33:08.593Z"
         },
         {
           "n": 6,
@@ -83268,11 +83276,11 @@
         {
           "n": 7,
           "text": "No Jet-to-Jet binary layout promise is introduced: an artifact carrying a different compiler identity is never linked or mapped, proven by test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:39:10.111Z"
+          "evidence": "evidence: tests/library_outputs.rs:142-156; passing refusal test. [lane y1421]",
+          "at": "2026-08-23T04:33:09.466Z"
         },
         {
           "n": 8,
@@ -83333,8 +83341,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T19:37:03.322Z",
-      "updated": "2026-08-23T02:47:20.070Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-23T04:33:11.048Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-23T04:33:11.048Z"
     },
     {
       "id": "c0nwijdh",
@@ -127332,7 +127341,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m03-hostable-jet-artifacts",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -127348,20 +127357,20 @@
         {
           "n": 1,
           "text": "E1260 is retired for Bool and Text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:07:22.739Z"
+          "evidence": "evidence: Bool/Text ABI mapping at crates/jet-codegen/src/Codegen/Plugin.rs:39-40,48-49,96-97; targeted E1260 UI test passed; fresh sandbox build emitted WIT, core, and component artifacts without E1258. [lane y1906]",
+          "at": "2026-08-23T04:33:12.364Z"
         },
         {
           "n": 2,
           "text": "A sandbox example passes a validated host function to an untrusted plugin and round-trips Text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:07:23.200Z"
+          "evidence": "evidence: examples/features/packages/sandbox_mathkit/main.jet:20-23; example output included is-enabled(true) = true and greet(Ada) = hello, Ada!. [lane y1906]",
+          "at": "2026-08-23T04:33:13.731Z"
         }
       ],
       "refs": [],
@@ -127373,8 +127382,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:07:22.309Z",
-      "updated": "2026-08-23T01:03:05.380Z",
-      "updatedBy": "mse6"
+      "updated": "2026-08-23T04:33:15.553Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-23T04:33:15.552Z"
     },
     {
       "id": "c0n4dq3e",
@@ -127947,7 +127957,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m03-hostable-jet-artifacts",
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -128029,8 +128039,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:16.636Z",
-      "updated": "2026-08-23T01:10:52.421Z",
-      "updatedBy": "mse6"
+      "updated": "2026-08-23T04:33:16.617Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0jr1xem",
@@ -128453,7 +128463,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": "e6-m05-foreign-ecosystems-reachable",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
@@ -128469,20 +128479,20 @@
         {
           "n": 1,
           "text": "The pipeline is documented with selection, validation, and provenance steps",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:08:25.475Z"
+          "evidence": "evidence: [pipeline plan and selection](</home/nate/Projects/Github/jet/docs/research/c-library-port-pipeline-2026-08-22.md:8>), [validation steps](</home/nate/Projects/Github/jet/docs/research/c-library-port-pipeline-2026-08-22.md:40>), [provenance requirements](</home/nate/Projects/Github/jet/docs/research/c-library-port-pipeline-2026-08-22.md:59>) [lane y1920]",
+          "at": "2026-08-23T04:33:17.209Z"
         },
         {
           "n": 2,
           "text": "One C library is ported with tests green and provenance recorded",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-12T16:08:25.955Z"
+          "evidence": "evidence: [MurmurHash3 corpus](</home/nate/Projects/Github/jet/examples/features/ports/murmur3_x86_32/corpus/murmur3_x86_32.c:19>), [Jet test](</home/nate/Projects/Github/jet/examples/features/ports/murmur3_x86_32/main.jet:75>) passed 1 passed, 0 failed, 0 skipped; [provenance](</home/nate/Projects/Github/jet/examples/features/ports/murmur3_x86_32/provenance.md:65>) [lane y1920]",
+          "at": "2026-08-23T04:33:17.573Z"
         }
       ],
       "refs": [],
@@ -128493,8 +128503,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-12T16:08:24.849Z",
-      "updated": "2026-08-23T01:04:21.972Z",
-      "updatedBy": "mse6"
+      "updated": "2026-08-23T04:33:18.327Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-23T04:33:18.326Z"
     },
     {
       "id": "c0gxabzg",
@@ -190885,6 +190896,307 @@
   ],
   "events": [
     {
+      "at": "2026-08-23T04:33:18.327Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pj4od3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:17.574Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pj4od3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T04:33:17.209Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pj4od3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:33:16.618Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xpdgxg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:15.553Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z8je96",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:13.731Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z8je96",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T04:33:12.365Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z8je96",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:33:11.048Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pwzvbh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:09.467Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pwzvbh",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-23T04:33:08.593Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pwzvbh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T04:33:07.140Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ayuct3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:06.410Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayuct3",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-23T04:33:05.147Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayuct3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-23T04:33:03.969Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayuct3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T04:33:03.623Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ayuct3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:33:02.468Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u1r7eg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:33:00.561Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0u1r7eg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:59.058Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gb0kax",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:57.388Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gb0kax",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T04:32:56.411Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gb0kax",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T04:32:55.567Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07dnjkm",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-23T04:32:54.415Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07dnjkm",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T04:32:53.461Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07dnjkm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:52.877Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04rv5on",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:52.156Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04rv5on",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T04:32:51.413Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04rv5on",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:50.016Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nozhth",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:48.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nozhth",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T04:32:47.070Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nozhth",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T04:32:44.815Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07cg57p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T04:32:43.708Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07cg57p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:42.544Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z0a3nt",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:41.211Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z0a3nt",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T04:32:40.862Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z0a3nt",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:39.785Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n7wnrd",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:39.059Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n7wnrd",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-23T04:32:38.715Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n7wnrd",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-23T04:32:37.613Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n7wnrd",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:36.385Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xede68",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-23T04:32:35.049Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xede68",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-23T04:32:34.035Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xede68",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-23T04:32:33.192Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "caffiunify",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-23T04:32:32.838Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "caffiunify",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-23T03:43:09.816Z",
       "by": "Main",
       "action": "card.update",
@@ -194081,307 +194393,6 @@
       "by": "mse4",
       "action": "card.update",
       "ref": "c0d9coim",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:27.949Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c02zkxoe",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:27.457Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0x6p0ku",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:26.928Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0rwk4s1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:26.401Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0y82zyl",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:25.868Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0s6ntn0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:25.352Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0li2g5o",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:24.832Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0g4ojoy",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:24.323Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0a2zqpr",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:23.813Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lqvdtv",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:23.312Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0gcdx0k",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:22.656Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0b35mgo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:22.156Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c00de14z",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:21.630Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0tqgl1r",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:21.091Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lz10ao",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:20.591Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0919zeb",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:20.075Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c039pkzo",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:19.589Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0r9091q",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:19.078Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0lgdhb0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:18.547Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ftyk6u",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:18.021Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0aidnku",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:17.505Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c09ygniz",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:17.007Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c04k992u",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:16.500Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0uk9nn3",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:15.987Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0p2so2x",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:15.455Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0jkzumg",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:14.954Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0e6lx1b",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:14.432Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c07elzj4",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:13.893Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c01wj9pi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:13.365Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0rs9jy0",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:12.864Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0ma8tq3",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:12.354Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0glsi0q",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:11.838Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c06lyt4i",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:11.523Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c09w33e1",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:11.185Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c011qi9t",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:10.810Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c02582xi",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:10.442Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0qv7ncu",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:10.154Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c0tw88ts",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:09.832Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0l1auuh",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:09.520Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c0lzs7ou",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:09.247Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c0flp0gw",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:08.971Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c0ec460v",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:08.602Z",
-      "by": "mse5",
-      "action": "card.update",
-      "ref": "c09xefbn",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-23T01:08:08.290Z",
-      "by": "mse4",
-      "action": "card.update",
-      "ref": "c05xx3y0",
       "note": "milestoneId"
     }
   ],
