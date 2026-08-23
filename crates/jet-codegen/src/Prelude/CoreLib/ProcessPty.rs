@@ -37,8 +37,8 @@ mod unix {
     use super::{File, PtyConfig, PtyPair};
     use std::ffi::{CStr, OsStr};
     use std::io;
-    use std::os::raw::{c_char, c_void};
     use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::raw::{c_char, c_void};
     use std::os::unix::ffi::OsStrExt;
     use std::process::Command;
     use std::sync::Mutex;
@@ -161,9 +161,9 @@ mod unix {
         // until the next PTY-name operation in this process. Copy the bytes
         // before opening the slave.
         let slave_path = {
-            let _name_guard = PTY_NAME_LOCK.lock().map_err(|_| {
-                io::Error::new(io::ErrorKind::Other, "PTY name lock poisoned")
-            })?;
+            let _name_guard = PTY_NAME_LOCK
+                .lock()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "PTY name lock poisoned"))?;
             let name = unsafe { ptsname(master_fd) };
             if name.is_null() {
                 return Err(last_os_error("ptsname"));
@@ -627,7 +627,12 @@ mod windows {
             Ok(Self { list, storage })
         }
 
-        fn update(&mut self, attribute: usize, value: *const c_void, size: usize) -> io::Result<()> {
+        fn update(
+            &mut self,
+            attribute: usize,
+            value: *const c_void,
+            size: usize,
+        ) -> io::Result<()> {
             // SAFETY: `value` points to a live attribute value for this call.
             if unsafe {
                 UpdateProcThreadAttribute(
@@ -752,7 +757,8 @@ mod windows {
                 "Windows process argument contains NUL",
             ));
         }
-        let quoted = value.is_empty() || value.chars().any(char::is_whitespace) || value.contains('"');
+        let quoted =
+            value.is_empty() || value.chars().any(char::is_whitespace) || value.contains('"');
         let mut output = String::new();
         if quoted {
             output.push('"');
@@ -1008,6 +1014,12 @@ mod windows {
     }
 
     pub fn resize(console: usize, config: PtyConfig) -> io::Result<()> {
+        if console == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "ConPTY session is closed",
+            ));
+        }
         let size = validate_size(config)?;
         // SAFETY: the HPCON is owned by TerminalSession and remains live.
         let status = unsafe { ResizePseudoConsole(console as Handle, size) };

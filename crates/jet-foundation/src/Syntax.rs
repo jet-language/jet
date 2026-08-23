@@ -109,6 +109,10 @@
 // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
 // fields and D-LIT-DOT1 `Type{ ... }` construction. D-ECO-ROOTNAME1 still
 // owns the root noun; #560 owns executable source and tooling behavior.
+// D-ECO-GRAPH1=A (ratified 2026-08-23, card #532) adds no spelling: Package
+// owns one semantic graph and one lock identity; JetOS projects its typed
+// system/fleet facts from that graph. Filename, merge, and receipt storage
+// choices stay with their existing decisions.
 // D-MEM-VIEWRET1=B adds no token, sigil, lifetime spelling, or grammar rule.
 // It reuses the existing named-type spellings `View`, `ViewMut`, and the
 // restricted `str` element spelling at public string-view boundaries; sema

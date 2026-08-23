@@ -1516,6 +1516,13 @@ fn jet_process_child_wait(
         // deadlines wake the wait exactly like channel, timer, and I/O waits.
         jet_scheduler_park_ms("process wait", 10);
     };
+    // Unix process groups need one final sweep after the leader exits because
+    // the group has no close-time kill contract. Windows Job Objects already
+    // carry `KILL_ON_JOB_CLOSE`; calling TerminateJobObject again after the
+    // leader exits races an empty/signaled job and can turn a successful wait
+    // into a cleanup error. Dropping the native handle below closes that job
+    // and kills any remaining descendants.
+    #[cfg(unix)]
     let cleanup_error = if child.process_group {
         if let Some(inner) = child.inner.borrow_mut().as_mut() {
             jet_process_tree_signal(inner, true, jet_process_signal_kill())
@@ -1527,6 +1534,8 @@ fn jet_process_child_wait(
     } else {
         None
     };
+    #[cfg(not(unix))]
+    let cleanup_error: Option<jet_std::IOError> = None;
     if let Some(error) = cleanup_error.as_ref() {
         jet_process_record_cleanup_error(child, error.clone());
     }

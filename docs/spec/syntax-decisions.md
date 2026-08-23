@@ -6055,6 +6055,13 @@ systems.<host>` answers from machine back to source). The owner's
 ratification comment asked for a better root noun than "project" — honored by
 D-ECO-ROOTNAME1=I below: the root is `Package`.
 
+**D-ECO-GRAPH1=A — one Package graph, one lock identity** *(ratified
+2026-08-23, card #532)*: `Package` owns one semantic graph from source through
+packages, development setups, Outputs, Systems, and Fleets. JetOS is a typed
+projection of that graph, not a parallel OS graph. One lock identity covers
+the graph. This decision does not choose filenames, Config merge algebra, or
+receipt storage.
+
 **D-ECO-ROOTNAME1=I — the ecosystem root is `Package`** *(ratified
 2026-07-15)*: `Package` is the one noun for the complete graph from a single
 package through a monorepo and fleet. A root may list flat `members:` by
