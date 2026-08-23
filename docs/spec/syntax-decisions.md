@@ -7251,6 +7251,18 @@ checked before mapping. Native export produces static and shared libraries,
 the C header, and generated bindings for named languages. No new lexer token,
 keyword, or Jet-to-Jet ABI promise enters the surface.
 
+**2026-08-23 — D-EMBED1=E / D-EMBED2=C** *(card #1915)*: Jet has one typed
+embedding export surface: top-level `pub fn` items whose parameters and return
+type use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar. There is no
+separate `#Export` marker. `jet build --lib` lowers that surface to a native
+static/shared library and generated C header; it carries zero-runtime linkage
+but is a trusted native process boundary, not a sandbox. `jet build
+--target=sandbox` lowers the same rows to a WASM Component and WIT world; it
+requires a Component host runtime and carries the sandbox boundary. Both
+artifacts grant no ambient Jet capability: the native host receives only the
+declared C exports, and the Component host supplies only explicit WIT imports
+(the current world has none).
+
 **2026-08-13 — D-MATRIX-MUL1=F / D-MATRIX-LIT1=E /
 D-MATRIX-BCAST1=E / D-MATRIX-INDEX1=E / D-MATRIX-SOLVE1=B /
 D-MATRIX-HOME1=D** *(card #1437)*: `Matrix<M,N>` and `Vec<N>` use the

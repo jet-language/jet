@@ -446,6 +446,17 @@ pub fn manifest_parse_diagnostic(path: &Path, err: &PackageParseError) -> Diagno
         PackageParseError::ConfigMembers => {
             e1206(&file, "a Config file cannot declare `members`")
         }
+        PackageParseError::NestedMembers { root, member } => Diagnostic::error(
+            "E1323",
+            format!("member Package `{member}` declares `members`"),
+            format!(
+                "Package membership has depth cap one: `{root}` owns the member list, but `{member}` declares another one"
+            ),
+            format!(
+                "remove `members:` from `{member}` and lift its references into `{root}`"
+            ),
+            None,
+        ),
         PackageParseError::LintPolicyCode { code, name } => e1206_lint_policy(code, name),
         PackageParseError::Composition(detail) => e1206(&file, detail),
         PackageParseError::BadTarget { name, value, reserved: true } => e1210(

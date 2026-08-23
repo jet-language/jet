@@ -419,6 +419,16 @@ pub fn write(lock: &LockFile) -> String {
     let mut out = String::new();
     out.push_str(&format!("version = {}\n", lock.version));
 
+    // Keep top-level workspace identity before the first table. When the lock
+    // has no members, no later table header would close `[build.stamp]` and
+    // the parser would read this field as a build-stamp key.
+    if let Some(digest) = &lock.workspace_source_digest {
+        out.push_str(&format!(
+            "workspace_source_digest = \"{}\"\n",
+            escape_str(digest)
+        ));
+    }
+
     if let Some(stamp) = &lock.build_stamp {
         out.push_str("\n[build.stamp]\n");
         if let Some(git) = &stamp.git {
@@ -609,13 +619,6 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str(&format!(
             "package_digest = \"{}\"\n",
             escape_str(&member.package_digest)
-        ));
-    }
-
-    if let Some(digest) = &lock.workspace_source_digest {
-        out.push_str(&format!(
-            "\nworkspace_source_digest = \"{}\"\n",
-            escape_str(digest)
         ));
     }
 

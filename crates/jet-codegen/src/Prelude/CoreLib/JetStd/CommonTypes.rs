@@ -106,13 +106,11 @@
     impl PartialEq for TerminalSession {
         fn eq(&self, other: &Self) -> bool {
             #[cfg(unix)]
-            {
-                std::rc::Rc::ptr_eq(&self.master, &other.master)
-            }
+            return std::rc::Rc::ptr_eq(&self.master, &other.master);
             #[cfg(windows)]
-            {
-                std::rc::Rc::ptr_eq(&self.control, &other.control)
-            }
+            return std::rc::Rc::ptr_eq(&self.control, &other.control);
+            #[cfg(not(any(unix, windows)))]
+            false
         }
     }
 

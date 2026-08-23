@@ -38,6 +38,68 @@ fn explicit_path_list_yields_members() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+#[test]
+fn package_root_owns_membership_over_retired_workspace_source() {
+    let dir = unique_temp_dir("package-members");
+    for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
+        let package = dir.join(relative);
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("package.jet"), format!("name: \"{name}\"\n")).unwrap();
+    }
+    std::fs::write(
+        dir.join("package.jet"),
+        "name: \"root\"\nmembers: [\"packages/hello\", \"packages/ranker\"]\n",
+    )
+    .unwrap();
+    // A stale role file must not become a second graph authority once the
+    // canonical Package root exists.
+    std::fs::write(
+        dir.join("workspace.jet"),
+        "module workspace { members: 1 }\n",
+    )
+    .unwrap();
+
+    let plan = WorkspaceFile::load(&dir)
+        .expect("Package membership should select the graph")
+        .expect("Package membership should evaluate");
+    let names: Vec<&str> = plan
+        .members
+        .iter()
+        .map(|member| member.name.as_str())
+        .collect();
+    assert_eq!(names, ["hello", "ranker"]);
+    assert_eq!(
+        plan.source_digest,
+        jetpack::SHA256::sha256_hex(std::fs::read(dir.join("package.jet")).unwrap().as_slice(),)
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn package_member_cannot_declare_nested_members() {
+    let dir = unique_temp_dir("package-nested-members");
+    let member = dir.join("packages/app");
+    std::fs::create_dir_all(&member).unwrap();
+    std::fs::write(
+        dir.join("package.jet"),
+        "name: \"root\"\nmembers: [\"packages/app\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        member.join("package.jet"),
+        "name: \"app\"\nmembers: [\"child\"]\n",
+    )
+    .unwrap();
+
+    let error = WorkspaceFile::load(&dir)
+        .expect("Package membership should be discovered")
+        .expect_err("nested Package membership must fail");
+    assert_eq!(error.code, "E1323");
+    assert!(error.what.contains("packages/app/package.jet"));
+    assert!(error.why.contains("package.jet"));
+    std::fs::remove_dir_all(dir).ok();
+}
+
 fn unique_temp_dir(tag: &str) -> PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -853,10 +853,20 @@ fn compile_workspace_build_opts(
     workspace_resolver
         .revalidate_source(&workspace_source)
         .map_err(|error| vec![error.diagnostic()])?;
+    let workspace_entry_source = if workspace_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        == Some(Syntax::PACKAGE_FILE)
+    {
+        Package::build_entry_source(&workspace_source.source)
+            .unwrap_or_else(|| workspace_source.source.clone())
+    } else {
+        workspace_source.source.clone()
+    };
     let output = Driver::compile_bundle_path_build_with_overlay(
         &workspace_path.to_string_lossy(),
         &workspace_source.path,
-        &workspace_source.source,
+        &workspace_entry_source,
         Driver::BuildRunOptions {
             grants: workspace_grants,
             policy: production_build_policy(),

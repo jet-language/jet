@@ -1,9 +1,12 @@
 //! Declaration-resolved workspace evaluator (D-WORKSPACE1=B, D-WORKSPACE2=A).
 //!
-//! Parses and evaluates the canonical `workspace.jet` index declaration
-//! `module workspace { members: <expr> }`. Arbitrary top-level authority
-//! declarations are resolved separately for policy and boundary purposes; they
-//! do not supply workspace members. The index `members:` expression may be:
+//! Loads Package membership from the canonical `package.jet` root. During
+//! reversible split/fold migration, roots that have not yet folded membership
+//! still evaluate the old declaration-resolved `workspace.jet` index
+//! `module workspace { members: <expr> }`.
+//! Arbitrary top-level authority declarations are resolved separately for
+//! policy and boundary purposes; they do not supply workspace members. The
+//! migration index `members:` expression may be:
 //!   - `find("./packages")` — discovers package directories under the path
 //!   - A list literal of strings: `["./pkg/a", "./pkg/b"]`
 //!   - Any comptime expression that evaluates to a `[String]`
@@ -112,6 +115,45 @@ pub fn load_checked_source(
     })
 }
 
+/// Project Package membership into the historical workspace-plan read model.
+/// The Package parser and checked member resolver remain the sole authority;
+/// this is a view for callers that still need member ordering/selection.
+fn evaluate_package_source(
+    source: &WorkspaceSource,
+    resolver: &AuthorityResolver,
+) -> Result<WorkspacePlan, Diagnostic> {
+    let package = resolver
+        .checked_package(Path::new("."))
+        .map_err(|error| error.diagnostic())?;
+    let checked_members = package
+        .facts
+        .checked_members_in(resolver)
+        .map_err(|error| error.diagnostic())?;
+    let mut members = Vec::with_capacity(checked_members.len());
+    for member in checked_members {
+        resolver
+            .revalidate_member(&member.member)
+            .map_err(|error| error.diagnostic())?;
+        let canonical_path = resolver
+            .relative_identity(&member.member.directory)
+            .map_err(|error| error.diagnostic())?;
+        members.push(WorkspaceMember {
+            name: member.facts.name,
+            path: canonical_path.clone(),
+            canonical_path,
+        });
+    }
+    resolver
+        .revalidate_source(source)
+        .map_err(|error| error.diagnostic())?;
+    Ok(WorkspacePlan {
+        members,
+        comptime_inputs: Vec::new(),
+        overlay_policy: Default::default(),
+        source_digest: jet_pkg_model::SHA256::sha256_hex(source.source.as_bytes()),
+    })
+}
+
 pub fn changed_workspace_source_diagnostic(dir: &Path) -> Diagnostic {
     Diagnostic::error(
         "E1334",
@@ -171,7 +213,13 @@ pub fn evaluate_checked_source(
     resolver
         .revalidate_source(source)
         .map_err(|error| error.diagnostic())?;
-    let plan = evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)?;
+    let plan = if source.path.file_name().and_then(|name| name.to_str())
+        == Some(Syntax::PACKAGE_FILE)
+    {
+        evaluate_package_source(source, resolver)?
+    } else {
+        evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)?
+    };
     resolver
         .revalidate_source(source)
         .map_err(|error| error.diagnostic())?;

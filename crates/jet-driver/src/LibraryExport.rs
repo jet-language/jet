@@ -115,7 +115,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut exports = 0usize;
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(function) = item else { continue };
-        if !function.is_pub {
+        if !function.is_pub || !bundle.name_ledger.public(bundle.entry, &function.name) {
             continue;
         }
         exports += 1;
@@ -124,10 +124,10 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
                 "E1260",
                 "a Library export has an unsupported signature".to_string(),
                 format!(
-                    "native Library exports currently use one homogeneous `Int` or `Float` scalar shape; `pub fn {}` is outside that boundary",
+                    "native Library exports currently use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar shape; `pub fn {}` is outside that boundary",
                     function.name
                 ),
-                "make every parameter and the return type all `Int` or all `Float`, or drop `pub` if this function is private to the library".to_string(),
+                "make every parameter and the return type one of the same `Int`, `Float`, `Bool`, or `Text` scalar, or drop `pub` if this function is private to the library".to_string(),
                 None,
             ));
         }
@@ -175,7 +175,10 @@ pub fn check_and_freeze_version(
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(function) = item else { continue };
-        if !function.is_pub || crate::Codegen::library_export_shape(function).is_none() {
+        if !function.is_pub
+            || !bundle.name_ledger.public(bundle.entry, &function.name)
+            || crate::Codegen::library_export_shape(function).is_none()
+        {
             continue;
         }
         funcs.push(ApiFreeze::FrozenFn {

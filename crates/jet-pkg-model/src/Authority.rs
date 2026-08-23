@@ -163,6 +163,7 @@ pub enum AuthorityError {
     RetiredManifest(PathBuf),
     WorkspaceAmbiguous(Vec<PathBuf>),
     WorkspaceNoModule,
+    NestedMembers { root: PathBuf, member: PathBuf },
     Invalid { path: PathBuf, detail: String },
     Changed(PathBuf),
     Unsupported(String),
@@ -206,6 +207,21 @@ impl AuthorityError {
                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)
             }
             Self::WorkspaceNoModule => crate::WorkspacePlan::e0995_no_workspace_module(),
+            Self::NestedMembers { root, member } => Diagnostic::error(
+                "E1323",
+                format!("member Package `{}` declares `members`", member.display()),
+                format!(
+                    "Package membership has depth cap one: `{}` owns the member list, but `{}` declares another one",
+                    root.display(),
+                    member.display()
+                ),
+                format!(
+                    "remove `members:` from `{}` and lift its references into `{}`",
+                    member.display(),
+                    root.display()
+                ),
+                None,
+            ),
             Self::ManifestParse { path, error } => {
                 crate::Manifest::manifest_parse_diagnostic(path, error)
             }
@@ -326,6 +342,12 @@ impl std::fmt::Display for AuthorityError {
                 paths.len()
             ),
             Self::WorkspaceNoModule => f.write_str("canonical workspace source has no workspace module"),
+            Self::NestedMembers { root, member } => write!(
+                f,
+                "Package root `{}` cannot contain member Package `{}` with its own members",
+                root.display(),
+                member.display()
+            ),
             Self::Invalid { path, detail } => write!(f, "invalid authority `{}`: {detail}", path.display()),
             Self::ManifestParse { path, error } => {
                 write!(f, "invalid manifest `{}`: {error}", path.display())
@@ -623,9 +645,14 @@ impl AuthorityResolver {
         &self,
         member: CheckedMember,
     ) -> Result<CheckedPackage, AuthorityError> {
+        // Config paths and a Package's own membership are relative to that
+        // Package root, not to the enclosing workspace. The checked directory
+        // already carries the opened handle, so scoping here does not reopen
+        // or weaken the parent authority proof.
+        let package_resolver = Self::from_checked_directory(&member.directory);
         let mut facts = member.manifest.facts.clone();
         facts
-            .compose_configs_checked(self)
+            .compose_configs_checked(&package_resolver)
             .map_err(|error| AuthorityError::Invalid {
                 path: member.manifest.file.path.clone(),
                 detail: error.to_string(),
@@ -636,12 +663,7 @@ impl AuthorityResolver {
                 path: member.manifest.file.path.clone(),
                 detail: error.to_string(),
             })?;
-        facts
-            .validate_members_in_checked(self)
-            .map_err(|error| AuthorityError::Invalid {
-                path: member.manifest.file.path.clone(),
-                detail: error.to_string(),
-            })?;
+        facts.checked_members_in(&package_resolver)?;
         self.revalidate_member(&member)?;
         Ok(CheckedPackage { member, facts })
     }
@@ -794,6 +816,30 @@ impl AuthorityResolver {
         &self,
     ) -> Result<Option<crate::WorkspacePlan::WorkspaceSource>, AuthorityError> {
         self.revalidate_root()?;
+
+        // D-ECO-FILEROOT1/D-ECO-GRAPH1: a Package root owns membership. The
+        // old declaration-resolved workspace source remains below only while
+        // a Package root is still waiting for its membership list to be
+        // folded into package.jet.
+        match self.checked_manifest(Path::new(".")) {
+            Ok(manifest) => {
+                if !manifest.facts.members.is_empty() {
+                    let source = crate::WorkspacePlan::WorkspaceSource {
+                        path: manifest.file.path.clone(),
+                        source: manifest.file.text()?,
+                        role: crate::WorkspacePlan::WorkspaceSourceRole::Index,
+                        checked: manifest.file,
+                    };
+                    self.revalidate_source(&source)?;
+                    return Ok(Some(source));
+                }
+            }
+            Err(error)
+                if error.is_missing() || matches!(&error, AuthorityError::RetiredManifest(_)) =>
+            {}
+            Err(error) => return Err(error),
+        }
+
         let mut entries = fs::read_dir(&self.root).map_err(|error| Self::map_io(&self.root, error, true))?
             .collect::<Result<Vec<_>, _>>().map_err(|error| AuthorityError::Io {
                 path: self.root.clone(),

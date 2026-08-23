@@ -1014,6 +1014,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--skipped", help: "with project parts: show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: favor a smaller binary" },
+    FlagSpec { long: "--lib", help: "with build: emit the native Library and C header" },
     FlagSpec { long: "--output", help: "with run: run a named build output" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.

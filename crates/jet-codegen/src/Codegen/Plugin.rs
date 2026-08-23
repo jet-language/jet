@@ -28,36 +28,11 @@
 //!     freeze. A real follow-on, not a stub — v1 plugins are single flat
 //!     files, which is already a complete, useful shape.
 
-use crate::AST::{AccessConvention, Item, ProgramBundle, Type};
+use crate::AST::ProgramBundle;
 use jet_foundation::Names::mangle;
 
-/// One exported plugin function's homogeneous scalar shape.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum PluginScalar {
-    Int,
-    Float,
-    Bool,
-    Text,
-}
-
-impl PluginScalar {
-    fn wit_ty(self) -> &'static str {
-        match self {
-            PluginScalar::Int => "s64",
-            PluginScalar::Float => "f64",
-            PluginScalar::Bool => "bool",
-            PluginScalar::Text => "string",
-        }
-    }
-    fn rust_ty(self) -> &'static str {
-        match self {
-            PluginScalar::Int => "i64",
-            PluginScalar::Float => "f64",
-            PluginScalar::Bool => "bool",
-            PluginScalar::Text => "String",
-        }
-    }
-}
+/// Plugin compatibility name for the shared embedding scalar table.
+pub use super::Embedding::ExportScalar as PluginScalar;
 
 /// The guest-side artifacts for a `target: sandbox` build.
 #[derive(Debug, Clone)]
@@ -77,6 +52,8 @@ pub struct PluginArtifacts {
     /// The Jet names of every function actually exported (for the ApiFreeze
     /// snapshot / version-handshake diagnostics).
     pub exported_fns: Vec<String>,
+    /// The same typed rows consumed by the native Library lowerer.
+    pub exports: Vec<super::Embedding::ExportFunction>,
 }
 
 /// The one fixed `.wit` world name every plugin uses — only the `package`
@@ -88,34 +65,7 @@ const WORLD_NAME: &str = "jetplugin";
 /// parameter and the return type are the same Component Model scalar, else
 /// `None` (not exportable in v1 — see module doc).
 pub fn plugin_export_shape(f: &crate::AST::Func) -> Option<PluginScalar> {
-    let mut shape: Option<PluginScalar> = None;
-    let note = |t: &Type, shape: &mut Option<PluginScalar>| -> bool {
-        let this = match t {
-            Type::Int => PluginScalar::Int,
-            Type::Float => PluginScalar::Float,
-            Type::Bool => PluginScalar::Bool,
-            Type::String => PluginScalar::Text,
-            _ => return false,
-        };
-        match shape {
-            Some(s) if *s != this => false,
-            Some(_) => true,
-            None => {
-                *shape = Some(this);
-                true
-            }
-        }
-    };
-    for p in &f.params {
-        if !note(&p.ty, &mut shape) {
-            return None;
-        }
-    }
-    match &f.return_type {
-        Some(t) if note(t, &mut shape) => {}
-        _ => return None,
-    }
-    shape
+    super::Embedding::export_shape(f)
 }
 
 /// `snake_case` (or anything) -> `kebab-case`, the Component Model's required
@@ -161,23 +111,16 @@ pub fn emit_plugin(
     export_name: &str,
 ) -> PluginArtifacts {
     let sanitized = sanitize_package_name(export_name);
-    let entry_items = &bundle.modules[bundle.entry].items;
+    let exports = super::Embedding::export_surface(bundle);
 
     let mut wit_lines = Vec::new();
     let mut wrapper_fns = String::new();
-    let mut exported = Vec::new();
     let mut has_text_export = false;
 
-    for item in entry_items {
-        let Item::Func(f) = item else { continue };
-        if !bundle.name_ledger.public(bundle.entry, &f.name) {
-            continue;
-        }
-        let Some(scalar) = plugin_export_shape(f) else {
-            continue;
-        };
-        let kebab = to_kebab(&f.name);
-        let wit_params: Vec<String> = f
+    for export in &exports {
+        let scalar = export.scalar;
+        let kebab = to_kebab(&export.name);
+        let wit_params: Vec<String> = export
             .params
             .iter()
             .enumerate()
@@ -188,34 +131,34 @@ pub fn emit_plugin(
             wit_params.join(", "),
             scalar.wit_ty()
         ));
-        let wrapper_name = mangle(&format!("plugin_export_{}", f.name));
+        let wrapper_name = mangle(&format!("plugin_export_{}", export.name));
         if scalar == PluginScalar::Text {
             has_text_export = true;
-            let rust_params: Vec<String> = f
+            let rust_params: Vec<String> = export
                 .params
                 .iter()
                 .enumerate()
                 .flat_map(|(i, _)| [format!("p{i}_ptr: i32"), format!("p{i}_len: i32")])
                 .collect();
-            let locals: Vec<String> = f
+            let locals: Vec<String> = export
                 .params
                 .iter()
                 .enumerate()
-                .map(|(i, p)| {
-                    let mutable = matches!(p.convention, AccessConvention::Write)
+                .map(|(i, convention)| {
+                    let mutable = matches!(convention, crate::AST::AccessConvention::Write)
                         .then_some("mut ")
                         .unwrap_or_default();
                     format!("let {mutable}p{i} = __jet_plugin_read_text(p{i}_ptr, p{i}_len);")
                 })
                 .collect();
-            let call_args: Vec<String> = f
+            let call_args: Vec<String> = export
                 .params
                 .iter()
                 .enumerate()
-                .map(|(i, p)| match p.convention {
-                    AccessConvention::Read => format!("&p{i}"),
-                    AccessConvention::Write => format!("&mut p{i}"),
-                    AccessConvention::Move => format!("p{i}"),
+                .map(|(i, convention)| match convention {
+                    crate::AST::AccessConvention::Read => format!("&p{i}"),
+                    crate::AST::AccessConvention::Write => format!("&mut p{i}"),
+                    crate::AST::AccessConvention::Move => format!("p{i}"),
                 })
                 .collect();
             wrapper_fns.push_str(&format!(
@@ -223,28 +166,45 @@ pub fn emit_plugin(
                 wrapper_name = wrapper_name,
                 rust_params = rust_params.join(", "),
                 locals = locals.join(" "),
-                callee = mangle(&f.name),
+                callee = mangle(&export.name),
                 call_args = call_args.join(", "),
-                post_name = mangle(&format!("plugin_post_{}", f.name)),
+                post_name = mangle(&format!("plugin_post_{}", export.name)),
             ));
         } else {
-            let rust_params: Vec<String> = f
+            let rust_params: Vec<String> = export
                 .params
                 .iter()
                 .enumerate()
                 .map(|(i, _)| format!("p{i}: {}", scalar.rust_ty()))
                 .collect();
-            let call_args: Vec<String> = (0..f.params.len()).map(|i| format!("p{i}")).collect();
+            let locals: Vec<String> = export
+                .params
+                .iter()
+                .enumerate()
+                .filter(|(_, convention)| matches!(convention, crate::AST::AccessConvention::Write))
+                .map(|(i, _)| format!("let mut p{i} = p{i};"))
+                .collect();
+            let call_args: Vec<String> = export
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, convention)| match convention {
+                    crate::AST::AccessConvention::Write => format!("&mut p{i}"),
+                    crate::AST::AccessConvention::Read | crate::AST::AccessConvention::Move => {
+                        format!("p{i}")
+                    }
+                })
+                .collect();
             wrapper_fns.push_str(&format!(
-                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {callee}({call_args}) }}\n",
+                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> {ret} {{ {locals} {callee}({call_args}) }}\n",
                 wrapper_name = wrapper_name,
                 rust_params = rust_params.join(", "),
                 ret = scalar.rust_ty(),
-                callee = mangle(&f.name),
+                locals = locals.join(" "),
+                callee = mangle(&export.name),
                 call_args = call_args.join(", "),
             ));
         }
-        exported.push(f.name.clone());
     }
 
     let wit = format!(
@@ -362,6 +322,7 @@ fn __jet_plugin_post_text(ret_ptr: i32) {
         guest_rust,
         world_name: WORLD_NAME.to_string(),
         export_name: sanitized,
-        exported_fns: exported,
+        exported_fns: exports.iter().map(|export| export.name.clone()).collect(),
+        exports,
     }
 }

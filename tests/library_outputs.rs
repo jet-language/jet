@@ -63,6 +63,41 @@ fn cc() -> Option<&'static str> {
 }
 
 #[test]
+fn native_and_component_exports_share_one_typed_surface() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/packages/library_loadable");
+    let scratch = Scratch::new("embedding-parity");
+    copy_tree(&fixture, &scratch.path);
+    let source = scratch.path.join("library.jet");
+    let source = source.to_string_lossy();
+
+    let library = jet::compile_library(&source, None)
+        .expect("native Library codegen should accept the fixture")
+        .library
+        .expect("native Library artifacts");
+    let plugin = jet::compile_plugin(&source)
+        .expect("sandbox Component codegen should accept the fixture")
+        .plugin
+        .expect("sandbox Component artifacts");
+
+    let library_rows: Vec<_> = library
+        .exports
+        .iter()
+        .map(|export| (export.name.clone(), export.scalar, export.conventions.clone()))
+        .collect();
+    let plugin_rows: Vec<_> = plugin
+        .exports
+        .iter()
+        .map(|export| (export.name.clone(), export.scalar, export.params.clone()))
+        .collect();
+    assert_eq!(library_rows, plugin_rows);
+    assert_eq!(
+        plugin.exported_fns,
+        library.exports.iter().map(|export| export.name.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn library_build_load_and_foreign_call_are_one_surface() {
     if !have_rustc() {
         eprintln!("note: skipping Library end-to-end proof (need rustc)");
@@ -79,7 +114,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     copy_tree(&fixture, &scratch.path);
     let expected = expected_output();
 
-    let build = run_jet(&scratch.path, &["build", "library.jet"]);
+    let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
     assert!(build.status.success(), "Library build failed:\n{}", compiler_text(&build));
 
     let target = scratch.path.join("target");
@@ -101,13 +136,14 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     ] {
         assert!(path.is_file(), "Library build missed {}", path.display());
     }
+    let header_text = fs::read_to_string(target.join("loadable.h")).unwrap();
+    assert!(header_text.contains("int64_t on_tick(int64_t p0);"));
+    assert!(header_text.contains("bool is_enabled(bool p0);"));
+    assert!(header_text.contains("JetText greet(JetText p0);"));
+    assert!(header_text.contains("void jet_text_free(JetText value);"));
 
     let c_source = scratch.path.join("foreign.c");
-    fs::write(
-        &c_source,
-        "#include \"loadable.h\"\n#include <stdint.h>\n#include <stdio.h>\nint main(void) { printf(\"%lld\\n\", (long long)on_tick(41)); return 0; }\n",
-    )
-    .unwrap();
+    assert!(c_source.is_file(), "missing checked-in C host example");
     let c_binary = scratch.path.join("foreign");
     let mut c_build = Command::new(cc);
     c_build

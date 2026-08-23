@@ -24,7 +24,7 @@ pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_dep, remove_dep};
 
-use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
+use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
 use crate::Lexer;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -384,6 +384,8 @@ pub enum PackageParseError {
     InvalidValue { field: String, value: String },
     ConfigMembers,
     Composition(String),
+    /// D-ECO-MEMBERS1: a member Package may not introduce another member list.
+    NestedMembers { root: String, member: String },
     /// D-LINTPOLICY1: a registered diagnostic code was used as a lint-policy
     /// selector; Manifest turns the typed pair into the E1206 row.
     LintPolicyCode { code: String, name: String },
@@ -426,6 +428,10 @@ impl fmt::Display for PackageParseError {
             }
             Self::ConfigMembers => f.write_str("Config cannot declare `members`"),
             Self::Composition(value) => f.write_str(value),
+            Self::NestedMembers { root, member } => write!(
+                f,
+                "member Package `{member}` declares `members`; Package root `{root}` owns membership"
+            ),
             Self::LintPolicyCode { code, name } => write!(
                 f,
                 "`{code}` is a diagnostic code; use `{name}` in `policy.lints.deny`"
@@ -459,7 +465,13 @@ impl std::error::Error for ComposeError {}
 impl std::error::Error for PackageParseError {}
 
 fn authority_package_error(error: AuthorityError) -> PackageParseError {
-    PackageParseError::Composition(error.to_string())
+    match error {
+        AuthorityError::NestedMembers { root, member } => PackageParseError::NestedMembers {
+            root: root.display().to_string(),
+            member: member.display().to_string(),
+        },
+        error => PackageParseError::Composition(error.to_string()),
+    }
 }
 
 impl PackageFacts {
@@ -1207,6 +1219,71 @@ impl PackageFacts {
         self.member_names_in_checked(resolver).map(|_| ())
     }
 
+    /// Resolve the root's flat member references from the same checked Package
+    /// authority used by `load`. Callers receive the checked snapshots they
+    /// will consume; no workspace-specific parser or second Package identity
+    /// is created.
+    pub fn checked_members_in(
+        &self,
+        resolver: &AuthorityResolver,
+    ) -> Result<Vec<CheckedPackage>, AuthorityError> {
+        self.validate_members().map_err(|error| AuthorityError::Invalid {
+            path: Path::new(&self.origin).to_path_buf(),
+            detail: error.to_string(),
+        })?;
+        let mut physical = Vec::new();
+        let mut names = Vec::new();
+        let mut packages = Vec::new();
+        for member in &self.members {
+            let relative = match member {
+                MemberRef::Path(path) | MemberRef::Find(path) => path,
+            };
+            let candidates = if matches!(member, MemberRef::Find(_)) {
+                resolver.discover_members(Path::new(relative))?
+            } else {
+                vec![resolver.checked_member(Path::new(relative))?]
+            };
+            for candidate in candidates {
+                if !candidate.manifest.facts.members.is_empty() {
+                    return Err(AuthorityError::NestedMembers {
+                        root: Path::new(&self.origin).to_path_buf(),
+                        member: candidate.manifest.file.path.clone(),
+                    });
+                }
+                let package = resolver.complete_checked_package(candidate)?;
+                let canonical = resolver.relative_identity(&package.member.directory)?;
+                if canonical == "." {
+                    return Err(AuthorityError::Invalid {
+                        path: package.member.manifest.file.path.clone(),
+                        detail: format!("member reference `{relative}` resolves to its Package root"),
+                    });
+                }
+                if physical.iter().any(|existing| existing == &canonical) {
+                    return Err(AuthorityError::Invalid {
+                        path: package.member.manifest.file.path.clone(),
+                        detail: format!(
+                            "member reference `{relative}` has the same physical identity as another member"
+                        ),
+                    });
+                }
+                if names.iter().any(|existing| existing == &package.facts.name) {
+                    return Err(AuthorityError::Invalid {
+                        path: package.member.manifest.file.path.clone(),
+                        detail: format!(
+                            "member Package name `{}` is declared more than once",
+                            package.facts.name
+                        ),
+                    });
+                }
+                physical.push(canonical);
+                names.push(package.facts.name.clone());
+                packages.push(package);
+            }
+        }
+        resolver.revalidate_root()?;
+        Ok(packages)
+    }
+
     /// Validate member paths and return the canonical names discovered in the
     /// physical Package root. Transition planners use the same checked
     /// discovery result when they preview a new member, so name collisions do
@@ -1223,58 +1300,9 @@ impl PackageFacts {
         &self,
         resolver: &AuthorityResolver,
     ) -> Result<Vec<String>, PackageParseError> {
-        self.validate_members()
-            .map_err(|error| PackageParseError::Composition(error.to_string()))?;
-        let mut physical = Vec::new();
-        let mut names = Vec::new();
-        for member in &self.members {
-            let relative = match member {
-                MemberRef::Path(relative) | MemberRef::Find(relative) => relative,
-            };
-            let candidates = if matches!(member, MemberRef::Find(_)) {
-                resolver
-                    .discover_members(Path::new(relative))
-                    .map_err(authority_package_error)?
-            } else {
-                vec![resolver
-                    .checked_member(Path::new(relative))
-                    .map_err(authority_package_error)?]
-            };
-            for candidate in candidates {
-                let canonical = resolver
-                    .relative_identity(&candidate.directory)
-                    .map_err(authority_package_error)?;
-                if canonical == "." {
-                    return Err(PackageParseError::Composition(format!(
-                        "member reference `{relative}` resolves to its Package root"
-                    )));
-                }
-                if physical.iter().any(|existing| existing == &canonical) {
-                    return Err(PackageParseError::Composition(format!(
-                        "member reference `{relative}` has the same physical identity as another member"
-                    )));
-                }
-                let name = candidate.manifest.facts.name.clone();
-                if !candidate.manifest.facts.members.is_empty() {
-                    let manifest = candidate.manifest.file.path.display().to_string();
-                    return Err(PackageParseError::Composition(format!(
-                        "member Package `{relative}` at `{manifest}` declares members"
-                    )));
-                }
-                if names.iter().any(|existing| existing == &name) {
-                    return Err(PackageParseError::Composition(format!(
-                        "member Package name `{name}` is declared more than once"
-                    )));
-                }
-                physical.push(canonical);
-                names.push(name);
-                resolver
-                    .revalidate_member(&candidate)
-                    .map_err(authority_package_error)?;
-            }
-        }
-        resolver.revalidate_root().map_err(authority_package_error)?;
-        Ok(names)
+        self.checked_members_in(resolver)
+            .map(|packages| packages.into_iter().map(|package| package.facts.name).collect())
+            .map_err(authority_package_error)
     }
 }
 

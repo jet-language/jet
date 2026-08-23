@@ -4316,6 +4316,28 @@ diagnostics: E1257 (interface changed incompatibly), E1258 (authority
 denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
 shape) — see docs/spec/diagnostics.md.
 
+### Embedding artifacts — one export table, two host boundaries
+
+The native and sandbox embedding artifacts use one export list and one scalar
+lowering table. The list is the entry file's top-level `pub fn` surface; each
+function must have one homogeneous `Int`, `Float`, `Bool`, or `Text` shape.
+There is no separate `#Export` marker to keep in sync.
+
+`jet build --lib` emits a linkable native static/shared library and a generated
+C header from that list. It needs no WASM or Component runtime in the host
+process. The native artifact is trusted code: it does not provide sandboxing,
+and the C host must treat the declared ABI and any host-side capabilities as
+its responsibility. Text results are released with the generated
+`jet_text_free` function.
+
+`jet build --target=sandbox` emits the WASM Component from the same list. A
+sandbox host must carry a Component runtime, but the guest runs behind the
+runtime's sandbox boundary. The host gets no ambient Jet authority: the current
+world declares no host imports, and future host capabilities must be explicit
+WIT imports. The native library and Component therefore share semantics while
+making different guarantees — zero-runtime linkage only on native, sandboxing
+only on the Component.
+
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
 `jet build` checks the root program, then runs one optional package-local

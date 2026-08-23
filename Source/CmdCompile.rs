@@ -294,6 +294,7 @@ pub(crate) fn run_compile_cmd(
     file: &str,
     emit_rust: bool,
     emit_generated: bool,
+    library_flag: bool,
     small: bool,
     freestanding: bool,
     gates: jet::Policy::GateSet,
@@ -611,7 +612,7 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
-    let library_output = if cmd == "build" && !is_web && !is_plugin {
+    let library_output = if cmd == "build" && !is_web && !is_plugin && (library_flag || output_name.is_none()) {
         package_manifest.as_ref().and_then(|(_, manifest)| {
             let selected = output_name
                 .and_then(|name| manifest.outputs.get(name).map(|_| name.to_string()))
@@ -633,7 +634,7 @@ pub(crate) fn run_compile_cmd(
     } else {
         None
     };
-    let is_library = library_output.is_some();
+    let is_library = library_flag || library_output.is_some();
 
     // #2083: one front end per build. A `jet build` used to load and
     // type-check its program three times — once inside `native_cache_key`,

@@ -1274,6 +1274,7 @@ fn main() {
     let json = jet_argv.iter().any(|a| a == "--json");
     reject_retired_gate_flags(jet_argv, json);
     let small = jet_argv.iter().any(|a| a == "--small");
+    let library_flag = jet_argv.iter().any(|a| a == "--lib");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let gates = parse_gate_flags(jet_argv, json);
     let build_grants: Vec<String> = BuildEffect::ALL
@@ -1474,6 +1475,14 @@ fn main() {
     };
     let record_name = named_record_for_command(jet_argv, cmd, json);
     let debug_replay = named_debug_replay(jet_argv, cmd, json);
+    if library_flag && cmd != "build" {
+        crate::cli_error!(@fix "E2104", "`--lib` is only valid with `jet build`", "run `jet build --lib <file.jet>` to emit the native Library artifacts");
+        exit(ExitCodes::USAGE);
+    }
+    if library_flag && cross_target.is_some() {
+        crate::cli_error!(@fix "E2102", "`--lib` cannot be combined with `--target`", "remove `--target`; the native Library is built for the host ABI");
+        exit(ExitCodes::USAGE);
+    }
     if let Some(output) = output_name.as_deref() {
         if cmd != "run" || output.is_empty() {
             crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address with `jet run`", format!("write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT));
@@ -1515,6 +1524,7 @@ fn main() {
                 &resolved,
                 emit_rust,
                 emit_generated,
+                library_flag,
                 small,
                 freestanding,
                 gates,
@@ -2569,6 +2579,7 @@ fn main() {
                                     &entry_str,
                                     emit_rust,
                                     emit_generated,
+                                    library_flag,
                                     small,
                                     freestanding,
                                     gates,
@@ -2831,6 +2842,7 @@ fn main() {
                 &resolved,
                 emit_rust,
                 emit_generated,
+                library_flag,
                 small,
                 freestanding,
                 gates,

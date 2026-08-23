@@ -82,7 +82,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             if source.role != WorkspaceSourceRole::Index {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "workspace lock members require workspace.jet as the index",
+                    "workspace lock members require package.jet as the Package index",
                 ));
             }
             let digest = jet_pkg_model::SHA256::sha256_hex(source.source.as_bytes());
@@ -101,7 +101,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
         } else if !plan.members.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "workspace lock members require a checked workspace.jet index",
+                "workspace lock members require a checked Package index",
             ));
         }
         let source_digest = if !plan.source_digest.is_empty() {
@@ -146,7 +146,17 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                             format!("workspace member {} has no relative identity: {error}", m.name),
                         )
                     })?;
+                let member_manifest_path = checked.member.manifest.file.path.display().to_string();
                 let package = checked.facts;
+                if !package.members.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Package member `{}` declares nested members",
+                            member_manifest_path
+                        ),
+                    ));
+                }
                 Ok(LockedWorkspaceMember {
                     name: m.name.clone(),
                     path: m.path.clone(),
@@ -363,7 +373,36 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_with_workspace_root_member() {
+    fn package_root_members_roundtrip_through_one_lock() {
+        let tmp = std::env::temp_dir().join(format!(
+            "wlock-package-root-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::create_dir_all(tmp.join("packages/hello")).unwrap();
+        std::fs::write(
+            tmp.join(Syntax::PACKAGE_FILE),
+            "name: \"root\"\nmembers: [\"packages/hello\"]\n",
+        )
+        .unwrap();
+        write_member_manifest(&tmp, "packages/hello", "hello");
+
+        let plan = crate::WorkspaceFile::load(&tmp)
+            .expect("Package root must provide the member plan")
+            .expect("Package members must evaluate");
+        write(&tmp, &plan).unwrap();
+        let loaded = load(&tmp).expect("one unified lock must reload the Package graph");
+        assert_eq!(loaded.members.len(), 1);
+        assert_eq!(loaded.members[0].name, "hello");
+        assert_eq!(loaded.members[0].path, "packages/hello");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn a_single_package_has_no_workspace_membership() {
         let tmp = std::env::temp_dir().join(format!(
             "wlock-root-member-{}",
             std::time::SystemTime::now()
@@ -372,17 +411,11 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp).unwrap();
-        write_workspace_index(&tmp);
         std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
-        let plan = WorkspacePlan {
-            members: vec![member("root", ".")],
-            ..Default::default()
-        };
+        let plan = WorkspacePlan::default();
         write(&tmp, &plan).unwrap();
-        let loaded = load(&tmp).expect("lock reload must preserve a root member");
-        assert_eq!(loaded.members.len(), 1);
-        assert_eq!(loaded.members[0].name, "root");
-        assert_eq!(loaded.members[0].path, ".");
+        let loaded = load(&tmp).expect("lock reload must preserve the single Package graph");
+        assert!(loaded.members.is_empty());
         std::fs::remove_dir_all(&tmp).ok();
     }
 

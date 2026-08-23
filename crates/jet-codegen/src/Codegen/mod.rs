@@ -102,6 +102,7 @@ macro_rules! jet_name_format {
 
 mod CModule;
 mod Context;
+pub mod Embedding;
 mod Imports;
 mod Items;
 pub use crate::task_group;
@@ -128,6 +129,7 @@ pub(crate) use Context::*;
 pub(crate) use Imports::*;
 pub(crate) use Items::*;
 pub use Plugin::{emit_plugin, plugin_export_shape, PluginArtifacts, PluginScalar};
+pub use Embedding::{export_shape, export_surface, ExportFunction, ExportScalar};
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
