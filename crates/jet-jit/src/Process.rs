@@ -452,7 +452,10 @@ fn jet_jit_process_child_terminal(child: i64) -> i64 {
         rt.process_children
             .get(idx)
             .and_then(|child| child.terminal.as_ref().ok())
-            .map(|_| child)
+            // `ProcessChild.terminal` is a packed Option in the Cranelift
+            // ABI: zero is None and a present payload is stored as value + 1.
+            // Return the child handle itself after the lowering unpacks it.
+            .map(|_| child.wrapping_add(1))
             .unwrap_or(0)
     })
 }
@@ -534,6 +537,24 @@ fn jet_jit_process_stream_lines(child: i64, tag: i64) -> i64 {
         }
         list
     })
+}
+
+fn jet_jit_process_stdin_write(child: i64, text: i64) -> i64 {
+    if child <= 0 {
+        return invalid_process_child();
+    }
+    let text = clone_string(text);
+    let index = (child as usize).saturating_sub(1);
+    let result = Concurrency::with_runtime_mut(|rt| {
+        rt.process_children
+            .get(index)
+            .map(|child| process_prelude::child_stdin_write(child, &text))
+    });
+    match result {
+        Some(Ok(())) => result_ok(0),
+        Some(Err(error)) => process_io_error_result(error),
+        None => invalid_process_child(),
+    }
 }
 
 fn jet_jit_process_child_id(child: i64) -> i64 {
@@ -666,4 +687,5 @@ host_fns! {
     child_wait: "jet_jit_process_child_wait" => jet_jit_process_child_wait: sig_unary;
     terminal_resize: "jet_jit_terminal_session_resize" => jet_jit_terminal_session_resize: sig_binary;
     stream_lines: "jet_jit_process_stream_lines" => jet_jit_process_stream_lines: sig_binary;
+    stdin_write: "jet_jit_process_stdin_write" => jet_jit_process_stdin_write: sig_binary;
 }

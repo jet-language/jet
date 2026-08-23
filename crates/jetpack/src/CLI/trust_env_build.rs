@@ -685,10 +685,10 @@ mod tests {
                 0,
                 &[(
                     "linux-bwrap".into(),
-                    "filesystem=source-readonly;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB".into(),
+                    "filesystem=source-readonly,output-private-copy;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB".into(),
                 )],
             ),
-            "enforced via linux-bwrap (filesystem=source-readonly;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB)"
+            "enforced via linux-bwrap (filesystem=source-readonly,output-private-copy;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB)"
         );
         assert_eq!(
             build_sandbox_outcome(1, 0, &[]),

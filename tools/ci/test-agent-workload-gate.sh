@@ -59,6 +59,12 @@ check excluded-os-report 1 "$tmp/excluded.tsv" | grep -Fq 'OS is excluded by fro
 awk -F '\t' -v OFS='\t' '$1 == "1" {$26 = substr($26, 1, 63) "0"} {print}' "$report" >"$tmp/bad-policy.tsv"
 check bad-policy-report 1 "$tmp/bad-policy.tsv" | grep -Fq 'policy digest is not the frozen policy'
 
+awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$13 = 1} {print}' "$report" >"$tmp/nonzero-exit.tsv"
+check nonzero-exit-report 1 "$tmp/nonzero-exit.tsv" | grep -Fq 'corpus command exited 1'
+
+awk -F '\t' -v OFS='\t' '$4 == "repository-marker-scan" {$8 = "loss"} {print}' "$report" >"$tmp/inconsistent-score.tsv"
+check inconsistent-score-report 1 "$tmp/inconsistent-score.tsv" | grep -Fq 'passing corpus score has a non-passing adapter'
+
 check missing-report 1 "$tmp/missing.tsv" | grep -Fq 'missing report'
 
 mkdir "$tmp/reports"

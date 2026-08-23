@@ -261,6 +261,56 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn process_child_stdin_write_runs_resident() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_process_stdin_write");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("stdin_write.jet");
+    fs::write(
+        &file,
+        r#"use core.process as process
+
+fn run() {
+    child :: process.cmd(["sh", "-c", "read line; printf '%s' \"$line\""]).stdin(.Capture).stdout(.Capture).spawn() ?? panic("spawn failed")
+    child.stdin.write("resident-stdin\n") ?? panic("write failed")
+    result :: child.wait() ?? panic("wait failed")
+    print(result.output)
+}
+"#,
+    )
+    .unwrap();
+
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = dev_iteration(file.to_str().unwrap(), false, false);
+    let stdout = match outcome {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!(
+            "ProcessChild.stdin.write must run under default `jet run`: {:?}",
+            diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
+        ),
+    };
+    assert_eq!(stdout, "resident-stdin\n");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(file.to_str().unwrap(), true, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!(
+            "ProcessChild.stdin.write must run in the interpreter: {:?}",
+            diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
+        ),
+    };
+    assert_eq!(interpreted, "resident-stdin\n");
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
+    let _ = fs::remove_dir_all(&dir);
+}
+
 /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the expert policy,
 /// checked capability keys, and child terminal handle stay resident too.
 #[cfg(unix)]
@@ -337,6 +387,21 @@ fn run() {
         !jet_jit::fallback_invoked_for_test(),
         "the expert terminal model must not deopt to tier 0"
     );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(file.to_str().unwrap(), true, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!(
+            "expert terminal model must run in the interpreter: {:?}",
+            diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
+        ),
+    };
+    assert_eq!(
+        interpreted,
+        "true\ntrue\ntrue\nfalse\ntrue\nterminal present\ntrue\nterminal absent\nplain\n"
+    );
+    assert!(!jet_jit::jit_executed_for_test());
+    assert!(!jet_jit::fallback_invoked_for_test());
 
     let _ = fs::remove_dir_all(&dir);
 }

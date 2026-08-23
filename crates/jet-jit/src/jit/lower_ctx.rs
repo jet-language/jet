@@ -18809,6 +18809,15 @@ impl LowerCtx<'_, '_> {
                             return Ok(self.call_host(self.host.process.child_terminal, &[handle]));
                         });
                     }
+                    // ProcessChild stream fields are opaque views of the same
+                    // resident child slot. The stdin writer host consumes the
+                    // child handle directly; stdout/stderr use the same
+                    // identity for their loop-only stream adapter.
+                    if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
+                        && matches!(field.as_str(), "stdin" | "stdout" | "stderr")
+                    {
+                        return Ok(handle);
+                    }
                     let type_name = record_type_key(&record_ty)
                         .or_else(|| self.method_struct.clone());
                     // GameFrame.input / .index — TIR may erase the frame param to Int
@@ -25791,7 +25800,12 @@ impl LowerCtx<'_, '_> {
                     Err("jit terminal resize arity unsupported".to_string())
                 })
             }
-            THandleOp::ProcessStdinWrite => Err("jit handle method unsupported".to_string()),
+            THandleOp::ProcessStdinWrite => {
+                in_own_frame(|| -> Result<Value, String> {
+                    let text = self.lower_expr(&args[0])?;
+                    Ok(self.call_host(self.host.process.stdin_write, &[recv_val, text]))
+                })
+            }
             THandleOp::TaskDetach => {
                 in_own_frame(|| -> Result<Value, String> {
                     let host_ref = self

@@ -143,6 +143,9 @@
               export JET_ROOT="$PWD"
             fi
             export TZDIR="${jetTzdb}"
+            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
+            ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
               "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
@@ -251,6 +254,9 @@
             fi
             export TZDIR="${jetTzdb}"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
+            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
+            ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
               "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"

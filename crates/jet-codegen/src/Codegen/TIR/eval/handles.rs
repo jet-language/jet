@@ -77,6 +77,7 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
         THandleOp::ProcessSpecMethod { method } => return format!("ProcessSpec:{method}"),
         THandleOp::ProcessChildMethod { method } => return format!("ProcessChild:{method}"),
+        THandleOp::ProcessStdinWrite => "ProcessStdin:write",
         THandleOp::EmailMethod { method } => return format!("EmailMethod:{method}"),
         THandleOp::TerminalSessionResize => "TerminalSessionResize",
         THandleOp::DBWithPolicy => "DBWithPolicy",

@@ -48,10 +48,11 @@
         }
     }
 
+    // JET_VETTED_UNSAFE_BEGIN: jet_conpty_control
     #[cfg(windows)]
     #[derive(Debug)]
     pub(crate) struct ConPtyControl {
-        handle: usize,
+        handle: std::cell::Cell<usize>,
     }
 
     #[cfg(windows)]
@@ -64,24 +65,32 @@
     #[cfg(windows)]
     impl ConPtyControl {
         pub(crate) fn new(handle: usize) -> Self {
-            Self { handle }
+            Self {
+                handle: std::cell::Cell::new(handle),
+            }
         }
 
         pub(crate) fn raw(&self) -> usize {
-            self.handle
+            self.handle.get()
+        }
+
+        pub(crate) fn close(&self) {
+            let handle = self.handle.replace(0);
+            if handle != 0 {
+                // SAFETY: this control owns the one live HPCON; replacing the
+                // handle with zero makes close idempotent across wait and drop.
+                unsafe { close_pseudo_console(handle as *mut std::ffi::c_void) };
+            }
         }
     }
 
     #[cfg(windows)]
     impl Drop for ConPtyControl {
         fn drop(&mut self) {
-            if self.handle != 0 {
-                // SAFETY: the backend transfers one live HPCON into this
-                // owner, which closes it exactly once here.
-                unsafe { close_pseudo_console(self.handle as *mut std::ffi::c_void) };
-            }
+            self.close();
         }
     }
+    // JET_VETTED_UNSAFE_END: jet_conpty_control
 
     #[derive(Clone, Debug)]
     pub struct TerminalSession {

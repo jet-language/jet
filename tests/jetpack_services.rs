@@ -824,6 +824,18 @@ blackfire)
     : > .service-running
     exec sleep 30
     ;;
+tideways-daemon)
+    address=
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -address) shift; address=$1 ;;
+        esac
+        shift
+    done
+    [ "$address" = "tcp://127.0.0.1:${JETPACK_SERVICE_PORT}" ]
+    : > .service-running
+    exec nc -lk 127.0.0.1 "${JETPACK_SERVICE_PORT}"
+    ;;
 nginx)
     prefix=
     config=
@@ -931,6 +943,7 @@ esac
         "mailpit",
         "MailHog",
         "blackfire",
+        "tideways-daemon",
         "nginx",
         "pg_isready",
         "redis-cli",
@@ -990,6 +1003,7 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
         "mail",
         "mailhog",
         "blackfire",
+        "tideways",
     ] {
         let plan = DevServicePlan {
             name: name.to_string(),
@@ -1036,7 +1050,7 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
             "minio" | "mailpit" | "mail" => {
                 assert!(data_dir.join(".service-running").is_file())
             }
-            "mailhog" | "blackfire" => {
+            "mailhog" | "blackfire" | "tideways" => {
                 assert!(data_dir.join(".service-running").is_file())
             }
             "nginx" => {

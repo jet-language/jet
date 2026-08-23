@@ -330,6 +330,9 @@ live acceptance, and documentation. Work order is binding.
   The recipe path, hermetic executor, and authority-bound agent executor run
   those rows through the shared native child boundary. Each row must be
   blocked, or the platform must report the backend unsupported before launch.
+  A published receipt must use the backend's exact filesystem, process,
+  network, environment, device, and resource policy values. A field-only or
+  advisory receipt is not an isolation claim.
   The ambient #769 workload harness remains ambient and records network and
   external writes as `unmeasured:#769`; it does not publish a confinement
   claim.

@@ -683,7 +683,7 @@ pub(crate) mod process_prelude {
         #[cfg(windows)]
         #[derive(Debug)]
         pub(crate) struct ConPtyControl {
-            handle: usize,
+            handle: std::cell::Cell<usize>,
         }
 
         #[cfg(windows)]
@@ -696,22 +696,30 @@ pub(crate) mod process_prelude {
         #[cfg(windows)]
         impl ConPtyControl {
             pub(crate) fn new(handle: usize) -> Self {
-                Self { handle }
+                Self {
+                    handle: std::cell::Cell::new(handle),
+                }
             }
 
             pub(crate) fn raw(&self) -> usize {
-                self.handle
+                self.handle.get()
+            }
+
+            pub(crate) fn close(&self) {
+                let handle = self.handle.replace(0);
+                if handle != 0 {
+                    // SAFETY: this control owns the one live HPCON; replacing
+                    // the handle with zero makes close idempotent across wait
+                    // and drop.
+                    unsafe { close_pseudo_console(handle as *mut std::ffi::c_void) };
+                }
             }
         }
 
         #[cfg(windows)]
         impl Drop for ConPtyControl {
             fn drop(&mut self) {
-                if self.handle != 0 {
-                    // SAFETY: the backend transfers one live HPCON into this
-                    // owner, which closes it exactly once here.
-                    unsafe { close_pseudo_console(self.handle as *mut std::ffi::c_void) };
-                }
+                self.close();
             }
         }
 
@@ -960,6 +968,13 @@ pub(crate) mod process_prelude {
 
     pub(crate) fn child_wait(child: &ProcessChild) -> Result<ProcessReceipt, IOError> {
         jet_process_child_wait(child)
+    }
+
+    pub(crate) fn child_stdin_write(
+        child: &ProcessChild,
+        text: &String,
+    ) -> Result<(), IOError> {
+        jet_process_stdin_write(&child.stdin, text)
     }
 
     pub(crate) fn child_exited(child: &ProcessChild) -> Result<bool, IOError> {
@@ -1603,6 +1618,27 @@ fn process_child_value(child: process_prelude::ProcessChild) -> CtValue {
         type_name: "ProcessChild".to_string(),
         fields: vec![
             ("handle".to_string(), CtValue::Int(handle)),
+            (
+                "stdin".to_string(),
+                CtValue::Struct {
+                    type_name: "ProcessStdin".to_string(),
+                    fields: vec![("handle".to_string(), CtValue::Int(handle))],
+                },
+            ),
+            (
+                "stdout".to_string(),
+                CtValue::Struct {
+                    type_name: "ProcessStdoutStream".to_string(),
+                    fields: vec![("handle".to_string(), CtValue::Int(handle))],
+                },
+            ),
+            (
+                "stderr".to_string(),
+                CtValue::Struct {
+                    type_name: "ProcessStderrStream".to_string(),
+                    fields: vec![("handle".to_string(), CtValue::Int(handle))],
+                },
+            ),
             ("terminal".to_string(), terminal),
         ],
     }
@@ -1749,6 +1785,30 @@ fn ambient_process_child_handle(
             .ok_or_else(|| unsupported("ProcessChild receiver", span)),
         _ => unreachable!(),
     };
+    Some(result)
+}
+
+fn ambient_process_stdin_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if op != "ProcessStdin:write" {
+        return None;
+    }
+    let result = (|| {
+        let text = process_string(
+            args.first()
+                .ok_or_else(|| unsupported("ProcessStdin.write text", span))?,
+            "ProcessStdin.write text",
+            span,
+        )?;
+        with_process_child(recv, |child| {
+            process_unit_outcome(process_prelude::child_stdin_write(child, &text))
+        })
+        .ok_or_else(|| unsupported("ProcessStdin receiver", span))
+    })();
     Some(result)
 }
 
@@ -4834,6 +4894,9 @@ pub fn ambient_handle(
         return Some(result);
     }
     if let Some(result) = ambient_process_child_handle(op, recv, args, span) {
+        return Some(result);
+    }
+    if let Some(result) = ambient_process_stdin_handle(op, recv, args, span) {
         return Some(result);
     }
     if let Some(result) = ambient_terminal_session_handle(op, recv, args, span) {

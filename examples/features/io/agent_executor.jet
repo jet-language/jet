@@ -1,0 +1,24 @@
+// #1180: one argv executor, one workspace authority, one receipt.
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["printf", "agent-safe"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run()
+            if receipt == {
+                .Ok(value) -> {
+                    print(value.output)
+                    print(plan.policy_digest == value.policy_digest)
+                    print(value.redacted)
+                }
+                .Err(_) -> print("unsupported")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+}

@@ -267,6 +267,51 @@ fn run() {{
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn core_process_streams_bound_both_pipes_and_close_stdin_after_wait() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_streams_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let flood = dir.join("flood.sh");
+    write_executable(
+        &flood,
+        "#!/bin/sh\n\
+dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' x &\n\
+out=$!\n\
+dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' y >&2 &\n\
+err=$!\n\
+wait \"$out\"\n\
+wait \"$err\"\n",
+    );
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    limited :: process.cmd(["{flood}"]).output_limit(1024).run()
+    if limited == {{
+        .Ok(_) -> {{ print("limit:accepted") }}
+        .Err(_) -> {{ print("limit:refused") }}
+    }}
+    child :: process.cmd(["sh", "-c", "exit 0"]).stdin(.Capture).spawn() ?? panic("spawn failed")
+    child.wait() ?? panic("wait failed")
+    if child.stdin.write("late") == {{
+        .Ok(_) -> {{ print("closed:accepted") }}
+        .Err(_) -> {{ print("closed:typed-error") }}
+    }}
+}}
+"#,
+        flood = jet_string_path(&flood),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_streams", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "limit:refused\nclosed:typed-error\n");
+}
+
 /// D-PROCESS-SESSION1=A (#1181): `.terminal()` is the one opt-in for a
 /// terminal-backed session, and it lives on the same `ProcessSpec`. Argv
 /// execution with no terminal stays the default. Unix run/spawn use a real PTY;
@@ -362,13 +407,18 @@ fn run() {{
     child :: process.cmd(["{probe}"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
     session :: child.terminal ?? panic("missing terminal session")
     session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("resize failed")
-    child.stdin.write("typed\\n") ?? panic("terminal write failed")
+    child.stdin.write("typed\n") ?? panic("terminal write failed")
     result :: child.wait() ?? panic("terminal wait failed")
     print(result.success)
     print(result.output)
     if child.stdin.write("late") == {{
         .Ok(_) -> {{ print("closed:accepted") }}
-        .Err(_) -> {{ print("closed:typed-error") }}
+        .Err(error) -> {{
+            if error == {{
+                .Closed(_) -> {{ print("closed:typed-error") }}
+                else -> {{ print("closed:wrong-error") }}
+            }}
+        }}
     }}
 }}
 "#,
@@ -486,6 +536,81 @@ fn run() {{
     }
 }
 
+/// Process wait is a cancellation wait point. Cancelling a task that owns a
+/// live child must unwind the wait cleanup and terminate the child group,
+/// including a deliberately forked descendant.
+#[cfg(unix)]
+#[test]
+fn core_process_wait_cancellation_reaps_the_full_process_tree() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_cancel_tree_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("cancel-tree.sh");
+    let descendant_pid = dir.join("descendant.pid");
+    write_executable(
+        &script,
+        &format!(
+            "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{}'\nwhile :; do sleep 1; done\n",
+            descendant_pid.display()
+        ),
+    );
+    let src = format!(
+        r#"
+use core.process as process
+use core.tasks as tasks
+use core.time as time
+
+fn run() {{
+    (ready_tx, ready_rx) :: channel<Int>()
+    worker :: task {{
+        child :: process.cmd(["{script}"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
+        ready_tx.send(1)
+        child.wait() ?? panic("cancelled wait returned")
+    }}
+    _ready :: ready_rx.receive() ?? panic("ready failed")
+    time.sleep(100ms)
+    worker.cancel()
+    result :: worker.join()
+    if result == {{
+        .Err(error) -> {{
+            if error == {{
+                .Cancelled -> {{ print("cancelled") }}
+                else -> {{ print("wrong cancellation") }}
+            }}
+        }}
+        .Ok(_) -> {{ print("completed") }}
+    }}
+}}
+"#,
+        script = jet_string_path(&script),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_cancel_tree", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "cancelled\n");
+
+    let pid = fs::read_to_string(&descendant_pid).unwrap();
+    let pid = pid.trim();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        let alive = Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .unwrap()
+            .success();
+        if !alive {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = Command::new("kill").args(["-9", pid]).status();
+            panic!("cancelled process descendant {pid} survived task cleanup");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181): the beginner and expert
 /// forms share one ProcessSpec. Stable host facts advertise the Unix PTY and a
 /// policy controls the initial terminal size and mode.
@@ -591,6 +716,76 @@ fn run() {
             }),
         "{plain_child_terminal:?}"
     );
+}
+
+/// D-PROCESS-SESSION1=A / #1182: the Windows terminal path must create a real
+/// ConPTY, preserve the combined byte stream, resize the console, and release
+/// the pseudoconsole before `wait()` joins its output reader.
+#[cfg(windows)]
+#[test]
+fn core_process_terminal_uses_windows_conpty_for_bytes_resize_and_close() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_terminal_conpty_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("conpty_probe.cmd");
+    fs::write(
+        &script,
+        format!(
+            "@echo off\r\nmode con >nul 2>nul || exit /b 41\r\necho ready\r\nset /p line=\r\necho input:%line%\r\necho {red}control{reset}\r\nmode con\r\n",
+            red = "\x1b[31m",
+            reset = "\x1b[0m"
+        ),
+    )
+    .unwrap();
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    policy :: TerminalPolicy{{
+        size: TerminalSize{{ cols: 80, rows: 24 }},
+        mode: .Cooked
+    }}
+    child :: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{script}"])
+        .cwd("{dir}")
+        .terminal(policy)
+        .spawn() ?? panic("ConPTY spawn failed")
+    session :: child.terminal ?? panic("missing ConPTY session")
+    session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic("ConPTY resize failed")
+    child.stdin.write("typed\r\n") ?? panic("ConPTY input failed")
+    result :: child.wait() ?? panic("ConPTY wait failed")
+    print(result.success)
+    print(result.output)
+    if child.stdin.write("late") == {{
+        .Ok(_) -> {{ print("closed:accepted") }}
+        .Err(error) -> {{
+            if error == {{
+                .Closed(_) -> {{ print("closed:typed") }}
+                else -> {{ print("closed:wrong") }}
+            }}
+        }}
+    }}
+}}
+"#,
+        script = jet_string_path(&script),
+        dir = jet_string_path(&dir),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_conpty", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let output = stdout.replace("\r\n", "\n");
+    assert!(output.starts_with("true\n"), "{stdout:?}");
+    assert!(output.contains("ready\n"), "ready marker lost: {stdout:?}");
+    assert!(output.contains("input:typed\n"), "input bytes lost: {stdout:?}");
+    assert!(output.contains("\x1b[31mcontrol\x1b[0m"), "VT bytes lost: {stdout:?}");
+    assert!(output.contains("100") && output.contains("30"), "resize lost: {stdout:?}");
+    assert!(output.ends_with("closed:typed\n"), "closed stdin was not typed: {stdout:?}");
+
+    let compiled = compile_temp("process_terminal_conpty_text.jet", &src);
+    assert!(compiled.rust.contains("CreatePseudoConsole"));
+    assert!(compiled.rust.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE"));
 }
 
 #[cfg(unix)]

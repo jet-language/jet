@@ -136,3 +136,77 @@ fn run() {
     };
     tir_support::assert_tiers_agree("agent_executor_cancellation", source, expected);
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn agent_executor_windows_appcontainer_plan_and_receipt_preserve_policy() {
+    let source = r#"
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run_checked() ?? panic("Windows authority-bound run failed")
+            print(plan.backend)
+            print(plan.executable_identity == receipt.executable_identity)
+            print(plan.argv == receipt.argv)
+            print(plan.input_digest == receipt.input_digest)
+            print(plan.policy_digest == receipt.policy_digest)
+            print(plan.authority == receipt.authority)
+            print(plan.descendants == receipt.descendants)
+            print(plan.limits == receipt.limits)
+            print(plan.outputs[0] == receipt.outputs[0])
+            print(plan.outputs[1] == receipt.outputs[1])
+            print(receipt.outputs.len() == plan.outputs.len() + 1)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "agent_executor_windows_appcontainer_plan_receipt",
+        source,
+        "windows-appcontainer\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn agent_executor_windows_appcontainer_denies_host_read() {
+    let marker = std::env::temp_dir().join(format!(
+        "jet-agent-executor-windows-host-secret-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&marker, "host-secret").expect("write Windows host-read marker");
+    let marker = marker.to_string_lossy().replace('\\', "/");
+    let source = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "type \"{marker}\""]).under(policy)
+    if spec.plan() == {{
+        .Ok(plan) -> {{
+            print(plan.backend)
+            result :: spec.run_checked()
+            if result == {{
+                .Ok(_) -> print("escaped")
+                .Err(_) -> print("blocked")
+            }}
+        }}
+        .Err(_) -> print("refused")
+    }}
+}}
+"#
+    );
+    tir_support::assert_tiers_agree(
+        "agent_executor_windows_appcontainer_host_read",
+        &source,
+        "windows-appcontainer\nblocked\n",
+    );
+    let _ = std::fs::remove_file(marker);
+}

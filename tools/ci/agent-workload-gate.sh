@@ -136,6 +136,10 @@ validate_report() {
       current[task] = $7
       current_owner[task] = $12
       run_exit = $13
+      if ($13 != "0") fail("corpus command exited " $13 ": " task)
+      if ($11 == "pass" && ($7 != "pass" || $8 != "pass" || $9 != "pass" || $10 != "pass")) {
+        fail("passing corpus score has a non-passing adapter: " task)
+      }
       if ($11 != "pass") fail("task did not pass all adapters: " task)
       if ($7 == "loss" && !owner_ok($12)) fail("Jet loss has no card or ratified non-goal: " task)
       if (!nonnegative_integer($13)) fail("bad corpus exit code: " task)
@@ -232,7 +236,7 @@ generate_report() {
         if (python == "") python = "missing"
         if (node == "") node = "missing"
         score = run_exit == 0 && jet == "pass" && bash == "pass" && python == "pass" && node == "pass" ? "pass" : "loss"
-        printf "1\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+        printf "1\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
           host_os, host_arch, task_name, domain[task_name], case_name[task_name], jet, bash, python, node, score, owner[task_name], run_exit, \
           source_tokens[task_name SUBSEP "jet"], source_tokens[task_name SUBSEP "bash"], source_tokens[task_name SUBSEP "python"], source_tokens[task_name SUBSEP "node"], \
           cold[task_name SUBSEP "jet"], cold[task_name SUBSEP "bash"], cold[task_name SUBSEP "python"], cold[task_name SUBSEP "node"], \

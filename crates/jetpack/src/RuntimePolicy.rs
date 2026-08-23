@@ -270,31 +270,72 @@ pub(crate) fn sandbox_receipt_is_truthful(class: &str, policy: &str) -> bool {
             || policy.starts_with("no child launched (")
             || policy.starts_with("trusted substitution (");
     }
-    if !matches!(
-        class,
-        "linux-bwrap" | "macos-seatbelt" | "windows-appcontainer"
-    ) {
-        return false;
-    }
-    let mut fields = std::collections::BTreeSet::new();
+    let mut fields = std::collections::BTreeMap::new();
     for field in policy.split(';') {
         let Some((name, value)) = field.split_once('=') else {
-            continue;
+            return false;
         };
-        if value.is_empty() || !fields.insert(name) {
+        if name.is_empty() || value.is_empty() || fields.insert(name, value).is_some() {
             return false;
         }
     }
-    [
-        "filesystem",
-        "process",
-        "network",
-        "environment",
-        "devices",
-        "resources",
-    ]
-    .into_iter()
-    .all(|name| fields.contains(name))
+    let has =
+        |name: &str, values: &[&str]| fields.get(name).is_some_and(|value| values.contains(value));
+    match class {
+        "linux-bwrap" => {
+            fields.len() == 7
+                && has(
+                    "filesystem",
+                    &[
+                        "source-readonly,output-private-copy",
+                        "private-workspace-readwrite",
+                    ],
+                )
+                && has("process", &["private-pid,parent-death"])
+                && has("network", &["isolated", "declared-shared"])
+                && has("environment", &["clear"])
+                && has("devices", &["private-dev"])
+                && has("privilege", &["no-new-privs+cap-drop-all"])
+                && has("resources", &["tmpfs-64MiB"])
+        }
+        "macos-seatbelt" => {
+            fields.len() == 6
+                && has(
+                    "filesystem",
+                    &[
+                        "source-readonly,output-readwrite",
+                        "private-workspace-readwrite",
+                    ],
+                )
+                && has("process", &["declared-tool-and-fork"])
+                && has("network", &["denied", "declared-shared"])
+                && has("environment", &["clear"])
+                && has("devices", &["denied"])
+                && has("resources", &["none-declared"])
+        }
+        "windows-appcontainer" => {
+            fields.len() == 6
+                && has(
+                    "filesystem",
+                    &[
+                        "private-workspace-readwrite",
+                        "source-readonly,output-readwrite",
+                        "source-readonly",
+                        "filesystem-none",
+                        "filesystem-write-only",
+                    ],
+                )
+                && has(
+                    "process",
+                    &["appcontainer+job-kill-on-close+active-process=256"],
+                )
+                && has("network", &["denied", "declared-internet-client"])
+                && has("environment", &["clear+declared"])
+                && has("devices", &["appcontainer-default-deny"])
+                && has("resources", &["memory-2GiB+active-process-256"])
+        }
+        _ => false,
+    }
 }
 
 pub fn sandbox_policy_path() -> PathBuf {
@@ -859,7 +900,15 @@ mod tests {
     fn sandbox_receipts_require_a_native_backend_and_complete_policy() {
         assert!(sandbox_receipt_is_truthful(
             "linux-bwrap",
-            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB"
+            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
+        ));
+        assert!(sandbox_receipt_is_truthful(
+            "macos-seatbelt",
+            "filesystem=source-readonly,output-readwrite;process=declared-tool-and-fork;network=denied;environment=clear;devices=denied;resources=none-declared"
+        ));
+        assert!(sandbox_receipt_is_truthful(
+            "windows-appcontainer",
+            "filesystem=source-readonly,output-readwrite;process=appcontainer+job-kill-on-close+active-process=256;network=denied;environment=clear+declared;devices=appcontainer-default-deny;resources=memory-2GiB+active-process-256"
         ));
         assert!(sandbox_receipt_is_truthful(
             "non-executing",
@@ -867,12 +916,24 @@ mod tests {
         ));
         assert!(!sandbox_receipt_is_truthful(
             "linux-userns",
-            "filesystem=private-workspace-readwrite;process=private-pid;network=isolated;environment=clear;devices=private-dev;resources=tmpfs-64MiB"
+            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
         ));
         assert!(!sandbox_receipt_is_truthful(
             "linux-bwrap",
             "filesystem=private-workspace-readwrite"
         ));
         assert!(!sandbox_receipt_is_truthful("linux-bwrap", "not-enforced"));
+        assert!(!sandbox_receipt_is_truthful(
+            "linux-bwrap",
+            "filesystem=private-workspace-readwrite;process=host;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
+        ));
+        assert!(!sandbox_receipt_is_truthful(
+            "linux-bwrap",
+            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=unlimited"
+        ));
+        assert!(!sandbox_receipt_is_truthful(
+            "macos-seatbelt",
+            "filesystem=private-workspace-readwrite;process=private-pid,parent-death;network=isolated;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
+        ));
     }
 }

@@ -1966,7 +1966,6 @@ mod tests {
                 status.mechanism.contains("unavailable") || status.mechanism == "unsupported",
                 "unsupported backend must be named: {status:?}"
             );
-            return;
         }
 
         let corpus = include_str!(concat!(
@@ -2090,8 +2089,28 @@ mod tests {
                 Some(&output),
                 &BTreeMap::new(),
                 false,
-            )
-            .unwrap_or_else(|error| panic!("{case_id} unexpectedly lost enforcement: {error:?}"));
+            );
+            if !status.available {
+                assert!(
+                    matches!(result, Err(NativeSandboxError::Unsupported(_))),
+                    "unsupported backend must refuse {case_id} before launch: {result:?}"
+                );
+                assert!(!host_marker.exists(), "{case_id} wrote the host marker");
+                if let Some(network_thread) = network_thread {
+                    assert!(
+                        !network_thread.join().unwrap(),
+                        "{case_id} reached the network"
+                    );
+                }
+                fs::remove_file(&host_secret).ok();
+                fs::remove_file(&host_marker).ok();
+                fs::remove_file(&fill_name).ok();
+                fs::remove_dir_all(&root).ok();
+                continue;
+            }
+            let result = result.unwrap_or_else(|error| {
+                panic!("{case_id} unexpectedly lost enforcement: {error:?}")
+            });
             assert_eq!(
                 result.mechanism, status.mechanism,
                 "{case_id} backend receipt"

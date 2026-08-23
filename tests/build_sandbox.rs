@@ -7,7 +7,7 @@ mod common;
 
 use jetpack::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use jetpack::Toolchain;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -53,6 +53,48 @@ fn scratch(tag: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&p).unwrap();
     p
+}
+
+fn hostile_cases() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    let cases = HOSTILE_CORPUS
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
+            (fields[0], fields[1], fields[2], fields[3])
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+    let mut ids = BTreeSet::new();
+    for (id, category, attempt, expected) in &cases {
+        assert!(ids.insert(*id), "hostile corpus repeats case {id}");
+        assert!(
+            matches!(
+                *category,
+                "escape" | "exfiltration" | "resource-abuse" | "toctou" | "child-process-abuse"
+            ),
+            "{id} has an unknown hostile category {category}"
+        );
+        assert!(!attempt.is_empty(), "{id} has no hostile attempt");
+        assert_eq!(
+            *expected, "blocked-or-unsupported",
+            "{id} has a weak result claim"
+        );
+    }
+    for category in [
+        "escape",
+        "exfiltration",
+        "resource-abuse",
+        "toctou",
+        "child-process-abuse",
+    ] {
+        assert!(
+            cases.iter().any(|(_, found, _, _)| *found == category),
+            "hostile corpus lacks category {category}"
+        );
+    }
+    cases
 }
 
 #[test]
@@ -425,16 +467,7 @@ fn native_windows_appcontainer_uses_the_shared_hostile_corpus() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    let cases: Vec<_> = HOSTILE_CORPUS
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            let fields: Vec<_> = line.split('\t').collect();
-            assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
-            (fields[0], fields[1], fields[2], fields[3])
-        })
-        .collect();
-    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+    let cases = hostile_cases();
 
     for (case_id, _category, _attempt, _expected) in cases {
         let base = scratch(&format!("windows-hostile-{case_id}"));
@@ -932,28 +965,7 @@ fn shared_hostile_corpus_uses_the_recipe_production_path() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    let mut cases = Vec::new();
-    for line in HOSTILE_CORPUS.lines() {
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let fields: Vec<_> = line.split('\t').collect();
-        assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
-        cases.push((fields[0], fields[1], fields[2], fields[3]));
-    }
-    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
-    for category in [
-        "escape",
-        "exfiltration",
-        "resource-abuse",
-        "toctou",
-        "child-process-abuse",
-    ] {
-        assert!(
-            cases.iter().any(|(_, found, _, _)| *found == category),
-            "hostile corpus lacks category {category}"
-        );
-    }
+    let cases = hostile_cases();
     let sandbox_shell = std::env::split_paths(
         &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
     )
@@ -1106,16 +1118,7 @@ fn shared_hostile_corpus_uses_agent_executor_production_path() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    let cases: Vec<_> = HOSTILE_CORPUS
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            let fields: Vec<_> = line.split('\t').collect();
-            assert_eq!(fields.len(), 4, "malformed hostile corpus row: {line}");
-            (fields[0], fields[1], fields[2], fields[3])
-        })
-        .collect();
-    assert_eq!(cases.len(), 7, "hostile corpus lost a required case");
+    let cases = hostile_cases();
 
     let base = scratch("agent-hostile");
     let host_secret = base.with_file_name("build-sandbox-agent-hostile-secret");

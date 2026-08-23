@@ -1414,10 +1414,12 @@ fn push_corelib_prelude_body(
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_sandbox\n");
         out.push_str("\nmod jet_process_sandbox {\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessWindowsSandbox.rs"));
         out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_process_sandbox\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));

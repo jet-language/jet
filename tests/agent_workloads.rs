@@ -495,6 +495,19 @@ fn policy_receipt(digest: &str) -> String {
     )
 }
 
+fn validate_corpus_relative_path(relative: &str) -> Result<(), String> {
+    if relative.is_empty()
+        || Path::new(relative).is_absolute()
+        || relative.contains(':')
+        || relative
+            .split(|character| character == '/' || character == '\\')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(format!("invalid corpus fixture path: {relative}"));
+    }
+    Ok(())
+}
+
 fn validate_authority(authority: &str) -> Result<(), String> {
     if authority == policy_field("authority") {
         Ok(())
@@ -579,6 +592,8 @@ fn read_tasks() -> Vec<Task> {
             let fields = line.split('\t').collect::<Vec<_>>();
             assert_eq!(fields.len(), 13, "bad agent workload manifest row: {line}");
             assert_eq!(fields[0], "1", "unsupported corpus version in: {line}");
+            validate_corpus_relative_path(fields[5]).unwrap_or_else(|error| panic!("{error}"));
+            validate_corpus_relative_path(fields[6]).unwrap_or_else(|error| panic!("{error}"));
             Task {
                 id: fields[1].into(),
                 domain: fields[2].into(),
@@ -995,9 +1010,7 @@ fn verify_checksum_closure(root: &Path, sums: &str) -> Result<usize, String> {
         let (hash, relative) = line
             .split_once("  ")
             .ok_or_else(|| format!("bad SHA256SUMS row: {line}"))?;
-        if Path::new(relative).is_absolute()
-            || relative.split('/').any(|part| part == ".." || part.is_empty())
-        {
+        if validate_corpus_relative_path(relative).is_err() {
             return Err(format!("invalid checksum path: {relative}"));
         }
         if declared.insert(relative.to_string(), hash.to_string()).is_some() {
@@ -1095,10 +1108,7 @@ fn baseline_artifact_path(root: &Path, relative: &str) -> Result<PathBuf, String
     if path.is_absolute() {
         return Err(format!("baseline artifact escaped root: {relative}"));
     }
-    if relative
-        .split('/')
-        .any(|part| part.is_empty() || part == "..")
-    {
+    if validate_corpus_relative_path(relative).is_err() {
         return Err(format!("invalid baseline artifact path: {relative}"));
     }
     Ok(root.join(path))
@@ -1223,8 +1233,39 @@ fn policy_digest_covers_authority_and_receipt_contract() {
 fn receipt_artifact_paths_reject_escape_attempts() {
     let root = Path::new("/corpus/baselines");
     assert!(baseline_artifact_path(root, "outputs/bash/task.stdout").is_ok());
-    for path in ["/etc/passwd", "../outside", "outputs//task", "outputs/../task"] {
-        assert!(baseline_artifact_path(root, path).is_err(), "accepted {path}");
+    for path in [
+        "/etc/passwd",
+        "../outside",
+        "outputs//task",
+        "outputs/../task",
+        "outputs/./task",
+        r"..\outside",
+        r"C:\outside",
+    ] {
+        assert!(
+            baseline_artifact_path(root, path).is_err(),
+            "accepted {path}"
+        );
+    }
+}
+
+#[test]
+fn corpus_fixture_paths_reject_escape_attempts() {
+    assert!(validate_corpus_relative_path("inputs/repository").is_ok());
+    for path in [
+        "",
+        "/etc/passwd",
+        "../outside",
+        "inputs/../outside",
+        r"..\outside",
+        r"C:\outside",
+        "inputs//repository",
+        "inputs/./repository",
+    ] {
+        assert!(
+            validate_corpus_relative_path(path).is_err(),
+            "accepted {path}"
+        );
     }
 }
 
@@ -1669,8 +1710,16 @@ fn checksum_closure_rejects_drift_and_hostile_sums() {
             "invalid checksum path: ../outside.txt".to_string(),
         ),
         (
+            format!("{input_hash}  ..\\outside.txt\n{output_hash}  expected/task.out\n"),
+            "invalid checksum path: ..\\outside.txt".to_string(),
+        ),
+        (
             format!("{input_hash}  inputs//task.txt\n{output_hash}  expected/task.out\n"),
             "invalid checksum path: inputs//task.txt".to_string(),
+        ),
+        (
+            format!("{input_hash}  inputs/./task.txt\n{output_hash}  expected/task.out\n"),
+            "invalid checksum path: inputs/./task.txt".to_string(),
         ),
         (
             format!(

@@ -1434,6 +1434,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         s = next;
     }
     let s = strip_mod(&s, "jet_process_pty");
+    let s = strip_vetted_module(&s, "jet_process_sandbox");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
     let s = strip_mod(&s, "jet_gtk");
@@ -1441,6 +1442,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let mut s = strip_scheduler_native(&s);
     s = strip_shared_guard_internals(&s);
     s = strip_vetted_module(&s, "jet_os_extra");
+    s = strip_vetted_module(&s, "jet_conpty_control");
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
     s = strip_vetted_module(&s, "jet_atomic_windows");

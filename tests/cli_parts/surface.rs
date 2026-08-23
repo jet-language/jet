@@ -1,4 +1,6 @@
 use super::*;
+use jet_foundation::JSON::{json_get, json_int, json_str, JSONValue};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn target_equals_and_space_forms_match_for_build_run_and_dev() {
@@ -979,6 +981,380 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
     assert_eq!(fixed.status.code(), Some(0), "{}", String::from_utf8_lossy(&fixed.stderr));
     assert!(fixed.stdout.is_empty());
     assert!(fixed.stderr.is_empty());
+}
+
+const AGENT_FIX_LOOP_MAX_ROUNDS: usize = 4;
+const AGENT_FIX_LOOP_FIXTURES: &[(&str, &str)] = &[
+    (
+        "run.jet",
+        r#"fn run() {
+    pirnt("main typo")
+    score :: 90
+    print(scor)
+    println("main old")
+}
+"#,
+    ),
+    (
+        "helper.jet",
+        r#"fn run() {
+    pirnt("helper typo")
+    score :: 90
+    print(scor)
+    println("helper old")
+}
+"#,
+    ),
+];
+
+#[derive(Debug, Clone)]
+struct RepairEdit {
+    code: String,
+    file: PathBuf,
+    start: usize,
+    end: usize,
+    new_text: String,
+}
+
+#[derive(Debug, Clone)]
+struct RepairReport {
+    code: String,
+    edits: Vec<RepairEdit>,
+}
+
+type RepairState = BTreeMap<PathBuf, String>;
+
+fn repair_json_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+    json_get(value, key).unwrap_or_else(|| panic!("machine report missing {key}"))
+}
+
+fn repair_json_string(value: &JSONValue, key: &str) -> String {
+    json_str(repair_json_field(value, key))
+        .unwrap_or_else(|| panic!("machine report {key} is not a string"))
+        .to_string()
+}
+
+fn repair_json_usize(value: &JSONValue, key: &str) -> usize {
+    usize::try_from(
+        json_int(repair_json_field(value, key))
+            .unwrap_or_else(|| panic!("machine report {key} is not an integer")),
+    )
+    .unwrap_or_else(|_| panic!("machine report {key} is negative"))
+}
+
+fn parse_repair_report(value: &JSONValue) -> RepairReport {
+    assert_eq!(repair_json_string(value, "schema"), "jet.report/v1");
+    let code = repair_json_string(value, "code");
+    let edits = match repair_json_field(value, "fix_edits") {
+        JSONValue::Array(edits) => edits
+            .iter()
+            .map(|edit| {
+                let span = repair_json_field(edit, "span");
+                RepairEdit {
+                    code: code.clone(),
+                    file: PathBuf::from(repair_json_string(edit, "file")),
+                    start: repair_json_usize(span, "start"),
+                    end: repair_json_usize(span, "end"),
+                    new_text: repair_json_string(edit, "new_text"),
+                }
+            })
+            .collect(),
+        _ => panic!("machine report fix_edits is not an array"),
+    };
+    RepairReport { code, edits }
+}
+
+// Read only published jet.report/v1 fields. Human What/Why/Fix text never
+// participates in repair loop.
+fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
+    for (file, source) in state {
+        fs::write(file, source).unwrap();
+    }
+    let mut reports = Vec::new();
+    for file in state.keys() {
+        let output = Command::new(jet())
+            .args(["check", file.to_str().unwrap(), "--json"])
+            .current_dir(dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+
+        if output.status.success() {
+            assert!(output.stderr.is_empty(), "clean check wrote stderr: {:?}", output.stderr);
+            let clean = parse_json(String::from_utf8(output.stdout).unwrap().trim())
+                .expect("clean check must emit one JSON object");
+            assert_eq!(repair_json_string(&clean, "schema"), "jet.report/v1");
+            assert_eq!(repair_json_string(&clean, "status"), "ok");
+            assert!(matches!(
+                json_get(&clean, "ok"),
+                Some(JSONValue::Bool(true))
+            ));
+            match repair_json_field(&clean, "diagnostics") {
+                JSONValue::Array(diagnostics) => assert!(diagnostics.is_empty()),
+                _ => panic!("clean report diagnostics is not an array"),
+            }
+            continue;
+        }
+
+        assert_eq!(output.status.code(), Some(1), "check failed: {:?}", output);
+        assert!(output.stdout.is_empty(), "error check wrote stdout: {:?}", output.stdout);
+        reports.extend(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .lines()
+                .map(|line| parse_json(line).expect("error check must emit JSON lines"))
+                .map(|report| parse_repair_report(&report)),
+        );
+    }
+    reports
+}
+
+fn apply_repair_edits(state: &RepairState, reports: &[RepairReport]) -> Result<RepairState, String> {
+    let mut by_file: BTreeMap<PathBuf, Vec<RepairEdit>> = BTreeMap::new();
+    for report in reports {
+        if report.edits.is_empty() {
+            return Err(format!("report {} has no fix_edits", report.code));
+        }
+        for edit in &report.edits {
+            by_file
+                .entry(edit.file.clone())
+                .or_default()
+                .push(edit.clone());
+        }
+    }
+
+    let mut next = state.clone();
+    for (file, mut edits) in by_file {
+        let Some(source) = state.get(&file) else {
+            let code = edits.first().map_or("unknown", |edit| edit.code.as_str());
+            return Err(format!("fix_edit for {code} names untracked file {}", file.display()));
+        };
+        edits.sort_by(|left, right| {
+            right
+                .start
+                .cmp(&left.start)
+                .then(right.end.cmp(&left.end))
+        });
+        for pair in edits.windows(2) {
+            if pair[0].start < pair[1].end {
+                return Err(format!(
+                    "overlapping fix_edits for {} and {} in {}",
+                    pair[0].code,
+                    pair[1].code,
+                    file.display()
+                ));
+            }
+        }
+
+        let mut fixed = source.clone();
+        for edit in edits {
+            if edit.start > edit.end || fixed.get(edit.start..edit.end).is_none() {
+                return Err(format!(
+                    "invalid span {}..{} for fix_edit {} in {}",
+                    edit.start,
+                    edit.end,
+                    edit.code,
+                    file.display()
+                ));
+            }
+            fixed.replace_range(edit.start..edit.end, &edit.new_text);
+        }
+        next.insert(file, fixed);
+    }
+    Ok(next)
+}
+
+fn repair_codes(reports: &[RepairReport]) -> BTreeSet<String> {
+    reports.iter().map(|report| report.code.clone()).collect()
+}
+
+fn run_repair_loop<F>(
+    initial: RepairState,
+    max_rounds: usize,
+    mut check: F,
+) -> Result<(RepairState, usize), String>
+where
+    F: FnMut(&RepairState) -> Vec<RepairReport>,
+{
+    let mut state = initial;
+    let mut seen = Vec::new();
+    let mut previous_codes = None;
+
+    for round in 0..=max_rounds {
+        let reports = check(&state);
+        if reports.is_empty() {
+            return Ok((state, round));
+        }
+        let codes = repair_codes(&reports);
+        if seen.iter().any(|old| old == &state) {
+            return Err(format!(
+                "repeated file state; offending code(s): {}",
+                codes.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        if let Some(previous_codes) = &previous_codes {
+            let introduced: Vec<_> = codes.difference(previous_codes).cloned().collect();
+            if !introduced.is_empty() {
+                return Err(format!(
+                    "fix_edit regression introduced report code(s): {}",
+                    introduced.join(", ")
+                ));
+            }
+        }
+        if round == max_rounds {
+            return Err(format!(
+                "round bound {max_rounds} exceeded; offending code(s): {}",
+                codes.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        seen.push(state.clone());
+        state = apply_repair_edits(&state, &reports)?;
+        previous_codes = Some(codes);
+    }
+    unreachable!()
+}
+
+#[test]
+fn agent_fix_loop_corpus_converges_without_report_regression() {
+    let dir = isolated_cwd("agent_fix_loop");
+    let mut initial = RepairState::new();
+    for (name, source) in AGENT_FIX_LOOP_FIXTURES {
+        let file = dir.join(name);
+        fs::write(&file, source).unwrap();
+        initial.insert(file, (*source).to_string());
+    }
+    let run_file = dir.join("run.jet");
+    let helper_file = dir.join("helper.jet");
+    let mut check = |state: &RepairState| check_repair_state(&dir, state);
+
+    let initial_reports = check(&initial);
+    assert!(
+        initial_reports.iter().all(|report| !report.edits.is_empty()),
+        "every fixture report must carry fix_edits: {initial_reports:?}"
+    );
+    let mut edits_per_file = BTreeMap::new();
+    for edit in initial_reports.iter().flat_map(|report| &report.edits) {
+        *edits_per_file.entry(edit.file.clone()).or_insert(0usize) += 1;
+    }
+    assert_eq!(
+        edits_per_file.keys().cloned().collect::<BTreeSet<_>>(),
+        initial.keys().cloned().collect::<BTreeSet<_>>(),
+        "one repair-loop round must report edits for every fixture file"
+    );
+    assert!(edits_per_file[&run_file] >= 3, "run.jet needs several errors");
+    assert!(
+        edits_per_file[&helper_file] >= 3,
+        "helper.jet needs several errors"
+    );
+
+    let bound_error = run_repair_loop(initial.clone(), 0, &mut check).unwrap_err();
+    assert!(
+        bound_error.contains("round bound 0") && bound_error.contains("E0102"),
+        "bound failure must name offending code: {bound_error}"
+    );
+
+    let (final_state, rounds) =
+        run_repair_loop(initial, AGENT_FIX_LOOP_MAX_ROUNDS, &mut check).unwrap();
+    assert!(rounds <= AGENT_FIX_LOOP_MAX_ROUNDS);
+    assert!(check(&final_state).is_empty(), "final recheck was not clean");
+    assert_eq!(
+        final_state[&run_file],
+        r#"fn run() {
+    print("main typo")
+    score :: 90
+    print(score)
+    print("main old")
+}
+"#
+    );
+    assert_eq!(
+        final_state[&helper_file],
+        r#"fn run() {
+    print("helper typo")
+    score :: 90
+    print(score)
+    print("helper old")
+}
+"#
+    );
+}
+
+#[test]
+fn agent_fix_loop_repeat_guard_names_offending_code() {
+    let file = PathBuf::from("repeat.jet");
+    let state = BTreeMap::from([(file.clone(), "x".to_string())]);
+    let forward = RepairReport {
+        code: "E0102".to_string(),
+        edits: vec![RepairEdit {
+            code: "E0102".to_string(),
+            file: file.clone(),
+            start: 0,
+            end: 1,
+            new_text: "y".to_string(),
+        }],
+    };
+    let backward = RepairReport {
+        code: "E0102".to_string(),
+        edits: vec![RepairEdit {
+            code: "E0102".to_string(),
+            file: file.clone(),
+            start: 0,
+            end: 1,
+            new_text: "x".to_string(),
+        }],
+    };
+    let error = run_repair_loop(state, 3, |state| {
+        if state[&file] == "x" {
+            vec![forward.clone()]
+        } else {
+            vec![backward.clone()]
+        }
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("repeated file state") && error.contains("E0102"),
+        "repeat failure must name offending code: {error}"
+    );
+}
+
+#[test]
+fn agent_fix_loop_regression_guard_names_offending_code() {
+    let file = PathBuf::from("regression.jet");
+    let state = BTreeMap::from([(file.clone(), "x".to_string())]);
+    let first_report = RepairReport {
+        code: "E0102".to_string(),
+        edits: vec![RepairEdit {
+            code: "E0102".to_string(),
+            file: file.clone(),
+            start: 0,
+            end: 1,
+            new_text: "y".to_string(),
+        }],
+    };
+    let introduced_report = RepairReport {
+        code: "E0037".to_string(),
+        edits: vec![RepairEdit {
+            code: "E0037".to_string(),
+            file,
+            start: 0,
+            end: 1,
+            new_text: "z".to_string(),
+        }],
+    };
+    let mut checks = 0;
+    let error = run_repair_loop(state, 2, |_| {
+        checks += 1;
+        if checks == 1 {
+            vec![first_report.clone()]
+        } else {
+            vec![introduced_report.clone()]
+        }
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("fix_edit regression") && error.contains("E0037"),
+        "regression failure must name offending code: {error}"
+    );
 }
 
 #[test]

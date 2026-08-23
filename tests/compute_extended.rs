@@ -373,3 +373,53 @@ fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu()
         assert_eq!(lines[1], "webgpu:rejected");
     });
 }
+
+#[test]
+fn portable_accelerator_vulkan_operations_match_cpu_across_tiers() {
+    let source = r#"
+use core.compute as compute
+
+fn loss(left: Tensor, right: Tensor) Tensor -> compute.mse_loss(left, right) ?? panic("loss")
+
+fn run() {
+    left_cpu :: compute.full([2, 2], 2.0) ?? panic("left")
+    right_cpu :: compute.full([2, 2], 3.0) ?? panic("right")
+    left_f32 :: compute.matmul_f32_tile(left_cpu, compute.eye(2) ?? panic("eye")) ?? panic("left f32")
+    right_f32 :: compute.matmul_f32_tile(right_cpu, compute.eye(2) ?? panic("eye")) ?? panic("right f32")
+    left_request :: compute.on_device(left_f32, compute.device_vulkan())
+    if left_request == {
+        .Err(_) -> print("vulkan:unavailable")
+        .Ok(left) -> {
+            right :: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
+            added :: compute.add(left, right) ?? panic("add")
+            print("add:{compute.to_list(added)}")
+            reduced :: compute.sum_axis(right, 1) ?? panic("sum")
+            print("sum:{compute.to_list(reduced)}")
+            prediction :: compute.mse_loss(left, right) ?? panic("mse")
+            print("mse:{compute.to_list(prediction)}")
+            (gradient_left, gradient_right) :: compute.gradient(loss, ~left, ~right)
+            print("grad:{compute.to_list(gradient_left)}:{compute.to_list(gradient_right)}")
+            tangent_cpu :: compute.ones([2, 2]) ?? panic("tangent")
+            tangent :: compute.on_device(compute.matmul_f32_tile(tangent_cpu, compute.eye(2) ?? panic("eye")) ?? panic("tangent f32"), compute.device_vulkan()) ?? panic("tangent Vulkan")
+            jvp :: compute.jvp(loss)
+            (jvp_value, jvp_tangent) :: jvp(left, right, tangent, tangent)
+            print("jvp:{compute.to_list(jvp_value)}:{compute.to_list(jvp_tangent)}")
+            stream :: compute.stream_new_on(compute.device_vulkan()) ?? panic("stream")
+            compute.stream_sync(stream) ?? panic("sync")
+            cpu :: compute.transfer(left, compute.device_cpu()) ?? panic("transfer")
+            print("transfer:{compute.to_list(cpu)}")
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) =
+        run_default_multi("compute_vulkan_probe", "main.jet", &[("main.jet", source)]);
+    assert_eq!(code, 0, "Vulkan probe failed: {stderr}");
+    if stdout == "vulkan:unavailable\n" {
+        if std::env::var_os("JET_REQUIRE_VULKAN").is_some() {
+            panic!("Vulkan production path was not available: {stderr}");
+        }
+        return;
+    }
+    assert_tiers_agree("compute_vulkan_operations", source, &stdout);
+}

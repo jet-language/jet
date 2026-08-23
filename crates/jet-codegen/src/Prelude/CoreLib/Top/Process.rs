@@ -485,12 +485,7 @@ fn jet_process_spec_spawn(
             },
         )
         .map_err(|error| jet_process_sandbox_error(spec, error))?;
-        return jet_process_child_from_inner(
-            child,
-            spec,
-            true,
-            launch_plan.clone(),
-        );
+        return jet_process_child_from_inner(child, spec, true, launch_plan.clone());
     }
 
     #[cfg(target_os = "windows")]
@@ -531,12 +526,7 @@ fn jet_process_spec_spawn(
     // Ordinary Unix children get the same descendant boundary as terminal
     // sessions. Windows keeps direct-child cleanup until its native job
     // boundary is available.
-    jet_process_child_from_inner(
-        child,
-        spec,
-        cfg!(unix),
-        launch_plan,
-    )
+    jet_process_child_from_inner(child, spec, cfg!(unix), launch_plan)
 }
 
 #[cfg(unix)]
@@ -913,9 +903,17 @@ fn jet_process_collect_output(
         Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>,
     ),
 ) -> Result<(String, String, bool), jet_std::IOError> {
-    let output = jet_process_finish_output_drain(drains.0, "process stdout")?;
-    let errors = jet_process_finish_output_drain(drains.1, "process stderr")?;
-    Ok((output.text, errors.text, output.exceeded || errors.exceeded))
+    // Always join both readers. A malformed/closed stdout must not return
+    // before the stderr reader is reaped; otherwise its thread can outlive
+    // the child wait and retain a pipe/error path indefinitely.
+    let output = jet_process_finish_output_drain(drains.0, "process stdout");
+    let errors = jet_process_finish_output_drain(drains.1, "process stderr");
+    match (output, errors) {
+        (Ok(output), Ok(errors)) => {
+            Ok((output.text, errors.text, output.exceeded || errors.exceeded))
+        }
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1396,6 +1394,23 @@ fn jet_process_inner_kill(inner: &mut jet_std::ProcessHandle) -> std::io::Result
     }
 }
 
+fn jet_process_tree_signal(
+    inner: &mut jet_std::ProcessHandle,
+    process_group: bool,
+    signal: i32,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if process_group {
+        return match jet_process_pty::signal_group(jet_process_inner_id(inner), signal) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        };
+    }
+    let _ = (process_group, signal);
+    jet_process_inner_kill(inner)
+}
+
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
     child
         .inner
@@ -1437,13 +1452,14 @@ fn jet_process_child_wait(
             break status;
         }
         if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-            jet_process_inner_kill(inner).map_err(|error| {
-                jet_std::IOError::other(
-                    jet_std::IOOperation::Close,
-                    Some("process".to_string()),
-                    error,
-                )
-            })?;
+            jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
+                .map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                })?;
             break jet_process_inner_wait(inner).map_err(|error| {
                 jet_std::IOError::other(
                     jet_std::IOOperation::Close,
@@ -1454,13 +1470,14 @@ fn jet_process_child_wait(
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-                jet_process_inner_kill(inner).map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Close,
-                        Some("process".to_string()),
-                        error,
-                    )
-                })?;
+                jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
+                    .map_err(|error| {
+                        jet_std::IOError::other(
+                            jet_std::IOOperation::Close,
+                            Some("process".to_string()),
+                            error,
+                        )
+                    })?;
                 timed_out = true;
                 break jet_process_inner_wait(inner).map_err(|error| {
                     jet_std::IOError::other(
@@ -1479,7 +1496,7 @@ fn jet_process_child_wait(
     };
     if child.process_group {
         if let Some(inner) = child.inner.borrow_mut().as_mut() {
-            let _ = jet_process_inner_kill(inner);
+            let _ = jet_process_tree_signal(inner, true, jet_process_signal_kill());
         }
     }
     let pid = child
@@ -1490,6 +1507,13 @@ fn jet_process_child_wait(
         .unwrap_or(0);
     child.inner.borrow_mut().take();
     *child.stdin.borrow_mut() = None;
+    // ConPTY keeps its output pipe live until the pseudoconsole is released.
+    // Close it after the child exits, before joining the reader, or `wait()`
+    // can block forever on an otherwise finished terminal child.
+    #[cfg(windows)]
+    if let Some(session) = child.terminal.as_ref().ok() {
+        session.control.close();
+    }
     let (output, errors, output_exceeded) = jet_process_collect_output(drains)?;
     if output_exceeded {
         return Err(jet_std::IOError::other(
@@ -1583,8 +1607,7 @@ fn jet_terminal_session_resize(
             ))
         }
     };
-    result
-    .map_err(|error| {
+    result.map_err(|error| {
         jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
             Some("process terminal".to_string()),
@@ -1678,12 +1701,6 @@ fn jet_process_child_signal(
     signal: i32,
 ) -> Result<(), jet_std::IOError> {
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
-        #[cfg(unix)]
-        if child.terminal.is_ok() || child.process_group {
-            if jet_process_pty::signal_group(jet_process_inner_id(inner), signal).is_ok() {
-                return Ok(());
-            }
-        }
         #[cfg(windows)]
         if signal == jet_process_signal_interrupt() {
             if let jet_std::ProcessHandle::Native { pid, job, .. } = inner {
@@ -1701,13 +1718,14 @@ fn jet_process_child_signal(
                 });
             }
         }
-        jet_process_inner_kill(inner).map_err(|error| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Close,
-                Some("process".to_string()),
-                error,
-            )
-        })?;
+        jet_process_tree_signal(inner, child.terminal.is_ok() || child.process_group, signal)
+            .map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("process".to_string()),
+                    error,
+                )
+            })?;
     }
     Ok(())
 }
@@ -1727,7 +1745,7 @@ fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) {
     let Some(inner) = slot.as_mut() else {
         return;
     };
-    let _ = jet_process_inner_kill(inner);
+    let _ = jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill());
     let _ = jet_process_inner_wait(inner);
 }
 
@@ -1788,6 +1806,18 @@ fn jet_process_stdin_write(
     use std::os::fd::AsRawFd;
 
     let bytes = text.as_bytes();
+    {
+        let mut stdin = handle.borrow_mut();
+        if let Some(jet_std::ProcessStdin::Terminal(writer)) = stdin.as_mut() {
+            // PTY input and output are independent File clones of one master
+            // open file description. Setting O_NONBLOCK on the input clone
+            // would also make the output drain observe EAGAIN. Keep the PTY
+            // master blocking; terminal writes are byte-stream writes, while
+            // pipe writes below retain scheduler-aware nonblocking behavior.
+            std::io::Write::write_all(writer, bytes).map_err(jet_process_stdin_error)?;
+            return Ok(());
+        }
+    }
     let mut offset = 0;
     while offset < bytes.len() {
         let wait_fd = {
@@ -1795,17 +1825,22 @@ fn jet_process_stdin_write(
             let Some(stdin) = stdin.as_mut() else {
                 return Err(jet_process_stdin_closed());
             };
-            let fd = match stdin {
-                jet_std::ProcessStdin::Pipe(writer) => writer.as_raw_fd(),
-                jet_std::ProcessStdin::Terminal(writer) => writer.as_raw_fd(),
+            let (fd, nonblocking) = match stdin {
+                jet_std::ProcessStdin::Pipe(writer) => (writer.as_raw_fd(), true),
+                // PTY input/output clones share one open-file description.
+                // Do not set O_NONBLOCK on the input clone: it would also
+                // make the terminal output reader return WouldBlock.
+                jet_std::ProcessStdin::Terminal(writer) => (writer.as_raw_fd(), false),
             };
-            jet_scheduler_raw_io_set_nonblocking(fd).map_err(|error| {
-                jet_std::IOError::other(
-                    jet_std::IOOperation::Write,
-                    Some("process stdin".to_string()),
-                    error,
-                )
-            })?;
+            if nonblocking {
+                jet_scheduler_raw_io_set_nonblocking(fd).map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Write,
+                        Some("process stdin".to_string()),
+                        error,
+                    )
+                })?;
+            }
             match std::io::Write::write(stdin, &bytes[offset..]) {
                 Ok(0) => {
                     return Err(jet_process_stdin_closed());

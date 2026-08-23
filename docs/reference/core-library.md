@@ -1538,6 +1538,12 @@ child gets no stdin at all, never the parent's terminal by accident).
 `run()` to collect a `ProcessReceipt`, `run_checked()` to reject a failed exit,
 or `spawn()` to return a `ProcessChild`.
 
+The executable proof is `examples/features/io/agent_executor.jet`. The hostile
+matrix and AOT, default `jet run`, and forced-interpreter parity proof live in
+`tests/agent_executor_closeout.rs`; unsupported grants, unavailable native
+enforcement, denied filesystem/network access, limits, cancellation, and child
+descendants fail closed before authority can become ambient.
+
 Use `run()` when you need the full result and will inspect `success` yourself.
 It returns `ProcessReceipt` for a nonzero exit with `success` set to `false`.
 Use `run_checked()` when a nonzero exit must take the error path. Its `IOError`
@@ -1577,12 +1583,27 @@ child, so its type is `TerminalSession?`. After unwrapping it, `resize(size)`
 returns `Unit IOError!`.
 
 A terminal session needs a native PTY or ConPTY. On Unix, `run()` and
-`spawn()` create a real PTY, attach the child to a controlling session, and
-expose its one combined byte stream through `stdout`; `stderr` is empty because
-a PTY has no second output stream. The child session uses the requested size
-and mode, and `TerminalSession.resize` changes the PTY window size. The stable
-fact keys are `terminal`, `resize`, and `raw`. Unsupported targets fail
-closed with an `IOError` instead of silently falling back to pipes.
+`spawn()` create a real PTY. On Windows, they create a ConPTY and attach the
+child to a Job Object. Both backends expose one combined byte stream through
+`stdout`; `stderr` is empty because a terminal has no second output stream. The
+child session uses the requested size and mode, and `TerminalSession.resize`
+changes the native terminal window size. The stable fact keys are `terminal`,
+`resize`, and `raw`. Unsupported targets fail closed with an `IOError` instead
+of silently falling back to pipes.
+
+The checked-in native fixture
+`tests/fixtures/process_sessions/session_fixture.rs` proves the compatibility
+matrix through the production `ProcessSpec` path. Its terminal case checks the
+byte stream, input, resize, ANSI bytes, and closed input. Its tree case checks
+interrupt, terminate, kill, timeout, and drop cleanup of a descendant:
+
+| Native fixture | Linux | macOS | Windows | Other targets |
+| --- | --- | --- | --- | --- |
+| `session_fixture.rs` — terminal bytes, resize, input/close, full-tree controls | required | required | required | explicit unsupported |
+
+The machine-readable rows are in
+`tests/fixtures/process_sessions/compatibility.tsv`; the targeted integration
+test is `tests/process_sessions.rs`.
 
 `pipeline()` keeps ordinary pipe edges. A terminal-backed spec cannot be a
 pipeline stage; use `spawn()` for the interactive child. PTY/ConPTY transport,

@@ -23,7 +23,9 @@ Build-sandbox hostile cases are a separate shared fixture at
 executors, plus the authority-bound agent executor, run that fixture through
 the native child boundary. This ambient workload runner only records its
 unsupported confinement dimensions as `unmeasured:#769`; its parsing of the
-fixture is not isolation proof.
+fixture is not isolation proof. The fixture has seven unique rows in five
+required categories, and a consumer must reject malformed, duplicate, or
+advisory-only rows before it can count the run as isolation proof.
 
 The runner starts Jet through the integration-test `CARGO_BIN_EXE_jet` public CLI with `jet run --release`. The report records the CLI path, SHA-256 digest, and reported version. Corpus test evidence is not shipped product proof.
 
@@ -33,7 +35,7 @@ The repository and Git Jet adapters execute through the public `jet run --releas
 
 `tests/agent_workloads/policy.tsv` is the canonical policy contract. `tests/agent_workloads.rs::policy_digest` hashes that exact contract as the one policy identity. It covers the frozen plan, launch transaction, process-group descendant cleanup, wall and output limits, captured outputs, and receipt formats. The same digest appears in the baseline receipt, the run policy line, every task machine line, every adapter result, and the generated report; each machine and result line also records the enforced authority string.
 
-The manifest accepts only the enforced authority string. An unsupported authority value fails before an adapter starts. Baseline artifact paths reject absolute paths, empty components, and `..` components. Timed-out children are killed and reaped with their process group; scratch residue is checked before cleanup.
+The manifest accepts only the enforced authority string. An unsupported authority value fails before an adapter starts. Manifest fixture, checksum, and baseline artifact paths reject absolute paths, empty components, `.` and `..` components, drive prefixes, and backslash traversal. Timed-out children are killed and reaped with their process group; scratch residue is checked before cleanup.
 
 ## Scoring
 
@@ -125,6 +127,7 @@ The Linux AOT run is much slower than all three peers. The report keeps this los
 | `recorded_baselines_cover_frozen_tasks` | Receipt | Every frozen task has Bash, Python, and Node rows with one machine, pinned interpreter versions, frozen input/output hashes, existing scoring, and checked raw stdout/stderr. Unsupported rows require an explicit finding. |
 | `policy_digest_covers_authority_and_receipt_contract` | Policy | Plan, launch transaction, descendant handling, limits, outputs, authority, and receipt formats use one digest; unsupported authority fails closed. |
 | `receipt_artifact_paths_reject_escape_attempts` | Hostile | Absolute, empty-component, and parent-traversal receipt paths fail closed. |
+| `corpus_fixture_paths_reject_escape_attempts` | Hostile | Manifest input/output fixture paths reject absolute paths, parent/current-directory traversal, empty components, backslash traversal, and drive prefixes before any adapter starts. |
 | `native_os_matrix_is_frozen_and_names_current_host` | Matrix | The committed Linux/macOS/Windows matrix and current host declaration stay exact. |
 | `jet_baseline_is_frozen_and_each_loss_has_an_owner` | Regression input | The Jet pass set covers every task and every loss owner names a card or ratified non-goal. |
 | `repository_and_git_jet_adapters_use_production_paths` | Non-vacuity | The Jet repository and Git adapters retain their public semantic-inspection, codemod, filesystem, and bounded Git-diff calls. |

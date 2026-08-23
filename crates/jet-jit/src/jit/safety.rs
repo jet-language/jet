@@ -6615,6 +6615,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 ("wait" | "id" | "exited" | "kill" | "terminate" | "interrupt", 0)
             )
         }
+        THandleOp::ProcessStdinWrite => args.len() == 1,
         THandleOp::TerminalSessionResize => args.len() == 1,
         THandleOp::EventMethod { method } => {
             matches!(
