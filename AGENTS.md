@@ -255,8 +255,8 @@ the command to reclaim each piece.
 
 `/tmp` is RAM-backed here, so never point scratch, a target dir, or a log at it: agent scripts export
 `TMPDIR=~/.cache/jet-test-scratch` before `jet-env` (the nix shell inherits it) and set `CARGO_INCREMENTAL=0`.
-Briefs and worker logs live in `~/.cache/jet-luna`. The runtime rlib cache (`~/.cache/jet/runtime`) has no
-pruning yet (card #2084) and reached 28G; clear it when it grows.
+Briefs and worker logs live in `~/.cache/jet-luna`. The runtime rlib cache (`~/.cache/jet/runtime`) is bounded
+to 512 MiB and prunes its oldest published entries on writes; `jet self doctor` reports its byte footprint.
 
 Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
 

@@ -1,0 +1,147 @@
+    Blocking waiting for file lock on build directory
+   Compiling jet-foundation v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-foundation)
+   Compiling jet-lexer v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-lexer)
+   Compiling jet-canvas v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-canvas)
+   Compiling jet-rt v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-rt)
+   Compiling jet-parser v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-parser)
+   Compiling jet-comptime v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-comptime)
+   Compiling jet-sema v1.0.0 (/home/nate/Projects/Github/jet/crates/jet-sema)
+error[E0308]: arguments to this function are incorrect
+    --> crates/jet-sema/src/Sema/CheckerCore/switches.rs:1076:37
+     |
+1076 |                     self.diags.push(Diagnostic::error(
+     |                                     ^^^^^^^^^^^^^^^^^
+1077 |                         "E0112",
+1078 |                         "a readiness table cannot mix channel arms with Boolean guards",
+     |                         --------------------------------------------------------------- expected `String`, found `&str`
+1079 |                         "every arm in one readiness table waits on a Receiver<T> or a Duration",
+     |                         ----------------------------------------------------------------------- expected `String`, found `&str`
+1080 |                         "write `value, receiver :> ...` or move the Boolean guard to a separate `if`",
+     |                         ----------------------------------------------------------------------------- expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/jet-foundation/src/Diagnostics.rs:285:12
+     |
+ 285 |     pub fn error(
+     |            ^^^^^
+help: try using a conversion method
+     |
+1078 |                         "a readiness table cannot mix channel arms with Boolean guards".to_string(),
+     |                                                                                        ++++++++++++
+help: try using a conversion method
+     |
+1079 |                         "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
+     |                                                                                                ++++++++++++
+help: try using a conversion method
+     |
+1080 |                         "write `value, receiver :> ...` or move the Boolean guard to a separate `if`".to_string(),
+     |                                                                                                      ++++++++++++
+
+error[E0308]: arguments to this function are incorrect
+    --> crates/jet-sema/src/Sema/CheckerCore/switches.rs:1098:49
+     |
+1098 | ...                   self.diags.push(Diagnostic::error(
+     |                                       ^^^^^^^^^^^^^^^^^
+...
+1101 | ...                       "a receive arm waits on one plain channel endpoint",
+     |                           --------------------------------------------------- expected `String`, found `&str`
+1102 | ...                       "use the receiver returned by `channel<T>()`",
+     |                           --------------------------------------------- expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/jet-foundation/src/Diagnostics.rs:285:12
+     |
+ 285 |     pub fn error(
+     |            ^^^^^
+help: try using a conversion method
+     |
+1101 |                                     "a receive arm waits on one plain channel endpoint".to_string(),
+     |                                                                                        ++++++++++++
+help: try using a conversion method
+     |
+1102 |                                     "use the receiver returned by `channel<T>()`".to_string(),
+     |                                                                                  ++++++++++++
+
+error[E0308]: arguments to this function are incorrect
+    --> crates/jet-sema/src/Sema/CheckerCore/switches.rs:1111:49
+     |
+1111 | ...                   self.diags.push(Diagnostic::error(
+     |                                       ^^^^^^^^^^^^^^^^^
+...
+1118 | ...                       "one readiness table returns one receive payload type",
+     |                           ------------------------------------------------------ expected `String`, found `&str`
+1119 | ...                       "use receivers with the same T, or split the table",
+     |                           --------------------------------------------------- expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/jet-foundation/src/Diagnostics.rs:285:12
+     |
+ 285 |     pub fn error(
+     |            ^^^^^
+help: try using a conversion method
+     |
+1118 |                                     "one readiness table returns one receive payload type".to_string(),
+     |                                                                                           ++++++++++++
+help: try using a conversion method
+     |
+1119 |                                     "use receivers with the same T, or split the table".to_string(),
+     |                                                                                        ++++++++++++
+
+error[E0308]: arguments to this function are incorrect
+    --> crates/jet-sema/src/Sema/CheckerCore/switches.rs:1147:45
+     |
+1147 | ...                   self.diags.push(Diagnostic::error(
+     |                                       ^^^^^^^^^^^^^^^^^
+...
+1150 | ...                       "a readiness timeout is one canonical Duration delta",
+     |                           ----------------------------------------------------- expected `String`, found `&str`
+1151 | ...                       "write `after 100ms` or pass a Duration binding",
+     |                           ------------------------------------------------ expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/jet-foundation/src/Diagnostics.rs:285:12
+     |
+ 285 |     pub fn error(
+     |            ^^^^^
+help: try using a conversion method
+     |
+1150 |                                 "a readiness timeout is one canonical Duration delta".to_string(),
+     |                                                                                      ++++++++++++
+help: try using a conversion method
+     |
+1151 |                                 "write `after 100ms` or pass a Duration binding".to_string(),
+     |                                                                                 ++++++++++++
+
+error[E0308]: arguments to this function are incorrect
+    --> crates/jet-sema/src/Sema/CheckerCore/switches.rs:1168:33
+     |
+1168 |                 self.diags.push(Diagnostic::error(
+     |                                 ^^^^^^^^^^^^^^^^^
+1169 |                     "E0112",
+1170 |                     "a readiness table has no usable wait arm",
+     |                     ------------------------------------------ expected `String`, found `&str`
+1171 |                     "a table must wait on a Receiver<T> or a Duration",
+     |                     -------------------------------------------------- expected `String`, found `&str`
+1172 |                     "add `value, receiver :> ...` or `after 100ms :> ...`",
+     |                     ------------------------------------------------------ expected `String`, found `&str`
+     |
+note: associated function defined here
+    --> crates/jet-foundation/src/Diagnostics.rs:285:12
+     |
+ 285 |     pub fn error(
+     |            ^^^^^
+help: try using a conversion method
+     |
+1170 |                     "a readiness table has no usable wait arm".to_string(),
+     |                                                               ++++++++++++
+help: try using a conversion method
+     |
+1171 |                     "a table must wait on a Receiver<T> or a Duration".to_string(),
+     |                                                                       ++++++++++++
+help: try using a conversion method
+     |
+1172 |                     "add `value, receiver :> ...` or `after 100ms :> ...`".to_string(),
+     |                                                                           ++++++++++++
+
+For more information about this error, try `rustc --explain E0308`.
+error: could not compile `jet-sema` (lib) due to 5 previous errors

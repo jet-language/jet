@@ -1,0 +1,74 @@
+diff --git a/examples/features/expected/errors/default_error_conversion.err.out b/examples/features/expected/errors/default_error_conversion.err.out
+index 4105b3c79..043e46fb7 100644
+--- a/examples/features/expected/errors/default_error_conversion.err.out
++++ b/examples/features/expected/errors/default_error_conversion.err.out
+@@ -1,3 +1,4 @@
+-error propagated from: get_user (examples/features/errors/default_error_conversion.jet:16) via ?
+-error propagated from: run (examples/features/errors/default_error_conversion.jet:18) via ?
+ Error: store unavailable: missing user
++ Trail [E3002] (2 hops via ?, origin first):
++  1. get_user (examples/features/errors/default_error_conversion.jet:16)
++  2. run (examples/features/errors/default_error_conversion.jet:18)
+diff --git a/examples/features/expected/errors/env_divisor_trap.err.out b/examples/features/expected/errors/env_divisor_trap.err.out
+index 26d61e559..f24729337 100644
+--- a/examples/features/expected/errors/env_divisor_trap.err.out
++++ b/examples/features/expected/errors/env_divisor_trap.err.out
+@@ -1,4 +1,4 @@
+-Stop [E3010]: `divided by zero` — with Jet file and line.
++Stop [E3010]: `divided by zero`
+   --> examples/features/errors/env_divisor_trap.jet:8
+  Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data.
+  Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.
+diff --git a/examples/features/expected/errors/error_context.err.out b/examples/features/expected/errors/error_context.err.out
+index 5455dba16..a1616caa9 100644
+--- a/examples/features/expected/errors/error_context.err.out
++++ b/examples/features/expected/errors/error_context.err.out
+@@ -1,4 +1,5 @@
+-error propagated from: parse_config (examples/features/errors/error_context.jet:7) via ?: reading raw config
+-error propagated from: load_config (examples/features/errors/error_context.jet:12) via ?: loading config app.toml
+-error propagated from: run (examples/features/errors/error_context.jet:16) via ?
+ Error: file not found
++ Trail [E3002] (3 hops via ?, origin first):
++  1. parse_config (examples/features/errors/error_context.jet:7) — reading raw config
++  2. load_config (examples/features/errors/error_context.jet:12) — loading config app.toml
++  3. run (examples/features/errors/error_context.jet:16)
+diff --git a/examples/features/expected/errors/panic.err.out b/examples/features/expected/errors/panic.err.out
+index f14f2e495..ad77a4ee9 100644
+--- a/examples/features/expected/errors/panic.err.out
++++ b/examples/features/expected/errors/panic.err.out
+@@ -1,4 +1,4 @@
+-Stop [E3001]: `panic: expected condition` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.
++Stop [E3001]: `panic: expected condition`
+   --> examples/features/errors/panic.jet:4 in run
+     |
+ 4 |     require(false, "expected condition")
+diff --git a/examples/features/expected/errors/qq_panic.err.out b/examples/features/expected/errors/qq_panic.err.out
+index 4ad56073a..8785c0be1 100644
+--- a/examples/features/expected/errors/qq_panic.err.out
++++ b/examples/features/expected/errors/qq_panic.err.out
+@@ -1,4 +1,4 @@
+-Stop [E3001]: `panic: expected the answer, got none` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values.
++Stop [E3001]: `panic: expected the answer, got none`
+   --> examples/features/errors/qq_panic.jet:10 in run
+      |
+ 10 |     v :: maybe() ?? panic("expected the answer, got none")
+diff --git a/examples/features/expected/errors/stack_overflow.err.out b/examples/features/expected/errors/stack_overflow.err.out
+index 95917d987..373c0dcd4 100644
+--- a/examples/features/expected/errors/stack_overflow.err.out
++++ b/examples/features/expected/errors/stack_overflow.err.out
+@@ -1,4 +1,4 @@
+-Stop [E3012]: stack overflow in `recurse` — with Jet file, line, and source context
++Stop [E3012]: stack overflow in `recurse`
+   --> examples/features/errors/stack_overflow.jet:2 in recurse
+     |
+ 2 | fn recurse(n: Int) => Int :: recurse(n + 1)
+diff --git a/examples/features/expected/errors/u8_divide_zero.err.out b/examples/features/expected/errors/u8_divide_zero.err.out
+index 8cc053b31..45ee6e43f 100644
+--- a/examples/features/expected/errors/u8_divide_zero.err.out
++++ b/examples/features/expected/errors/u8_divide_zero.err.out
+@@ -1,4 +1,4 @@
+-Stop [E3010]: `this division can't be done (dividing by zero, or overflow)` — with Jet file and line.
++Stop [E3010]: `this division can't be done (dividing by zero, or overflow)`
+   --> examples/features/errors/u8_divide_zero.jet:5
+  Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data.
+  Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.

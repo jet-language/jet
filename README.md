@@ -9,7 +9,7 @@ full expert control behind explicit opt-in. You write Jet; the compiler checks
 everything in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
-<!-- Stable IDs bind advertised claims to docs/spec/feature-claim-manifest.json. -->
+<!-- Stable IDs bind advertised claims to docs/spec/feature-claims.json. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
 <!-- FEATURE_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
@@ -82,7 +82,7 @@ Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
 
 **How is Jet different from Rust?**  
 Jet keeps ownership and safety but drops most of Rust's surface syntax and
-jargon. Errors are values (`T ? E`), not exceptions. There is no macro
+jargon. Errors are values (`T E!`), not exceptions. There is no macro
 system, no `async`/`await`, and the compiler never speaks rustc's language to
 you. Expert unsafe is opt-in via `#Unsafe("reason") { … }`, not the default.
 
@@ -105,9 +105,10 @@ the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 **Can I use this in production?**  
 The language, compiler, and core library are post-v1.0. Pin your toolchain with
 `edition:` in `pkg.jet` and read [versioning](docs/reference/versioning.md).
-Not yet ready: registry upload (`jet registry publish` validates but does not upload —
-use git-based dependencies), `jet store gc` (stub until M12.2 registry lands), and
-`jet self doctor --online` (registry not wired). HTTPS clients use rustls with
+Registry delivery is available: `jet registry publish` atomically commits immutable
+metadata and source artifacts, and `jet fetch` verifies and installs them through
+the Hangar-backed lock path. `jet store gc` and `jet self doctor --online` remain
+separate package-manager work. HTTPS clients use rustls with
 system roots by default; `core.net.tls` provides advanced client TLS configuration.
 
 ## Repo map

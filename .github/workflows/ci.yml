@@ -156,6 +156,49 @@ jobs:
       - name: aarch64 freestanding QEMU smoke
         run: nix develop .#full -c bash tools/ci/aarch64-qemu-freestanding.sh
 
+  # D-WASISRV1=A: the server example is a real WASI Preview 2 Component.
+  # Build it with the target toolchain, then grant wasmtime TCP access and
+  # prove one request reaches the Jet HTTP Prelude.
+  wasip2-server:
+    name: WASI Preview 2 server
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Install WASI Preview 2 target
+        run: nix develop .#full -c rustup toolchain install stable --target wasm32-wasip2
+
+      - name: Build Jet
+        run: nix develop .#full -c cargo build
+
+      - name: Build and serve WASI Component
+        run: |
+          nix develop .#full -c bash -euo pipefail -c '
+            export PATH="$(dirname "$(rustup which rustc --toolchain stable)"):$PATH"
+            ./target/debug/jet build \
+              examples/features/net/http_server_wasip2.jet \
+              --target=wasm32-wasip2
+            wasm-tools validate build/http_server_wasip2
+            wasmtime run -S inherit-network=y -S tcp=y build/http_server_wasip2 >wasip2-server.log 2>&1 &
+            server_pid=$!
+            trap "kill $server_pid 2>/dev/null || true" EXIT
+            for _ in $(seq 1 30); do
+              grep -q "true" wasip2-server.log && break
+              sleep 1
+            done
+            grep -q "true" wasip2-server.log
+            curl --fail --silent --max-time 5 http://127.0.0.1:18080/ | grep -Fx "hello from wasip2"
+          '
+
   # #211 (D-CI1=A): the complete cargo test-target inventory (every lib/bin/
   # test target `cargo metadata` names across the whole workspace — not just
   # the "."/jet-driver/jetpack-bin/jetos default-members plain `cargo test`

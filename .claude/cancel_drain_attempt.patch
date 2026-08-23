@@ -1,0 +1,116 @@
+commit 07050d92ea2c57a5ec87f0f8a71e9507411a42be
+Author: HalcyonOmega <nathanbrown@me.com>
+Date:   Thu Aug 20 02:22:48 2026 -0400
+
+    fix: a task drains its owned groups before its completion is published
+    
+    The interpreter was right and native was wrong, which is the opposite of the
+    direction I first assumed. spec.md:2563-2566 and :2609-2610 require task.group to
+    join its children before the cancelled task completes, and D-CANCELMODEL1=C at
+    :2410-2419 governs the cancel itself. The evaluator already closed and drained
+    the group before publishing completion; native cancellation exited the task frame
+    and published the completion first, with the fallback close running only after
+    the caller had already returned. So a child's own output went missing on the
+    native tiers: the interpreter printed the child's settle line and native printed
+    nothing.
+    
+    Task-owned groups now drain before the scheduler publishes completion. The
+    ordering rule stays in the Prelude group close where it already lived; AOT and the
+    resident host each reach it through their existing adapter, so there is one rule
+    and two marshalling calls rather than two orderings.
+    
+    Cancellation stays structured rather than becoming a hang: the cancel path uses
+    the ordinary group close, no extra child cancel is introduced, and the drain ends
+    when the child publishes its completion. Finite uncooperative work finishes
+    naturally; genuinely unbounded work stays bound by the structured join instead of
+    being forcibly detached, which is the ratified shape.
+
+diff --git a/crates/jet-jit/src/Concurrency.rs b/crates/jet-jit/src/Concurrency.rs
+index 99ccbca0c..a8334b25c 100644
+--- a/crates/jet-jit/src/Concurrency.rs
++++ b/crates/jet-jit/src/Concurrency.rs
+@@ -31,6 +31,7 @@ thread_local! {
+     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
+     static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
+     static IN_JIT_TASK: Cell<bool> = const { Cell::new(false) };
++    static ACTIVE_TASK_GROUPS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+     static LOCAL_RICH_PANIC: Cell<bool> = const { Cell::new(false) };
+     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+     static PENDING_CHILD_DEADLINE: RefCell<Option<String>> = const { RefCell::new(None) };
+@@ -46,11 +47,15 @@ thread_local! {
+ 
+ pub(crate) struct JitTaskScope {
+     previous_task: bool,
++    previous_task_groups: Vec<i64>,
+     previous_rich_panic: bool,
+ }
+ 
+ impl Drop for JitTaskScope {
+     fn drop(&mut self) {
++        ACTIVE_TASK_GROUPS.with(|groups| {
++            *groups.borrow_mut() = std::mem::take(&mut self.previous_task_groups);
++        });
+         IN_JIT_TASK.with(|task| task.set(self.previous_task));
+         LOCAL_RICH_PANIC.with(|panic| panic.set(self.previous_rich_panic));
+     }
+@@ -62,6 +67,8 @@ pub(crate) fn enter_jit_task() -> JitTaskScope {
+         task.set(true);
+         previous
+     });
++    let previous_task_groups =
++        ACTIVE_TASK_GROUPS.with(|groups| std::mem::take(&mut *groups.borrow_mut()));
+     let previous_rich_panic = LOCAL_RICH_PANIC.with(|panic| {
+         let previous = panic.get();
+         panic.set(false);
+@@ -69,6 +76,7 @@ pub(crate) fn enter_jit_task() -> JitTaskScope {
+     });
+     JitTaskScope {
+         previous_task,
++        previous_task_groups,
+         previous_rich_panic,
+     }
+ }
+@@ -867,6 +875,11 @@ where
+             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
+             let _ = take_pending_shield_exit();
+             let out = f();
++            // Cranelift has no unwind tables: cancellation returns through the
++            // generated frame after recording its pending status. Drain the
++            // groups created by this task before the shared scheduler publishes
++            // this task's completion.
++            close_active_task_groups();
+             let child_deadline = take_pending_child_deadline();
+             // A native task owns its trap until the shared join/combinator
+             // result is observed; a sibling must not inherit it at its next
+@@ -936,6 +949,7 @@ fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
+         let id = rt.task_groups.len() as i64;
+         rt.task_groups
+             .push(Some(JitTaskGroup::new(limit, bounded != 0)));
++        ACTIVE_TASK_GROUPS.with(|groups| groups.borrow_mut().push(id));
+         id
+     })
+ }
+@@ -1031,13 +1045,19 @@ fn close_task_group(group: i64) -> i64 {
+ }
+ 
+ fn jet_jit_task_group_close(group: i64) -> i64 {
+-    close_task_group(group)
++    let status = close_task_group(group);
++    ACTIVE_TASK_GROUPS.with(|groups| {
++        if let Some(index) = groups.borrow().iter().rposition(|active| *active == group) {
++            groups.borrow_mut().remove(index);
++        }
++    });
++    status
+ }
+ 
+ pub(crate) fn close_active_task_groups() {
+-    let len = with_runtime_mut(|rt| rt.task_groups.len());
+-    for group in (0..len).rev() {
+-        let _ = close_task_group(group as i64);
++    let groups = ACTIVE_TASK_GROUPS.with(|active| std::mem::take(&mut *active.borrow_mut()));
++    for group in groups.into_iter().rev() {
++        let _ = close_task_group(group);
+     }
+ }
+ 

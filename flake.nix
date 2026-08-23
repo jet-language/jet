@@ -162,6 +162,7 @@
             # E4-JP9: resolved-symbol native evaluator authority stop-line.
             pkgs.clippy
             pkgs.rustc
+            pkgs.rustup
             pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
@@ -216,6 +217,7 @@
             # CLI tool (I6: shelled out to, like cargo/rustc, never linked
             # into the compiler).
             pkgs.wasm-tools
+            pkgs.wasmtime
             pkgs.tree-sitter
             pkgs.emscripten
             pkgs.lldb

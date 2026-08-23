@@ -1,0 +1,29 @@
+use core.service as services
+use core.testing as testing
+
+fn failure_worker() {}
+
+fn run() {
+    tree := services.tree("delivery")
+    tree.set_delivery(services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("service-failure-debug")
+    store_path :: Path.from(temp).join("delivery.state").to_string()
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "delivery-events", 1, "reversible") ?? panic("state")
+    worker :: tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.send_durable(worker, "first", key: "k1") ?? panic("first")
+    tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    conflicting :: tree.send_durable(worker, "different", key: "k1")
+    full :: tree.send_durable(worker, "second", key: "k2")
+    print("before:{tree.observe()}:depth:{tree.mailbox_depth(worker)}")
+    tree.receive(worker) ?? panic("receive")
+    print("after_receive:{tree.observe()}:depth:{tree.mailbox_depth(worker)}")
+    tree.drain_worker(worker) ?? panic("drain")
+    print("after_drain:{tree.observe()}:depth:{tree.mailbox_depth(worker)}")
+    stopped_receive :: tree.receive(worker)
+    if stopped_receive == {
+        .Ok(message) -> { print("accepted:{message}") }
+        .Err(error) -> { print("rejected:{error}") }
+    }
+}

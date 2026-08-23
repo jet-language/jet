@@ -1,0 +1,29 @@
+use core.sys as os
+
+fn named_callback() {
+    print("named")
+}
+
+fn stop_callback() {
+    print("stop")
+    panic("stop")
+}
+
+fn run() {
+    loop indirect := stop_callback, true {
+        named_alias :: named_callback
+        local_lambda :: () => {
+            print("lambda")
+        }
+        os.on_interrupt(() => {
+            named_alias()
+        })
+        os.on_interrupt(local_lambda)
+        os.on_interrupt(named_callback)
+        os.on_interrupt(indirect)
+        print("ready")
+        loop {
+            tick :: 0
+        }
+    }
+}

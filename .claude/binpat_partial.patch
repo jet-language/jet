@@ -1,0 +1,868 @@
+commit 7e50a63de80e5e8808f22608b01b4bab8b2942d0
+Author: HalcyonOmega <nathanbrown@me.com>
+Date:   Thu Aug 20 01:50:56 2026 -0400
+
+    wip: luna binpat matcher unification (partial, timed out) plus the cancelled-sleep fix
+    
+    Two lanes in one commit because they overlap in eval/exprs.rs.
+    
+    COMPLETE: the interpreter ran a settle path on group cancellation that native did
+    not, and printed it BEFORE the cancel was observed. Native is correct per
+    D-CANCELMODEL1=C - a cancelled wait unwinds and the post-wait child body cannot
+    run. Root cause was one missing post-wait cancel check in the interpreter's sleep
+    wait, so the shared wait policy is now consulted there like everywhere else.
+    
+    PARTIAL: the binary-pattern unification (#2100) hit its wall-clock limit mid-move,
+    with a new Prelude home under jet-foundation, kernel widening, and tier-agreement
+    tests started. Committed as a checkpoint so the work is not lost; verified next.
+
+diff --git a/crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs b/crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs
+index f9fbc4a9f..fd0e9aae1 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs
+@@ -5792,10 +5792,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
+                     )
+                 }
+                 // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+-                // inline scan (I8: the D-BINPAT1 engine in consume mode,
+-                // `bin_match_scan_closure_ex`), byte-mode sibling of
+-                // `CursorTakePattern` immediately above — same shape, `&[u8]`
+-                // tail instead of `&str`.
++                // marshal into the Foundation-owned Prelude scan kernel in
++                // consume mode, byte-mode sibling of `CursorTakePattern`.
+                 THandleOp::ReaderTakePattern { parts, canonical } => {
+                     let (closure, holes) =
+                         bin_match_scan_closure_ex(
+diff --git a/crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs b/crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs
+index f8dd00a06..b22be77c0 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs
+@@ -2641,12 +2641,14 @@ impl<'a> EvalCtx<'a> {
+         let _deadline = self
+             .context_deadline
+             .map(crate::scheduler::jet_ctx_push_deadline);
+-        Some(
+-            self.scheduler_wait("time sleep", || {
+-                crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
+-            })
+-            .map(|()| CtValue::Unit),
+-        )
++        let result = self.scheduler_wait("time sleep", || {
++            crate::scheduler::jet_std_time_sleep_duration_ns(nanos)
++        });
++        drop(_deadline);
++        Some(result.and_then(|()| {
++            self.task_wait_cancel_check()?;
++            Ok(CtValue::Unit)
++        }))
+     }
+ 
+     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
+@@ -7665,6 +7667,46 @@ impl<'a> EvalCtx<'a> {
+                         }
+                     }
+                 }
++                crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
++                    let subject = self
++                        .switch_subject
++                        .as_ref()
++                        .ok_or_else(|| unsupported("binary pattern outside switch", self.span()))?;
++                    let hit = super::bin_match_scan_value(subject, parts, false);
++                    match probe {
++                        crate::Codegen::TIR::TMatchProbe::IsSome => {
++                            Ok(CtValue::Bool(hit.is_some()))
++                        }
++                        crate::Codegen::TIR::TMatchProbe::Unwrap => {
++                            let Some((_, binds)) = hit else {
++                                return Err(unsupported("binary pattern unwrap", self.span()));
++                            };
++                            let Type::Tuple(fields) = &expr.ty else {
++                                return Err(unsupported("binary pattern tuple", self.span()));
++                            };
++                            if fields.len() != binds.len() {
++                                return Err(unsupported("binary pattern binding count", self.span()));
++                            }
++                            let plain_fields = fields
++                                .iter()
++                                .map(|(name, ty)| (name.clone(), (**ty).clone()))
++                                .collect::<Vec<_>>();
++                            let values = binds
++                                .into_iter()
++                                .map(|(_, _, bind)| super::bin_match_bind_value(bind));
++                            Ok(CtValue::Struct {
++                                type_name: crate::Codegen::Tuples::tuple_struct_name(
++                                    &plain_fields,
++                                ),
++                                fields: fields
++                                    .iter()
++                                    .map(|(name, _)| name.clone())
++                                    .zip(values)
++                                    .collect(),
++                            })
++                        }
++                    }
++                }
+                 crate::Codegen::TIR::THostCall::SwitchSubjectField { field } => {
+                     let CtValue::Struct { fields, .. } = self
+                         .switch_subject
+diff --git a/crates/jet-codegen/src/Codegen/TIR/eval/mod.rs b/crates/jet-codegen/src/Codegen/TIR/eval/mod.rs
+index 3720f7e78..d1e211aeb 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/eval/mod.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/eval/mod.rs
+@@ -132,7 +132,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+ use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+-use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
++use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
+ use crate::Codegen::mangle;
+ use super::Cx;
+ use crate::Codegen::TIR::{
+@@ -142,11 +142,40 @@ use crate::Codegen::TIR::{
+ use super::build_cx_items;
+ use crate::Comptime::{self, CtReport, CtValue, DevSink};
+ use crate::Diagnostics::{Diagnostic, Span};
++use jet_foundation::MatchScan::BinBind;
+ use jet_foundation::Reflection::ReflectionField;
+ 
+ /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
+ pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
+ 
++/// Binary-pattern marshalling shared by arm probes and direct pattern binds.
++/// The scan and endian policy live in Foundation's Prelude kernel.
++pub(super) fn bin_match_scan_value(
++    value: &CtValue,
++    parts: &[BinMatchPart],
++    consume_prefix: bool,
++) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
++    let bytes = match value {
++        CtValue::Bytes(bytes) => bytes.clone(),
++        CtValue::List(items) => items
++            .iter()
++            .map(|item| match item {
++                CtValue::Int(value) => Some(*value as u8),
++                _ => None,
++            })
++            .collect::<Option<Vec<_>>>()?,
++        _ => return None,
++    };
++    jet_foundation::MatchScan::bin_match_scan(&bytes, parts, consume_prefix)
++}
++
++pub(super) fn bin_match_bind_value(bind: BinBind) -> CtValue {
++    match bind {
++        BinBind::Int(value) => CtValue::Int(value),
++        BinBind::Rest(bytes) => CtValue::Bytes(bytes),
++    }
++}
++
+ /// D-MEMO1=A: the evaluator/deopt carrier for one run's Prelude memo stores.
+ /// The cache implementation remains in `Prelude/Memo.rs`; this type only keeps
+ /// one store alive while a tiered run crosses the interpreter boundary.
+diff --git a/crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs b/crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs
+index 993d8fa02..311b36df6 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs
+@@ -2601,7 +2601,16 @@ pub(super) fn bind_match_pattern(
+             }
+             Ok(true)
+         }
+-        Pattern::StrMatch { .. } | Pattern::BinMatch { .. } => Ok(false),
++        Pattern::StrMatch { .. } => Ok(false),
++        Pattern::BinMatch { parts, .. } => {
++            let Some((_, binds)) = super::bin_match_scan_value(value, parts, false) else {
++                return Ok(false);
++            };
++            for (name, _, bind) in binds {
++                scope.insert(name, super::bin_match_bind_value(bind));
++            }
++            Ok(true)
++        }
+     }
+ }
+ 
+diff --git a/crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs b/crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs
+index 6e0280224..e5ed55250 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs
+@@ -1478,14 +1478,9 @@ pub(crate) fn str_match_scan_closure_ex(
+     (closure, holes)
+ }
+ 
+-/// D-BINPAT1 (card #506): build the Rust closure that scans a `[U8]` subject
+-/// against a binary pattern with a sequential MSB-first bit cursor, returning
+-/// `Option<(T1, T2, …)>` (`None` on any short read, byte mismatch, or a
+-/// pattern with no trailing rest that doesn't consume the whole subject). This
+-/// is the byte-mode sibling of `str_match_scan_closure` — one matcher engine
+-/// (I8) — and must read bit-for-bit identically to the tier-0 interpreter's
+-/// `Pattern::BinMatch` arm (R12 parity). Thin wrapper over
+-/// `bin_match_scan_closure_ex` in full-match mode (the `switch`-arm shape).
++/// D-BINPAT1 (card #506): marshal a binary pattern into the Foundation-owned
++/// Prelude scan kernel and project its values into the generated tuple.
++/// `switch` uses full-match mode; `Reader.take_pattern` uses prefix mode.
+ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
+     let Pattern::BinMatch { parts, .. } = pattern else {
+         return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
+@@ -1498,121 +1493,87 @@ pub(crate) fn bin_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec
+     )
+ }
+ 
+-/// D-BINPAT1 (card #506 follow-up): the same bit-scan engine, generalized
+-/// over WHERE the subject bytes come from (`subject_src`, a raw Rust
+-/// expression yielding `&[u8]`) and whether the WHOLE subject must be
+-/// consumed (`require_full_match`) — the byte-mode sibling of
+-/// `str_match_scan_closure_ex`. `switch` uses the whole-buffer subject and
+-/// full consumption; `Reader.take_pattern` scans a local `__jet_tail` slice
+-/// and only needs a PREFIX match, ending on a byte boundary (a `Reader`
+-/// advances by whole bytes) — the caller advances the reader's position by
+-/// the consumed byte count, appended as one extra trailing `usize` in the
+-/// returned Rust tuple (not reflected in the returned `holes` list — callers
+-/// reconstruct the same trailing slot themselves, `lower_reader_take_pattern`
+-/// does exactly that, mirroring `lower_cursor_take_pattern`).
++/// D-BINPAT1 (card #506 follow-up): marshal any byte-pattern subject into the
++/// Foundation-owned Prelude kernel. The returned `holes` list describes only
++/// user bindings; consume mode appends the matched byte count to the generated
++/// tuple, matching `lower_reader_take_pattern`.
+ pub(crate) fn bin_match_scan_closure_ex(
+     parts: &[crate::AST::BinMatchPart],
+     cx: &Cx,
+     subject_src: &str,
+     require_full_match: bool,
+ ) -> (String, Vec<(String, Type)>) {
+-    use crate::AST::{BinEndian, BinMatchPart, BinSpec};
++    use crate::AST::{BinMatchPart, BinSpec};
+     let mut holes: Vec<(String, Type)> = Vec::new();
+     let mut body = String::new();
+     body.push_str(&jet_format!("let {jet_prefix}bm: &[u8] = {};\n", subject_src));
+-    body.push_str(&jet_format!(
+-        "let {jet_prefix}total: usize = {jet_prefix}bm.len().saturating_mul(8);\n"
+-    ));
+-    body.push_str(&jet_format!("let mut {jet_prefix}pos: usize = 0;\n"));
+-    let ends_in_rest = matches!(
+-        parts.last(),
+-        Some(BinMatchPart::Hole { spec: BinSpec::Rest, .. })
+-    );
+-    for part in parts {
+-        match part {
++    let kernel_parts = parts
++        .iter()
++        .map(|part| match part {
+             BinMatchPart::Lit(bytes) => {
+-                let arr = bytes
++                let bytes = bytes
+                     .iter()
+-                    .map(|b| format!("{}u8", b))
++                    .map(|byte| format!("{byte}u8"))
+                     .collect::<Vec<_>>()
+                     .join(", ");
+-                body.push_str(&jet_format!(
+-                    "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+-                ));
+-                body.push_str(&jet_format!(
+-                    "{{ let __s = {jet_prefix}pos / 8; let __lit: &[u8] = &[{arr}]; if __s + __lit.len() > {jet_prefix}bm.len() || &{jet_prefix}bm[__s..__s + __lit.len()] != __lit {{ return None; }} {jet_prefix}pos += __lit.len() * 8; }}\n",
+-                ));
++                format!("JetBinMatchPart::Lit(&[{bytes}])")
+             }
+-            BinMatchPart::Hole { name, spec, .. } => match spec {
+-                BinSpec::Rest => {
+-                    let var = jet_format!(
+-                        "{jet_prefix}bm_{}",
+-                        crate::Syntax::generated_suffix(&mangle(name))
+-                    );
+-                    body.push_str(&jet_format!(
+-                        "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+-                    ));
+-                    body.push_str(&jet_format!(
+-                        "let {var}: Vec<u8> = {jet_prefix}bm[{jet_prefix}pos / 8..].to_vec(); {jet_prefix}pos = {jet_prefix}total;\n"
+-                    ));
+-                    holes.push((
+-                        name.clone(),
++            BinMatchPart::Hole { spec, .. } => match spec {
++                BinSpec::Bits { width, endian } => format!(
++                    "JetBinMatchPart::Bits {{ width: {}usize, little: {} }}",
++                    width,
++                    matches!(endian, crate::AST::BinEndian::Little)
++                ),
++                BinSpec::Rest => "JetBinMatchPart::Rest".to_string(),
++            },
++        })
++        .collect::<Vec<_>>()
++        .join(", ");
++    body.push_str(&jet_format!(
++        "let ({jet_prefix}bm_pos, mut {jet_prefix}bm_values) = match jet_bin_match_scan({jet_prefix}bm, &[{kernel_parts}], {require_full_match}) {{ Some((pos, values)) => (pos, values.into_iter()), None => return None }};\n",
++        kernel_parts = kernel_parts,
++        require_full_match = require_full_match,
++    ));
++    let mut tuple_vars = Vec::new();
++    for part in parts {
++        match part {
++            BinMatchPart::Lit(_) => {}
++            BinMatchPart::Hole { name, spec, .. } => {
++                let var = jet_format!(
++                    "{jet_prefix}bm_{}",
++                    crate::Syntax::generated_suffix(&mangle(name))
++                );
++                let (ty, value) = match spec {
++                    BinSpec::Rest => (
+                         Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+-                    ));
+-                }
+-                BinSpec::Bits { width, endian } => {
+-                    let var = jet_format!(
+-                        "{jet_prefix}bm_{}",
+-                        crate::Syntax::generated_suffix(&mangle(name))
+-                    );
+-                    let ty = cx.rust_type(&bin_bits_type(*width));
+-                    let w = *width as usize;
+-                    body.push_str(&jet_format!("if {jet_prefix}pos + {w} > {jet_prefix}total {{ return None; }}\n"));
+-                    body.push_str(&jet_format!(
+-                        "let {var}: {ty} = {{ let mut __v: u64 = 0; let mut __k = 0usize; while __k < {w} {{ let __p = {jet_prefix}pos + __k; __v = (__v << 1) | (({jet_prefix}bm[__p / 8] >> (7 - (__p % 8))) & 1) as u64; __k += 1; }} {jet_prefix}pos += {w}; "
+-                    ));
+-                    if matches!(endian, BinEndian::Little) {
+-                        let nb = w / 8;
+-                        body.push_str(&format!(
+-                            "{{ let mut __sw: u64 = 0; let mut __i = 0usize; while __i < {nb} {{ __sw |= ((__v >> (8 * __i)) & 0xff) << (8 * ({nb} - 1 - __i)); __i += 1; }} __v = __sw; }} "
+-                        ));
++                        "Some(JetBinMatchValue::Rest(value)) => value".to_string(),
++                    ),
++                    BinSpec::Bits { width, .. } => {
++                        let ty = bin_bits_type(*width);
++                        let rust_ty = cx.rust_type(&ty);
++                        (
++                            ty,
++                            format!(
++                                "Some(JetBinMatchValue::Int(value)) => value as {rust_ty}"
++                            ),
++                        )
+                     }
+-                    body.push_str(&format!("__v as {ty} }};\n"));
+-                    holes.push((name.clone(), bin_bits_type(*width)));
+-                }
+-            },
+-        }
+-    }
+-    // A full-match pattern (`switch`) must consume the WHOLE subject, not
+-    // just a prefix — a trailing `{...}` rest hole already takes the rest by
+-    // construction, so only a non-rest ending needs the check. A
+-    // `take_pattern` consume mode (`!require_full_match`) skips this — the
+-    // caller only wanted a PREFIX matched — but a `Reader` only advances by
+-    // whole bytes, so the match point must still land on a byte boundary.
+-    if require_full_match {
+-        if !ends_in_rest {
+-            body.push_str(&jet_format!(
+-                "if {jet_prefix}pos != {jet_prefix}total {{ return None; }}\n"
+-            ));
++                };
++                body.push_str(&jet_format!(
++                    "let {var}: {rust_ty} = match {jet_prefix}bm_values.next() {{ {value}, _ => return None }};\n",
++                    var = var,
++                    rust_ty = cx.rust_type(&ty),
++                    value = value,
++                ));
++                tuple_vars.push(var);
++                holes.push((name.clone(), ty));
++            }
+         }
+-    } else {
+-        body.push_str(&jet_format!(
+-            "if {jet_prefix}pos % 8 != 0 {{ return None; }}\n"
+-        ));
+     }
+-    let mut tuple_vars: Vec<String> = holes
+-        .iter()
+-        .map(|(n, _)| {
+-            mangle_generated(&format!(
+-                "bm_{}",
+-                crate::Syntax::generated_suffix(&mangle(n))
+-            ))
+-        })
+-        .collect();
+     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
+     if !require_full_match {
+         body.push_str(&jet_format!(
+-            "let {jet_prefix}consumed: usize = {jet_prefix}pos / 8;\n"
++            "let {jet_prefix}consumed: usize = {jet_prefix}bm_pos / 8;\n"
+         ));
+         tuple_vars.push(mangle_generated("consumed"));
+         tuple_tys.push("usize".to_string());
+diff --git a/crates/jet-codegen/src/Codegen/TIR/mod.rs b/crates/jet-codegen/src/Codegen/TIR/mod.rs
+index f03268ce0..b6b68d0a7 100644
+--- a/crates/jet-codegen/src/Codegen/TIR/mod.rs
++++ b/crates/jet-codegen/src/Codegen/TIR/mod.rs
+@@ -5798,11 +5798,11 @@ pub enum THandleOp {
+         canonical: Vec<(String, Type)>,
+     },
+     /// D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+-    /// consume-mode reuse of the D-BINPAT1 bit-scan engine
+-    /// (`bin_match_scan_closure_ex`, I8: one matcher, not two). `parts` is
+-    /// the pattern literal's already-parsed holes; `canonical` is the same
+-    /// `(name, type)` list sema put in the call's `resolved_ret` `Type::Tuple`
+-    /// — mirrors `CursorTakePattern` exactly, byte-mode sibling.
++    /// consume-mode marshalling into the Foundation-owned Prelude bit-scan
++    /// kernel. `parts` is the pattern literal's already-parsed holes;
++    /// `canonical` is the same `(name, type)` list sema put in the call's
++    /// `resolved_ret` `Type::Tuple` — mirrors `CursorTakePattern` exactly,
++    /// byte-mode sibling.
+     ReaderTakePattern {
+         parts: Vec<crate::AST::BinMatchPart>,
+         canonical: Vec<(String, Type)>,
+diff --git a/crates/jet-codegen/src/Codegen/mod.rs b/crates/jet-codegen/src/Codegen/mod.rs
+index a2e817a3d..402b641e7 100644
+--- a/crates/jet-codegen/src/Codegen/mod.rs
++++ b/crates/jet-codegen/src/Codegen/mod.rs
+@@ -216,6 +216,9 @@ const PRELUDE_PARTS: &[&str] = &[
+     // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
+     // AOT prelude and the canonical TIR evaluator run one kernel (I9).
+     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
++    // D-BINPAT1 / I9: one binary-pattern scan kernel. AST-shaped engines only
++    // marshal pattern parts and project its values.
++    include_str!("../../../jet-foundation/src/Prelude/MatchScan.rs"),
+ ];
+ 
+ const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
+@@ -3006,6 +3009,10 @@ mod tests {
+             std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
+         let stream_cursor =
+             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
++        let match_scan = std::fs::read_to_string(
++            root.join("../jet-foundation/src/Prelude/MatchScan.rs"),
++        )
++        .unwrap();
+         for (relative, source) in [
+             ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
+             ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
+@@ -3071,6 +3078,10 @@ mod tests {
+                 "../jet-foundation/src/StreamCursor.rs",
+                 stream_cursor.as_str(),
+             ),
++            (
++                "../jet-foundation/src/Prelude/MatchScan.rs",
++                match_scan.as_str(),
++            ),
+         ] {
+             assert!(
+                 source.lines().count() < MAX_MODULE_LINES,
+@@ -3195,6 +3206,9 @@ mod tests {
+         let stream_cursor_pos = production_codegen
+             .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
+             .unwrap();
++        let match_scan_pos = production_codegen
++            .find("include_str!(\"../../../jet-foundation/src/Prelude/MatchScan.rs\")")
++            .unwrap();
+         assert!(
+             outcome_pos < unicode_pos
+                 && outcome_pos < job_pos
+@@ -3237,7 +3251,8 @@ mod tests {
+                 && control_pos < observe_pos
+                 && observe_pos < exact_units_pos
+                 && exact_units_pos < structural_debug_pos
+-                && structural_debug_pos < stream_cursor_pos,
++                && structural_debug_pos < stream_cursor_pos
++                && stream_cursor_pos < match_scan_pos,
+             "prelude ownership order is generated-byte order"
+         );
+         assert!(production_codegen.contains("for (index, part) in PRELUDE_PARTS.iter().enumerate()"));
+@@ -3307,6 +3322,7 @@ mod tests {
+                 exact_units.as_str(),
+                 structural_debug.as_str(),
+                 stream_cursor.as_str(),
++                match_scan.as_str(),
+             ],
+             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
+         );
+@@ -3360,6 +3376,7 @@ mod tests {
+                     exact_units.as_str(),
+                     structural_debug.as_str(),
+                     stream_cursor.as_str(),
++                    match_scan.as_str(),
+                 ]
+                 .concat(),
+             );
+@@ -3426,6 +3443,7 @@ mod tests {
+             "../jet-foundation/src/ExactUnitConversion.rs",
+             "../jet-foundation/src/StructuralDebug.rs",
+             "../jet-foundation/src/StreamCursor.rs",
++            "../jet-foundation/src/Prelude/MatchScan.rs",
+         ] {
+             fragments.push(root.join(relative));
+         }
+diff --git a/crates/jet-foundation/src/MatchScan.rs b/crates/jet-foundation/src/MatchScan.rs
+index 9f43d03b7..0a6927d2e 100644
+--- a/crates/jet-foundation/src/MatchScan.rs
++++ b/crates/jet-foundation/src/MatchScan.rs
+@@ -1,10 +1,10 @@
+-//! Interpreted D-PARSESTR1 / D-BINPAT1 match scans.
++//! AST adapters for D-PARSESTR1 / D-BINPAT1 match scans.
+ //!
+-//! AOT specializes each pattern into inline Rust (`str_match_scan_closure_ex` /
+-//! `bin_match_scan_closure_ex`). Every tier that still holds the pattern as AST
+-//! at run time — the Cranelift JIT host and the canonical TIR evaluator — walks
+-//! it here instead, so quick-run and full build agree on what matches, what
+-//! binds, and how far the subject is consumed (I9, I8: one matcher).
++//! Binary matching semantics live in the Foundation-owned Prelude fragment
++//! `Prelude/MatchScan.rs`. AOT embeds that fragment; Foundation's AST adapter,
++//! the Cranelift JIT host, and the canonical TIR evaluator marshal into it.
++//! String matching remains separate: AST tiers use this text adapter, while AOT
++//! keeps its existing generated text path.
+ 
+ use crate::AST::{BinEndian, BinMatchPart, BinSpec, StrMatchPart, Type};
+ 
+@@ -12,6 +12,10 @@ mod inline_range_semantics {
+     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
+ }
+ 
++mod bin_kernel {
++    include!("Prelude/MatchScan.rs");
++}
++
+ /// One value bound by a binary pattern hole: a fixed-width integer, or the
+ /// `..rest` tail as raw bytes.
+ #[derive(Clone, Debug, PartialEq)]
+@@ -119,118 +123,60 @@ pub fn bin_match_scan(
+     parts: &[BinMatchPart],
+     consume_prefix: bool,
+ ) -> Option<(usize, Vec<(String, Type, BinBind)>)> {
+-    let mut bit_pos = 0usize;
++    let kernel_parts = parts
++        .iter()
++        .map(|part| match part {
++            BinMatchPart::Lit(bytes) => bin_kernel::JetBinMatchPart::Lit(bytes.as_slice()),
++            BinMatchPart::Hole { spec, .. } => match spec {
++                BinSpec::Bits { width, endian } => bin_kernel::JetBinMatchPart::Bits {
++                    width: *width as usize,
++                    little: matches!(endian, BinEndian::Little),
++                },
++                BinSpec::Rest => bin_kernel::JetBinMatchPart::Rest,
++            },
++        })
++        .collect::<Vec<_>>();
++    let (bit_pos, values) =
++        bin_kernel::jet_bin_match_scan(subject, &kernel_parts, consume_prefix)?;
++    let mut values = values.into_iter();
+     let mut binds = Vec::new();
+     for part in parts {
+-        match part {
+-            BinMatchPart::Lit(bytes) => {
+-                let need = bytes.len() * 8;
+-                if bit_pos % 8 != 0 {
+-                    return None;
+-                }
+-                let byte_pos = bit_pos / 8;
+-                if byte_pos + bytes.len() > subject.len() {
+-                    return None;
+-                }
+-                if &subject[byte_pos..byte_pos + bytes.len()] != bytes.as_slice() {
+-                    return None;
+-                }
+-                bit_pos += need;
+-            }
+-            BinMatchPart::Hole { name, spec, .. } => {
+-                let (width, be) = match spec {
+-                    BinSpec::Bits { width, endian } => (
+-                        *width as usize,
+-                        matches!(endian, BinEndian::Big | BinEndian::None),
+-                    ),
+-                    BinSpec::Rest => {
+-                        if bit_pos % 8 != 0 {
+-                            return None;
+-                        }
+-                        let rest = subject[bit_pos / 8..].to_vec();
+-                        binds.push((
+-                            name.clone(),
+-                            Type::List(Box::new(Type::IntN {
+-                                signed: false,
+-                                bits: 8,
+-                            })),
+-                            BinBind::Rest(rest),
+-                        ));
+-                        bit_pos = subject.len() * 8;
+-                        continue;
+-                    }
+-                };
+-                if width % 8 == 0 && bit_pos % 8 == 0 {
+-                    let nbytes = width / 8;
+-                    let byte_pos = bit_pos / 8;
+-                    if byte_pos + nbytes > subject.len() {
+-                        return None;
+-                    }
+-                    let slice = &subject[byte_pos..byte_pos + nbytes];
+-                    let v = match (nbytes, be) {
+-                        (1, _) => slice[0] as i64,
+-                        (2, true) => u16::from_be_bytes([slice[0], slice[1]]) as i64,
+-                        (2, false) => u16::from_le_bytes([slice[0], slice[1]]) as i64,
+-                        (4, true) => {
+-                            u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
+-                        }
+-                        (4, false) => {
+-                            u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]) as i64
+-                        }
+-                        (8, true) => u64::from_be_bytes([
+-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
+-                            slice[7],
+-                        ]) as i64,
+-                        (8, false) => u64::from_le_bytes([
+-                            slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6],
+-                            slice[7],
+-                        ]) as i64,
+-                        _ => return None,
+-                    };
+-                    binds.push((
+-                        name.clone(),
+-                        Type::IntN {
+-                            signed: false,
+-                            bits: width as u8,
+-                        },
+-                        BinBind::Int(v),
+-                    ));
+-                    bit_pos += width;
+-                } else {
+-                    // Nibble-oriented (U4): read bit by bit MSB-first.
+-                    if bit_pos + width > subject.len() * 8 {
+-                        return None;
+-                    }
+-                    let mut v = 0u64;
+-                    for _ in 0..width {
+-                        let byte = subject[bit_pos / 8];
+-                        let bit = 7 - (bit_pos % 8);
+-                        v = (v << 1) | ((byte >> bit) as u64 & 1);
+-                        bit_pos += 1;
+-                    }
+-                    binds.push((
+-                        name.clone(),
+-                        Type::IntN {
+-                            signed: false,
+-                            bits: width as u8,
+-                        },
+-                        BinBind::Int(v as i64),
+-                    ));
+-                }
+-            }
+-        }
+-    }
+-    if !consume_prefix && bit_pos != subject.len() * 8 {
+-        let has_rest = parts
+-            .iter()
+-            .any(|p| matches!(p, BinMatchPart::Hole { spec: BinSpec::Rest, .. }));
+-        if !has_rest {
+-            return None;
+-        }
++        let BinMatchPart::Hole { name, spec, .. } = part else {
++            continue;
++        };
++        let value = values.next()?;
++        let (ty, bind) = match (spec, value) {
++            (BinSpec::Bits { width, .. }, bin_kernel::JetBinMatchValue::Int(value)) => (
++                bin_bits_type(*width),
++                BinBind::Int(value as i64),
++            ),
++            (BinSpec::Rest, bin_kernel::JetBinMatchValue::Rest(bytes)) => (
++                Type::List(Box::new(Type::IntN {
++                    signed: false,
++                    bits: 8,
++                })),
++                BinBind::Rest(bytes),
++            ),
++            _ => return None,
++        };
++        binds.push((name.clone(), ty, bind));
+     }
+     Some((bit_pos, binds))
+ }
+ 
++fn bin_bits_type(width: u8) -> Type {
++    let bits = if width <= 8 {
++        8
++    } else if width <= 16 {
++        16
++    } else if width <= 32 {
++        32
++    } else {
++        64
++    };
++    Type::IntN { signed: false, bits }
++}
++
+ #[cfg(test)]
+ mod match_scan_tests {
+     use super::*;
+diff --git a/crates/jet-foundation/src/Prelude/MatchScan.rs b/crates/jet-foundation/src/Prelude/MatchScan.rs
+new file mode 100644
+index 000000000..6b834a84f
+--- /dev/null
++++ b/crates/jet-foundation/src/Prelude/MatchScan.rs
+@@ -0,0 +1,89 @@
++// D-BINPAT1 / I9: one binary-pattern scan kernel. `Codegen/mod.rs` embeds this
++// exact source in generated AOT programs; Foundation's AST adapter, Cranelift,
++// and the TIR evaluator marshal into it. Keep this fragment std-only and free
++// of `crate::` paths so it also compiles at the root of generated Rust.
++
++#[derive(Clone, Copy, Debug)]
++pub enum JetBinMatchPart<'a> {
++    Lit(&'a [u8]),
++    Bits { width: usize, little: bool },
++    Rest,
++}
++
++#[derive(Clone, Debug, PartialEq)]
++pub enum JetBinMatchValue {
++    Int(u64),
++    Rest(Vec<u8>),
++}
++
++/// Scan one byte-pattern description from the current bit position.
++///
++/// `consume_prefix` permits trailing subject bytes, but still requires the
++/// match to end on a byte boundary because `Reader` advances by bytes.
++pub fn jet_bin_match_scan(
++    subject: &[u8],
++    parts: &[JetBinMatchPart<'_>],
++    consume_prefix: bool,
++) -> Option<(usize, Vec<JetBinMatchValue>)> {
++    let total = subject.len().checked_mul(8)?;
++    let mut bit_pos = 0usize;
++    let mut values = Vec::new();
++
++    for part in parts {
++        match *part {
++            JetBinMatchPart::Lit(bytes) => {
++                if bit_pos % 8 != 0 {
++                    return None;
++                }
++                let byte_pos = bit_pos / 8;
++                let end = byte_pos.checked_add(bytes.len())?;
++                if end > subject.len() || &subject[byte_pos..end] != bytes {
++                    return None;
++                }
++                bit_pos = bit_pos.checked_add(bytes.len().checked_mul(8)?)?;
++            }
++            JetBinMatchPart::Bits { width, little } => {
++                let end = bit_pos.checked_add(width)?;
++                if end > total {
++                    return None;
++                }
++                let mut value = 0u64;
++                for offset in 0..width {
++                    let position = bit_pos + offset;
++                    let byte = subject[position / 8];
++                    let bit = 7 - (position % 8);
++                    value = (value << 1) | u64::from((byte >> bit) & 1);
++                }
++                if little && width % 8 == 0 {
++                    let bytes = width / 8;
++                    let mut swapped = 0u64;
++                    for index in 0..bytes {
++                        swapped |= ((value >> (8 * index)) & 0xff)
++                            << (8 * (bytes - 1 - index));
++                    }
++                    value = swapped;
++                }
++                bit_pos = end;
++                values.push(JetBinMatchValue::Int(value));
++            }
++            JetBinMatchPart::Rest => {
++                if bit_pos % 8 != 0 {
++                    return None;
++                }
++                values.push(JetBinMatchValue::Rest(subject[bit_pos / 8..].to_vec()));
++                bit_pos = total;
++            }
++        }
++    }
++
++    if !consume_prefix && bit_pos != total {
++        let has_rest = parts.iter().any(|part| matches!(*part, JetBinMatchPart::Rest));
++        if !has_rest {
++            return None;
++        }
++    }
++    if consume_prefix && bit_pos % 8 != 0 {
++        return None;
++    }
++    Some((bit_pos, values))
++}
+diff --git a/crates/jet-foundation/src/StreamCursor.rs b/crates/jet-foundation/src/StreamCursor.rs
+index b6b5da9b2..14747dff1 100644
+--- a/crates/jet-foundation/src/StreamCursor.rs
++++ b/crates/jet-foundation/src/StreamCursor.rs
+@@ -119,12 +119,12 @@ pub fn jet_cursor_skip_ws(c: &mut JetCursor) {
+     c.pos += skipped;
+ }
+ 
+-// `take_pattern` runs a different match engine on every tier: AOT inlines a
+-// closure specialized to the pattern, the Cranelift host and the interpreter
+-// walk the pattern as data. What surrounds the match is the same everywhere,
+-// so it lives here: what the scan may look at, how far a hit advances, and
+-// what a miss reports. A tier supplies the match and projects the bindings;
+-// it decides nothing else.
++// `take_pattern` uses one scan policy per pattern family on every tier. Binary
++// AOT emits descriptors into the Foundation kernel; text AOT keeps its generated
++// text scanner; the Cranelift host and interpreter marshal parsed pattern data.
++// What surrounds the match is the same everywhere, so it lives here: what the
++// scan may look at, how far a hit advances, and what a miss reports. A tier
++// supplies the match and projects the bindings; it decides nothing else.
+ 
+ pub fn jet_cursor_tail(c: &JetCursor) -> &str {
+     &c.buf[c.pos..]
+diff --git a/tests/tir_patterns_and_fields.rs b/tests/tir_patterns_and_fields.rs
+index e3dc81563..1f9cc8a75 100644
+--- a/tests/tir_patterns_and_fields.rs
++++ b/tests/tir_patterns_and_fields.rs
+@@ -106,6 +106,58 @@ fn run() {
+     assert_tiers_agree("tir_generated_name_patterns", src, "7\n6\nok:7:7:6\n");
+ }
+ 
++#[test]
++fn binary_pattern_u24_both_endians_match_all_tiers() {
++    let src = r#"fn run() {
++    packet :: [U8].{1, 0, 0, 1, 0, 0}
++    if packet == {
++        [U8].{"{be:U24be}{le:U24le}"} -> { print("{be} {le}") }
++        else -> { print("miss") }
++    }
++}
++"#;
++    assert_tiers_agree("binary_pattern_u24_tiers", src, "65536 1\n");
++}
++
++#[test]
++fn binary_pattern_u40_both_endians_match_all_tiers() {
++    let src = r#"fn run() {
++    packet :: [U8].{1, 0, 0, 0, 0, 1, 0, 0, 0, 0}
++    if packet == {
++        [U8].{"{be:U40be}{le:U40le}"} -> { print("{be} {le}") }
++        else -> { print("miss") }
++    }
++}
++"#;
++    assert_tiers_agree("binary_pattern_u40_tiers", src, "4294967296 1\n");
++}
++
++#[test]
++fn binary_pattern_u48_both_endians_match_all_tiers() {
++    let src = r#"fn run() {
++    packet :: [U8].{1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0}
++    if packet == {
++        [U8].{"{be:U48be}{le:U48le}"} -> { print("{be} {le}") }
++        else -> { print("miss") }
++    }
++}
++"#;
++    assert_tiers_agree("binary_pattern_u48_tiers", src, "1099511627776 1\n");
++}
++
++#[test]
++fn binary_pattern_u56_both_endians_match_all_tiers() {
++    let src = r#"fn run() {
++    packet :: [U8].{1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0}
++    if packet == {
++        [U8].{"{be:U56be}{le:U56le}"} -> { print("{be} {le}") }
++        else -> { print("miss") }
++    }
++}
++"#;
++    assert_tiers_agree("binary_pattern_u56_tiers", src, "281474976710656 1\n");
++}
++
+ /// c109 (builtin-name collision): a user method whose name collides with a builtin
+ /// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
+ /// receiver-typed) → `b.get()` emitted garbage, `b.len()` → E0599. The fix dispatches

@@ -12,16 +12,16 @@
 // wasm via editors/zed/install.sh (FORCE=1).
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
-const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "loop", "return", "task", "task.all", "task.any", "task.group", "task.race"];
+const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "return", "task", "task.all", "task.any", "task.group", "task.race"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Abilities", "Bindgen", "CLI", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Abilities", "Bindgen", "CLI", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
-const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "..", "..<", ".[", "/", "/%", "/%=", "/=", ":>", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
+const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
 module.exports = grammar({
@@ -34,7 +34,6 @@ module.exports = grammar({
     [$._expr, $.list_pattern],
     [$._type, $._expr],
     [$.capability_type, $.union_type],
-    [$.option_type, $.fallible_type],
     [$.loop_stmt, $._loop_head],
     [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
@@ -43,7 +42,7 @@ module.exports = grammar({
     [$.function_def, $.struct_cli_binding, $.struct_field],
     [$.function_def, $.trait_method_sig],
     // `(a, b)` — destructure target vs tuple expr vs lambda params; the `::`/
-    // `=>` after the `)` disambiguates.
+    // `->` after the `)` disambiguates.
     [$.tuple_pattern, $._expr, $.lambda_param],
     // In a bindings module body, `fn name(…)` may be an extern fn (`= "path"`)
     // or a normal fn (with a block); fork until the `=`/`{` appears.
@@ -90,9 +89,9 @@ module.exports = grammar({
     // D-SHAPE8/D-ARROW-CONTROL1: one callable effect-row spelling.
     effect_arrow: ($) =>
       seq(
-        "=[",
+        "-[",
         commaSep(choice(seq("via", $.identifier), seq("..", $.type_identifier), seq(optional("!"), $.effect_path))),
-        "]=>",
+        "]>",
       ),
 
     effect_path: ($) => seq($.type_identifier, repeat(seq(".", choice($.type_identifier, $.identifier)))),
@@ -282,7 +281,7 @@ module.exports = grammar({
       ),
 
     // ── Extern (S50) ───────────────────────────────────────────────────────
-    // `extern rust "crate@ver" { fn name(…) => T = "rust::path" }`.
+    // `extern rust "crate@ver" { fn name(…) T = "rust::path" }`.
     extern_block: ($) =>
       seq("extern", "rust", $.string_literal, "{", repeat($.extern_fn), "}"),
 
@@ -294,7 +293,7 @@ module.exports = grammar({
         $.param_list,
         optional(
           choice(
-            seq("=>", field("return_type", $._type)),
+            field("return_type", $._type),
             prec.right(seq("?", optional(field("error_type", $._type)))),
           ),
         ),
@@ -302,7 +301,7 @@ module.exports = grammar({
       ),
 
     // ── Function definition (S1) ───────────────────────────────────────────
-    // Leading applied rules plus the D-SHAPE8 return/effect arrow.
+    // Leading applied rules plus the bare result and effect-row forms.
     function_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
@@ -313,18 +312,13 @@ module.exports = grammar({
         $.param_list,
         optional(choice(
           seq(
-            $.effect_arrow,
-            optional(
-              choice(
-                field("return_type", $._type),
-                seq("?", optional(field("error_type", $._type))),
-              ),
-            ),
+            field("return_type", $._type),
+            optional($.effect_arrow),
           ),
-          seq("=>", field("return_type", $._type)),
+          $.effect_arrow,
           seq("?", optional(field("error_type", $._type))),
         )),
-        choice($.block, seq("::", field("body", $._expr))),
+        choice(seq("->", field("body", choice($.block, $._expr))), $.block),
       ),
 
     // ── Struct definition ──────────────────────────────────────────────────
@@ -367,7 +361,11 @@ module.exports = grammar({
         field("name", $.identifier),
         ":",
         field("type", $._type),
-        choice(seq("=>", field("body", choice($.block, $._expr))), optional(",")),
+        choice(
+          seq("{", field("default", $._expr), "}"),
+          seq("->", field("body", choice($.block, $._expr))),
+          optional(","),
+        ),
       ),
 
     // D-META-CODE1=A / D-META-BODY1=A: the canonical provider definition.
@@ -474,14 +472,14 @@ module.exports = grammar({
     // ── Impl block (S27) ───────────────────────────────────────────────────
     // `impl Type { … }`, `impl Type.Trait { … }`, delegation
     // `impl Type.Trait using field` (S62), and error-conversion
-    // `impl FromErr => ToErr { … }` (D-ERR-CONV/D-ARROW-CONTROL1).
+    // `impl FromErr -> ToErr { … }` (D-ERR-CONV/D-ARROW-CONTROL1).
     impl_block: ($) =>
       choice(
-        // Conversion impl `impl FromErr => ToErr { return … }` — body is a block.
+        // Conversion impl `impl FromErr -> ToErr { return … }` — body is a block.
         seq(
           "impl",
           field("type", choice($.type_identifier, $.generic_type, $.compiler_fact)),
-          "=>",
+          "->",
           field("into", choice($.type_identifier, $.generic_type)),
           $.block,
         ),
@@ -521,8 +519,8 @@ module.exports = grammar({
         "}",
       ),
 
-    // A method signature with no body: `fn greet(self) => String`, optionally
-    // marked (`fn area(self) =[]=> Int`).
+    // A method signature with no body: `fn greet(self) String`, optionally
+    // marked (`fn area(self) Int -[]>`).
     trait_method_sig: ($) =>
       prec.right(seq(
         repeat($._marker),
@@ -531,16 +529,8 @@ module.exports = grammar({
         optional($.type_params),
         $.param_list,
         optional(choice(
-          seq(
-            $.effect_arrow,
-            optional(
-              choice(
-                field("return_type", $._type),
-                seq("?", optional(field("error_type", $._type))),
-              ),
-            ),
-          ),
-          seq("=>", field("return_type", $._type)),
+          seq(field("return_type", $._type), optional($.effect_arrow)),
+          $.effect_arrow,
           seq("?", optional(field("error_type", $._type))),
         )),
       )),
@@ -628,14 +618,14 @@ module.exports = grammar({
     // Receiver: `self`, `^self`, `&self` (D-MEM1).
     self_param: ($) => seq(optional($.capability_sigil), "self"),
 
-    // A parameter, with an optional default value `clamp: Bool = false`.
+    // A parameter, with an optional default value `clamp: Bool{false}`.
     param: ($) =>
       seq(
         optional("ref"),
         field("name", $.identifier),
         ":",
         field("type", $._type),
-        optional(seq("=", field("default", $._expr))),
+        optional(seq("{", field("default", $._expr), "}")),
       ),
 
     // ── Types ──────────────────────────────────────────────────────────────
@@ -706,11 +696,20 @@ module.exports = grammar({
       ),
 
     // `T?` optional (S32).
-    option_type: ($) => prec(1, seq($._type, "?")),
+    option_type: ($) => prec(2, seq($._type, "?")),
 
-    // `T ? E` fallible result (S34).
-    // Prec below `union_type` so `T ? E1 | E2` is `T ? (E1 | E2)` (D-UNIONTYPE1=A).
-    fallible_type: ($) => prec.left(1, seq($._type, "?", $._type)),
+    // D-ERRSUFFIX1=B: `[Success?] [ErrorUnion!]`. Tree-sitter does not retain
+    // whitespace, so the compiler owns the tight-vs-separated `!` distinction;
+    // this grammar only needs to preserve the suffix roles and grouping.
+    error_suffix: ($) =>
+      prec(3, seq(choice($.type_identifier, $.generic_type, $.paren_type), "!")),
+    fallible_type: ($) => prec.left(1, choice(
+      seq($._type, "?", $.error_suffix),
+      seq($._type, "?", "!"),
+      seq($._type, $.error_suffix),
+      $.error_suffix,
+      "!",
+    )),
 
     // D-UNIONTYPE1=A: closed structural sum `A | B | …`.
     union_type: ($) => prec.left(2, seq($._type, "|", $._type)),
@@ -726,23 +725,18 @@ module.exports = grammar({
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 
-    // `fn(T) =[]=> U` or `fn(T) =[IO]=> U` callback type (D-EFF2).
+    // `fn(T) U -[]>` or `fn(T) U -[IO]>` callback type (D-EFF2).
     fn_type: ($) =>
       prec.right(seq(
         "fn",
         "(",
         commaSep($._type),
         ")",
-        optional(
-          choice(
-            seq(
-              $.effect_arrow,
-              optional(choice($._type, seq("?", optional($._type)))),
-            ),
-            seq("=>", $._type),
-            seq("?", optional($._type)),
-          ),
-        ),
+        optional(choice(
+          seq($._type, optional($.effect_arrow)),
+          $.effect_arrow,
+          seq("?", optional($._type)),
+        )),
       )),
 
     paren_type: ($) => seq("(", $._type, ")"),
@@ -1351,7 +1345,11 @@ module.exports = grammar({
           "(",
           commaSep($.lambda_param),
           ")",
-          "=>",
+          optional(choice(
+            seq($._type, optional($.effect_arrow)),
+            $.effect_arrow,
+          )),
+          "->",
           choice($.block, $._expr),
         ),
       ),
