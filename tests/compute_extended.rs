@@ -325,7 +325,31 @@ fn run() {
     doubled :: compute.mul(tensor, compute.full([3], 2.0) ?? panic("factor")) ?? panic("doubled")
     print("data_tensor:{compute.to_list(doubled)}")
 }
+
 "#,
         &["data_tensor:[2.0, 4.0, 6.0]"],
     );
+}
+
+#[test]
+fn portable_accelerator_devices_are_registered_at_the_compute_seam() {
+    jet::compile(
+        r#"
+use core.compute as compute
+
+fn run() {
+    vulkan :: compute.device_vulkan()
+    webgpu :: compute.device_webgpu()
+    print(compute.device(compute.on_device(
+        compute.full([1], 1.0) ?? panic("tensor"),
+        vulkan,
+    ) ?? panic("vulkan")))
+    print(compute.device(compute.on_device(
+        compute.full([1], 1.0) ?? panic("tensor"),
+        webgpu,
+    ) ?? panic("webgpu")))
+}
+"#,
+    )
+    .expect("Vulkan and WebGPU devices must be public core.compute seams");
 }

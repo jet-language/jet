@@ -97,6 +97,13 @@ fn realize_one(
         .join(language.bindings_subdir())
         .join(format!("{name}.{}", Syntax::FILE_EXT));
     require_regular_file(&expected_binding, "generated foreign binding")?;
+    let descriptor = crate::AST::binder_descriptor(language).ok_or_else(|| {
+        ProviderError::ForeignProjection(format!(
+            "foreign dependency {name} has no binder descriptor for {}",
+            language.root()
+        ))
+    })?;
+    require_descriptor_stamp(&expected_binding, descriptor.stamp())?;
 
     let foreign_reference = format!("{}@{}", language.root(), reference);
     let Some(version) = exact_version(&spec) else {
@@ -137,15 +144,17 @@ fn realize_one(
         .join(language.bindings_subdir())
         .join(format!("{name}.{}", Syntax::FILE_EXT));
     require_regular_file(&stored_binding, "verified foreign binding")?;
+    require_descriptor_stamp(&stored_binding, descriptor.stamp())?;
 
     let binding = project_binding_path(project_root, language, name);
     copy_verified_file(&stored_binding, &binding)?;
     let provenance = provenance_path(project_root, language, name);
     let provenance_text = format!(
-        "schema = foreign-binding-v1\nlanguage = {}\nname = {}\nreference = {}\nstore-id = {}\noutput-hash = {}\n",
+        "schema = foreign-binding-v1\nlanguage = {}\nname = {}\nreference = {}\ndescriptor = {}\nstore-id = {}\noutput-hash = {}\n",
         language.root(),
         name,
         foreign_reference,
+        descriptor.stamp(),
         entry.id,
         entry.envelope.output_hash
     );
@@ -278,6 +287,25 @@ fn require_regular_file(path: &Path, label: &str) -> Result<(), ProviderError> {
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(ProviderError::ForeignProjection(format!(
             "{label} {} is not a regular file",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn require_descriptor_stamp(path: &Path, expected: String) -> Result<(), ProviderError> {
+    let source = fs::read_to_string(path).map_err(|error| {
+        ProviderError::ForeignProjection(format!(
+            "could not read generated foreign binding {}: {error}",
+            path.display()
+        ))
+    })?;
+    let actual = source
+        .lines()
+        .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="));
+    if actual != Some(expected.as_str()) {
+        return Err(ProviderError::ForeignProjection(format!(
+            "foreign binding {} has a missing or stale descriptor stamp",
             path.display()
         )));
     }

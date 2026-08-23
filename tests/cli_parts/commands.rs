@@ -214,7 +214,7 @@ fn r_bind_launders_parse_failure_as_e3208() {
 fn octave_bind_reports_checked_diagnostic_for_unsupported_shape() {
     let dir=isolated_cwd("octave_bind_invalid");let script=dir.join("broken.m");fs::write(&script,"function [left, right] = split(input)\n  left = input; right = input;\nend\n").unwrap();
     let output=Command::new(jet()).args(["inspect","bind","octave"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.m:"));
+    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains("multiple-output"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.m:"));
 }
 
 #[cfg(not(target_os="windows"))]
@@ -304,6 +304,39 @@ fn cobol_bind_launders_foreign_compiler_failure_as_e3208() {
     assert!(stderr.contains("Error [E3208]:")); assert!(stderr.contains(" Why:")); assert!(stderr.contains(" Fix:"));
     assert!(!stderr.contains("broken.cob:"),"raw cobc location leaked:\n{stderr}");
     check_snapshot("bind_cobol_invalid_e3208.txt",&scrub(&stderr,&source));
+}
+
+#[test]
+fn cobol_bind_rejects_unknown_copybook_usage_as_e3208() {
+    let dir = isolated_cwd("cobol_bind_unknown_usage");
+    let source = dir.join("program.cob");
+    let copybook = dir.join("record.cpy");
+    fs::write(
+        &source,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGRAM.\n",
+    )
+    .unwrap();
+    fs::write(
+        &copybook,
+        "       01 RECORD.\n          05 AMOUNT PIC 9(4) BINARY.\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "cobol"])
+        .arg(&source)
+        .args(["--copybook"])
+        .arg(&copybook)
+        .args(["--pkg", "record"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"), "missing E3208:\n{stderr}");
+    assert!(stderr.contains("unsupported PIC/usage"), "missing copybook cause:\n{stderr}");
+    assert!(stderr.contains(" Why:") && stderr.contains(" Fix:"), "incomplete diagnostic:\n{stderr}");
+    assert!(!stderr.contains("record.cpy:"), "raw copybook location leaked:\n{stderr}");
 }
 
 #[test]

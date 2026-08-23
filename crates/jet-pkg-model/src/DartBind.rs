@@ -197,7 +197,6 @@ pub fn build_compute(
     let output = cache.join(format!("libjet_dart_{lib}_compute{}", shared_ext()));
     let archive = cache.join(format!("libjet_dart_{lib}.a"));
     let _ = std::fs::remove_file(&output);
-    let _ = std::fs::remove_file(&archive);
     std::fs::write(&source, format!("{guest_rust}\n{host_rust}"))
         .map_err(|e| BindError::IO(format!("could not write the native Jet plugin source: {e}")))?;
     let mut command = Command::new("rustc");

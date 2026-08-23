@@ -6,10 +6,8 @@ use super::alloc_ptrs::result_ty;
 use super::serde_diags::wrong_core_arity;
 impl<'a> Checker<'a> {
         /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
-        /// String` argument elaboration shared by `.call`/`.call_int` — a plugin
-        /// export name plus a homogeneous scalar argument list. v1 supports
-        /// exactly two scalar shapes (`Float` via `.call`, `Int` via `.call_int`);
-        /// see `Prelude/Plugin.rs` for why Bool/Text aren't wired yet.
+        /// String` argument elaboration shared by the typed plugin calls — a
+        /// plugin export name plus a homogeneous scalar argument list.
         fn check_plugin_call_args(
             &mut self,
             name: &str,
@@ -30,7 +28,7 @@ impl<'a> Checker<'a> {
         }
     
         /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): instance methods on a `Plugin` handle
-        /// (produced by `core.plugin`'s `load`). `call`/`call_int` are fallible
+        /// (produced by `core.plugin`'s `load`). Typed calls are fallible
         /// (`? String`, naming a missing export or a param/type mismatch against
         /// the plugin's actual `.wit` signature) — the sandboxed loader never
         /// crashes the host program, it reports (I2).
@@ -50,6 +48,16 @@ impl<'a> Checker<'a> {
                     self.check_plugin_call_args("call_int", &Type::Int, args, span);
                     self.record_effect(Effect::Exec.name(), span);
                     Some(Some(result_ty(Type::Int, Type::String)))
+                }
+                "call_bool" => {
+                    self.check_plugin_call_args("call_bool", &Type::Bool, args, span);
+                    self.record_effect(Effect::Exec.name(), span);
+                    Some(Some(result_ty(Type::Bool, Type::String)))
+                }
+                "call_text" => {
+                    self.check_plugin_call_args("call_text", &Type::String, args, span);
+                    self.record_effect(Effect::Exec.name(), span);
+                    Some(Some(result_ty(Type::String, Type::String)))
                 }
                 _ => None,
             }

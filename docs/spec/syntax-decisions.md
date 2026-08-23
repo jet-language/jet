@@ -2850,7 +2850,8 @@ release build — divergence is a release blocker.
 
 **D-PLUGIN1 / D-DEP-WASM1**: `target: plugin` compiles to a sandboxed WASM
 module (wasmtime + Component Model, typed `.wit` contract), safe by default.
-Plugin target support is shipped for the v1 scope: all-`Int` or all-`Float`
+Plugin target support is shipped for the v1 scope: homogeneous `Int`, `Float`,
+`Bool`, or `Text`
 exported functions, deny-by-default plugin effects, `.wit` emission, component
 lifting through `wasm-tools`, host loading through `core.plugin`, version
 compatibility checks, and Jet-owned diagnostics E1257-E1260. This is the
@@ -2955,8 +2956,11 @@ STABILITY test** (idempotence alone misses dropped tokens).
 ### FFI & external dependencies
 
 **S50 — Rust FFI**: `extern rust "crate@version" { fn name(args) T =
-"rust::path" }`. Version pins required; by-value boundary only — no borrows,
-callbacks, or trait objects across the edge.
+"rust::path" }`. Version pins required; the by-value boundary is the default
+floor. D-FFI-CAP1 additionally permits checked `&T` exclusive call lends and
+`^T` ownership transfers, with raw capability calls gated by **E0702** and
+returned handles attachable to `#Close(fn)`; callbacks and trait objects remain
+outside this tier.
 
 **S59 — C FFI** *(D-CFFI2, D-CFFI-CANON1, D-CBIND2/3/5/6)*: auto-generated
 bindings + optional user overlay; by-value first, pointers only inside S58.
@@ -3169,7 +3173,8 @@ jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
 **D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
-is the top-level `pub fn` items of its entry file, all-`Int` or all-`Float`
+is the top-level `pub fn` items of its entry file, each with one homogeneous
+`Int`, `Float`, `Bool`, or `Text`
 (E1260) in v1, named by the manifest `export:` field (defaults to the package
 name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
 (re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2

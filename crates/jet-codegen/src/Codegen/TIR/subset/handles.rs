@@ -491,6 +491,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
         ("Plugin", "call", 2) => THandleOp::PluginCall,
         ("Plugin", "call_int", 2) => THandleOp::PluginCallInt,
+        ("Plugin", "call_bool", 2) => THandleOp::PluginCallBool,
+        ("Plugin", "call_text", 2) => THandleOp::PluginCallText,
         // D-LIB-CALLGRANT1=A: the first pinned-library call is a checked
         // homogeneous Int entry point.
         ("Mod", "on_tick", 1) => THandleOp::ModOnTick,

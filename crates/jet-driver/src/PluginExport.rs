@@ -1,6 +1,7 @@
 //! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
 //! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
-//! `export:` name, validating the exported `pub fn` surface (v1: `Int`/`Float`
+//! `export:` name, validating the exported `pub fn` surface (v1: homogeneous
+//! `Int`/`Float`/`Bool`/`Text`
 //! scalars only), and the ApiFreeze-based version handshake.
 //!
 //! Re-grounding note (this card): D-PLUGIN-EXPORT1/D-PLUGIN-VERSION1's ratified
@@ -53,15 +54,14 @@ fn resolve_version(bundle: &ProgramBundle) -> String {
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 
-/// E1260: a sandbox's exported `pub fn` isn't Int/Float-only (v1 scope; see
-/// `Codegen::Plugin` module doc for why — Bool needs no new work, Text needs
-/// the Component Model's memory-based string ABI, a real follow-on).
+/// E1260: a sandbox's exported `pub fn` isn't one homogeneous Component Model
+/// scalar shape (v1 scope; see `Codegen::Plugin` module doc).
 fn e1260(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1260",
         "a sandbox's exported function has an unsupported signature".to_string(),
         detail.to_string(),
-        "every parameter and the return type must be all `Int` or all `Float` (v1 sandbox scope) — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
+        "every parameter and the return type must use the same scalar type: `Int`, `Float`, `Bool`, or `Text` — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
         None,
     )
 }
@@ -79,7 +79,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
         }
         if crate::Codegen::plugin_export_shape(f).is_none() {
             diags.push(e1260(&format!(
-                "`pub fn {}` isn't all-`Int` or all-`Float` across its parameters and return type",
+                "`pub fn {}` isn't one homogeneous `Int`, `Float`, `Bool`, or `Text` shape across its parameters and return type",
                 f.name
             )));
         }

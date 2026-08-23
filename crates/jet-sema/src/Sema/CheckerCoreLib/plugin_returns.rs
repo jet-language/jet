@@ -8,6 +8,8 @@ pub fn plugin_method_return_ty(method: &str) -> Option<Type> {
     match method {
         "call" => Some(result_ty(Type::Float, Type::String)),
         "call_int" => Some(result_ty(Type::Int, Type::String)),
+        "call_bool" => Some(result_ty(Type::Bool, Type::String)),
+        "call_text" => Some(result_ty(Type::String, Type::String)),
         _ => None,
     }
 }

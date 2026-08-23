@@ -1039,7 +1039,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("Tensor".to_string()))],
             Some(Type::String),
         )),
-        ("core.compute", "device_cpu" | "device_auto" | "device_metal") => Some((
+        ("core.compute", "device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan" | "device_webgpu") => Some((
             vec![],
             Some(Type::Named("ComputeDevice".to_string())),
         )),
@@ -3014,7 +3014,7 @@ fn core_fixed_sig_impl(
         // Component Model plugin loader (wasmtime, runtime-side only, I6).
         // `load` is the only module-level entry point; it PRODUCES a `Plugin`
         // handle (mirrors `core.db`'s `open` producing a `DBConnection`). The
-        // actual calls (`.call`/`.call_int`) are instance methods dispatched by
+        // actual typed calls (`.call*`) are instance methods dispatched by
         // the receiver's `Plugin` type (see `check_plugin_method` below).
         ("core.plugin", "load") => Some((
             vec![(read, Type::String)],

@@ -1,0 +1,19 @@
+// #1146: explicit portable accelerator seams never fall back to CPU.
+use core.compute as compute
+
+fn run() {
+    seed :: compute.full([1, 1], 2.0) ?? panic("seed")
+    f32_value :: compute.matmul_f32_tile(seed, seed) ?? panic("f32")
+
+    vulkan :: compute.on_device(f32_value, compute.device_vulkan())
+    if vulkan == {
+        .Ok(_) -> { print("vulkan:accepted") }
+        .Err(_) -> { print("vulkan:rejected") }
+    }
+
+    webgpu :: compute.on_device(f32_value, compute.device_webgpu())
+    if webgpu == {
+        .Ok(_) -> { print("webgpu:accepted") }
+        .Err(_) -> { print("webgpu:rejected") }
+    }
+}

@@ -144,6 +144,7 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     let mut artifact = jet::JetLibArtifact::decode(&original).unwrap();
     artifact.stamp.compiler_version = "0.0.1-foreign".to_string();
     artifact.stamp.declared_effects.insert("Net".to_string());
+    artifact.payload = b"not a shared object".to_vec();
     fs::write(&jetlib, artifact.encode()).unwrap();
     let mismatched = run_jet(&scratch.path, &["run", "host.jet"]);
     assert!(!mismatched.status.success(), "mismatched .jetlib unexpectedly loaded");

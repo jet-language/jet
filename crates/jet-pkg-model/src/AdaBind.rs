@@ -62,7 +62,7 @@ fn parse(source:&str)->Result<Vec<Routine>,BindError>{
         let header=&statement[function_at+9..];let open=header.find('(').ok_or_else(||BindError::Source("malformed exported Ada function".into()))?;let name=header[..open].trim().to_ascii_lowercase();if !ident(&name){return Err(BindError::Source(format!("`{name}` is not a bindable Ada function name")))}let close=matching_close(header,open).ok_or_else(||BindError::Source(format!("function `{name}` has no closed parameter list")))?;
         let after=&header[close+1..];let after_lower=after.to_ascii_lowercase();let return_at=after_lower.find("return ").ok_or_else(||BindError::Source(format!("function `{name}` has no return type")))?;let result_name=after[return_at+7..].split_whitespace().next().unwrap_or("").trim_matches(',');let (result,_)=resolve_type(result_name,&constraints).ok_or_else(||BindError::Source(format!("function `{name}` has unsupported return type `{result_name}`")))?;
         let symbol=quoted_after(after,"external_name =>").ok_or_else(||BindError::Source(format!("function `{name}` must declare `External_Name => \"...\"`")))?;if !ident(&symbol){return Err(BindError::Source(format!("`{symbol}` is not a bindable C symbol")))}
-        let mut params=Vec::new();for group in header[open+1..close].split(';'){let Some((names,kind))=group.split_once(':') else {return Err(BindError::Source(format!("function `{name}` has a malformed parameter")))};let kind=kind.trim();if kind.to_ascii_lowercase().starts_with("out ")||kind.to_ascii_lowercase().starts_with("in out "){return Err(BindError::Source(format!("function `{name}` uses unsupported output parameters")))}let kind=kind.strip_prefix("in ").unwrap_or(kind);let (value,constraint)=resolve_type(kind,&constraints).ok_or_else(||BindError::Source(format!("function `{name}` has unsupported parameter type `{kind}`")))?;for param in names.split(','){let param=param.trim().to_ascii_lowercase();if !ident(&param){return Err(BindError::Source(format!("function `{name}` has invalid parameter `{param}`")))}params.push(Param{name:param,scalar:value,constraint:constraint.clone()})}}
+        let mut params=Vec::new();for group in header[open+1..close].split(';'){let Some((names,kind))=group.split_once(':') else {return Err(BindError::Source(format!("function `{name}` has a malformed parameter")))};let kind=kind.trim();let lower_kind=kind.to_ascii_lowercase();if lower_kind.starts_with("out ")||lower_kind.starts_with("in out "){return Err(BindError::Source(format!("function `{name}` uses unsupported output parameters")))}let kind=if lower_kind.starts_with("in "){&kind[3..]}else{kind};let (value,constraint)=resolve_type(kind,&constraints).ok_or_else(||BindError::Source(format!("function `{name}` has unsupported parameter type `{kind}`")))?;for param in names.split(','){let param=param.trim().to_ascii_lowercase();if !ident(&param){return Err(BindError::Source(format!("function `{name}` has invalid parameter `{param}`")))}params.push(Param{name:param,scalar:value,constraint:constraint.clone()})}}
         if let Some(previous)=names.insert(name.clone(),symbol.clone()){
             return Err(BindError::Source(format!("Ada overload `{name}` is ambiguous for Jet; exported name already maps to `{previous}`")))
         }
@@ -167,5 +167,13 @@ mod tests{
     fn unsupported_exported_procedure_is_rejected_instead_of_skipped(){
         let error=parse("package P is procedure P with Export, Convention => C; end P;").unwrap_err();
         assert!(error.to_string().contains("procedures are unsupported"));
+    }
+
+    #[test]
+    fn parser_preserves_case_insensitive_in_parameter_mode(){
+        let routines=parse("package P is function Value (Input : IN Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"value\"; end P;").unwrap();
+        assert_eq!(routines.len(),1);
+        assert_eq!(routines[0].params.len(),1);
+        assert_eq!(routines[0].params[0].name,"input");
     }
 }

@@ -1,0 +1,11 @@
+// #1144: CUDA is explicit and never widens an F64 Tensor or falls back.
+use core.compute as compute
+
+fn run() {
+    value :: compute.full([1, 1], 2.0) ?? panic("value")
+    request :: compute.on_device(value, compute.device_cuda())
+    if request == {
+        .Ok(_) -> { print("cuda:f64:accepted") }
+        .Err(_) -> { print("cuda:f64:rejected") }
+    }
+}

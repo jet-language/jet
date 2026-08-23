@@ -385,76 +385,13 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             }
         }
 
-        if lib.starts_with("jet_go_") {
+        if let Some(descriptor) = crate::AST::FOREIGN_BINDERS.iter().find(|descriptor| {
+            let prefix = descriptor.language.bridge_prefix();
+            !prefix.is_empty() && lib.starts_with(prefix)
+        }) {
             for function in &mut merged {
-                function.effect_root = Some("FFI.Go".to_string());
+                function.effect_root = Some(descriptor.effect_root.to_string());
             }
-        }
-        if lib.starts_with("jet_py_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI.Py".to_string());
-            }
-        }
-        if lib.starts_with("jet_js_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI".to_string());
-            }
-        }
-        if lib.starts_with("jet_java_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI.Java".to_string());
-            }
-        }
-        if lib.starts_with("jet_cpp_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI.Cpp".to_string());
-            }
-        }
-        if lib.starts_with("jet_lua_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI.Lua".to_string());
-            }
-        }
-        if lib.starts_with("jet_cobol_") {
-            for function in &mut merged {
-                function.effect_root = Some("FFI.Cobol".to_string());
-            }
-        }
-        if lib.starts_with("jet_cs_") {
-            for function in &mut merged { function.effect_root=Some("FFI.DotNet".to_string()); }
-        }
-        if lib.starts_with("jet_tcl_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Tcl".to_string()); }
-        }
-        if lib.starts_with("jet_ada_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Ada".to_string()); }
-        }
-        if lib.starts_with("jet_pascal_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Pascal".to_string()); }
-        }
-        if lib.starts_with("jet_dart_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Dart".to_string()); }
-        }
-        if lib.starts_with("jet_pwsh_") {
-            for function in &mut merged { function.effect_root=Some("FFI.PowerShell".to_string()); }
-        }
-        if lib.starts_with("jet_perl_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Perl".to_string()); }
-        }
-        if lib.starts_with("jet_ruby_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Ruby".to_string()); }
-        }
-        if lib.starts_with("jet_php_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Php".to_string()); }
-        }
-        if lib.starts_with("jet_r_") {
-            for function in &mut merged { function.effect_root=Some("FFI.R".to_string()); }
-        }
-        if lib.starts_with("jet_octave_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Octave".to_string()); }
-        }
-        if lib.starts_with("jet_com_") {
-            for function in &mut merged { function.effect_root=Some("FFI.Com".to_string()); }
         }
         if let Some(descriptor) = crate::AST::binder_descriptor(ForeignLanguage::C) {
             for function in &mut merged {

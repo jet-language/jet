@@ -1106,7 +1106,7 @@
     }
 
     // ── D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin wire helpers ────────────
-    // `Plugin.call`/`.call_int` cross the sandboxed Component Model boundary as
+    // `Plugin.call*` cross the sandboxed Component Model boundary as
     // plain wire text — the always-compiled prelude here and the hidden FFI
     // bridge crate (`Prelude/Plugin.rs`, `jet_plugin_call`) are built
     // independently and share no Rust types, only this tagged-length text
@@ -1157,10 +1157,32 @@
         out
     }
 
+    /// Encode a Bool argument list for plugin.call_bool(name, args).
+    pub fn jet_plugin_encode_args_bool(args: &Vec<bool>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('B', if *a { "true" } else { "false" }));
+        }
+        out
+    }
+
+    /// Encode a Text argument list for plugin.call_text(name, args).
+    pub fn jet_plugin_encode_args_text(args: &Vec<String>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('T', a));
+        }
+        out
+    }
+
     /// Decode the `"O:<handle>"`/`"E:<message>"` wire produced by
     /// `jet_plugin_load`. Returns the handle, or `0` (the invalid-handle
     /// sentinel, mirroring `jet_db_open`'s style) when the load failed — every
-    /// later `.call`/`.call_int` on handle `0` reports "no plugin loaded for
+    /// later typed calls on handle `0` report "no plugin loaded for
     /// this handle" rather than ever panicking (I2).
     pub fn jet_plugin_load_handle(wire: &str) -> u64 {
         wire.strip_prefix("O:")
@@ -1196,6 +1218,38 @@
             Some((_, payload)) => payload
                 .parse::<i64>()
                 .map_err(|_| "plugin returned a malformed Int result".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
+    /// Decode a Bool result wire from jet_plugin_call.
+    pub fn jet_plugin_decode_result_bool(wire: &str) -> Result<bool, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some(('B', payload)) => match payload.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err("plugin returned a malformed Bool result".to_string()),
+            },
+            Some(_) => Err("plugin returned a result with the wrong type".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
+    /// Decode a Text result wire from jet_plugin_call.
+    pub fn jet_plugin_decode_result_text(wire: &str) -> Result<String, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some(('T', payload)) => Ok(payload),
+            Some(_) => Err("plugin returned a result with the wrong type".to_string()),
             None => Err("plugin returned a malformed result".to_string()),
         }
     }

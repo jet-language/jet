@@ -18,8 +18,9 @@
 // 0 is the error sentinel (never a live plugin instance).
 //
 // Wire protocol (mirrors `DB.rs`'s tagged-length encoding — byte-exact,
-// nothing to escape): a scalar value is `I<len>:<int>` (Jet `Int`) or
-// `F<len>:<float>` (Jet `Float`) — v1's supported plugin-call scalar types. A
+// nothing to escape): a scalar value is `I<len>:<int>` (Jet `Int`),
+// `F<len>:<float>` (Jet `Float`), `B<len>:<true|false>` (Jet `Bool`), or
+// `T<len>:<utf8>` (Jet `Text`). A
 // call result or error is `O:<value>` / `E:<message>`. Helper names are
 // prefixed `plugin_` so they never collide with `DB.rs`'s identically-shaped
 // `encode_tagged`/`read_tagged` helpers when both runtimes are concatenated
@@ -147,17 +148,14 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
     })
 }
 
-/// v1 (c81) supports Int/Float scalar plugin calls only — a plugin export
-/// must be all-`Int` or all-`Float` in its params and return (checked at the
-/// plugin's own build time; see `ApiFreeze`-based export validation in the
-/// driver). Bool/Text aren't wired yet: Bool is a trivial scalar to add later,
-/// but Text needs the Component Model's memory-based string ABI (a
-/// `cabi_realloc` export this hand-rolled scalar guest ABI doesn't have yet) —
-/// a real follow-on increment, not a stub inside this one.
+/// Component Model scalar types accepted by the plugin export validator and
+/// checked again at the dynamic host boundary.
 fn plugin_type_name(ty: &Type) -> &'static str {
     match ty {
         Type::S64 => "Int",
         Type::Float64 => "Float",
+        Type::Bool => "Bool",
+        Type::String => "Text",
         _ => "unsupported",
     }
 }
@@ -167,6 +165,12 @@ fn plugin_to_val(tagged: &(char, String), ty: &Type) -> Option<Val> {
     match (tag, ty) {
         ('I', Type::S64) => payload.parse::<i64>().ok().map(Val::S64),
         ('F', Type::Float64) => payload.parse::<f64>().ok().map(Val::Float64),
+        ('B', Type::Bool) => match payload.as_str() {
+            "true" => Some(Val::Bool(true)),
+            "false" => Some(Val::Bool(false)),
+            _ => None,
+        },
+        ('T', Type::String) => Some(Val::String(payload.clone())),
         _ => None,
     }
 }
@@ -175,6 +179,8 @@ fn plugin_zero_val(ty: &Type) -> Val {
     match ty {
         Type::S64 => Val::S64(0),
         Type::Float64 => Val::Float64(0.0),
+        Type::Bool => Val::Bool(false),
+        Type::String => Val::String(String::new()),
         _ => Val::S64(0),
     }
 }
@@ -183,6 +189,8 @@ fn plugin_from_val(v: &Val) -> Option<String> {
     match v {
         Val::S64(n) => Some(plugin_encode_tagged('I', &n.to_string())),
         Val::Float64(f) => Some(plugin_encode_tagged('F', &f.to_string())),
+        Val::Bool(value) => Some(plugin_encode_tagged('B', if *value { "true" } else { "false" })),
+        Val::String(value) => Some(plugin_encode_tagged('T', value)),
         _ => None,
     }
 }

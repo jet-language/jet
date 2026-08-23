@@ -50,6 +50,8 @@ pub fn bind(
         )));
     }
     let functions = parse(source)?;
+    let descriptor = *binder_descriptor(ForeignLanguage::Py)
+        .ok_or_else(|| BindError::Source("Python binder descriptor is not registered".into()))?;
     let source_path = source_path
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve Python source: {error}")))?;
@@ -64,32 +66,43 @@ pub fn bind(
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve Python worker: {error}")))?;
     let abi = format!("jet_py_{lib}");
-    let archive = ForeignBridge::compile_scalar_sidecar(
+    let identity = ForeignBridge::scalar_bridge_identity(
+        descriptor,
+        lib,
+        &abi,
+        "python3",
+        &source_path,
+        &worker,
+        &functions,
+    )
+    .map_err(BindError::Source)?;
+    let archive = ForeignBridge::compile_scalar_sidecar_with_identity(
         cache,
+        &identity,
         &abi,
         "python3",
         &worker,
         &source_path,
+        descriptor,
         &functions,
     )
     .map_err(BindError::Source)?;
-    let provenance_path = ForeignBridge::write_scalar_provenance(
+    let provenance_path = ForeignBridge::write_scalar_provenance_with_functions(
         cache,
         lib,
-        ForeignLanguage::Py,
+        descriptor,
         "python3",
         &source_path,
         &worker,
         &archive,
+        &functions,
     )
     .map_err(BindError::Source)?;
     let provenance = std::fs::read_to_string(provenance_path)
         .map_err(|error| BindError::Io(format!("could not read binding provenance: {error}")))?;
-    let stamp = binder_descriptor(ForeignLanguage::Py)
-        .ok_or_else(|| BindError::Source("Python binder descriptor is not registered".into()))?
-        .stamp();
     Ok(BindResult {
-        source: ForeignBridge::render_scalar_jet(&abi, "FFI.Py", &stamp, &functions),
+        source: ForeignBridge::render_scalar_jet(&abi, descriptor, &functions)
+            .map_err(BindError::Source)?,
         bound: functions
             .into_iter()
             .map(|function| function.name)
@@ -345,8 +358,9 @@ mod tests {
     fn renderer_uses_current_effect_arrow() {
         let functions =
             parse("def add(left: int, right: int) -> int:\n    return left + right\n").unwrap();
-        let stamp = binder_descriptor(ForeignLanguage::Py).unwrap().stamp();
-        let source = ForeignBridge::render_scalar_jet("jet_py_math", "FFI.Py", &stamp, &functions);
+        let descriptor = *binder_descriptor(ForeignLanguage::Py).unwrap();
+        let source =
+            ForeignBridge::render_scalar_jet("jet_py_math", descriptor, &functions).unwrap();
         assert!(source.contains("Int String! -[FFI.Py]>"));
         assert!(!source.contains("=>"));
     }

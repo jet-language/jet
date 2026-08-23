@@ -113,7 +113,7 @@ fn resident_safe_compute_call(
         {
             args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        ("device_cpu" | "device_auto" | "device_metal", []) => true,
+        ("device_cpu" | "device_auto" | "device_metal" | "device_vulkan" | "device_webgpu", []) => true,
         ("on_device", [tensor, device])
             if tensor.ty.is_compute_tensor_family() && jit_value_type(&device.ty) =>
         {

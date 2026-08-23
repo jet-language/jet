@@ -6,6 +6,7 @@ use crate::AST::{
     VariantPayload,
 };
 use crate::Sema::Bundle::fn_types_compatible;
+use crate::Traits::TraitRegistry;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 
@@ -80,8 +81,8 @@ pub(crate) fn check_extern_fn(
         if !is_ffi_type(&p.ty, registry) {
             diags.push(ffi_type_error(
                 &format!("`{}` has type `{}`, which can't cross into Rust", p.name, p.ty.name()),
-                "only plain value types can cross the `extern rust` boundary — no references, callbacks, or trait objects",
-                "use `Int`, `Float`, `Bool`, `String`, `Char`, collections of those, or a struct whose fields are allowed",
+                "the by-value floor admits checked Jet values; `&` is exclusive access for this call and `^` transfers ownership, but the underlying type must still be supported",
+                "use a checked value type, `&T` for one-call exclusive access, or `^T` to give ownership; keep the underlying type in the allowed set",
                 p.ty_span,
             ));
             ok = false;
@@ -99,6 +100,33 @@ pub(crate) fn check_extern_fn(
         }
     }
     ok
+}
+
+/// D-FFI-CAP1: make a validated foreign returned handle satisfy the same
+/// nominal `Close` protocol as every other resource. The call checker sees
+/// this registry fact before it checks the function body; codegen emits the
+/// matching bridge-backed implementation.
+pub(crate) fn register_foreign_close_impls(
+    functions: &[ExternFn],
+    traits: &mut TraitRegistry,
+) {
+    for function in functions {
+        let Some(return_type) = function.return_type.as_ref() else {
+            continue;
+        };
+        if function.close.is_none() {
+            continue;
+        }
+        let Some(type_name) = (match return_type {
+            Type::Named(name) | Type::Apply { name, .. } => Some(name),
+            _ => None,
+        }) else {
+            continue;
+        };
+        traits
+            .trait_impls
+            .insert((type_name.clone(), Syntax::TRAIT_CLOSE.to_string()));
+    }
 }
 
 /// D-FFI-CAP1: a foreign close is a normal consuming close protocol, not an

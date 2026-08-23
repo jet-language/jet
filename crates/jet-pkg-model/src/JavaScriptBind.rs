@@ -4,8 +4,8 @@
 //! scalar TypeScript declarations and executes the matching module through a
 //! supervised Node worker. Dynamic or callback-shaped declarations fail closed.
 
-use crate::AST::{binder_descriptor, ForeignLanguage, ForeignScalar};
 use crate::ForeignBridge::{self, ScalarBridgeFunction};
+use crate::AST::{binder_descriptor, ForeignLanguage, ForeignScalar};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -31,7 +31,9 @@ impl std::fmt::Display for BindError {
         match self {
             Self::Source(value) | Self::Io(value) => f.write_str(value),
             Self::ToolMissing(tool) => write!(f, "the provisioned {tool} tool was not found"),
-            Self::ToolFailed(tool, detail) => write!(f, "{tool} rejected the JavaScript binding: {detail}"),
+            Self::ToolFailed(tool, detail) => {
+                write!(f, "{tool} rejected the JavaScript binding: {detail}")
+            }
         }
     }
 }
@@ -44,52 +46,80 @@ pub fn bind(
     cache: &Path,
 ) -> Result<BindResult, BindError> {
     if !is_ident(lib) {
-        return Err(BindError::Source(format!("{lib} is not a valid Jet library name")));
+        return Err(BindError::Source(format!(
+            "{lib} is not a valid Jet library name"
+        )));
     }
     let functions = parse(declarations)?;
-    let _declaration_path = declaration_path
-        .canonicalize()
-        .map_err(|error| BindError::Io(format!("could not resolve TypeScript declarations: {error}")))?;
+    let descriptor = *binder_descriptor(ForeignLanguage::JS)
+        .ok_or_else(|| BindError::Source("JS binder descriptor is not registered".into()))?;
+    let _declaration_path = declaration_path.canonicalize().map_err(|error| {
+        BindError::Io(format!(
+            "could not resolve TypeScript declarations: {error}"
+        ))
+    })?;
     let runtime_path = runtime_path
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve JavaScript runtime: {error}")))?;
     check_node(&runtime_path)?;
-    std::fs::create_dir_all(cache)
-        .map_err(|error| BindError::Io(format!("could not create JavaScript binding cache: {error}")))?;
+    std::fs::create_dir_all(cache).map_err(|error| {
+        BindError::Io(format!(
+            "could not create JavaScript binding cache: {error}"
+        ))
+    })?;
     let worker = cache.join(format!("{lib}_worker.mjs"));
-    std::fs::write(&worker, render_worker(&functions))
+    let declaration_digest = crate::SHA256::sha256_hex(declarations.as_bytes());
+    let worker_source = format!(
+        "// jet-ffi-declaration-sha256={declaration_digest}\n{}",
+        render_worker(&functions)
+    );
+    std::fs::write(&worker, worker_source)
         .map_err(|error| BindError::Io(format!("could not write JavaScript worker: {error}")))?;
     let worker = worker
         .canonicalize()
         .map_err(|error| BindError::Io(format!("could not resolve JavaScript worker: {error}")))?;
     let abi = format!("jet_js_{lib}");
-    let archive = ForeignBridge::compile_scalar_sidecar(
+    let identity = ForeignBridge::scalar_bridge_identity(
+        descriptor,
+        lib,
+        &abi,
+        "node",
+        &runtime_path,
+        &worker,
+        &functions,
+    )
+    .map_err(BindError::Source)?;
+    let archive = ForeignBridge::compile_scalar_sidecar_with_identity(
         cache,
+        &identity,
         &abi,
         "node",
         &worker,
         &runtime_path,
+        descriptor,
         &functions,
     )
     .map_err(BindError::Source)?;
-    let provenance_path = ForeignBridge::write_scalar_provenance(
+    let provenance_path = ForeignBridge::write_scalar_provenance_with_functions(
         cache,
         lib,
-        ForeignLanguage::JS,
+        descriptor,
         "node",
         &runtime_path,
         &worker,
         &archive,
+        &functions,
     )
     .map_err(BindError::Source)?;
     let provenance = std::fs::read_to_string(provenance_path)
         .map_err(|error| BindError::Io(format!("could not read binding provenance: {error}")))?;
-    let stamp = binder_descriptor(ForeignLanguage::JS)
-        .ok_or_else(|| BindError::Source("JS binder descriptor is not registered".into()))?
-        .stamp();
     Ok(BindResult {
-        source: ForeignBridge::render_scalar_jet(&abi, "FFI", &stamp, &functions),
-        bound: functions.into_iter().map(|function| function.name).collect(),
+        source: ForeignBridge::render_scalar_jet(&abi, descriptor, &functions)
+            .map_err(BindError::Source)?,
+        bound: functions
+            .into_iter()
+            .map(|function| function.name)
+            .collect(),
         archive,
         worker,
         provenance,
@@ -130,7 +160,10 @@ fn parse(source: &str) -> Result<Vec<ScalarBridgeFunction>, BindError> {
             continue;
         };
         let open = signature.find('(').ok_or_else(|| {
-            BindError::Source(format!("line {}: declaration has no parameter list", line_number + 1))
+            BindError::Source(format!(
+                "line {}: declaration has no parameter list",
+                line_number + 1
+            ))
         })?;
         let name = signature[..open].trim();
         if !is_ident(name) || name == "take_error" {
@@ -166,7 +199,10 @@ fn parse(source: &str) -> Result<Vec<ScalarBridgeFunction>, BindError> {
                 line_number + 1
             ))
         })?;
-        if functions.iter().any(|function: &ScalarBridgeFunction| function.name == name) {
+        if functions
+            .iter()
+            .any(|function: &ScalarBridgeFunction| function.name == name)
+        {
             return Err(BindError::Source(format!(
                 "line {}: declaration {name} is repeated",
                 line_number + 1
@@ -230,9 +266,7 @@ fn scalar(name: &str) -> Option<ForeignScalar> {
 }
 
 fn render_worker(functions: &[ScalarBridgeFunction]) -> String {
-    let mut out = String::from(
-        "import { pathToFileURL } from \"node:url\";\n\nconst KINDS = {\n",
-    );
+    let mut out = String::from("import { pathToFileURL } from \"node:url\";\n\nconst KINDS = {\n");
     for function in functions {
         out.push_str("  ");
         out.push_str(&format!("{:?}: [", function.name));
@@ -329,9 +363,11 @@ mod tests {
 
     #[test]
     fn renderer_uses_one_effect_row_shape() {
-        let functions = parse("export function add(left: bigint, right: bigint): bigint;\n").unwrap();
-        let stamp = binder_descriptor(ForeignLanguage::JS).unwrap().stamp();
-        let source = ForeignBridge::render_scalar_jet("jet_js_math", "FFI", &stamp, &functions);
+        let functions =
+            parse("export function add(left: bigint, right: bigint): bigint;\n").unwrap();
+        let descriptor = *binder_descriptor(ForeignLanguage::JS).unwrap();
+        let source =
+            ForeignBridge::render_scalar_jet("jet_js_math", descriptor, &functions).unwrap();
         assert!(source.contains("Int String! -[FFI]>"));
         assert!(!source.contains("=>"));
     }

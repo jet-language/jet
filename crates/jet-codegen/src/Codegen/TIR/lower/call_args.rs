@@ -473,8 +473,10 @@ pub(crate) fn lower_extern_call_arg(
     // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or the
     // non-scalar-param clone (when implicit_clone is false). The two never stack — the
     // AST applies the param clone only `&& !a.flags.implicit_clone`.
-    let clone = !mut_borrow
-        && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone));
+    let clone = conv.as_ref().is_none_or(|(convention, _)| {
+        *convention == AccessConvention::Read
+            && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone))
+    });
     TExternArg {
         value,
         clone,

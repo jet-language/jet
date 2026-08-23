@@ -402,6 +402,60 @@ pub(crate) fn call_ctvalue(
                 .map(CtValue::Str)
                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
         }
+        ([ParamAbi::Int, ParamAbi::String], RetAbi::Int) => {
+            type FnIntStrInt = unsafe extern "C" fn(i64, *const u8, usize) -> i64;
+            let f: FnIntStrInt = unsafe { std::mem::transmute(entry.ptr) };
+            let code = strings[1].as_deref().expect("String ABI argument");
+            Ok(CtValue::Int(unsafe {
+                f(int_arg(0)?, code.as_ptr(), code.len())
+            }))
+        }
+        ([ParamAbi::Int, ParamAbi::String], RetAbi::Float) => {
+            type FnIntStrFloat = unsafe extern "C" fn(i64, *const u8, usize) -> f64;
+            let f: FnIntStrFloat = unsafe { std::mem::transmute(entry.ptr) };
+            let code = strings[1].as_deref().expect("String ABI argument");
+            Ok(float_result(unsafe {
+                f(int_arg(0)?, code.as_ptr(), code.len())
+            }))
+        }
+        ([ParamAbi::Int, ParamAbi::String], RetAbi::String) => {
+            type FnIntStr = unsafe extern "C" fn(
+                i64,
+                *const u8,
+                usize,
+                *mut *mut u8,
+                *mut usize,
+            ) -> i32;
+            let f: FnIntStr = unsafe { std::mem::transmute(entry.ptr) };
+            let code = strings[1].as_deref().expect("String ABI argument");
+            let mut out_ptr = std::ptr::null_mut();
+            let mut out_len = 0;
+            let rc = unsafe {
+                f(
+                    int_arg(0)?,
+                    code.as_ptr(),
+                    code.len(),
+                    &mut out_ptr,
+                    &mut out_len,
+                )
+            };
+            if rc != 0 {
+                return Err(ffi_diag(wrapper, format!("returned {rc}"), span));
+            }
+            let bytes = if out_ptr.is_null() {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(out_ptr, out_len) }.to_vec()
+            };
+            if let Some(free) = state.free_fn {
+                if !out_ptr.is_null() {
+                    unsafe { free(out_ptr, out_len) };
+                }
+            }
+            String::from_utf8(bytes)
+                .map(CtValue::Str)
+                .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
+        }
         ([ParamAbi::Int], RetAbi::Int) => {
             type FnInt = unsafe extern "C" fn(i64) -> i64;
             let f: FnInt = unsafe { std::mem::transmute(entry.ptr) };

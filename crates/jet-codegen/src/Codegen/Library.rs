@@ -70,6 +70,7 @@ pub fn library_export_shape(function: &crate::AST::Func) -> Option<LibraryScalar
     Some(match shape {
         crate::Codegen::PluginScalar::Int => LibraryScalar::Int,
         crate::Codegen::PluginScalar::Float => LibraryScalar::Float,
+        crate::Codegen::PluginScalar::Bool | crate::Codegen::PluginScalar::Text => return None,
     })
 }
 

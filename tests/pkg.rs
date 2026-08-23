@@ -1909,16 +1909,21 @@ fn manifest_parse_foreign_package_dep() {
 fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     let _guard = STORE_LOCK.lock().unwrap();
     let project = Scratch::new("foreign_provider_project");
+    let stale_project = Scratch::new("foreign_provider_stale");
     let failed_project = Scratch::new("foreign_provider_failure");
     let fixtures = Scratch::new("foreign_provider_fixtures");
     let store = Scratch::new("foreign_provider_store");
-    let artifact = fixtures.join(
-        "foreign/npm/plotly-plotly_version_2_35_0_npm/.jet/bindings/js/plotly.jet",
-    );
+    let artifact =
+        fixtures.join("foreign/npm/plotly-plotly_version_2_35_0/.jet/bindings/js/plotly.jet");
     fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+    let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::JS)
+        .unwrap()
+        .stamp();
     fs::write(
         &artifact,
-        "pub fn scatter() Int {\n    return 7\n}\n",
+        format!(
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int {{\n    return 7\n}}\n"
+        ),
     )
     .unwrap();
     let manifest_text = manifest_with_deps(
@@ -1943,6 +1948,34 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     let old_fixtures = std::env::var_os("JETPACK_FIXTURES");
     std::env::set_var("JETPACK_ROOT", &store.path);
     std::env::set_var("JETPACK_FIXTURES", &fixtures.path);
+    fs::write(stale_project.join("package.jet"), &manifest_text).unwrap();
+    fs::write(
+        &artifact,
+        "// jet-ffi-descriptor=stale\npub fn scatter() Int {\n    return 7\n}\n",
+    )
+    .unwrap();
+    let stale_manifest =
+        jet::Manifest::parse(&stale_project.join("package.jet"), &manifest_text).unwrap();
+    let stale = jet::Fetch::fetch(
+        &stale_project.path,
+        &stale_manifest,
+        None,
+        &jet::Fetch::FetchOptions {
+            locked: false,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        },
+    )
+    .expect_err("stale provider binding must fail before ingestion");
+    assert!(stale.iter().any(|diagnostic| diagnostic.code == "E1256"));
+    fs::write(
+        &artifact,
+        format!(
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int {{\n    return 7\n}}\n"
+        ),
+    )
+    .unwrap();
     let fetched = jet::Fetch::fetch(
         &project.path,
         &manifest,
@@ -1975,7 +2008,10 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
             output,
         } if reference == "plotly#version=2.35.0@npm" && !output.is_empty()
     ));
-    assert!(foreign.envelope.as_ref().is_some_and(|envelope| !envelope.output_hash.is_empty()));
+    assert!(foreign
+        .envelope
+        .as_ref()
+        .is_some_and(|envelope| !envelope.output_hash.is_empty()));
     let lock_text = fs::read_to_string(project.join(".jet/lock")).unwrap();
     let round_trip = jet::Lock::parse(&lock_text).expect("foreign lock should parse back");
     assert_eq!(round_trip.packages, lock.packages);

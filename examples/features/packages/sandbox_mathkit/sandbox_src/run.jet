@@ -1,8 +1,8 @@
 // c81 / D-PLUGIN1=B / D-DEP-WASM1=A: the sandbox's own source. Built with
 // `--target=sandbox` (see package.jet) instead of run directly — no `fn run()`,
-// this package is loaded, not executed. v1 sandbox exports are Int/Float-only
-// scalar functions (D-PLUGIN-EXPORT1=A; see `Codegen::Plugin` module doc for
-// why Bool/Text aren't wired yet) and may not use any effect — the wasmtime
+// this package is loaded, not executed. v1 sandbox exports use one homogeneous
+// Component Model scalar shape: Int, Float, Bool, or Text
+// (D-PLUGIN-EXPORT1=A) and may not use any effect — the wasmtime
 // host that loads this registers zero host imports (D-PLUGIN1=B: safe by
 // default, no `#Unsafe` gate anywhere in this story).
 use core.math as math
@@ -21,3 +21,7 @@ pub fn gcd(a: Int, b: Int) Int -> {
     }
     return x
 }
+
+pub fn is_enabled(flag: Bool) Bool -> flag
+
+pub fn greet(name: String) String -> "hello, {name}!"

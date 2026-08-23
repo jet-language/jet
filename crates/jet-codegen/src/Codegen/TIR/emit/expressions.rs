@@ -766,6 +766,10 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             } else {
                 format!("{{ {} }}", lambda.body)
             };
+            // D-FFI-UNIFY1 / card #1121: inline callbacks use the same
+            // fail-closed Prelude rail as named callbacks. No Rust unwind may
+            // cross the foreign callback frame.
+            let body = format!("{{ jet_ffi_callback_boundary(|| {body}) }}");
             format!(
                 "{{ extern \"C\" fn {}({}){} {} {} }}",
                 symbol,
@@ -6164,8 +6168,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::DBValueText => format!("({}).text()", recv),
                 THandleOp::DBValueBool => format!("({}).bool()", recv),
                 THandleOp::DBValueIsNull => format!("({}).is_null()", recv),
-                // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call`/`.call_int` —
-                // a homogeneous scalar call across the sandboxed Component
+                // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call*` — a
+                // homogeneous scalar call across the sandboxed Component
                 // Model boundary, wire-encoded exactly like `DBQuery` above
                 // (args encoded, result decoded; see `Prelude/Plugin.rs` and
                 // `jet_std::jet_plugin_{encode_args_float,decode_result_float}`
@@ -6177,6 +6181,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 THandleOp::PluginCallInt => format!(
                     "{root}jet_std::jet_plugin_decode_result_int(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_int(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::PluginCallBool => format!(
+                    "{root}jet_std::jet_plugin_decode_result_bool(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_bool(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::PluginCallText => format!(
+                    "{root}jet_std::jet_plugin_decode_result_text(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_text(&({}))))",
                     a(0),
                     a(1)
                 ),

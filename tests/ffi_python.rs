@@ -71,6 +71,36 @@ fn python_sidecar_binds_runs_and_launders_failure() {
     assert!(provenance.contains("safety=GeneratedWrapper"));
     assert!(provenance.contains("provider=PyPi"));
     assert!(provenance.contains("artifact.libjet_py_ops.a="));
+    assert!(provenance.contains("runtime-toolchain="));
+    assert!(provenance.contains("source-sha256="));
+    let first_identity = provenance
+        .lines()
+        .find_map(|line| line.strip_prefix("identity="))
+        .unwrap()
+        .to_string();
+    let first_store = root.join(".jet/bindings/py/.bridges").join(&first_identity);
+    assert!(first_store.join("libjet_py_ops.a").is_file());
+    fs::remove_file(root.join(".jet/bindings/py/libjet_py_ops.a")).unwrap();
+    let cached = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "bind", "py", "ops.py", "--pkg", "ops"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        cached.status.success(),
+        "identical Python binding did not reuse its bridge: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    let cached_provenance =
+        fs::read_to_string(root.join(".jet/bindings/py/ops.provenance")).unwrap();
+    assert_eq!(
+        cached_provenance
+            .lines()
+            .find_map(|line| line.strip_prefix("identity=")),
+        Some(first_identity.as_str())
+    );
+    assert!(root.join(".jet/bindings/py/libjet_py_ops.a").is_file());
 
     fs::write(
         root.join("main.jet"),
@@ -89,6 +119,35 @@ fn python_sidecar_binds_runs_and_launders_failure() {
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "5\n99\n");
+
+    fs::write(
+        root.join("ops.py"),
+        "def add(left: int, right: int) -> int:\n    return left + right + 1\n\ndef fail(value: int) -> int:\n    raise RuntimeError('secret foreign detail')\n",
+    )
+    .unwrap();
+    let changed = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "bind", "py", "ops.py", "--pkg", "ops"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        changed.status.success(),
+        "changed Python source did not rebuild its bridge: {}",
+        String::from_utf8_lossy(&changed.stderr)
+    );
+    let changed_provenance =
+        fs::read_to_string(root.join(".jet/bindings/py/ops.provenance")).unwrap();
+    let changed_identity = changed_provenance
+        .lines()
+        .find_map(|line| line.strip_prefix("identity="))
+        .unwrap();
+    assert_ne!(changed_identity, first_identity);
+    assert!(root
+        .join(".jet/bindings/py/.bridges")
+        .join(changed_identity)
+        .join("libjet_py_ops.a")
+        .is_file());
 
     fs::write(root.join("bad.py"), "def bad(value):\n    return value\n").unwrap();
     let bad = Command::new(env!("CARGO_BIN_EXE_jet"))

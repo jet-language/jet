@@ -1724,6 +1724,27 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new(
         "core.compute",
+        "device_cuda",
+        "jet_compute_device_cuda",
+        true,
+        &[],
+    ),
+    CoreCallRecord::new(
+        "core.compute",
+        "device_vulkan",
+        "jet_compute_device_vulkan",
+        true,
+        &[],
+    ),
+    CoreCallRecord::new(
+        "core.compute",
+        "device_webgpu",
+        "jet_compute_device_webgpu",
+        true,
+        &[],
+    ),
+    CoreCallRecord::new(
+        "core.compute",
         "on_device",
         "jet_compute_on_device",
         true,

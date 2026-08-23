@@ -196,7 +196,7 @@ pub fn is_ring_module(name: &str) -> bool {
         name,
         "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db" | "time"
             // D-DEP-WASM1=A (c81): `core.plugin` — the
-            // wasmtime-backed plugin loader (`Plugin.load`/`.call`).
+            // wasmtime-backed plugin loader (`Plugin.load`/`.call*`).
             | "plugin"
     )
 }

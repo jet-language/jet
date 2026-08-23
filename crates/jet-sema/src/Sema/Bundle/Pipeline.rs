@@ -1005,6 +1005,7 @@ fn check_bundle_opts_for_output_inner(
                 }
                 Item::ExternRust(block) => {
                     if check_extern_block(block, &st.registry, &mut diags) {
+                        register_foreign_close_impls(&block.functions, &mut st.trait_reg);
                         for ef in &block.functions {
                             register_extern_fn(
                                 ef,
@@ -1040,6 +1041,7 @@ fn check_bundle_opts_for_output_inner(
                     });
                     let check_registry = merged_registry.as_ref().unwrap_or(&st.registry);
                     if check_c_module(cm, check_registry, &mut diags) {
+                        register_foreign_close_impls(&cm.functions, &mut st.trait_reg);
                         for ef in &cm.functions {
                             register_extern_fn(
                                 ef,

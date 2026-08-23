@@ -1343,6 +1343,12 @@ Python package realization remains the PyPI provider's responsibility; the
 bridge consumes the provisioned `python3` runtime and records its descriptor,
 source, worker, and archive identities in provenance.
 
+The scalar bridge archive lives under
+`.jet/bindings/<lang>/.bridges/<identity>/`. The stable `lib<abi>.a` projection
+links to that archive. The identity includes the descriptor, source and worker
+bytes, runtime and native toolchain identities, and the typed function list.
+Identical inputs reuse one identity. A changed input selects a new identity.
+
 `jet inspect dossier ffi` prints the golden-tested per-language capability
 matrix derived from the same descriptor table that routes imports and resolves
 foreign archives. Planned roots remain visible as planned; no host-tool probe
@@ -1480,8 +1486,11 @@ decimal values as scaled minor-unit `Int` values, initializes `libcob` once,
 and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. The public
 wrapper keeps range and foreign-program failures typed as `CobolError` while
 publishing the `-[FFI.Cobol]>` effect. Generated tools have 60-second deadlines
-and 64 KiB capture ceilings. Unknown layouts and laundered foreign-tool failures
-use **E3208**.
+and 64 KiB capture ceilings. Binding also proves the generated C bridge and
+COBOL object link together with undefined symbols denied, then records the
+descriptor, source/copybook hashes, layout facts, runtime, and archive hash in
+`.provenance`. Unknown layouts, ABI-proof failures, and laundered foreign-tool
+failures use **E3208**.
 
 ## E3 — JVM project binder (D-FFI-JVM1=A, embedded class vertical)
 
@@ -1617,6 +1626,12 @@ schema. The native link records the exact GNAT runtime directory and rejects a
 missing or non-absolute runtime identity.
 
 Example: `examples/features/lowlevel/polyglot_ada/`.
+
+`jet import ada <dir>` preserves each Ada package spec and sibling body as the
+authority, emits an editable `ada.<package>` binder stub, and records JT0101
+for unsupported source semantics. It does not invent translations for ranges,
+exceptions, tasking, representation clauses, or ownership. Run `jet inspect
+bind ada <package.ads> --pkg <package>` for the call-in-place C-ABI surface.
 
 ## E3 — Object Pascal project binder (D-FFI-PASCAL1=A)
 
@@ -4265,11 +4280,12 @@ fn run() {
 ```
 
 `Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) -> Float String!` and
-`.call_int(name, [Int]) -> Int String!` are the only instance methods (v1
-scope — every parameter and the return type must be all-`Int` or all-`Float`,
-E1260; Bool is a trivial follow-on, Text needs the Component Model's
-memory-based string ABI, a real future increment). The wasmtime host embedded
+`open`/`open_memory`); `.call(name, [Float]) -> Float String!`,
+`.call_int(name, [Int]) -> Int String!`, `.call_bool(name, [Bool]) -> Bool
+String!`, and `.call_text(name, [String]) -> String String!` are the typed instance
+methods. Every exported function remains homogeneous: all parameters and the
+return type use the same `Int`, `Float`, `Bool`, or `Text` shape (E1260). The
+wasmtime host embedded
 via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
 runtime-side only, I6) registers **zero host imports** — deny-by-default
 authority: a sandbox that tried to touch the filesystem, network, or clock

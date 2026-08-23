@@ -26966,6 +26966,8 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::PluginCall => Err("jit handle method unsupported".to_string()),
             THandleOp::PluginCallInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::PluginCallBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::PluginCallText => Err("jit handle method unsupported".to_string()),
             THandleOp::ModOnTick => {
                 in_own_frame(|| -> Result<Value, String> {
                     let dt = self.lower_expr(&args[0])?;

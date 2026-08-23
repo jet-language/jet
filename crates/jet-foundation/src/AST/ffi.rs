@@ -1,6 +1,6 @@
 // ── C-FFI data types ──────────────────────────────────────────────────────────
 
-use super::{ExternFn, ForeignLanguage, Type};
+use super::{AccessConvention, ExternFn, ForeignLanguage, Type};
 use std::path::{Path, PathBuf};
 
 /// D-FFI-UNIFY1: one descriptor is the contract between a foreign schema,
@@ -260,13 +260,12 @@ impl ForeignAbiContract {
         let scalar = match normalized {
             "bool" | "_Bool" => ForeignScalar::Bool,
             "float" | "double" | "long double" => ForeignScalar::Float,
-            "char" | "signed char" | "unsigned char" | "short" | "unsigned short"
-            | "short int" | "unsigned short int" | "int" | "unsigned" | "unsigned int"
-            | "signed" | "signed int" | "long" | "unsigned long" | "long int"
-            | "unsigned long int" | "long long" | "unsigned long long" | "long long int"
-            | "size_t" | "ssize_t" | "ptrdiff_t" | "intptr_t" | "uintptr_t" | "int8_t"
-            | "int16_t" | "int32_t" | "int64_t" | "uint8_t" | "uint16_t" | "uint32_t"
-            | "uint64_t" => ForeignScalar::Int,
+            "char" | "signed char" | "unsigned char" | "short" | "unsigned short" | "short int"
+            | "unsigned short int" | "int" | "unsigned" | "unsigned int" | "signed"
+            | "signed int" | "long" | "unsigned long" | "long int" | "unsigned long int"
+            | "long long" | "unsigned long long" | "long long int" | "size_t" | "ssize_t"
+            | "ptrdiff_t" | "intptr_t" | "uintptr_t" | "int8_t" | "int16_t" | "int32_t"
+            | "int64_t" | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t" => ForeignScalar::Int,
             _ => ForeignScalar::Unsupported,
         };
         (scalar != ForeignScalar::Unsupported).then_some(scalar)
@@ -297,6 +296,36 @@ impl ForeignAbiContract {
 }
 
 impl ForeignLanguage {
+    /// Prefix used by generated bridge symbols.  Keep this beside the
+    /// descriptor table so the loader cannot grow a second language map.
+    pub const fn bridge_prefix(self) -> &'static str {
+        match self {
+            Self::C => "",
+            Self::Cpp => "jet_cpp_",
+            Self::Rust => "jet_rust_",
+            Self::Py => "jet_py_",
+            Self::JS => "jet_js_",
+            Self::Swift => "jet_swift_",
+            Self::Go => "jet_go_",
+            Self::Java => "jet_java_",
+            Self::DotNet => "jet_cs_",
+            Self::Tcl => "jet_tcl_",
+            Self::Lua => "jet_lua_",
+            Self::Fortran => "jet_fortran_",
+            Self::Cobol => "jet_cobol_",
+            Self::Ada => "jet_ada_",
+            Self::Pascal => "jet_pascal_",
+            Self::Dart => "jet_dart_",
+            Self::PowerShell => "jet_pwsh_",
+            Self::Perl => "jet_perl_",
+            Self::Ruby => "jet_ruby_",
+            Self::Php => "jet_php_",
+            Self::R => "jet_r_",
+            Self::Octave => "jet_octave_",
+            Self::Com => "jet_com_",
+        }
+    }
+
     pub const fn abi_contract(self) -> ForeignAbiContract {
         match self {
             Self::C
@@ -387,6 +416,7 @@ const TARGET_CAPABILITIES: &[BinderCapability] = &[
     BinderCapability::TypedStub,
     BinderCapability::SafeWrapper,
     BinderCapability::OwnershipConversion,
+    BinderCapability::LayoutValidation,
     BinderCapability::ErrorConversion,
     BinderCapability::CallbackValidation,
     BinderCapability::CacheProvenance,
@@ -398,6 +428,7 @@ const ADAPTER_CAPABILITIES: &[BinderCapability] = &[
     BinderCapability::TypedStub,
     BinderCapability::SafeWrapper,
     BinderCapability::OwnershipConversion,
+    BinderCapability::LayoutValidation,
     BinderCapability::ErrorConversion,
     BinderCapability::CacheProvenance,
     BinderCapability::PackageProvider,
@@ -444,33 +475,265 @@ const fn binder(
 /// Canonical descriptor table. Driver routing and package binders both read
 /// this table; no language adapter owns a parallel ABI contract.
 pub const FOREIGN_BINDERS: &[BinderDescriptor] = &[
-    binder(ForeignLanguage::C, BinderRuntime::DirectCAbi, BindingStubKind::CHeader, BinderStatus::Active, ForeignAbiContract::C, C_CAPABILITIES, "FFI", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Cpp, BinderRuntime::ClangCppShim, BindingStubKind::CppHeader, BinderStatus::Active, ForeignAbiContract::CXX, C_CAPABILITIES, "FFI.Cpp", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Rust, BinderRuntime::LegacyRustExtern, BindingStubKind::RustExternBlock, BinderStatus::Planned, ForeignAbiContract::NATIVE, PLANNED_CAPABILITIES, "FFI", ForeignProvider::Cargo, ForeignStubFile::None),
-    binder(ForeignLanguage::Py, BinderRuntime::SupervisedPythonSidecar, BindingStubKind::PythonIntrospection, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Py", ForeignProvider::PyPi, ForeignStubFile::None),
-    binder(ForeignLanguage::JS, BinderRuntime::TargetDispatchedJs, BindingStubKind::TypeScriptDeclarations, BinderStatus::Active, ForeignAbiContract::MESSAGE, TARGET_CAPABILITIES, "FFI", ForeignProvider::Npm, ForeignStubFile::Suffix("d.ts")),
-    binder(ForeignLanguage::Swift, BinderRuntime::SwiftCAbiBridge, BindingStubKind::SwiftModule, BinderStatus::Planned, ForeignAbiContract::C, PLANNED_CAPABILITIES, "FFI", ForeignProvider::SwiftPm, ForeignStubFile::None),
-    binder(ForeignLanguage::Go, BinderRuntime::GoCArchive, BindingStubKind::GoExports, BinderStatus::Active, ForeignAbiContract::C, ADAPTER_CAPABILITIES, "FFI.Go", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Java, BinderRuntime::EmbeddedJvm, BindingStubKind::JvmClass, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Java", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::DotNet, BinderRuntime::EmbeddedDotNet, BindingStubKind::DotNetAssembly, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.DotNet", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Tcl, BinderRuntime::EmbeddedTcl, BindingStubKind::TclScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Tcl", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Lua, BinderRuntime::EmbeddedLua, BindingStubKind::LuaScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Lua", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Fortran, BinderRuntime::FortranIsoCBinding, BindingStubKind::FortranIsoCBinding, BinderStatus::Active, ForeignAbiContract::C, C_CAPABILITIES, "FFI.Fortran", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Cobol, BinderRuntime::GnuCobolCAbi, BindingStubKind::GnuCobolCopybook, BinderStatus::Active, ForeignAbiContract::C, C_CAPABILITIES, "FFI.Cobol", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Ada, BinderRuntime::AdaGnatCAbi, BindingStubKind::AdaSpec, BinderStatus::Active, ForeignAbiContract::C, C_CAPABILITIES, "FFI.Ada", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Pascal, BinderRuntime::FreePascalCdecl, BindingStubKind::PascalSource, BinderStatus::Active, ForeignAbiContract::C, C_CAPABILITIES, "FFI.Pascal", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Dart, BinderRuntime::DartApiDl, BindingStubKind::DartContract, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Dart", ForeignProvider::System, ForeignStubFile::StemSuffix("_host.dart")),
-    binder(ForeignLanguage::PowerShell, BinderRuntime::SupervisedPowerShell, BindingStubKind::PowerShellScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.PowerShell", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Perl, BinderRuntime::SupervisedPerl, BindingStubKind::PerlScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Perl", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Ruby, BinderRuntime::SupervisedRuby, BindingStubKind::RubyScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Ruby", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Php, BinderRuntime::SupervisedPhpPool, BindingStubKind::PhpScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Php", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::R, BinderRuntime::SupervisedR, BindingStubKind::RScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.R", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Octave, BinderRuntime::SupervisedOctave, BindingStubKind::OctaveScript, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Octave", ForeignProvider::System, ForeignStubFile::None),
-    binder(ForeignLanguage::Com, BinderRuntime::WindowsComAutomation, BindingStubKind::ComTypeLibrary, BinderStatus::Active, ForeignAbiContract::MESSAGE, ADAPTER_CAPABILITIES, "FFI.Com", ForeignProvider::System, ForeignStubFile::None),
+    binder(
+        ForeignLanguage::C,
+        BinderRuntime::DirectCAbi,
+        BindingStubKind::CHeader,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Cpp,
+        BinderRuntime::ClangCppShim,
+        BindingStubKind::CppHeader,
+        BinderStatus::Active,
+        ForeignAbiContract::CXX,
+        C_CAPABILITIES,
+        "FFI.Cpp",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Rust,
+        BinderRuntime::LegacyRustExtern,
+        BindingStubKind::RustExternBlock,
+        BinderStatus::Planned,
+        ForeignAbiContract::NATIVE,
+        PLANNED_CAPABILITIES,
+        "FFI",
+        ForeignProvider::Cargo,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Py,
+        BinderRuntime::SupervisedPythonSidecar,
+        BindingStubKind::PythonIntrospection,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Py",
+        ForeignProvider::PyPi,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::JS,
+        BinderRuntime::TargetDispatchedJs,
+        BindingStubKind::TypeScriptDeclarations,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        TARGET_CAPABILITIES,
+        "FFI",
+        ForeignProvider::Npm,
+        ForeignStubFile::Suffix("d.ts"),
+    ),
+    binder(
+        ForeignLanguage::Swift,
+        BinderRuntime::SwiftCAbiBridge,
+        BindingStubKind::SwiftModule,
+        BinderStatus::Planned,
+        ForeignAbiContract::C,
+        PLANNED_CAPABILITIES,
+        "FFI",
+        ForeignProvider::SwiftPm,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Go,
+        BinderRuntime::GoCArchive,
+        BindingStubKind::GoExports,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI.Go",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Java,
+        BinderRuntime::EmbeddedJvm,
+        BindingStubKind::JvmClass,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Java",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::DotNet,
+        BinderRuntime::EmbeddedDotNet,
+        BindingStubKind::DotNetAssembly,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.DotNet",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Tcl,
+        BinderRuntime::EmbeddedTcl,
+        BindingStubKind::TclScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Tcl",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Lua,
+        BinderRuntime::EmbeddedLua,
+        BindingStubKind::LuaScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Lua",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Fortran,
+        BinderRuntime::FortranIsoCBinding,
+        BindingStubKind::FortranIsoCBinding,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI.Fortran",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Cobol,
+        BinderRuntime::GnuCobolCAbi,
+        BindingStubKind::GnuCobolCopybook,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI.Cobol",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Ada,
+        BinderRuntime::AdaGnatCAbi,
+        BindingStubKind::AdaSpec,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI.Ada",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Pascal,
+        BinderRuntime::FreePascalCdecl,
+        BindingStubKind::PascalSource,
+        BinderStatus::Active,
+        ForeignAbiContract::C,
+        C_CAPABILITIES,
+        "FFI.Pascal",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Dart,
+        BinderRuntime::DartApiDl,
+        BindingStubKind::DartContract,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Dart",
+        ForeignProvider::System,
+        ForeignStubFile::StemSuffix("_host.dart"),
+    ),
+    binder(
+        ForeignLanguage::PowerShell,
+        BinderRuntime::SupervisedPowerShell,
+        BindingStubKind::PowerShellScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.PowerShell",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Perl,
+        BinderRuntime::SupervisedPerl,
+        BindingStubKind::PerlScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Perl",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Ruby,
+        BinderRuntime::SupervisedRuby,
+        BindingStubKind::RubyScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Ruby",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Php,
+        BinderRuntime::SupervisedPhpPool,
+        BindingStubKind::PhpScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Php",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::R,
+        BinderRuntime::SupervisedR,
+        BindingStubKind::RScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.R",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Octave,
+        BinderRuntime::SupervisedOctave,
+        BindingStubKind::OctaveScript,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Octave",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
+    binder(
+        ForeignLanguage::Com,
+        BinderRuntime::WindowsComAutomation,
+        BindingStubKind::ComTypeLibrary,
+        BinderStatus::Active,
+        ForeignAbiContract::MESSAGE,
+        ADAPTER_CAPABILITIES,
+        "FFI.Com",
+        ForeignProvider::System,
+        ForeignStubFile::None,
+    ),
 ];
 
 pub fn binder_descriptor(language: ForeignLanguage) -> Option<&'static BinderDescriptor> {
-    FOREIGN_BINDERS.iter().find(|descriptor| descriptor.language == language)
+    FOREIGN_BINDERS
+        .iter()
+        .find(|descriptor| descriptor.language == language)
 }
 
 pub fn foreign_abi_contract(language: ForeignLanguage) -> ForeignAbiContract {
@@ -497,7 +760,7 @@ impl BinderDescriptor {
 
     pub fn stamp(self) -> String {
         format!(
-            "{FOREIGN_DESCRIPTOR_SCHEMA};language={:?};surface={:?};status={:?};runtime={:?};stub={:?};contract={};effect={};provider={:?};cache={};type-stub={:?}",
+            "{FOREIGN_DESCRIPTOR_SCHEMA};language={:?};surface={:?};status={:?};runtime={:?};stub={:?};contract={};effect={};provider={:?};cache={};type-stub={:?};capabilities={:?};bridge={}",
             self.language,
             self.surface,
             self.status,
@@ -508,6 +771,8 @@ impl BinderDescriptor {
             self.provider,
             self.cache_extension,
             self.type_stub_file,
+            self.capabilities,
+            self.language.bridge_prefix(),
         )
     }
 
@@ -530,6 +795,16 @@ impl ExternFn {
     ///
     /// Every other valid C signature stays on CModule's direct wrapper path.
     pub fn hidden_c_bridge_compatible(&self) -> bool {
+        // D-FFI-CAP1: the resident JIT/interpreter bridge is value-shaped only.
+        // A capability call must report the native boundary; it must never be
+        // re-encoded as a by-value adapter that could copy or retain storage.
+        if self
+            .params
+            .iter()
+            .any(|param| param.convention != AccessConvention::Read)
+        {
+            return false;
+        }
         match self.return_type.as_ref() {
             None => {
                 self.params.is_empty()
@@ -543,14 +818,26 @@ impl ExternFn {
                         self.params.as_slice(),
                         [left, right] if left.ty == Type::Int && right.ty == Type::Int
                     )
+                    || matches!(
+                        self.params.as_slice(),
+                        [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+                    )
             }
             Some(Type::Float) => {
                 matches!(self.params.as_slice(), [param] if param.ty == Type::Float)
                     || (self.params.len() == 6
                         && self.params.iter().all(|param| param.ty == Type::Float))
+                    || matches!(
+                        self.params.as_slice(),
+                        [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+                    )
             }
             Some(Type::String) => {
                 matches!(self.params.as_slice(), [param] if param.ty == Type::String)
+                    || matches!(
+                        self.params.as_slice(),
+                        [handle, code] if handle.ty == Type::Int && code.ty == Type::String
+                    )
             }
             _ => false,
         }

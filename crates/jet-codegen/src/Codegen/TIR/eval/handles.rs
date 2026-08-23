@@ -158,6 +158,13 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::UdpSocketClose => "UdpSocketClose",
         THandleOp::UdpSocketReceiveDeadline => "UdpSocketReceiveDeadline",
         THandleOp::UdpSocketSendToDeadline => "UdpSocketSendToDeadline",
+        // D-LIB-CALLGRANT1=A: route the interpreter through the same ambient
+        // Prelude loader used by the Cranelift host.
+        THandleOp::ModOnTick => "ModOnTick",
+        THandleOp::PluginCall => "PluginCall",
+        THandleOp::PluginCallInt => "PluginCallInt",
+        THandleOp::PluginCallBool => "PluginCallBool",
+        THandleOp::PluginCallText => "PluginCallText",
         _ => "",
     };
     name.to_string()
@@ -1350,6 +1357,8 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::AppMethod { .. } => Err(unsupported("handle `AppMethod`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
+        THandleOp::PluginCallBool => Err(unsupported("handle `PluginCallBool`", span)),
+        THandleOp::PluginCallText => Err(unsupported("handle `PluginCallText`", span)),
         // D-LIB-CALLGRANT1=A: interpreter ambient owns the actual loader and
         // call; this context-free fallback must never invent a second policy.
         THandleOp::ModOnTick => Err(unsupported("handle `ModOnTick`", span)),

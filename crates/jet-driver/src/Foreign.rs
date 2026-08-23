@@ -184,7 +184,7 @@ pub fn capability_report_text() -> String {
             .join(",");
         let _ = writeln!(
             output,
-            "{} {:?} {:?} {:?} {:?} {} {:?} {}",
+            "{} {:?} {:?} {:?} {} {} {:?} {}",
             report.language.root(),
             report.status,
             descriptor.runtime,
@@ -396,6 +396,15 @@ fn materialize_namespace(
             Err(_) => String::new(),
         };
         if !source.is_empty() {
+            if language == ForeignLanguage::Cobol && descriptor_stamp(&source).is_none() {
+                return Err(vec![Diagnostic::error(
+                    "E3208",
+                    "generated `Cobol` binding has no ABI descriptor".to_string(),
+                    "the generated stub must record the checked COBOL C-ABI contract".to_string(),
+                    "regenerate the binding with `jet inspect bind cobol`".to_string(),
+                    None,
+                )]);
+            }
             if let Some(actual) = descriptor_stamp(&source) {
                 if actual != descriptor.stamp() {
                     return Err(vec![Diagnostic::error(
@@ -441,25 +450,17 @@ fn materialize_namespace(
         }
     }
 
-    bundle.modules.push(LoadedModule {
-        path: PathBuf::from(format!("<{}.{}>", language.root(), lib)),
-        display: format!("{}.{}", language.root(), lib),
-        source: String::new(),
-        alias,
-        imports: Vec::new(),
-        items: Vec::new(),
-        script_body: Vec::new(),
-        block_spans: Vec::new(),
-        web_target_ceiling: None,
-        pub_file: false,
-        no_prelude: false,
-        default_target: None,
-        html_path: None,
-        policy_declarations: Vec::new(),
-        user_policy_declarations: Vec::new(),
-        rule_facts: Vec::new(),
-    });
-    Ok(module_idx)
+    Err(vec![Diagnostic::error(
+        "E3208",
+        format!(
+            "foreign binding cache for `{}.{}` is missing or empty",
+            language.root(),
+            lib
+        ),
+        "an active foreign namespace needs a generated typed binding before use".to_string(),
+        "run the language binder or realize the foreign package before importing it".to_string(),
+        None,
+    )])
 }
 
 fn mark_cpp_callback_abi(items: &mut [Item]) {

@@ -3712,13 +3712,26 @@ from the portable `Driver` surface every backend goes through.
 D-COMPUTE1=D / D-COMPUTE-TYPE1=D / D-COMPUTE-PLACE1=D: `core.compute` owns one
 ranked Tensor operation family. Tensor views retain the owner allocation and
 strides; `vec` and `matrix` are rank-1 / rank-2 aliases over that substrate.
-This slice registers the CPU oracle and an explicit Metal backend. Every receipt
+This slice registers the CPU oracle and explicit Metal, CUDA, Vulkan, and WebGPU backends. Every receipt
 records backend, version, profile, cache, closed capabilities, and the policy
 that selected it. `Auto` remains the CPU choice for the default F64 profile.
 `device_metal` is explicit and accepts only `F32Strict+Reproducible`; it never
 silently falls back to CPU. Metal is available on macOS/iOS when the system
 device and runtime shader compiler are available. Other targets return a typed
 unsupported error.
+`device_cuda` is explicit and accepts only `F32Strict+Reproducible`; it never
+silently falls back to CPU. The Linux bridge dynamically loads the CUDA Driver
+API, embeds checked PTX kernels, and reports a typed device error when the
+driver or device is unavailable.
+`device_vulkan` is explicit and accepts only `F32Strict+Reproducible`; it never
+silently falls back to CPU. The Linux bridge dynamically loads the Vulkan loader,
+selects a compute queue, and launches the embedded checked SPIR-V kernel. A
+missing loader, device, queue, memory type, or rejected pipeline is a typed
+device/unsupported error.
+`device_webgpu` is explicit and accepts only `F32Strict+Reproducible`; it never
+silently falls back to CPU. WebGPU is a browser-owned provider. Native hosts
+without a browser provider return a typed device error, so the receipt cannot
+claim work ran on WebGPU.
 
 ```jet
 use core.compute as compute
@@ -3745,11 +3758,11 @@ fn run() {
 | `gradient` / `value_and_gradient` / `jvp` / `vjp` | reverse default + composable JVP/VJP |
 | `mse_loss` / `sgd_step` | scalar Tensor loss and precision-preserving differentiable SGD |
 | `serialize` / `deserialize` | checksummed Tensor model wire with profile receipt |
-| `matmul_f32_tile` / `profile_show` | CPU-SIMD or Metal F32 profile vs oracle |
+| `matmul_f32_tile` / `profile_show` | CPU-SIMD, Metal, CUDA, or Vulkan F32 profile vs oracle |
 | `stream_new` / `stream_new_on` / `transfer` / `kernel_bounds_ok` | stream, transfer, and checked bounds |
 | `get` / `set` | indexed access (`set` takes `&Tensor`) |
 | `shape` / `rank` / `numel` / `to_list` | inspection |
-| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` / `device_metal` | placement receipts |
+| `device` / `placement` / `on_device` / `device_cpu` / `device_auto` / `device_metal` / `device_cuda` / `device_vulkan` / `device_webgpu` | placement receipts |
 
 Semantics live only in `crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs`.
 AOT emit, JIT deopt, and interpreter ambient call those same `jet_compute_*`
@@ -3767,6 +3780,22 @@ Metal operations;
 they return `ComputeError::Unsupported` until a Metal kernel is ratified.
 Transfer receipts report the logical F32 byte count and never label an
 unavailable-device request as a CPU fallback.
+
+The CUDA Driver bridge covers the same F32 transfer, elementwise, unary,
+matmul, ordered-reduction, MSE, JVP/VJP, SGD, and stream operations through
+embedded PTX. Its `cuda` backend, `driver` version identity, runtime cache
+identity, closed ability list, and explicit placement reason appear in every
+CUDA receipt. CUDA det/inv/solve/fft, sparse operations, and serialization
+remain typed unsupported operations; callers must transfer to CPU explicitly.
+
+The Vulkan bridge covers the same F32 transfer, elementwise, unary, matmul,
+ordered-reduction, MSE, JVP/VJP, SGD, and stream operations through one
+embedded SPIR-V kernel family. Its `vulkan` backend, system version identity,
+runtime cache identity, closed ability list, and explicit placement reason
+appear in every Vulkan receipt. Vulkan det/inv/solve/fft, sparse operations,
+and serialization remain typed unsupported operations; callers must transfer
+to CPU explicitly. WebGPU publishes the same Core seam and receipt contract,
+but native hosts fail closed until a browser WebGPU provider is present.
 
 Tensor serialization is the canonical wire
 `shape=axis,...;data=value,...;profile=name;checksum=hex16`.
@@ -3819,13 +3848,14 @@ are checked, broadcast gradients reduce to the input shape, and scalar-loss
 requirements reject non-scalar outputs. Gradient receipts inherit the primal
 placement and profile.
 
-`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle` and explicit `metal`
+`D-COMPUTE-BACKEND1=D`: the registered `cpu-oracle`, explicit `metal`, and
+explicit `cuda`
 backends publish stable backend, version, profile, cache identity, and closed
 feature lists in placement receipts. General operations report their actual
 `F64Strict+Reproducible` profile by default and retain
 `F32Strict+Reproducible` when their inputs carry that explicit profile; the
-tiled path reports real F32 arithmetic and ordered reduction on either the CPU
-or Metal path. Metal capability negotiation and unsupported-operation checks
+tiled path reports real F32 arithmetic and ordered reduction on CPU, Metal, or
+CUDA. Metal and CUDA capability negotiation and unsupported-operation checks
 fail before launch; no host tier inserts a CPU fallback.
 
 `D-COMPUTE-RAWBOUNDARY1=A` (ratified 2026-08-03): raw kernel boundaries use a
@@ -4002,6 +4032,8 @@ share that source-owned TIR path.
 | `examples/features/tooling/compute_ndarray.jet` | broadcast, fused elementwise ufuncs, transpose, and axis reduction |
 | `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
 | `examples/features/tooling/compute_metal.jet` | explicit Metal precision gate and device-scoped streams |
+| `examples/features/tooling/compute_cuda.jet` | explicit CUDA precision gate and no-fallback policy |
+| `examples/features/tooling/compute_vulkan_webgpu.jet` | explicit Vulkan/WebGPU placement and no-fallback policy |
 | `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
 | `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |
 | `examples/features/tooling/compute_ml.jet` | inference, autodiff training, SGD, and checksummed model serialization |

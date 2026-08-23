@@ -583,6 +583,10 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     assert!(bind.status.success(),"Tcl bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     assert!(dir.join(".jet/bindings/tcl/libjet_tcl_eda.a").is_file());
     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
+    let generated=fs::read_to_string(dir.join(".jet/bindings/tcl/eda.jet")).unwrap();
+    assert!(generated.contains("String TclError! -[FFI.Tcl]>"));
+    assert!(generated.contains("pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
+    assert!(!generated.contains("=>"));
     fs::write(dir.join("main.jet"),r#"use tcl.eda as tcl
 
 fn run() -[FFI.Tcl, IO]> {
@@ -595,7 +599,7 @@ fn run() -[FFI.Tcl, IO]> {
     tcl.close(^session)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","--profile=debug","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"embedded Tcl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n43\n42\n2.5\ntcl-error\n");
     assert!(!String::from_utf8_lossy(&run.stderr).contains("foreign stack secret"));
@@ -608,9 +612,9 @@ fn ada_bind_compiles_runs_and_rejects_range_before_call() {
 use type Interfaces.C.double;
 package Geodesy is
    subtype Latitude is Interfaces.C.double range -90.0 .. 90.0;
-   function Double_Lat (Lat : Latitude) return Interfaces.C.double
+   function Double_Lat (Lat : IN Latitude) return Interfaces.C.double
      with Export, Convention => C, External_Name => "geo_double";
-   function Calls (Unused : Interfaces.C.long_long) return Interfaces.C.long_long
+   function Calls (Unused : In Interfaces.C.long_long) return Interfaces.C.long_long
      with Export, Convention => C, External_Name => "geo_calls";
 end Geodesy;
 "#).unwrap();
@@ -718,6 +722,13 @@ extern int64_t jet_pascal_inventory_destroyed_count(void);
 int main(void){int64_t first=jet_pascal_inventory_counter_new(1);if(!first)return 1;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_destroyed_count()!=1)return 2;int64_t second=jet_pascal_inventory_counter_new(2);if(!second||second==first)return 3;jet_pascal_inventory_counter_close(first);if(jet_pascal_inventory_take_error()!=1)return 4;if(jet_pascal_inventory_destroyed_count()!=1)return 5;jet_pascal_inventory_counter_close(second);if(jet_pascal_inventory_destroyed_count()!=2)return 6;return 0;}
 "#).unwrap();
     let cc=Command::new("cc").arg("stale.c").args(["-L.jet/bindings/pascal","-Wl,-rpath,.jet/bindings/pascal","-l:libjet_pascal_inventory.a","-ljet_pascal_inventory_runtime","-lpthread","-ldl","-o","stale"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"stale-handle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let stale=Command::new(dir.join("stale")).current_dir(&dir).output().unwrap();assert!(stale.status.success(),"stale close reached Pascal destructor twice: {:?}",stale.status.code());
+    fs::write(dir.join("capacity.c"),r#"#include <stdint.h>
+extern int64_t jet_pascal_inventory_counter_new(int64_t);
+extern void jet_pascal_inventory_counter_close(int64_t);
+extern int64_t jet_pascal_inventory_take_error(void);
+int main(void){int64_t handles[64];for(int i=0;i<64;i++){handles[i]=jet_pascal_inventory_counter_new(i);if(!handles[i])return 1;}if(jet_pascal_inventory_counter_new(65)!=0||jet_pascal_inventory_take_error()!=2)return 2;for(int i=0;i<64;i++){jet_pascal_inventory_counter_close(handles[i]);if(jet_pascal_inventory_take_error()!=0)return 3;}return 0;}
+"#).unwrap();
+    let capacity_cc=Command::new("cc").arg("capacity.c").args(["-L.jet/bindings/pascal","-Wl,-rpath,.jet/bindings/pascal","-l:libjet_pascal_inventory.a","-ljet_pascal_inventory_runtime","-lpthread","-ldl","-o","capacity"]).current_dir(&dir).output().unwrap();assert!(capacity_cc.status.success(),"capacity probe link failed:\n{}",String::from_utf8_lossy(&capacity_cc.stderr));let capacity=Command::new(dir.join("capacity")).current_dir(&dir).output().unwrap();assert!(capacity.status.success(),"64-slot Pascal handle table failed: {:?}",capacity.status.code());
 }
 
 #[test]

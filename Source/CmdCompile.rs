@@ -4272,9 +4272,9 @@ pub(crate) enum PluginBuildError {
 /// `rustc --target wasm32-unknown-unknown --crate-type cdylib` builds the core
 /// module from the guest Rust, then `wasm-tools component embed` + `component
 /// new` lift it into a typed component using the generated `.wit` world — no
-/// wit-bindgen crate, no adapter shims; v1's Int/Float-only scalar exports are
-/// already canonical-ABI-compatible at the core-wasm level (see
-/// `Codegen::Plugin` module doc).
+/// wit-bindgen crate, no adapter shims; scalar exports use the canonical
+/// Component Model ABI at the core-wasm level (including `cabi_realloc` for
+/// Text; see `Codegen::Plugin` module doc).
 pub(crate) fn write_plugin_artifacts(
     file: &str,
     plugin: &jet::Codegen::PluginArtifacts,

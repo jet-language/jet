@@ -52,6 +52,9 @@ fn device_to_ct(device: JetComputeDevice) -> CtValue {
             JetComputeDevice::Auto => "Auto".to_string(),
             JetComputeDevice::Cpu => "CPU".to_string(),
             JetComputeDevice::Metal => "Metal".to_string(),
+            JetComputeDevice::Cuda => "CUDA".to_string(),
+            JetComputeDevice::Vulkan => "Vulkan".to_string(),
+            JetComputeDevice::WebGpu => "WebGPU".to_string(),
         },
         args: Vec::new(),
     }
@@ -65,11 +68,19 @@ fn ct_to_device(value: &CtValue, span: Span) -> Result<JetComputeDevice, Diagnos
             "Auto" => Ok(JetComputeDevice::Auto),
             "CPU" | "Cpu" => Ok(JetComputeDevice::Cpu),
             "Metal" | "METAL" => Ok(JetComputeDevice::Metal),
+            "CUDA" | "Cuda" => Ok(JetComputeDevice::Cuda),
+            "Vulkan" | "VULKAN" => Ok(JetComputeDevice::Vulkan),
+            "WebGPU" | "WEBGPU" | "Webgpu" => Ok(JetComputeDevice::WebGpu),
             _ => Err(unsupported("ComputeDevice variant", span)),
         },
         CtValue::Str(s) if s == "Auto" => Ok(JetComputeDevice::Auto),
         CtValue::Str(s) if s == "CPU" || s == "Cpu" => Ok(JetComputeDevice::Cpu),
         CtValue::Str(s) if s == "Metal" || s == "METAL" => Ok(JetComputeDevice::Metal),
+        CtValue::Str(s) if s == "CUDA" || s == "Cuda" => Ok(JetComputeDevice::Cuda),
+        CtValue::Str(s) if s == "Vulkan" || s == "VULKAN" => Ok(JetComputeDevice::Vulkan),
+        CtValue::Str(s) if s == "WebGPU" || s == "WEBGPU" || s == "Webgpu" => {
+            Ok(JetComputeDevice::WebGpu)
+        }
         _ => Err(unsupported("ComputeDevice", span)),
     }
 }
@@ -1134,12 +1145,22 @@ fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnos
             .map(|(_, v)| v)
             .ok_or_else(|| unsupported("ComputeStream field", span))
     };
+    let device = ct_to_device(field("device")?, span)?;
+    let cuda = if device == JetComputeDevice::Cuda {
+        Some(std::sync::Arc::new(
+            jet_compute_cuda::stream_new()
+                .map_err(|_| unsupported("CUDA compute stream", span))?,
+        ))
+    } else {
+        None
+    };
     Ok(JetComputeStream {
         id: match field("id")? {
             CtValue::Int(n) if *n > 0 => *n,
             _ => return Err(unsupported("compute stream id", span)),
         },
-        device: ct_to_device(field("device")?, span)?,
+        device,
+        cuda,
     })
 }
 
@@ -1507,6 +1528,9 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
         "device_cpu" => Ok(device_to_ct(jet_compute_device_cpu())),
         "device_auto" => Ok(device_to_ct(jet_compute_device_auto())),
         "device_metal" => Ok(device_to_ct(jet_compute_device_metal())),
+        "device_cuda" => Ok(device_to_ct(jet_compute_device_cuda())),
+        "device_vulkan" => Ok(device_to_ct(jet_compute_device_vulkan())),
+        "device_webgpu" => Ok(device_to_ct(jet_compute_device_webgpu())),
         "on_device" => Ok(
             match jet_compute_on_device(&ct_to_tensor(one(0)?, span)?, ct_to_device(one(1)?, span)?)
             {
@@ -1694,6 +1718,105 @@ pub fn take_set_ok(value: &CtValue) -> Option<(CtValue, CtValue)> {
     }
     let tensor = fields.iter().find(|(n, _)| n == "tensor")?.1.clone();
     Some((tensor, CtValue::Present(Box::new(CtValue::Unit))))
+}
+
+#[cfg(test)]
+mod backend_tests {
+    use super::*;
+
+    fn f32_tensor(shape: Vec<i64>, values: Vec<f32>) -> JetTensor {
+        let mut tensor = jet_compute_tensor_from_shape(shape, 0.0, JetComputeDevice::Cpu).unwrap();
+        tensor.data = std::sync::Arc::new(values.into_iter().map(f64::from).collect());
+        tensor.last_placement.profile = CPU_ORACLE_F32_PROFILE.to_string();
+        tensor.last_placement.abilities = CPU_ORACLE_F32_CAPABILITIES
+            .iter()
+            .map(|ability| (*ability).to_string())
+            .collect();
+        jet_compute_validate_tensor(&tensor).unwrap();
+        tensor
+    }
+
+    #[test]
+    fn portable_backend_seams_use_real_vulkan_and_fail_closed_webgpu() {
+        let cpu = f32_tensor(vec![2], vec![2.0, 3.0]);
+        let vulkan = jet_compute_on_device(&cpu, JetComputeDevice::Vulkan);
+        if jet_compute_vulkan::available() {
+            let vulkan = vulkan.expect("available Vulkan must accept placement");
+            let result = jet_compute_binary("add", &vulkan, &vulkan).unwrap();
+            assert_eq!(jet_compute_tensor_values(&result), vec![4.0, 6.0]);
+            assert_eq!(result.last_placement.backend, VULKAN_BACKEND);
+
+            let unary = jet_compute_unary("sqrt", &result).unwrap();
+            assert_eq!(jet_compute_tensor_values(&unary), vec![2.0, 6.0_f64.sqrt()]);
+
+            let left = jet_compute_on_device(
+                &f32_tensor(vec![1, 2], vec![1.0, 2.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let right = jet_compute_on_device(
+                &f32_tensor(vec![2, 1], vec![3.0, 4.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let product = jet_compute_matmul(&left, &right).unwrap();
+            assert_eq!(jet_compute_tensor_values(&product), vec![11.0]);
+            let reduced = jet_compute_sum_axis(&product, 0).unwrap();
+            assert_eq!(jet_compute_tensor_values(&reduced), vec![11.0]);
+
+            let prediction = jet_compute_on_device(
+                &f32_tensor(vec![2], vec![3.0, 1.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let target = jet_compute_on_device(
+                &f32_tensor(vec![2], vec![1.0, 1.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
+            let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&loss), vec![2.0]);
+            let state = jet_compute_vjp_begin(loss, tape);
+            let seed = jet_compute_gradient_seed(&state).unwrap();
+            let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
+            assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![2.0, 0.0]);
+            assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-2.0, 0.0]);
+
+            let parameter = jet_compute_on_device(
+                &f32_tensor(vec![2], vec![3.0, 1.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let gradient = jet_compute_on_device(
+                &f32_tensor(vec![2], vec![1.0, 2.0]),
+                JetComputeDevice::Vulkan,
+            )
+            .unwrap();
+            let updated = jet_compute_sgd_step(&parameter, &gradient, 0.5).unwrap();
+            assert_eq!(jet_compute_tensor_values(&updated), vec![2.5, 0.0]);
+
+            let downloaded = jet_compute_transfer(&result, JetComputeDevice::Cpu).unwrap();
+            assert_eq!(jet_compute_tensor_values(&downloaded), vec![4.0, 6.0]);
+            assert_eq!(downloaded.last_transfer.unwrap().bytes, 8);
+            let stream = jet_compute_stream_new_on_device(JetComputeDevice::Vulkan).unwrap();
+            jet_compute_stream_sync(&stream).unwrap();
+        } else {
+            assert!(matches!(
+                vulkan,
+                Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
+            ));
+        }
+        assert!(matches!(
+            jet_compute_on_device(&cpu, JetComputeDevice::WebGpu),
+            Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
+        ));
+        let f64_tensor = jet_compute_full(&vec![1], 2.0).unwrap();
+        assert!(matches!(
+            jet_compute_on_device(&f64_tensor, JetComputeDevice::Vulkan),
+            Err(JetComputeError::Unsupported(_))
+        ));
+    }
 }
 
 #[allow(dead_code)]

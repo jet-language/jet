@@ -195,6 +195,8 @@
             pkgs.php
             # D-FFI-R1=A: provision R plus the framed worker's JSON transport.
             jetR
+            # D-FFI-OCTAVE1=A: provision the MATLAB-compatible sidecar worker.
+            pkgs.octave
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu

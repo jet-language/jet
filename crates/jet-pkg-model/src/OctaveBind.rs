@@ -45,6 +45,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
             "`{lib}` is not a valid Jet library name"
         )));
     }
+    let functions = parse_functions(source)?;
     let (octave, tool_name) = match tool_path("octave-cli") {
         Some(path) => (path, "octave-cli"),
         None => (
@@ -60,7 +61,6 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
             "Octave bindings require a `.m` source file".into(),
         ));
     }
-    let functions = parse_functions(source)?;
     std::fs::create_dir_all(cache).map_err(|error| {
         BindError::IO(format!("could not create Octave binding cache: {error}"))
     })?;
@@ -225,9 +225,6 @@ fn render_worker(script: &Path, functions: &[String]) -> String {
     let worker = r#"input = fopen('/dev/stdin', 'rb');
 output = fopen('/dev/stdout', 'wb');
 script_path = __JET_SCRIPT__;
-if exist('jsondecode', 'file') ~= 2 || exist('jsonencode', 'file') ~= 2
-  error('Octave jsondecode/jsonencode are required by the Jet sidecar');
-end
 try
   evalc('source(script_path)');
 catch
@@ -253,33 +250,119 @@ while true
   id = 0;
   shutdown = false;
   try
-    request = jsondecode(char(payload));
-    id = double(request.id);
-    if strcmp(request.op, 'shutdown')
+    % ponytail: parse only Jet's fixed numeric matrix envelope; replace with a
+    % provisioned JSON library if the sidecar gains general JSON values.
+    request = char(payload);
+    id = 0;
+    id_ok = false;
+    id_marker = '"id":';
+    id_at = strfind(request, id_marker);
+    if ~isempty(id_at)
+      id_start = id_at(1) + numel(id_marker);
+      id_tail = request(id_start:end);
+      id_stop = find(id_tail == ',' | id_tail == '}', 1, 'first');
+      if ~isempty(id_stop)
+        id_token = strtrim(id_tail(1:id_stop - 1));
+        id = str2double(id_token);
+        id_ok = ~isempty(id_token) && isscalar(id) && isreal(id) && isfinite(id);
+      end
+    end
+    op = '';
+    op_ok = false;
+    op_marker = '"op":"';
+    op_at = strfind(request, op_marker);
+    if ~isempty(op_at)
+      op_start = op_at(1) + numel(op_marker);
+      op_stop = find(request(op_start:end) == '"', 1, 'first');
+      if ~isempty(op_stop)
+        op = request(op_start:op_start + op_stop - 2);
+        op_ok = true;
+      end
+    end
+    if op_ok && strcmp(op, 'shutdown')
       shutdown = true;
-    elseif ~strcmp(request.op, 'invoke') || ~any(strcmp(request.command, allowed))
-      error('rejected Octave command');
     else
-      shape = double(request.input.shape(:)');
-      values = double(request.input.data(:)');
-      if numel(shape) ~= 2 || any(shape < 0) || any(shape ~= fix(shape)) || numel(values) ~= shape(1) * shape(2)
+      command = '';
+      command_ok = false;
+      command_marker = '"command":"';
+      command_at = strfind(request, command_marker);
+      if ~isempty(command_at)
+        command_start = command_at(1) + numel(command_marker);
+        command_stop = find(request(command_start:end) == '"', 1, 'first');
+        if ~isempty(command_stop)
+          command = request(command_start:command_start + command_stop - 2);
+          command_ok = true;
+        end
+      end
+      shape = [];
+      values = [];
+      shape_ok = false;
+      values_ok = false;
+      array_keys = {'shape', 'data'};
+      for array_index = 1:2
+        array_marker = ['"', array_keys{array_index}, '":'];
+        array_at = strfind(request, array_marker);
+        if isempty(array_at)
+          continue;
+        end
+        array_start = array_at(1) + numel(array_marker);
+        if array_start > numel(request) || request(array_start) ~= '['
+          continue;
+        end
+        array_tail = request(array_start + 1:end);
+        array_stop = find(array_tail == ']', 1, 'first');
+        if isempty(array_stop)
+          continue;
+        end
+        array_body = strtrim(array_tail(1:array_stop - 1));
+        array_value = [];
+        array_ok = true;
+        if ~isempty(array_body)
+          array_tokens = strsplit(array_body, ',');
+          array_value = zeros(1, numel(array_tokens));
+          for array_token_index = 1:numel(array_tokens)
+            array_token = strtrim(array_tokens{array_token_index});
+            array_number = str2double(array_token);
+            if isempty(array_token) || ~isscalar(array_number) || ~isreal(array_number) || ~isfinite(array_number)
+              array_ok = false;
+              break;
+            end
+            array_value(array_token_index) = array_number;
+          end
+        end
+        if array_index == 1
+          shape = array_value;
+          shape_ok = array_ok;
+        else
+          values = array_value;
+          values_ok = array_ok;
+        end
+      end
+      if ~id_ok || ~op_ok || ~strcmp(op, 'invoke') || ~command_ok || ~any(strcmp(command, allowed))
+        error('rejected Octave command');
+      elseif ~shape_ok || ~values_ok || numel(shape) ~= 2 || any(shape < 0) || any(shape ~= fix(shape)) || numel(values) ~= shape(1) * shape(2)
         error('invalid rank-two matrix wire');
       end
       matrix = reshape(values, shape(1), shape(2));
-      value = feval(request.command, matrix);
+      value = feval(command, matrix);
       if ~isnumeric(value) || ~isreal(value) || any(~isfinite(value(:))) || ndims(value) > 2
         error('Octave function did not return a finite real matrix');
       end
-      wire = struct('shape', double(size(value)), 'data', double(value(:)'));
-      response = struct('id', id, 'ok', true, 'value', wire);
+      output_shape = double(size(value));
+      output_values = double(value(:)');
+      output_parts = cell(1, numel(output_values));
+      for output_index = 1:numel(output_values)
+        output_parts{output_index} = sprintf('%.17g', output_values(output_index));
+      end
+      response = sprintf('{"id":%.0f,"ok":true,"value":{"shape":[%.0f,%.0f],"data":[%s]}}', id, output_shape(1), output_shape(2), strjoin(output_parts, ','));
     end
   catch
-    response = struct('id', id, 'ok', false, 'code', 'CommandFailed', 'value', []);
+    response = sprintf('{"id":%.0f,"ok":false,"code":"CommandFailed","value":null}', id);
   end
   if shutdown
     break;
   end
-  encoded = uint8(jsonencode(response));
+  encoded = uint8(response);
   if numel(encoded) > 1048576
     break;
   end
@@ -359,7 +442,7 @@ pub fn cancel(session: Session) -[FFI.Octave]> {{ abi.cancel(session.value) }}
     ));
     for function in functions {
         out.push_str(&format!(
-            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) Tensor OctaveError! -[FFI.Octave]> {{
+            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) Tensor OctaveError! -[FFI.Octave, GPU]> {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     request :: json.to_string(TensorWire{{ shape: compute.shape(input), data: compute.to_list(input) }})
     raw :: abi.{function}(session.value, request, deadline_ms)
@@ -534,7 +617,7 @@ mod tests {
         let source = super::render_jet("matrix", &["scale".into()]);
         assert!(source.contains("TensorWire{ shape: compute.shape(input)"));
         assert!(source.contains("compute.rank(input) != 2 ->"));
-        assert!(source.contains("-[FFI.Octave]> {"));
+        assert!(source.contains("-[FFI.Octave, GPU]> {"));
         assert!(!source.contains("=>") && !source.contains("Session.{"));
     }
 
@@ -545,6 +628,10 @@ mod tests {
         assert!(source.contains("'scale'"));
         assert!(source.contains("numel(shape) ~= 2"));
         assert!(source.contains("numel(encoded) > 1048576"));
+        assert!(source.contains("array_keys = {'shape', 'data'}"));
+        assert!(source.contains("strjoin(output_parts, ',')"));
+        assert!(!source.contains("jsondecode"));
+        assert!(!source.contains("jsonencode"));
         assert!(source.contains("script_path = '/work/legacy.m'"));
     }
 

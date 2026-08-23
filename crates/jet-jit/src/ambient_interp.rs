@@ -61,6 +61,14 @@ mod wire {
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 
+// D-PLUGIN1 / I9: the interpreter/JIT ambient path includes the same Prelude
+// runtime source as the hidden FFI bridge. It only converts CtValue arguments
+// to the shared wire and returns CtValue results; sandbox policy stays in the
+// included Plugin.rs implementation.
+mod plugin_runtime {
+    include!("../../jet-pkg-model/src/Prelude/Plugin.rs");
+}
+
 fn unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
@@ -2934,6 +2942,26 @@ pub fn ambient_core_call(
     resolved_ret: Option<Type>,
     sink: Option<&mut jet_codegen::Comptime::DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.plugin" && method == "load" {
+        let Some(CtValue::Str(path)) = args.first() else {
+            return Some(Err(unsupported("core.plugin.load path", span)));
+        };
+        let authority = args
+            .get(1)
+            .and_then(|value| match value {
+                CtValue::Str(value) => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+        let wire = plugin_runtime::jet_plugin_load(path, authority);
+        return Some(Ok(CtValue::Struct {
+            type_name: "JetPlugin".to_string(),
+            fields: vec![(
+                "handle".to_string(),
+                CtValue::Int(wire::jet_plugin_load_handle(&wire) as i64),
+            )],
+        }));
+    }
     if jet_foundation::Syntax::core_call(module, method).is_some() {
         if let Err(error) = jet_foundation::Syntax::core_call_projection(
             module,
@@ -4569,6 +4597,12 @@ pub fn ambient_handle(
     if let Some(result) = ambient_app_handle(op, recv, args, span) {
         return Some(result);
     }
+    if matches!(
+        op,
+        "PluginCall" | "PluginCallInt" | "PluginCallBool" | "PluginCallText"
+    ) {
+        return Some(ambient_plugin_call(op, recv, args, span));
+    }
     if let Some(result) = ambient_http_handle(op, recv, args, span) {
         return Some(result);
     }
@@ -4887,6 +4921,101 @@ pub fn ambient_handle(
             }))
         }
         _ => None,
+    }
+}
+
+fn ambient_plugin_call(
+    op: &str,
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = recv else {
+        return Err(unsupported("Plugin receiver", span));
+    };
+    if type_name != "JetPlugin" {
+        return Err(unsupported("Plugin receiver", span));
+    }
+    let Some(handle) = fields.iter().find_map(|(name, value)| {
+        (name == "handle").then_some(match value {
+            CtValue::Int(value) if *value >= 0 => Some(*value as u64),
+            _ => None,
+        })
+    }).flatten() else {
+        return Err(unsupported("Plugin handle", span));
+    };
+    let Some(CtValue::Str(name)) = args.first() else {
+        return Err(unsupported("Plugin call name", span));
+    };
+    let Some(CtValue::List(values)) = args.get(1) else {
+        return Err(unsupported("Plugin call arguments", span));
+    };
+    match op {
+        "PluginCall" => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Float(value) => Ok(value.as_f64()),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| unsupported("Plugin.call arguments", span))?;
+            let args_wire = wire::jet_plugin_encode_args_float(&values);
+            let result = plugin_runtime::jet_plugin_call(handle, name, &args_wire);
+            return Ok(match wire::jet_plugin_decode_result_float(&result) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(value)))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            });
+        }
+        "PluginCallInt" => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Int(value) => Ok(*value),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| unsupported("Plugin.call_int arguments", span))?;
+            let args_wire = wire::jet_plugin_encode_args_int(&values);
+            let result = plugin_runtime::jet_plugin_call(handle, name, &args_wire);
+            return Ok(match wire::jet_plugin_decode_result_int(&result) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            });
+        }
+        "PluginCallBool" => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Bool(value) => Ok(*value),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| unsupported("Plugin.call_bool arguments", span))?;
+            let args_wire = wire::jet_plugin_encode_args_bool(&values);
+            let result = plugin_runtime::jet_plugin_call(handle, name, &args_wire);
+            return Ok(match wire::jet_plugin_decode_result_bool(&result) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            });
+        }
+        "PluginCallText" => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Str(value) => Ok(value.clone()),
+                    _ => Err(()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| unsupported("Plugin.call_text arguments", span))?;
+            let args_wire = wire::jet_plugin_encode_args_text(&values);
+            let result = plugin_runtime::jet_plugin_call(handle, name, &args_wire);
+            return Ok(match wire::jet_plugin_decode_result_text(&result) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            });
+        }
+        _ => unreachable!(),
     }
 }
 

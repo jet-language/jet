@@ -5834,6 +5834,10 @@ pub enum THandleOp {
     /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call_int(name, args)` →
     /// `Result<Int, String>`, the `[Int]` sibling of `PluginCall`.
     PluginCallInt,
+    /// `Result<Bool, String>`, the `[Bool]` sibling of `PluginCall`.
+    PluginCallBool,
+    /// `Result<String, String>`, the `[String]` sibling of `PluginCall`.
+    PluginCallText,
     /// D-LIB-CALLGRANT1=A: `mod.on_tick(dt)` → the checked native entry point.
     ModOnTick,
     /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →

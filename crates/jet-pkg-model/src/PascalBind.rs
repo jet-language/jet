@@ -612,11 +612,11 @@ fn call_args(output: &mut String, params: &[Param], skip: usize, first: Option<&
 
 fn render_c(lib: &str, surface: &Surface) -> String {
     const SLOT_COUNT: usize = 64;
-    const SLOT_BITS: usize = 6;
+    const SLOT_BITS: usize = 7;
     let abi = format!("jet_pascal_{lib}");
     let handle = &surface.handle;
     let mut output = format!(
-        "#include <stdint.h>\n#include <pthread.h>\n#include <stdlib.h>\n#define JET_PASCAL_SLOTS {SLOT_COUNT}\n#define JET_PASCAL_SLOT_BITS {SLOT_BITS}\n#define JET_PASCAL_SLOT_MASK ((uint64_t)(JET_PASCAL_SLOTS - 1))\nstatic void* slots[JET_PASCAL_SLOTS];\nstatic uint32_t generations[JET_PASCAL_SLOTS];\nstatic pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;\nstatic pthread_once_t once = PTHREAD_ONCE_INIT;\nstatic _Thread_local int64_t failed;\n"
+        "#include <stdint.h>\n#include <pthread.h>\n#include <stdlib.h>\n#define JET_PASCAL_SLOTS {SLOT_COUNT}\n#define JET_PASCAL_SLOT_BITS {SLOT_BITS}\n#define JET_PASCAL_SLOT_MASK ((uint64_t)((1ULL << JET_PASCAL_SLOT_BITS) - 1))\nstatic void* slots[JET_PASCAL_SLOTS];\nstatic uint32_t generations[JET_PASCAL_SLOTS];\nstatic pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;\nstatic pthread_once_t once = PTHREAD_ONCE_INIT;\nstatic _Thread_local int64_t failed;\n"
     );
     for routine in &surface.plain {
         raw_c_decl(&mut output, routine);

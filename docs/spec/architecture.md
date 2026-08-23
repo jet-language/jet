@@ -424,6 +424,12 @@ become dependencies of the compiler workspace crates.
 5. Keep generated wrappers minimal and audited. Safe Jet cannot acquire an
    ungated unsafe operation through a bridge; boundary ownership, error, and
    layout conversions must be explicit.
+   Callback and task composition uses the same boundary: a C callback is
+   emitted as an `extern "C"` trampoline whose panic rail fails closed, while
+   a foreign operation may run in a Jet `task` and complete through its normal
+   join result. Any non-sendable state captured by that task is rejected by the
+   ordinary crossing prover before the foreign call; it is never smuggled
+   through a callback or a task handle.
 6. Add focused tests for front-end rejection, generated wrapper/link arguments,
    cache reuse, and a real end-to-end bridge call. Add the diagnostic snapshot
    and docs for every new error. Run

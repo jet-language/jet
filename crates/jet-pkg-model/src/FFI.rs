@@ -8,10 +8,14 @@
 //! (toolchain, target, profile, rustflags) build identity shares one Cargo
 //! target dir under `<root>/deps/<hash>/`, so the dependency graph is compiled
 //! once instead of once per key (#2075, `bridge_paths`).
+//! Every foreign entry carries its canonical binder descriptor in the cache
+//! identity, generated wrapper, and provenance sidecar.
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{AccessConvention, ExternFn, ExternRustBlock, Item, ProgramBundle, Type};
-use std::collections::{BTreeMap, HashSet};
+use crate::AST::{
+    AccessConvention, ExternFn, ExternRustBlock, ForeignLanguage, Item, ProgramBundle, Type,
+};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -1745,6 +1749,7 @@ fn build_bridge_full(
             &crate_name,
             &key,
             selected_target,
+            entries,
             artifacts,
         )
     })
@@ -1802,6 +1807,7 @@ fn build_bridge_full(
             &crate_name,
             &key,
             selected_target,
+            entries,
             artifacts,
         )
     })
@@ -2038,6 +2044,7 @@ fn build_bridge_full(
         selected_target,
         &crate_name,
         &target,
+        entries,
         &artifacts,
     ) {
         return Err(tool_error(&error));
@@ -2545,6 +2552,10 @@ fn cache_key_full(
         identity.field("dependency_version", v.as_bytes());
     }
     for e in entries {
+        if let Some(language) = foreign_language_for_entry(e) {
+            let descriptor = foreign_descriptor_stamp(language);
+            identity.field("foreign_descriptor", descriptor.as_bytes());
+        }
         identity.field("jet_name", e.jet_name.as_bytes());
         identity.field("rust_path", e.rust_path.as_bytes());
         identity.field("wrapper_name", e.wrapper_name.as_bytes());
@@ -2570,6 +2581,35 @@ fn cache_key_full(
         }
     }
     identity.finish()
+}
+
+/// Map one hidden-bridge entry to the descriptor that owns its ABI contract.
+/// Rust declarations and inline C/C++ bodies share the bridge implementation,
+/// but their descriptor stamps must remain distinct in the cache identity.
+fn foreign_language_for_entry(entry: &ExternEntry) -> Option<ForeignLanguage> {
+    if entry.c_abi {
+        return Some(ForeignLanguage::C);
+    }
+    match entry.inline.as_ref().map(|inline| inline.lang.as_str()) {
+        Some("cpp") => Some(ForeignLanguage::Cpp),
+        Some("c") => Some(ForeignLanguage::C),
+        Some(_) => None,
+        None => Some(ForeignLanguage::Rust),
+    }
+}
+
+fn foreign_descriptor_stamp(language: ForeignLanguage) -> String {
+    crate::AST::binder_descriptor(language)
+        .unwrap_or_else(|| panic!("missing canonical foreign binder descriptor for {language:?}"))
+        .stamp()
+}
+
+fn foreign_descriptor_stamps(entries: &[ExternEntry]) -> BTreeSet<String> {
+    entries
+        .iter()
+        .filter_map(|entry| foreign_language_for_entry(entry))
+        .map(foreign_descriptor_stamp)
+        .collect()
 }
 
 fn identity_static_link_inputs(
@@ -2754,6 +2794,7 @@ fn bridge_cache_verified(
     crate_name: &str,
     cache_identity: &str,
     selected_target: &str,
+    entries: &[ExternEntry],
     artifacts: &[PathBuf],
 ) -> bool {
     let Ok(manifest) = fs::read_to_string(bridge_manifest_path(target, crate_name)) else {
@@ -2815,6 +2856,17 @@ fn bridge_cache_verified(
     {
         return false;
     }
+    let expected_descriptors = foreign_descriptor_stamps(entries);
+    let actual_descriptors = provenance
+        .fields
+        .get("descriptor")
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if actual_descriptors != expected_descriptors {
+        return false;
+    }
     artifacts.iter().all(|path| {
         let Some(relative) = artifact_relative_path(target, path) else {
             return false;
@@ -2861,6 +2913,7 @@ fn publish_bridge_provenance(
     selected_target: &str,
     crate_name: &str,
     target: &Path,
+    entries: &[ExternEntry],
     artifacts: &[PathBuf],
 ) -> Result<(), String> {
     let mut artifact_digests = Vec::with_capacity(artifacts.len());
@@ -2876,15 +2929,26 @@ fn publish_bridge_provenance(
         artifact_digests.push((relative, crate::SHA256::sha256_hex(&bytes)));
     }
     let toolchain_digest = crate::SHA256::sha256_hex(native_toolchain_identity().as_bytes());
+    let descriptor_stamps = foreign_descriptor_stamps(entries);
+    let mut fields = vec![
+        ("target", selected_target.to_string()),
+        ("crate", crate_name.to_string()),
+        ("bridge-descriptor", INLINE_BRIDGE_SCHEMA.to_string()),
+        ("toolchain", toolchain_digest),
+    ];
+    fields.extend(
+        descriptor_stamps
+            .into_iter()
+            .map(|stamp| ("descriptor", stamp)),
+    );
+    let field_refs = fields
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
     crate::ForeignBridge::write_provenance(
         path,
         cache_identity,
-        &[
-            ("target", selected_target),
-            ("crate", crate_name),
-            ("descriptor", INLINE_BRIDGE_SCHEMA),
-            ("toolchain", &toolchain_digest),
-        ],
+        &field_refs,
         &artifact_digests,
     )
 }
@@ -3072,6 +3136,14 @@ fn emit_wrapper_lib(
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\nfn ffi_panic() -> ! {\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::panic_any(format!(\"__jet_ffi_runtime__: {MESSAGE}\"));\n}\n\n",
     );
+    for descriptor in foreign_descriptor_stamps(entries) {
+        out.push_str("// jet-ffi-descriptor=");
+        out.push_str(&descriptor);
+        out.push('\n');
+    }
+    if !entries.is_empty() {
+        out.push('\n');
+    }
     // Every runtime fragment below carries its own top-level `use` lines
     // (e.g. `std::io::{Read, Write}` appears in HTTP.rs, HTTPServerTLS.rs
     // and NetTls.rs alike), so concatenating any two of them at the crate
@@ -3307,7 +3379,22 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (_, ty))| format!("p{i}: {}", inline_rust_type(ty)))
+        .map(|(i, (convention, ty))| {
+            format!("p{i}: {}", inline_rust_param_type(*convention, ty))
+        })
+        .collect::<Vec<_>>();
+    let abi_params = entry
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, (convention, ty))| {
+            let base = inline_rust_type(ty);
+            let abi_ty = match *convention {
+                AccessConvention::Write => format!("*mut {base}"),
+                AccessConvention::Read | AccessConvention::Move => base,
+            };
+            format!("p{i}: {abi_ty}")
+        })
         .collect::<Vec<_>>();
     let ret = entry
         .return_type
@@ -3316,7 +3403,10 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .unwrap_or_else(|| "()".to_string());
     let symbol = format!("jet_inline_{}", entry.wrapper_name);
     let args = (0..entry.params.len())
-        .map(|i| format!("p{i}"))
+        .map(|i| match entry.params[i].0 {
+            AccessConvention::Write => format!("p{i} as *mut _"),
+            AccessConvention::Read | AccessConvention::Move => format!("p{i}"),
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let ret_decl = if ret == "()" {
@@ -3326,7 +3416,7 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
     };
     format!(
         "extern \"C\" {{ #[link_name = \"{symbol}\"] fn {symbol}({}){ret_decl}; }}\npub fn {}({}){ret_decl} {{ unsafe {{ {symbol}({args}) }} }}\n",
-        params.join(", "), entry.wrapper_name, params.join(", ")
+        abi_params.join(", "), entry.wrapper_name, params.join(", ")
     )
 }
 
@@ -3335,7 +3425,9 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (_, ty))| format!("p{i}: {}", inline_rust_type(ty)))
+        .map(|(i, (convention, ty))| {
+            format!("p{i}: {}", inline_rust_param_type(*convention, ty))
+        })
         .collect::<Vec<_>>();
     let ret = entry
         .return_type
@@ -3449,6 +3541,17 @@ fn inline_rust_type(ty: &Type) -> String {
     }
 }
 
+/// D-FFI-CAP1: inline C/C++/asm wrappers preserve the same capability shape as
+/// `extern rust`; an exclusive lend is a pointer to the live Jet slot, never a
+/// read-only reference or copied temporary. Move keeps the value consuming.
+fn inline_rust_param_type(convention: AccessConvention, ty: &Type) -> String {
+    let base = inline_rust_type(ty);
+    match convention {
+        AccessConvention::Write => format!("&mut {base}"),
+        AccessConvention::Read | AccessConvention::Move => base,
+    }
+}
+
 fn inline_c_type(ty: &Type, cpp: bool) -> &'static str {
     match ty {
         Type::Int => "int64_t",
@@ -3493,6 +3596,14 @@ fn inline_c_type(ty: &Type, cpp: bool) -> &'static str {
     }
 }
 
+fn inline_c_param_type(convention: AccessConvention, ty: &Type, cpp: bool) -> String {
+    let base = inline_c_type(ty, cpp);
+    match convention {
+        AccessConvention::Write => format!("{base}*"),
+        AccessConvention::Read | AccessConvention::Move => base.to_string(),
+    }
+}
+
 fn emit_native_inline_source(entry: &ExternEntry, index: usize) -> String {
     let inline = entry.inline.as_ref().expect("native inline entry");
     let cpp = inline.lang == "cpp";
@@ -3505,12 +3616,14 @@ fn emit_native_inline_source(entry: &ExternEntry, index: usize) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (_, ty))| format!("{} p{i}", inline_c_type(ty, cpp)))
+        .map(|(i, (convention, ty))| {
+            format!("{} p{i}", inline_c_param_type(*convention, ty, cpp))
+        })
         .collect::<Vec<_>>();
     let types = entry
         .params
         .iter()
-        .map(|(_, ty)| inline_c_type(ty, cpp))
+        .map(|(convention, ty)| inline_c_param_type(*convention, ty, cpp))
         .collect::<Vec<_>>();
     let args = (0..entry.params.len())
         .map(|i| format!("p{i}"))
@@ -3971,6 +4084,37 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn generated_rust_bridge_carries_the_canonical_descriptor_stamp() {
+        let entry = ExternEntry {
+            jet_name: "rust_max".into(),
+            rust_path: "std::cmp::max".into(),
+            wrapper_name: "jet_ffi_rust_max".into(),
+            params: vec![(AccessConvention::Read, Type::Int)],
+            return_type: Some(Type::Int),
+            crate_spec: "std".into(),
+            line_hint: "extern rust rust_max".into(),
+            inline: None,
+            c_abi: false,
+            close: None,
+        };
+        let source = emit_wrapper_lib(
+            &[entry],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
+        let stamp = foreign_descriptor_stamp(ForeignLanguage::Rust);
+        assert!(source.contains(&format!("// jet-ffi-descriptor={stamp}")));
+    }
+
+    #[test]
     fn generated_bridge_reports_through_host_callback() {
         let source = emit_wrapper_lib(&[], false, false, false, false, false, false, false, false, false, false);
         assert!(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"));
@@ -4006,6 +4150,34 @@ mod tests {
             ..value_entry
         };
         assert!(emit_cabi_trampoline(&capability_entry, &HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn inline_capability_wrapper_keeps_exclusive_pointer_shape() {
+        let entry = ExternEntry {
+            jet_name: "edit".into(),
+            rust_path: String::new(),
+            wrapper_name: "jet_ffi_edit".into(),
+            params: vec![(AccessConvention::Write, Type::Int)],
+            return_type: None,
+            crate_spec: "std".into(),
+            line_hint: "#FFI(c) edit".into(),
+            inline: Some(InlineEntry {
+                lang: "c".into(),
+                source: "void edit(int64_t* value) { *value += 1; }".into(),
+                param_names: vec!["value".into()],
+            }),
+            c_abi: false,
+            close: None,
+        };
+        let inline = entry.inline.as_ref().unwrap();
+        let wrapper = emit_inline_wrapper_fn(&entry, inline);
+        assert!(wrapper.contains("p0: *mut i64"), "{wrapper}");
+        assert!(wrapper.contains("pub fn jet_ffi_edit(p0: &mut i64)"), "{wrapper}");
+
+        let native = emit_native_inline_source(&entry, 0);
+        assert!(native.contains("void edit(int64_t* value)"), "{native}");
+        assert!(native.contains("jet_inline_jet_ffi_edit(int64_t* p0)"), "{native}");
     }
 
     #[test]

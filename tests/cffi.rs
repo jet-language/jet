@@ -24,11 +24,7 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
-    });
-    let Some(tool) = tool else {
-        eprintln!("note: provisioned Octave unavailable; skipping Octave integration");
-        return;
-    };
+    }).expect("jet-env full must provision Octave");
     eprintln!("using {tool} for Octave integration");
     let root = std::env::temp_dir().join(format!("jet_octave_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -87,11 +83,16 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
         .current_dir(&root).output().unwrap();
     assert!(bind.status.success(), "{}", String::from_utf8_lossy(&bind.stderr));
     let generated = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.jet")).unwrap();
+    assert!(generated.contains("jet-ffi-descriptor="));
     assert!(generated.contains("gross_pay: Decimal\n"));
     assert!(generated.contains("offset=24 width=5 type=Decimal scale=2 encoding=COMP-3"));
     assert!(!generated.contains("gross_pay: Float"));
     assert!(generated.contains("Int CobolError! -[FFI.Cobol]>"));
     assert!(!generated.contains("=>"));
+    let provenance = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap();
+    assert!(provenance.contains("schema=jet-cobol-bind-v1\n"));
+    assert!(provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
+    assert!(provenance.contains("record_width=29\n"));
     let run = Command::new(env!("CARGO_BIN_EXE_jet")).args(["run", "main.jet"]).current_dir(&root).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout), fs::read_to_string(root.join("expected.out")).unwrap());
@@ -586,6 +587,18 @@ fn run() { }
 fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     let dir = common::unique_tmp("jet_foreign_active_js");
     fs::create_dir_all(&dir).unwrap();
+    let cache = dir.join(".jet/bindings/js");
+    fs::create_dir_all(&cache).unwrap();
+    let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::JS)
+        .unwrap()
+        .stamp();
+    fs::write(
+        cache.join("plotly.jet"),
+        format!(
+            "// jet-ffi-descriptor={descriptor}\npub fn scatter() Int {{\n    return 7\n}}\n"
+        ),
+    )
+    .unwrap();
     let main = dir.join("main.jet");
     let src = "use js.plotly as plot\nfn run() { }\n";
     fs::write(&main, src).unwrap();
@@ -1034,6 +1047,12 @@ fn jet_bind_native_backend_end_to_end() {
     assert!(result
         .source
         .contains("fn jetc_greeting() String = \"jetc_greeting\";"));
+    let descriptor = jet::AST::binder_descriptor(jet::AST::ForeignLanguage::C)
+        .unwrap()
+        .stamp();
+    assert!(result
+        .source
+        .contains(&format!("// jet-ffi-descriptor={descriptor}")));
     fs::write(cache.join("jetc.jet"), &result.source).unwrap();
 
     let main = root.join("main.jet");
@@ -1940,6 +1959,28 @@ fn descriptor_mismatch_rejects_generated_cache_before_call() {
     assert!(
         diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
         "stale descriptor must be rejected before the foreign call: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn cobol_cache_without_descriptor_rejects_abi_unknown() {
+    let root = std::env::temp_dir().join(format!("jet_cobol_descriptor_missing_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join(".jet/bindings/cobol");
+    fs::create_dir_all(&cache_dir).unwrap();
+    fs::write(
+        cache_dir.join("payroll.jet"),
+        "#Extern module c.jet_cobol_payroll {\n    fn apply_minor(value: Int) Int = \"jet_cobol_payroll_apply_minor\"\n}\n",
+    )
+    .unwrap();
+    let main = root.join("main.jet");
+    fs::write(&main, "use cobol.payroll as payroll\nfn run() { print(payroll.apply_minor(1)) }\n").unwrap();
+    let source = fs::read_to_string(&main).unwrap();
+    let diagnostics = jet::compile_with_path(&source, main.to_str().unwrap()).unwrap_err();
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        "COBOL cache without a descriptor must fail closed: {diagnostics:?}"
     );
     let _ = fs::remove_dir_all(&root);
 }

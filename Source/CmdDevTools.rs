@@ -2972,6 +2972,7 @@ fn run_cobol_bind(args: &[&String]) {
     let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
     let result=jet::CobolBind::bind(std::path::Path::new(source_path),&source,std::path::Path::new(&copybook_path),&copybook,&lib,cache).unwrap_or_else(|e|cobol_bind_error(source_path,&e.to_string()));
     if let Err(e)=std::fs::write(&out_path,&result.source){cobol_bind_error(source_path,&format!("the generated cache could not be written ({e})"))}
+    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){cobol_bind_error(source_path,&format!("the binding provenance could not be written ({e})"))}
     if let Err(e)=std::fs::write(cache.join(format!("{lib}.cobol-path")),format!("{}\n",result.runtime_dir.display())){cobol_bind_error(source_path,&format!("the libcob runtime identity could not be written ({e})"))}
     println!("bound GnuCOBOL program `{}` and {}-byte copybook `{}` → {out_path}",result.program,result.layout.width,result.layout.name);
     for field in &result.layout.fields{println!("  layout: {} offset={} width={} type={}",field.name,field.offset,field.width,field.kind.jet_type())}

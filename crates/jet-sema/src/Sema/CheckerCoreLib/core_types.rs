@@ -1936,7 +1936,7 @@ pub(crate) fn core_service_error_variants(
 /// in the user struct/impl registries, so the shadow test has to ask here too —
 /// otherwise `Plugin.call` (D-DEP-WASM1=A / D-PLUGIN1=B) is hijacked by the
 /// projection and reported as E0803 "this is `Plugin`, not a function", while
-/// its sibling `.call_int` resolves normally.
+/// its typed siblings resolve normally.
 ///
 /// Only the bespoke, receiver-name-dispatched handle tables answer: the generic
 /// ones (`file_handle_method_return` and friends) diagnose as they resolve, so
