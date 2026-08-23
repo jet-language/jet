@@ -8,8 +8,9 @@ use jet_driver::SHA256;
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::{
-    canonical_path, debug_diagnostics_error, debug_error, debug_ok, git_output,
+    canonical_path, debug_diagnostics_error, debug_error, debug_ok, debug_stop_ok, git_output,
     git_relative_path, git_root, line_from_anchor, required_debug_string, untracked_diff,
+    DebugSessions,
 };
 use super::edit_actions::{
     apply_add_pattern_arm, apply_append_multi_input, apply_break_link,
@@ -1190,21 +1191,52 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
 
 /// Run the debugger against the source selected by a project-relative id.
 pub fn debug_session_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    let sessions = DebugSessions::default();
+    debug_session_json_for_entry_with_sessions(entry, request, &sessions)
+}
+
+/// Run a debugger command against the shared live-session store owned by the
+/// dev server. The public one-shot wrapper above remains useful to embedders
+/// that do not own a server lifetime.
+pub fn debug_session_json_for_entry_with_sessions(
+    entry: &Path,
+    request: &str,
+    sessions: &DebugSessions,
+) -> Result<String, String> {
     let source_id = json_string_field(request, "source_id");
-    let path = resolve_entry_source_path(entry, source_id.as_deref())?;
-    debug_session_json_for_file(&path, request)
+    let path = match resolve_entry_source_path(entry, source_id.as_deref()) {
+        Ok(path) => path,
+        Err(error) => {
+            if let Some(id) = json_string_field(request, "session_id") {
+                sessions.stop(&id);
+            }
+            return Err(error);
+        }
+    };
+    debug_session_json_for_file_with_sessions(&path, request, sessions)
 }
 
 /// Run one source-level debugger slice and project it onto Canvas graph spans.
 pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String, String> {
-    let src = fs::read_to_string(path).map_err(|e| debug_error("io", &e.to_string()))?;
+    let sessions = DebugSessions::default();
+    debug_session_json_for_file_with_sessions(path, request, &sessions)
+}
+
+pub fn debug_session_json_for_file_with_sessions(
+    path: &Path,
+    request: &str,
+    sessions: &DebugSessions,
+) -> Result<String, String> {
+    let src = match fs::read_to_string(path) {
+        Ok(src) => src,
+        Err(error) => {
+            if let Some(id) = json_string_field(request, "session_id") {
+                sessions.stop(&id);
+            }
+            return Err(debug_error("io", &error.to_string()));
+        }
+    };
     let revision = required_debug_string(request, "revision")?;
-    if revision != source_revision(&src) {
-        return Err(debug_error(
-            "conflict",
-            "source changed since this Canvas debug state was drawn",
-        ));
-    }
     let schema = json_usize_field(request, "schema_version").unwrap_or(0);
     if schema != DEBUG_SCHEMA_VERSION as usize {
         return Err(debug_error(
@@ -1212,35 +1244,45 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
             "Canvas debug schema_version must be 1",
         ));
     }
+    let session_id = json_string_field(request, "session_id");
+    if json_bool_field(request, "stop").unwrap_or(false) {
+        let id = required_debug_string(request, "session_id")?;
+        sessions.stop(&id);
+        return Ok(debug_stop_ok(&src, &id));
+    }
+    if revision != source_revision(&src) {
+        if let Some(id) = session_id.as_deref() {
+            sessions.stop(id);
+        }
+        return Err(debug_error(
+            "conflict",
+            "source changed since this Canvas debug state was drawn",
+        ));
+    }
 
-    let mut inputs = Vec::new();
     let mut breakpoint_lines = json_usize_array(request, "breakpoints");
+    let mut stale_breakpoints = Vec::new();
     for anchor in json_string_array(request, "breakpoint_spans") {
         if let Some(line) = line_from_anchor(&src, &anchor) {
             breakpoint_lines.push(line);
+        } else {
+            stale_breakpoints.push(anchor);
         }
     }
     breakpoint_lines.sort_unstable();
     breakpoint_lines.dedup();
-    for line in &breakpoint_lines {
-        inputs.push(format!("break {line}"));
-    }
-
-    let mut commands = json_string_array(request, "commands");
-    if commands.is_empty() {
-        commands.push("s".to_string());
-    }
-    inputs.extend(commands);
-    inputs.push("locals".to_string());
     let watches = json_string_array(request, "watches");
-    for watch in &watches {
-        inputs.push(format!("p {watch}"));
-    }
-    inputs.push("bt".to_string());
-    let refs = inputs.iter().map(|s| s.as_str()).collect::<Vec<_>>();
-    let result = jet_debug::run_session_result(&path.display().to_string(), &refs);
-    if result.status == jet_debug::SessionStatus::Failed {
-        return Err(debug_error("diagnostic", &result.transcript));
+    let commands = json_string_array(request, "commands");
+    let execution = sessions.execute(
+        path,
+        &revision,
+        session_id.as_deref(),
+        &commands,
+        &breakpoint_lines,
+        &watches,
+    )?;
+    if execution.status == jet_debug::SessionStatus::Failed {
+        return Err(debug_error("diagnostic", &execution.transcript));
     }
 
     let projection =
@@ -1248,9 +1290,11 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
     Ok(debug_ok(
         &src,
         &projection.json,
-        &result.transcript,
-        result.status,
+        &execution.transcript,
+        execution.status,
+        &execution.id,
         &breakpoint_lines,
+        &stale_breakpoints,
         &watches,
     ))
 }

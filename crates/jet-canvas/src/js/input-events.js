@@ -86,7 +86,12 @@
       return;
     }
     const found = hitNodeAt(x, y);
-    if (found) selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
+    // mousedown owns node selection so a following click cannot toggle or
+    // collapse the selection a second time after a modifier gesture/drag.
+    if (found) {
+      ev.preventDefault();
+      return;
+    }
     else {
       const comment = hitCommentAt(x, y);
       if (comment) {
@@ -135,29 +140,43 @@
     const endpoint = hitWireEndpointAt(x, y);
     if (endpoint && endpoint.pin) {
       hoverPin = endpoint.pin;
-      drag = { mode: "pin", pin: endpoint.pin, rewire: endpoint, x, y, mx: x, my: y };
+      const graph = currentGraphOrNull();
+      drag = { mode: "pin", pin: endpoint.pin, rewire: endpoint, graphId: graph && graph.graph_id, revision: latestDoc && latestDoc.revision, sourceId: currentCanvasSourceId(), x, y, mx: x, my: y };
       showToast("Rewire " + pinName(endpoint.pin));
       return;
     }
     const pin = hitPinAt(x, y);
     if (pin) {
       hoverPin = pin;
-      drag = { mode: "pin", pin, x, y, mx: x, my: y };
+      const graph = currentGraphOrNull();
+      drag = { mode: "pin", pin, graphId: graph && graph.graph_id, revision: latestDoc && latestDoc.revision, sourceId: currentCanvasSourceId(), x, y, mx: x, my: y };
       showToast(pin.name + ": " + pin.type);
       return;
     }
     setPendingPin(null);
     const found = hitNodeAt(x, y);
     if (found) {
-      selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
+      const modifier = ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : null;
+      const alreadySelected = selectedNodeIds.has(found.node.node_id);
+      if (modifier) {
+        selectNode(found.node, modifier);
+      } else if (!alreadySelected || selectedNodeIds.size === 0) {
+        selectNode(found.node, "replace");
+      } else {
+        selectedVariableName = null;
+        selectedNodeId = found.node.node_id;
+        selectionExplicitlyCleared = false;
+        setSourceHash(found.node.source_span || { start: 0, end: 0 });
+      }
       const starts = new Map();
       for (const id of selectedNodeIds) starts.set(id, nodeOffsets.get(id) || { x: 0, y: 0 });
-      drag = { mode: "node", x, y, wx: wx(x), wy: wy(y), starts };
+      drag = { mode: "node", x, y, wx: wx(x), wy: wy(y), starts, moved: false };
     } else if (hitCommentAt(x, y)) {
       const comment = hitCommentAt(x, y);
       selectedVariableName = null;
       selectedNodeIds = new Set([comment.box.comment_id]);
       selectedNodeId = comment.box.comment_id;
+      selectionExplicitlyCleared = false;
       const graph = currentGraphOrNull();
       const contained = comment.part === "title" ? nodesInsideComment(graph, comment.box) : [];
       const starts = new Map();
@@ -166,7 +185,16 @@
     } else if (ev.button === 1 || ev.altKey || spaceDown) {
       drag = { mode: "pan", x, y, ox: view.x, oy: view.y };
     } else {
-      drag = { mode: "marquee", x, y, mx: x, my: y, additive: ev.shiftKey || ev.ctrlKey || ev.metaKey };
+      drag = {
+        mode: "marquee",
+        x,
+        y,
+        mx: x,
+        my: y,
+        selectionMode: ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace",
+        initialSelection: new Set(selectedNodeIds),
+        moved: false
+      };
     }
   });
 
@@ -201,10 +229,12 @@
     } else if (drag.mode === "node") {
       const dx = wx(x) - drag.wx;
       const dy = wy(y) - drag.wy;
+      drag.moved = drag.moved || Math.abs(dx) > 1 || Math.abs(dy) > 1;
       for (const [id, start] of drag.starts.entries()) nodeOffsets.set(id, { x: start.x + dx, y: start.y + dy });
     } else if (drag.mode === "marquee") {
       drag.mx = x;
       drag.my = y;
+      drag.moved = drag.moved || Math.abs(x - drag.x) > 3 || Math.abs(y - drag.y) > 3;
       selectMarquee();
     } else if (drag.mode === "pin") {
       drag.mx = x;
@@ -226,11 +256,17 @@
   });
 
   window.addEventListener("mouseup", function (ev) {
-    if (drag && drag.mode === "node") {
+    if (drag && drag.mode === "node" && drag.moved) {
       const graph = latestDoc ? currentGraph(latestDoc) : null;
       rememberSelectedNodePositions(graph);
       persistStagedNodePositions();
       showToast("Moved " + selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s") + " locally");
+    }
+    if (drag && drag.mode === "marquee" && !drag.moved && drag.selectionMode === "replace") {
+      selectedNodeIds = new Set();
+      selectedNodeId = null;
+      selectionExplicitlyCleared = true;
+      if (latestDoc) drawGraph(latestDoc);
     }
     if (drag && (drag.mode === "comment" || drag.mode === "comment-resize")) {
       const movedIds = drag.starts ? Array.from(drag.starts.keys()) : [];
@@ -375,6 +411,7 @@
   const onboardingOpen = document.getElementById("tour-open");
   if (onboardingOpen) onboardingOpen.addEventListener("click", startTour);
   if (sourceEditor) sourceEditor.addEventListener("input", () => saveSourceDraft(sourceEditor.value));
+  debugStart.addEventListener("click", () => runDebug(["s"]));
   debugStep.addEventListener("click", () => runDebug(["s"]));
   debugNext.addEventListener("click", () => runDebug(["n"]));
   debugContinue.addEventListener("click", () => runDebug(["c"]));
@@ -518,6 +555,7 @@
       }
       selectedNodeIds = new Set();
       selectedNodeId = null;
+      selectionExplicitlyCleared = true;
       if (latestDoc) drawGraph(latestDoc);
       return;
     }

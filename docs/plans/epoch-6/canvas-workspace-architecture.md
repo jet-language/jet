@@ -87,6 +87,14 @@ Every write path follows one rule:
 4. Reject with Jet diagnostics if validation fails.
 5. Write all touched files, then reproject.
 
+The source write is one shared Canvas transaction seam. It compares the
+expected source snapshot again immediately before publish, writes the checked
+candidate to a synced temporary file, and atomically replaces the source file.
+Project transactions use the same seam for every touched file and restore
+completed files from their explicit before/after snapshots if a later publish
+fails. A conflict or I/O failure leaves source and browser undo history at the
+last committed snapshot; no Canvas graph or semantic sidecar is created.
+
 No hidden Canvas DB. Local-only state may store viewport, tabs, selection,
 recent commands, breakpoints, watches, and unsaved UI preferences. Shared visual
 intent uses existing source-anchored comments only when the user asks to share it.
@@ -267,7 +275,9 @@ Rust (source truth + projection + transactions), ~10.5k lines across 13 files:
 - `crates/jet-devserver/src/Canvas/query_actions.rs` (1335) — palette/action database (`actions`
   op): project functions + core catalog + exclusion reasons.
 - `crates/jet-devserver/src/Canvas/project_transactions.rs` (929),
-  `crates/jet-devserver/src/Canvas/project_scan.rs` (553) — workspace layer.
+  `crates/jet-devserver/src/Canvas/project_scan.rs` (553) — workspace layer;
+  `crates/jet-devserver/src/Canvas/source_model.rs` — shared compare-and-publish
+  source transaction seam.
 - `crates/jet-devserver/src/Canvas/schema_api.rs` (1022),
   `crates/jet-devserver/src/Canvas/validation_json.rs` (608), and
   `crates/jet-devserver/src/Canvas/debug_source_git.rs` (319).
@@ -306,7 +316,7 @@ Blueprint earned maintainability by separating four layers plus an editor shell.
 | `K2Node` subclasses (`K2Node_CallFunction`, `K2Node_VariableGet`, `K2Node_IfThenElse`, `K2Node_Switch`…) | Semantic per-node behavior: pins, tooltip, menu category, expansion to lower graph | `node_catalog.rs` now owns stable identity, archetype, presentation, palette, transaction, and default-editor facts. The graph protocol serves this table and stamps each node with `node_descriptor_id`. | The first registry slice is complete. Projection rules and edit arms still stay in their current modules. |
 | `SGraphEditor` / `SGraphNode` / `SGraphPin` (Slate widgets) | Rendering + interaction as per-node widget objects | `graph-rendering.js` immediate-mode 2D + `input-events.js`. No per-node widget; hit-testing rebuilt each frame into a hit map | Works for render; interaction logic is a flat event handler, hard to extend to marquee/drag/rewire uniformly |
 | `FKismetCompilerContext` | Compiles graph → bytecode | **The Jet front end itself** | Clean advantage — no separate compiler, no stale-compile class of bugs |
-| `BlueprintActionDatabase` + `UBlueprintNodeSpawner` | Palette/context-menu action registry with ranking | `query_actions.rs` `actions` op | Present but leaky: #389 shows foreign-symbol phantoms and wrong ranking. No spawner abstraction, ranking is ad hoc |
+| `BlueprintActionDatabase` + `UBlueprintNodeSpawner` | Palette/context-menu action registry with ranking | `query_actions.rs` `actions` op | Checked callable exports only; foreign-symbol phantoms are filtered and ranking comes from the node descriptor palette facts |
 | `FBlueprintEditor` shell (tabs: My Blueprint, Details, Palette, Compiler Results, Debug) | Editor window | `html.rs` static shell + the JS panels | Shell exists; panels are `innerHTML` string builders with per-panel logic, no shared component model |
 | Details = property system reflecting `UPROPERTY` | Generic property editor | `inspector-connections.js` hand-written `innerHTML` per selection type | No reflection; every editable field is bespoke. This is why Details has "dead controls" (#377) |
 | `FKismetDebugUtilities` (breakpoints, watches, exec pulse) | Debugger | Projection facts only; UI buttons in html.rs | Largest unbuilt layer |

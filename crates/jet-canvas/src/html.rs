@@ -78,6 +78,8 @@ body.detail-package .project-section.package-detail, body.detail-diagnostics .pr
 body:not(.is-dev-mode) #jump { display: none; }
 .debug-controls { display: none; align-items: center; gap: 5px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
 body.is-debug-active .debug-controls { display: flex; }
+body:not(.is-debug-active) #debug-menu[open] .debug-controls { display: grid; }
+body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none; }
 .debug-controls select { flex: 1 1 130px; min-width: 112px; max-width: 220px; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
 #workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
@@ -384,7 +386,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="check-current" title="Check current source" aria-label="Check current source">Check</button>
       <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry">Run</button>
       <details id="debug-menu" class="toolbar-menu"><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
-      <select id="debug-session" aria-label="Debug session"><option>local debug</option></select>
+      <select id="debug-session" aria-label="Debug session"><option value="none">No live session</option></select>
+      <button id="debug-start" type="button" aria-label="Start debug">Start debug</button>
       <button id="debug-break">Break</button>
       <button id="debug-watch">Watch</button>
       <button id="debug-step">Step</button>

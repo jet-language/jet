@@ -347,16 +347,18 @@ fn canvas_blueprint_facts_json(
     runtime_events: Option<&str>,
 ) -> String {
     let mut interfaces = Vec::new();
-    collect_interface_facts(
-        &bundle
-            .modules
-            .iter()
-            .flat_map(|m| m.items.iter())
-            .collect::<Vec<_>>(),
-        &mut interfaces,
-        &[],
-        src,
-    );
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        let items = module.items.iter().collect::<Vec<_>>();
+        collect_interface_facts(
+            &items,
+            &mut interfaces,
+            &[],
+            &module.source,
+            module_idx,
+            &module.alias,
+            &bundle.name_ledger,
+        );
+    }
     let task_flows = task_flow_facts(src).join(",");
     let outputs = index.outputs().iter().map(output_fact_json).collect::<Vec<_>>().join(",");
     let package_facts = index
@@ -397,19 +399,91 @@ fn collect_interface_facts(
     out: &mut Vec<String>,
     scope: &[String],
     src: &str,
+    module_idx: usize,
+    module_alias: &str,
+    name_ledger: &jet_foundation::Names::NameLedger,
 ) {
     for item in items {
         match item {
-            Item::Trait(t) => out.push(trait_fact_json(src, t, scope)),
-            Item::Impl(i) if i.trait_name.is_some() => out.push(impl_fact_json(i, scope)),
+            Item::Trait(t) => {
+                let trait_path = source_item_path(
+                    name_ledger,
+                    module_idx,
+                    module_alias,
+                    &t.name,
+                    t.name_span,
+                    scope,
+                );
+                out.push(trait_fact_json(src, t, &trait_path));
+            }
+            Item::Impl(i) if i.trait_name.is_some() => {
+                let type_path = source_item_path(
+                    name_ledger,
+                    module_idx,
+                    module_alias,
+                    &i.type_name,
+                    i.type_span,
+                    scope,
+                );
+                let trait_name = i.trait_name.as_deref().unwrap_or("");
+                let trait_path = source_item_path(
+                    name_ledger,
+                    module_idx,
+                    module_alias,
+                    trait_name,
+                    i.trait_span.unwrap_or(i.type_span),
+                    scope,
+                );
+                out.push(impl_fact_json(i, &type_path, &trait_path));
+            }
             Item::Struct(s) => {
                 for block in &s.trait_impls {
-                    out.push(inline_trait_impl_fact_json(&s.name, block, scope));
+                    let type_path = source_item_path(
+                        name_ledger,
+                        module_idx,
+                        module_alias,
+                        &s.name,
+                        s.name_span,
+                        scope,
+                    );
+                    let trait_path = source_item_path(
+                        name_ledger,
+                        module_idx,
+                        module_alias,
+                        &block.trait_name,
+                        block.trait_span,
+                        scope,
+                    );
+                    out.push(inline_trait_impl_fact_json(
+                        &type_path,
+                        &trait_path,
+                        block,
+                    ));
                 }
             }
             Item::Enum(e) => {
                 for block in &e.trait_impls {
-                    out.push(inline_trait_impl_fact_json(&e.name, block, scope));
+                    let type_path = source_item_path(
+                        name_ledger,
+                        module_idx,
+                        module_alias,
+                        &e.name,
+                        e.name_span,
+                        scope,
+                    );
+                    let trait_path = source_item_path(
+                        name_ledger,
+                        module_idx,
+                        module_alias,
+                        &block.trait_name,
+                        block.trait_span,
+                        scope,
+                    );
+                    out.push(inline_trait_impl_fact_json(
+                        &type_path,
+                        &trait_path,
+                        block,
+                    ));
                 }
             }
             Item::CodeModule(m) => {
@@ -417,7 +491,15 @@ fn collect_interface_facts(
                     let nested = body.iter().collect::<Vec<_>>();
                     let mut nested_scope = scope.to_vec();
                     nested_scope.push(m.name.clone());
-                    collect_interface_facts(&nested, out, &nested_scope, src);
+                    collect_interface_facts(
+                        &nested,
+                        out,
+                        &nested_scope,
+                        src,
+                        module_idx,
+                        module_alias,
+                        name_ledger,
+                    );
                 }
             }
             _ => {}
@@ -425,11 +507,50 @@ fn collect_interface_facts(
     }
 }
 
-fn scope_json(scope: &[String]) -> String {
-    json_str(&scope.join("."))
+fn source_item_path(
+    name_ledger: &jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    module_alias: &str,
+    internal_name: &str,
+    span: Span,
+    fallback_scope: &[String],
+) -> String {
+    for candidate in [
+        format!("{module_alias}.{internal_name}"),
+        if fallback_scope.is_empty() {
+            format!("{module_alias}.{internal_name}")
+        } else {
+            format!("{module_alias}.{}.{}", fallback_scope.join("."), internal_name)
+        },
+    ] {
+        if let Some(path) = name_ledger.display_path(module_idx, &candidate, Some(module_idx)) {
+            return strip_module_alias(&path, module_alias);
+        }
+    }
+    if let Some(path) = name_ledger.canonical_path_at(module_idx, span.start, span.end) {
+        return strip_module_alias(&path, module_alias);
+    }
+    let fallback = if fallback_scope.is_empty() {
+        internal_name.to_string()
+    } else if internal_name.contains('.') {
+        internal_name.to_string()
+    } else {
+        format!("{}.{}", fallback_scope.join("."), internal_name)
+    };
+    strip_module_alias(&fallback, module_alias)
 }
 
-fn trait_fact_json(src: &str, t: &AST::TraitDef, scope: &[String]) -> String {
+fn strip_module_alias(path: &str, module_alias: &str) -> String {
+    path.strip_prefix(module_alias)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn trait_fact_json(src: &str, t: &AST::TraitDef, display_path: &str) -> String {
+    let (scope, trait_name) = display_path
+        .rsplit_once('.')
+        .map_or(("", display_path), |(scope, name)| (scope, name));
     let associated_types = t
         .assoc_types
         .iter()
@@ -466,15 +587,15 @@ fn trait_fact_json(src: &str, t: &AST::TraitDef, scope: &[String]) -> String {
         .join(",");
     format!(
         "{{\"kind\":\"trait_interface\",\"trait\":{},\"scope\":{},\"associated_types\":[{}],\"methods\":[{}],\"source_span\":{},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}",
-        json_str(&t.name),
-        scope_json(scope),
+        json_str(trait_name),
+        json_str(scope),
         associated_types,
         methods,
         span_json(t.name_span.into())
     )
 }
 
-fn impl_fact_json(i: &AST::ImplDef, scope: &[String]) -> String {
+fn impl_fact_json(i: &AST::ImplDef, type_path: &str, trait_path: &str) -> String {
     let methods = i
         .methods
         .iter()
@@ -489,9 +610,9 @@ fn impl_fact_json(i: &AST::ImplDef, scope: &[String]) -> String {
         .join(",");
     format!(
         "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":{},\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
-        json_str(&i.type_name),
-        json_str(i.trait_name.as_deref().unwrap_or("")),
-        scope_json(scope),
+        json_str(type_path),
+        json_str(trait_path.rsplit_once('.').map_or(trait_path, |(_, name)| name)),
+        json_str(trait_path.rsplit_once('.').map_or("", |(scope, _)| scope)),
         methods,
         associated_types,
         i.delegation_field
@@ -503,9 +624,9 @@ fn impl_fact_json(i: &AST::ImplDef, scope: &[String]) -> String {
 }
 
 fn inline_trait_impl_fact_json(
-    type_name: &str,
+    type_path: &str,
+    trait_path: &str,
     block: &AST::TraitImplBlock,
-    scope: &[String],
 ) -> String {
     let methods = block
         .methods
@@ -521,9 +642,9 @@ fn inline_trait_impl_fact_json(
         .join(",");
     format!(
         "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"scope\":{},\"methods\":[{}],\"associated_types\":[{}],\"delegation_field\":null,\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
-        json_str(type_name),
-        json_str(&block.trait_name),
-        scope_json(scope),
+        json_str(type_path),
+        json_str(trait_path.rsplit_once('.').map_or(trait_path, |(_, name)| name)),
+        json_str(trait_path.rsplit_once('.').map_or("", |(scope, _)| scope)),
         methods,
         associated_types,
         span_json(block.trait_span.into())

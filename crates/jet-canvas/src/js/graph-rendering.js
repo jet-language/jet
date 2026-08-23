@@ -150,6 +150,7 @@
   }
 
   function fitGraph() {
+    if (document.getElementById("execute-command-authority")) return;
     const graph = latestDoc ? currentGraph(latestDoc) : null;
     if (!graph) return;
     const b = graphBounds(graph);
@@ -557,7 +558,7 @@
       return;
     }
     const selected = selectedNodeIds.has(node.node_id);
-    const active = debugOverlay && debugOverlay.active_node_id === node.node_id;
+    const active = debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const diagnostics = nodeDiagnostics(node);
     const breakpoint = nodeBreakpoint(node);
@@ -792,8 +793,9 @@
     }
     selectedGraphId = graph.graph_id;
     window.__jetCanvasSelectedGraphId = selectedGraphId;
-    if (!selectedNodeId || (!graph.nodes.some((n) => n.node_id === selectedNodeId) && !graphCommentBoxes(sourceGraph).some((b) => b.comment_id === selectedNodeId))) selectedNodeId = graph.entry_node;
-    if (selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
+    const selectedNodeIsValid = selectedNodeId && (graph.nodes.some((n) => n.node_id === selectedNodeId) || graphCommentBoxes(sourceGraph).some((b) => b.comment_id === selectedNodeId));
+    if (!selectedNodeIsValid) selectedNodeId = selectionExplicitlyCleared ? null : graph.entry_node;
+    if (!selectionExplicitlyCleared && selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
     selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id) || graphCommentBoxes(sourceGraph).some((b) => b.comment_id === id)));
     syncGraphPicker(doc);
     syncGraphList(doc);
@@ -835,7 +837,7 @@
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
       if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
-      const activeWire = debugOverlay && debugOverlay.active_wire_id === wire.wire_id;
+      const activeWire = debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_wire_id === wire.wire_id;
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       rememberWireEndpoint(wire, from, to);
       drawWire(wire, from, to, activeWire, selectedWire);
@@ -851,11 +853,12 @@
     }
 
     if (drag && drag.mode === "pin") {
-      drawCompatibleDropTargets(graph, drag.pin);
+      drawCompatibleDropTargets(graph, drag.pin, drag);
       const from = pinPoints.get(drag.pin.pin_id);
       if (from) {
         const controls = bezierControls(from, { x: drag.mx, y: drag.my });
-        const plan = connectionPlan(graph, drag.pin, hoverPin);
+        const plan = connectionPlan(graph, drag.pin, hoverPin, drag);
+        window.__jetCanvasWirePreview = { ok: plan.ok, label: plan.label, color: plan.color, from_pin_id: drag.pin.pin_id, to_pin_id: hoverPin && hoverPin.pin_id || null };
         syncWireStatus({ title: plan.ok ? "Wire preview" : "Wire refused", detail: plan.label, color: plan.color });
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
@@ -867,11 +870,13 @@
         ctx.setLineDash([]);
         drawConnectionBadge(plan, drag.mx, drag.my);
       }
+    } else {
+      window.__jetCanvasWirePreview = null;
     }
 
     if (pendingPin && (!drag || drag.mode !== "pin")) {
       syncWireStatus({ title: "Destination needed", detail: pinName(pendingPin) + " : " + exactPinType(pendingPin), color: colorForType(pendingPin.type || "Value") });
-      drawCompatibleDropTargets(graph, pendingPin);
+      drawCompatibleDropTargets(graph, pendingPin, { graphId: graph.graph_id, revision: latestDoc && latestDoc.revision, sourceId: currentCanvasSourceId() });
       const from = pinPoints.get(pendingPin.pin_id);
       if (from) {
         ctx.beginPath();
@@ -889,10 +894,10 @@
       const x = Math.min(drag.x, drag.mx), y = Math.min(drag.y, drag.my);
       const w = Math.abs(drag.mx - drag.x), h = Math.abs(drag.my - drag.y);
       ctx.setLineDash([6, 5]);
-      ctx.strokeStyle = "#67e8f9";
+      ctx.strokeStyle = "#f5a623";
       ctx.lineWidth = 1.5;
       ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = "rgba(103,232,249,.08)";
+      ctx.fillStyle = "rgba(245,166,35,.08)";
       ctx.fillRect(x, y, w, h);
       ctx.setLineDash([]);
     }
@@ -928,7 +933,7 @@
     const hitMap = {
       graph_id: graph.graph_id,
       nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
-      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, role: h.pin.role || null, pattern_source: h.pin.pattern_source || null, append_op: h.pin.append_op || null, source_span: h.pin.source_span || null, pattern_source_span: h.pin.pattern_source_span || null, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy })),
+      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, ability: h.pin.ability || "", fallible: !!h.pin.fallible, effect_grant_need: h.pin.effect_grant_need || null, role: h.pin.role || null, pattern_source: h.pin.pattern_source || null, append_op: h.pin.append_op || null, source_span: h.pin.source_span || null, pattern_source_span: h.pin.pattern_source_span || null, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy })),
       diagnostics: diagnosticHit.map((h) => ({ node_id: h.node.node_id, count: h.entries.length, severity: worstDiagnosticSeverity(h.entries), codes: h.entries.map((entry) => entry.code) }))
     };
     nodeBounds = new Map(hitMap.nodes.map((n) => [n.node_id, n]));
@@ -944,6 +949,9 @@
       name: point.pin && point.pin.name,
       type: point.pin && point.pin.type,
       direction: point.pin && point.pin.direction
+      , ability: point.pin && point.pin.ability || ""
+      , fallible: !!(point.pin && point.pin.fallible)
+      , effect_grant_need: point.pin && point.pin.effect_grant_need || null
       , role: point.pin && point.pin.role || null,
       append_op: point.pin && point.pin.append_op || null,
       source_span: point.pin && point.pin.source_span || null,
@@ -982,7 +990,12 @@
       virtualizationStats: Object.assign({}, window.__jetCanvasVirtualizationStats || {}),
       sourceText: doc.source_text || "",
       doc: latestDoc,
+      debugSession: debugSessionInfo,
+      debugSessionId,
+      debugOverlay,
       execConvergencePreview: window.__jetCanvasExecConvergencePreview || null,
+      wirePreview: window.__jetCanvasWirePreview || null,
+      lastConnectionPlan: window.__jetCanvasLastConnectionPlan || null,
       nodeDescriptors: latestDoc.node_descriptors || [],
       descriptorConsumption: graph.nodes.map((node) => {
         const descriptor = nodeDescriptor(node);
@@ -1008,6 +1021,7 @@
       graphTitle: graph.title || graph.graph_id,
       review: typeof reviewTestState === "function" ? reviewTestState() : null,
       selectedNodeIds: Array.from(selectedNodeIds),
+      pasteRenameChips: pasteRenameChips.map((rename) => Object.assign({}, rename)),
       savedNodePositions: JSON.parse(JSON.stringify((editorState.nodePositions || {})[graph.graph_id] || {})),
       renderedCommentRegions: renderedCommentRegions.map((region) => Object.assign({}, region)),
       favorites: (editorState.favorites || []).slice(),
@@ -1017,6 +1031,9 @@
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
       openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
       openGraphActionPalette: (query) => { openGraphActionPalette(window.innerWidth / 2 - 210, 72, query || "", viewportCenterGraphPoint()); return true; },
+      startDebug: () => { runDebug(["s"]); return true; },
+      stepDebug: () => { runDebug(["s"]); return true; },
+      stopDebug: () => { stopDebug(); return true; },
       switchGraphByTitle: (title) => {
         const target = (latestDoc && latestDoc.graphs || []).find((g) => g.title === title || String(g.title || "").includes(title));
         if (!target) return false;
@@ -1028,6 +1045,7 @@
           graph.nodes.find((node) => node.title === title && node.source_span)).filter(Boolean);
         selectedNodeIds = new Set(selected.map((node) => node.node_id));
         selectedNodeId = selected.length ? selected[selected.length - 1].node_id : null;
+        selectionExplicitlyCleared = selected.length === 0;
         drawGraph(latestDoc);
         return selected.length;
       },
@@ -1043,6 +1061,8 @@
           signature: entry.signature || "",
           summary: entry.summary || "",
           pure: !!entry.pure,
+          rank: Number(entry.rank || 0),
+          rank_terms: entry.rank_terms || [],
           pins: entry.pins || [],
           ret: entry.ret || "",
           op: entry.op || "",
@@ -1122,6 +1142,7 @@
       selectVariable: (name) => { selectVariable(name); return true; },
       copySelection: () => { copySelection(); return true; },
       pasteSelection: () => { pasteSelection(); return true; },
+      pasteAsStaged: () => { pasteAsStaged(); return true; },
       checkCurrentSource,
       jumpProblem: (index) => {
         const entry = activeDiagnostics()[Number(index) || 0];
@@ -1274,6 +1295,7 @@
     if (select) {
       selectedNodeIds = new Set([box.comment_id]);
       selectedNodeId = box.comment_id;
+      selectionExplicitlyCleared = false;
     }
     window.__jetCanvasCommentBoxes = graphCommentBoxes(graph).length;
     showToast("Comment added");

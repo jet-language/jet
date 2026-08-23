@@ -443,6 +443,11 @@ fn node_drag_persists_without_source_change() {
 }
 
 #[test]
+fn selection_marquee_modifiers_local_move() {
+    run_canvas_scenario("selection-marquee-modifiers-local-move");
+}
+
+#[test]
 fn read_graph_overview() {
     run_canvas_scenario("read-graph-overview");
 }
@@ -465,6 +470,16 @@ fn palette_insert_flow_variable_project_core() {
 #[test]
 fn wire_data_and_exec() {
     run_canvas_scenario("wire-data-and-exec");
+}
+
+#[test]
+fn data_pin_drag_to_wire() {
+    run_canvas_scenario("data-pin-drag-to-wire");
+}
+
+#[test]
+fn data_pin_type_gate() {
+    run_canvas_scenario("data-pin-type-gate");
 }
 
 #[test]
@@ -605,6 +620,11 @@ fn undo_depth_20_mixed_run() {
 #[test]
 fn run_button_output_visible() {
     run_canvas_scenario("run-button-output-visible");
+}
+
+#[test]
+fn debug_live_session() {
+    run_canvas_scenario("debug-live-session");
 }
 
 #[test]

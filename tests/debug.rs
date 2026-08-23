@@ -73,6 +73,24 @@ fn structured_session_status_ignores_program_output() {
     );
 }
 
+#[test]
+fn paused_session_stops_at_a_live_command_boundary() {
+    let file = fixture("paused_status", LOOPS);
+    let result = jet::Debug::run_session_result_paused(&file, &["s"]);
+
+    assert_eq!(result.status, jet::Debug::SessionStatus::Running);
+    assert!(result.transcript.contains("<- here"), "missing live stop: {}", result.transcript);
+    assert!(
+        !result.transcript.contains("program finished"),
+        "a paused session must not fabricate completion: {}",
+        result.transcript
+    );
+
+    let finished = jet::Debug::run_session_result_paused(&file, &["c"]);
+    assert_eq!(finished.status, jet::Debug::SessionStatus::Finished);
+    assert!(finished.transcript.contains("program finished"));
+}
+
 /// `step`/`s` stops on the very first statement of `main`, with the right Jet
 /// line, a `<- here` caret, and a `locals:` dump — all in Jet terms.
 #[test]

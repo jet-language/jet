@@ -2,19 +2,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
-use jet_driver::AST::{self, Expr, Item, Stmt};
 use jet_driver::FixEngine;
+use jet_driver::AST::{self, Expr, Item, Stmt};
 use jet_semindex::SourceSpan;
 
 use super::debug_source_git::canonical_path;
 use super::graph_helpers::{
-    diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id_name_span,
-    indentation_at, line_after, line_start, snippet, span_through_closing_parens,
+    diagnostics_error, edit, edit_error, edit_ok, edit_ok_source, function_signature_span,
+    graph_id_name_span, indentation_at, line_after, line_start, snippet,
+    span_through_closing_parens,
 };
 use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::trait_method_signature;
 use super::project_scan::project_file;
 use super::query_actions::{core_member_params, default_arg_for_type};
+use super::source_model::{write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, normalize_bounds,
     parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha, validate_comment_color,
@@ -112,7 +114,10 @@ pub(super) fn apply_create_trait_impl(
         let sig = trait_method_signature(src, method);
         body.push_str("    ");
         body.push_str(&sig);
-        if method.return_type.as_ref().is_some_and(|ret| ret.name() != "Void")
+        if method
+            .return_type
+            .as_ref()
+            .is_some_and(|ret| ret.name() != "Void")
             && method.declared_effects.is_none()
             && !method.is_pure
         {
@@ -171,6 +176,60 @@ struct TraitLocation<'a> {
     module_close: usize,
 }
 
+fn source_trait_path(
+    bundle: &AST::ProgramBundle,
+    module_idx: usize,
+    module_alias: &str,
+    name: &str,
+    span: Span,
+    fallback_scope: &[String],
+) -> Option<String> {
+    let ledger = &bundle.name_ledger;
+    let path = [
+        format!("{module_alias}.{name}"),
+        if fallback_scope.is_empty() {
+            format!("{module_alias}.{name}")
+        } else {
+            format!("{module_alias}.{}.{}", fallback_scope.join("."), name)
+        },
+    ]
+    .into_iter()
+    .find_map(|candidate| ledger.display_path(module_idx, &candidate, Some(module_idx)))
+    .or_else(|| ledger.canonical_path_at(module_idx, span.start, span.end))?;
+    Some(
+        path.strip_prefix(module_alias)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .unwrap_or(&path)
+            .to_string(),
+    )
+}
+
+fn enclosing_inline_module(
+    items: &[Item],
+    position: usize,
+) -> Option<(Vec<String>, usize)> {
+    for item in items {
+        let Item::CodeModule(module) = item else {
+            continue;
+        };
+        let Some(body) = &module.body else {
+            continue;
+        };
+        if !(module.span.start <= position && position < module.span.end) {
+            continue;
+        }
+        if let Some((mut scope, close)) = enclosing_inline_module(body, position) {
+            scope.insert(0, module.name.clone());
+            return Some((scope, close));
+        }
+        return Some((
+            vec![module.name.clone()],
+            module.span.end.saturating_sub(1),
+        ));
+    }
+    None
+}
+
 fn find_trait_location<'a>(
     bundle: &'a AST::ProgramBundle,
     path: &Path,
@@ -185,18 +244,46 @@ fn find_trait_location<'a>(
         items: &'a [Item],
         scope: &mut Vec<String>,
         requested_scope: &[&str],
-        trait_name: &str,
-        module_close: usize,
+        requested_name: &str,
+        local_name: &str,
+        module_idx: usize,
+        module_alias: &str,
+        root_items: &'a [Item],
+        source_len: usize,
+        bundle: &'a AST::ProgramBundle,
     ) -> Option<TraitLocation<'a>> {
         for item in items {
             match item {
-                Item::Trait(t)
-                    if t.name == trait_name
-                        && scope.iter().map(String::as_str).eq(requested_scope.iter().copied()) =>
-                {
+                Item::Trait(t) => {
+                    let display_path = source_trait_path(
+                        bundle,
+                        module_idx,
+                        module_alias,
+                        &t.name,
+                        t.name_span,
+                        scope,
+                    );
+                    let fallback_match = t.name == local_name
+                        && scope
+                            .iter()
+                            .map(String::as_str)
+                            .eq(requested_scope.iter().copied());
+                    if display_path.as_deref() != Some(requested_name) && !fallback_match {
+                        continue;
+                    }
+                    let (scope, module_close) = enclosing_inline_module(
+                        root_items,
+                        t.name_span.start,
+                    )
+                    .unwrap_or_else(|| (scope.clone(), source_len));
+                    let scope = display_path
+                        .as_deref()
+                        .and_then(|path| path.rsplit_once('.'))
+                        .map(|(scope, _)| scope.split('.').map(str::to_string).collect())
+                        .unwrap_or(scope);
                     return Some(TraitLocation {
                         trait_def: t,
-                        scope: scope.clone(),
+                        scope,
                         module_close,
                     });
                 }
@@ -207,8 +294,13 @@ fn find_trait_location<'a>(
                             body,
                             scope,
                             requested_scope,
-                            trait_name,
-                            m.span.end.saturating_sub(1),
+                            requested_name,
+                            local_name,
+                            module_idx,
+                            module_alias,
+                            root_items,
+                            source_len,
+                            bundle,
                         ) {
                             return Some(t);
                         }
@@ -220,7 +312,7 @@ fn find_trait_location<'a>(
         }
         None
     }
-    for module in &bundle.modules {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
         if canonical_path(&module.path) != source_path {
             continue;
         }
@@ -228,8 +320,13 @@ fn find_trait_location<'a>(
             &module.items,
             &mut Vec::new(),
             requested_scope,
+            trait_name,
             local_name,
+            module_idx,
+            &module.alias,
+            &module.items,
             module.source.len(),
+            bundle,
         ) {
             return Some(t);
         }
@@ -379,7 +476,9 @@ pub(super) fn apply_insert_call(
 ) -> Result<String, String> {
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let final_args = if args.is_empty() {
-        wire_expr.map(|expr| vec![expr.to_string()]).unwrap_or_default()
+        wire_expr
+            .map(|expr| vec![expr.to_string()])
+            .unwrap_or_default()
     } else {
         args.to_vec()
     };
@@ -429,11 +528,8 @@ pub(super) fn apply_insert_call(
     if let Some(import) = plan.import {
         edits.push(import);
     }
-    let changed = FixEngine::apply_edits(
-        src,
-        &edits,
-    )
-    .map_err(|_| edit_error("overlap", "Canvas insert edit overlapped"))?;
+    let changed = FixEngine::apply_edits(src, &edits)
+        .map_err(|_| edit_error("overlap", "Canvas insert edit overlapped"))?;
     write_checked_formatted(path, src, &changed)
 }
 
@@ -506,8 +602,7 @@ fn normalize_core_module(module: &str, member: &str) -> String {
     if module == "core.encoding"
         && matches!(
             member,
-            "parse" | "decode" | "to_string" | "to_string_pretty"
-                | "canonical" | "events"
+            "parse" | "decode" | "to_string" | "to_string_pretty" | "canonical" | "events"
         )
     {
         return "core.encoding.json".to_string();
@@ -614,7 +709,8 @@ fn core_import_insert_point(src: &str) -> (usize, bool) {
 }
 
 fn core_default_args(module: &str, member: &str) -> Vec<String> {
-    core_member_params(module, member, "").into_iter()
+    core_member_params(module, member, "")
+        .into_iter()
         .map(|(_, ty)| default_arg_for_type(&ty))
         .collect()
 }
@@ -672,8 +768,8 @@ pub(super) fn canvas_action_candidate(
         )],
     )
     .map_err(|_| edit_error("overlap", "Canvas action edit overlapped"))?;
-    let formatted =
-        jet_driver::Formatter::format_source(&changed).map_err(|diags| diagnostics_error(path, src, &diags))?;
+    let formatted = jet_driver::Formatter::format_source(&changed)
+        .map_err(|diags| diagnostics_error(path, src, &diags))?;
     let tmp = temp_canvas_check_path(path);
     fs::write(&tmp, &formatted).map_err(|e| edit_error("io", &e.to_string()))?;
     let (check, _) = jet_driver::Driver::check_file(&tmp.display().to_string(), None, true);
@@ -832,7 +928,11 @@ pub(super) fn apply_update_comment_region(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_delete_comment_region(path: &Path, src: &str, region_id: &str) -> Result<String, String> {
+pub(super) fn apply_delete_comment_region(
+    path: &Path,
+    src: &str,
+    region_id: &str,
+) -> Result<String, String> {
     apply_delete_hint_region(path, src, region_id, "comment")
 }
 
@@ -880,12 +980,7 @@ pub(super) fn apply_create_collapse_region(
             "Canvas collapse needs one valid source span",
         ));
     }
-    let selected = validated_collapse_selection(
-        path,
-        src,
-        graph_id,
-        SourceSpan { start, end },
-    )?;
+    let selected = validated_collapse_selection(path, src, graph_id, SourceSpan { start, end })?;
     if canvas_collapse_hints(src)
         .iter()
         .any(|hint| hint.anchor.start == selected.start && hint.anchor.end == selected.end)
@@ -950,35 +1045,39 @@ fn validated_collapse_selection(
     };
     let mut locs = Vec::new();
     collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
-    let first = locs.iter().find(|loc| {
-        requested.start == loc.anchor.start
-            || requested.start == loc.source.start
-            || requested.start == loc.full.start
-    }).or_else(|| {
-        // Subjectless guards render the condition span, not the `if` token.
-        // Accept that graph boundary and let the block comparison below make
-        // the final safety decision.
-        locs.iter().find(|loc| {
-            loc.is_guard
-                && loc.guard_span.is_some_and(|span| {
-                    requested.start >= span.start && requested.start < span.end
-                })
+    let first = locs
+        .iter()
+        .find(|loc| {
+            requested.start == loc.anchor.start
+                || requested.start == loc.source.start
+                || requested.start == loc.full.start
         })
-    });
-    let last = locs.iter().find(|loc| {
-        requested.end == loc.anchor.end
-            || requested.end == loc.source.end
-            || requested.end == loc.full.end
-    }).or_else(|| {
-        // Call nodes may expose the callee span while the checked statement
-        // owns the complete call expression. Treat an endpoint inside that
-        // expression as the graph's statement boundary.
-        locs.iter().find(|loc| {
-            loc.is_expr
-                && requested.end > loc.source.start
-                && requested.end <= loc.source.end
+        .or_else(|| {
+            // Subjectless guards render the condition span, not the `if` token.
+            // Accept that graph boundary and let the block comparison below make
+            // the final safety decision.
+            locs.iter().find(|loc| {
+                loc.is_guard
+                    && loc.guard_span.is_some_and(|span| {
+                        requested.start >= span.start && requested.start < span.end
+                    })
+            })
+        });
+    let last = locs
+        .iter()
+        .find(|loc| {
+            requested.end == loc.anchor.end
+                || requested.end == loc.source.end
+                || requested.end == loc.full.end
         })
-    });
+        .or_else(|| {
+            // Call nodes may expose the callee span while the checked statement
+            // owns the complete call expression. Treat an endpoint inside that
+            // expression as the graph's statement boundary.
+            locs.iter().find(|loc| {
+                loc.is_expr && requested.end > loc.source.start && requested.end <= loc.source.end
+            })
+        });
     let (Some(first), Some(last)) = (first, last) else {
         return Err(edit_error(
             "bad_request",
@@ -1137,13 +1236,21 @@ pub(super) fn apply_reorder_statements(
     };
     let mut locs = Vec::new();
     collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
-    let Some(moved_loc) = locs.iter().find(|loc| same_span(loc.anchor, moved)).cloned() else {
+    let Some(moved_loc) = locs
+        .iter()
+        .find(|loc| same_span(loc.anchor, moved))
+        .cloned()
+    else {
         return Err(edit_error(
             "not_found",
             "Canvas step to move no longer exists",
         ));
     };
-    let Some(anchor_loc) = locs.iter().find(|loc| same_span(loc.anchor, anchor)).cloned() else {
+    let Some(anchor_loc) = locs
+        .iter()
+        .find(|loc| same_span(loc.anchor, anchor))
+        .cloned()
+    else {
         return Err(edit_error(
             "not_found",
             "Canvas anchor step no longer exists",
@@ -1217,7 +1324,12 @@ pub(super) fn apply_add_pattern_arm(
             else_body,
             span,
         } => add_arm_to_classic_switch(src, arm, else_body, span, &head, &body)?,
-        PatternTarget::Switch { arms, else_body, span, .. } => {
+        PatternTarget::Switch {
+            arms,
+            else_body,
+            span,
+            ..
+        } => {
             // Insert right after the last existing arm so the new arm never
             // lands inside the else body's block (its first-statement
             // offset sits *inside* `else -> { ... }`, not before it — that
@@ -1314,10 +1426,13 @@ pub(super) fn apply_toggle_switch_state(
             "Canvas node is already inside a statement state",
         )),
         None if !statement_contains_span(&func.body, node_span)
-            || same_span(func.name_span.into(), node_span) => Err(edit_error(
-            "not_found",
-            "Canvas statement node no longer exists",
-        )),
+            || same_span(func.name_span.into(), node_span) =>
+        {
+            Err(edit_error(
+                "not_found",
+                "Canvas statement node no longer exists",
+            ))
+        }
         None => {
             let insert = line_start(src, node_span.start);
             let changed = FixEngine::apply_edits(
@@ -1440,9 +1555,7 @@ pub(super) fn apply_append_multi_input(
         ));
     };
     let (span, count) = match target {
-        MultiInputTarget::List { span, count } => {
-            (span, count)
-        }
+        MultiInputTarget::List { span, count } => (span, count),
     };
     let insert = src
         .get(span.start..span.end)
@@ -1702,10 +1815,7 @@ fn find_pattern_arm_remove_span(
                 for arm in arms {
                     let classic = AST::is_subjectless_guard(subject, *span)
                         && AST::uses_classic_if_spelling(src, *span, arm.cond.span());
-                    if same_span(
-                        switch_arm_edit_span(src, subject, *span, arm),
-                        pattern_span,
-                    ) {
+                    if same_span(switch_arm_edit_span(src, subject, *span, arm), pattern_span) {
                         *out = Some(RemoveArmInfo {
                             remove_span: if classic {
                                 stmt_text_span(src, stmt)
@@ -1788,22 +1898,13 @@ fn find_pattern_arm_remove_span_in_children(
     }
 }
 
-fn pattern_span_belongs_to_graph(
-    src: &str,
-    stmts: &[Stmt],
-    pattern_span: SourceSpan,
-) -> bool {
+fn pattern_span_belongs_to_graph(src: &str, stmts: &[Stmt], pattern_span: SourceSpan) -> bool {
     let mut found = false;
     find_pattern_span(src, stmts, pattern_span, &mut found);
     found
 }
 
-fn find_pattern_span(
-    src: &str,
-    stmts: &[Stmt],
-    pattern_span: SourceSpan,
-    found: &mut bool,
-) {
+fn find_pattern_span(src: &str, stmts: &[Stmt], pattern_span: SourceSpan, found: &mut bool) {
     if *found {
         return;
     }
@@ -1816,10 +1917,7 @@ fn find_pattern_span(
                 span,
             } => {
                 for arm in arms {
-                    if same_span(
-                        switch_arm_edit_span(src, subject, *span, arm),
-                        pattern_span,
-                    ) {
+                    if same_span(switch_arm_edit_span(src, subject, *span, arm), pattern_span) {
                         *found = true;
                         return;
                     }
@@ -1874,9 +1972,7 @@ fn find_pattern_span_in_children(
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => {
-            find_pattern_span(src, body, pattern_span, found)
-        }
+        | Stmt::ScopeMember { body, .. } => find_pattern_span(src, body, pattern_span, found),
         Stmt::ComptimeIf {
             then_body,
             else_body,
@@ -1908,7 +2004,11 @@ fn find_multi_input_target(
     }
 }
 
-fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option<MultiInputTarget>) {
+fn find_multi_input_in_stmt(
+    stmt: &Stmt,
+    node_span: SourceSpan,
+    out: &mut Option<MultiInputTarget>,
+) {
     if out.is_some() {
         return;
     }
@@ -1951,22 +2051,39 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                AST::ForKind::Range { start, end, step, exclusive: _ } => {
+                AST::ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     find_multi_input_in_expr(start, node_span, out);
                     find_multi_input_in_expr(end, node_span, out);
-                    if let Some(step) = step { find_multi_input_in_expr(step, node_span, out); }
+                    if let Some(step) = step {
+                        find_multi_input_in_expr(step, node_span, out);
+                    }
                 }
                 AST::ForKind::In { collection, step } => {
                     find_multi_input_in_expr(collection, node_span, out);
-                    if let Some(step) = step { find_multi_input_in_expr(step, node_span, out); }
+                    if let Some(step) = step {
+                        find_multi_input_in_expr(step, node_span, out);
+                    }
                 }
             }
             find_multi_input_target(body, node_span, out);
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             find_multi_input_in_expr(&init.init, node_span, out);
             find_multi_input_in_expr(cond, node_span, out);
-            if let Some(step) = step { find_multi_input_in_stmt(step, node_span, out); }
+            if let Some(step) = step {
+                find_multi_input_in_stmt(step, node_span, out);
+            }
             find_multi_input_target(body, node_span, out);
         }
         Stmt::Loop { body, .. }
@@ -2065,7 +2182,11 @@ fn walk_expr_children_for_multi_input(
             find_multi_input_in_expr(index, node_span, out);
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             find_multi_input_in_expr(base, node_span, out);
             if let Some(range) = range {
@@ -2184,22 +2305,39 @@ fn find_multi_input_element_in_stmt(
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                AST::ForKind::Range { start, end, step, exclusive: _ } => {
+                AST::ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     find_multi_input_element_in_expr(start, node_span, element_span, found);
                     find_multi_input_element_in_expr(end, node_span, element_span, found);
-                    if let Some(step) = step { find_multi_input_element_in_expr(step, node_span, element_span, found); }
+                    if let Some(step) = step {
+                        find_multi_input_element_in_expr(step, node_span, element_span, found);
+                    }
                 }
                 AST::ForKind::In { collection, step } => {
                     find_multi_input_element_in_expr(collection, node_span, element_span, found);
-                    if let Some(step) = step { find_multi_input_element_in_expr(step, node_span, element_span, found); }
+                    if let Some(step) = step {
+                        find_multi_input_element_in_expr(step, node_span, element_span, found);
+                    }
                 }
             }
             find_multi_input_element(body, node_span, element_span, found);
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             find_multi_input_element_in_expr(&init.init, node_span, element_span, found);
             find_multi_input_element_in_expr(cond, node_span, element_span, found);
-            if let Some(step) = step { find_multi_input_element_in_stmt(step, node_span, element_span, found); }
+            if let Some(step) = step {
+                find_multi_input_element_in_stmt(step, node_span, element_span, found);
+            }
             find_multi_input_element(body, node_span, element_span, found);
         }
         _ => {}
@@ -2347,7 +2485,10 @@ fn comma_separated_remove_span(
     element: SourceSpan,
 ) -> Result<SourceSpan, String> {
     let Some(container_text) = src.get(container.start..container.end) else {
-        return Err(edit_error("bad_request", "Canvas multi-input span is stale"));
+        return Err(edit_error(
+            "bad_request",
+            "Canvas multi-input span is stale",
+        ));
     };
     let rel_start = element.start.saturating_sub(container.start);
     let rel_end = element.end.saturating_sub(container.start);
@@ -2371,7 +2512,12 @@ fn comma_separated_remove_span(
 }
 
 fn consume_trailing_space(src: &str, mut offset: usize, limit: usize) -> usize {
-    while offset < limit && src.as_bytes().get(offset).is_some_and(u8::is_ascii_whitespace) {
+    while offset < limit
+        && src
+            .as_bytes()
+            .get(offset)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
         offset += 1;
     }
     offset
@@ -2606,13 +2752,21 @@ fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
     a.start == b.start && a.end == b.end
 }
 
-pub(super) fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
+pub(super) fn write_checked_formatted(
+    path: &Path,
+    before: &str,
+    candidate: &str,
+) -> Result<String, String> {
     let formatted = jet_driver::Formatter::format_source(candidate)
         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;
     write_checked_candidate(path, before, &formatted)
 }
 
-pub(super) fn write_checked_source(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
+pub(super) fn write_checked_source(
+    path: &Path,
+    before: &str,
+    candidate: &str,
+) -> Result<String, String> {
     write_checked_candidate(path, before, candidate)
 }
 
@@ -2631,7 +2785,13 @@ fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result
     }
     let changed = candidate != before;
     if changed {
-        fs::write(path, candidate).map_err(|e| edit_error("io", &e.to_string()))?;
+        write_source_if_unchanged(path, before, candidate).map_err(|error| match error {
+            SourceWriteError::Conflict => edit_error(
+                "conflict",
+                "source changed while this Canvas edit was prepared",
+            ),
+            SourceWriteError::Io(error) => edit_error("io", &error.to_string()),
+        })?;
     }
-    Ok(edit_ok(changed, path))
+    Ok(edit_ok_source(changed, candidate))
 }

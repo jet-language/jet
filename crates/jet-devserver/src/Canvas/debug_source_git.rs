@@ -1,18 +1,204 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use jet_driver::Diagnostics::Diagnostic;
 use jet_semindex::SourceSpan;
 
-use super::schema_api::{DEBUG_SCHEMA_VERSION, source_revision};
-use super::validation_json::{json_str, json_string_field, json_usize_field, parse_json_string, span_json};
+use super::schema_api::{source_revision, DEBUG_SCHEMA_VERSION};
+use super::validation_json::{
+    json_str, json_string_field, json_usize_field, parse_json_string, span_json,
+};
+
+const MAX_DEBUG_SESSIONS: usize = 32;
+const MAX_DEBUG_COMMANDS: usize = 64;
+const MAX_DEBUG_WATCHES: usize = 32;
+const MAX_DEBUG_BREAKPOINTS: usize = 128;
+const MAX_DEBUG_COMMAND_BYTES: usize = 256;
+
+/// Live Canvas debugger ownership. A session is source- and revision-bound;
+/// the server replays only its bounded command history through the same Jet
+/// debugger boundary on each request. This keeps the HTTP protocol live while
+/// avoiding a second interpreter or a second semantic model.
+pub struct DebugSessions {
+    next_id: AtomicU64,
+    sessions: Mutex<HashMap<String, DebugSession>>,
+}
+
+struct DebugSession {
+    path: PathBuf,
+    revision: String,
+    breakpoints: Vec<usize>,
+    commands: Vec<String>,
+    watches: Vec<String>,
+}
+
+pub(crate) struct DebugExecution {
+    pub(crate) id: String,
+    pub(crate) status: jet_debug::SessionStatus,
+    pub(crate) transcript: String,
+}
+
+impl DebugSessions {
+    pub fn new() -> Self {
+        Self {
+            next_id: AtomicU64::new(1),
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn execute(
+        &self,
+        path: &Path,
+        revision: &str,
+        requested_id: Option<&str>,
+        commands: &[String],
+        breakpoints: &[usize],
+        watches: &[String],
+    ) -> Result<DebugExecution, String> {
+        validate_debug_limits(commands, breakpoints, watches)?;
+        let path = canonical_path(path);
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+
+        let id = if let Some(id) = requested_id {
+            let Some(session) = sessions.get_mut(id) else {
+                return Err(debug_error(
+                    "session",
+                    "debug session is no longer live; start a new session",
+                ));
+            };
+            if session.path != path || session.revision != revision {
+                sessions.remove(id);
+                return Err(debug_error(
+                    "conflict",
+                    "debug session is stale for the current source revision",
+                ));
+            }
+            if session.breakpoints != breakpoints {
+                sessions.remove(id);
+                return Err(debug_error(
+                    "session",
+                    "breakpoints changed; start a new debug session",
+                ));
+            }
+            let mut next_commands = commands.to_vec();
+            if next_commands.is_empty() {
+                next_commands.push("s".to_string());
+            }
+            if session.commands.len() + next_commands.len() > MAX_DEBUG_COMMANDS {
+                return Err(debug_error(
+                    "limit",
+                    "debug session command history is full; start a new session",
+                ));
+            }
+            session.commands.extend(next_commands);
+            session.watches = watches.to_vec();
+            id.to_string()
+        } else {
+            if sessions.len() >= MAX_DEBUG_SESSIONS {
+                if let Some(oldest) = sessions.keys().next().cloned() {
+                    sessions.remove(&oldest);
+                }
+            }
+            let id = format!(
+                "canvas-debug-{}",
+                self.next_id.fetch_add(1, Ordering::Relaxed)
+            );
+            let mut history = commands.to_vec();
+            if history.is_empty() {
+                history.push("s".to_string());
+            }
+            sessions.insert(
+                id.clone(),
+                DebugSession {
+                    path: path.clone(),
+                    revision: revision.to_string(),
+                    breakpoints: breakpoints.to_vec(),
+                    commands: history,
+                    watches: watches.to_vec(),
+                },
+            );
+            id
+        };
+
+        let session = sessions
+            .get(&id)
+            .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
+        let mut inputs = session
+            .breakpoints
+            .iter()
+            .map(|line| format!("break {line}"))
+            .collect::<Vec<_>>();
+        inputs.extend(session.commands.iter().cloned());
+        inputs.push("locals".to_string());
+        inputs.extend(session.watches.iter().map(|watch| format!("p {watch}")));
+        inputs.push("bt".to_string());
+        let refs = inputs.iter().map(String::as_str).collect::<Vec<_>>();
+        let result = jet_debug::run_session_result_paused(&path.display().to_string(), &refs);
+        if result.status != jet_debug::SessionStatus::Running {
+            sessions.remove(&id);
+        }
+        Ok(DebugExecution {
+            id,
+            status: result.status,
+            transcript: result.transcript,
+        })
+    }
+
+    pub(crate) fn stop(&self, id: &str) -> bool {
+        self.sessions
+            .lock()
+            .map(|mut sessions| sessions.remove(id).is_some())
+            .unwrap_or(false)
+    }
+}
+
+impl Default for DebugSessions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn validate_debug_limits(
+    commands: &[String],
+    breakpoints: &[usize],
+    watches: &[String],
+) -> Result<(), String> {
+    if commands.len() > MAX_DEBUG_COMMANDS
+        || breakpoints.len() > MAX_DEBUG_BREAKPOINTS
+        || watches.len() > MAX_DEBUG_WATCHES
+    {
+        return Err(debug_error(
+            "limit",
+            "Canvas debug accepts at most 64 commands, 128 breakpoints, and 32 watches per session",
+        ));
+    }
+    if commands
+        .iter()
+        .chain(watches.iter())
+        .any(|value| value.len() > MAX_DEBUG_COMMAND_BYTES)
+    {
+        return Err(debug_error(
+            "limit",
+            "Canvas debug command and watch names are limited to 256 bytes",
+        ));
+    }
+    Ok(())
+}
 
 pub(super) fn debug_ok(
     src: &str,
     graph_json: &str,
     transcript: &str,
     status: jet_debug::SessionStatus,
+    session_id: &str,
     breakpoint_lines: &[usize],
+    stale_breakpoints: &[String],
     watches: &[String],
 ) -> String {
     let active_line = match status {
@@ -34,9 +220,10 @@ pub(super) fn debug_ok(
         jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => "finished",
     };
     format!(
-        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":\"local-source-span\",\"state\":{},\"persistence\":\"local-source-span\"}},\"overlay\":{{\"debug_overlay\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":\"jet-dev-interpreter\",\"persistence\":\"local-source-span\"}},\"overlay\":{{\"debug_overlay\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}]}}}}",
         DEBUG_SCHEMA_VERSION,
         json_str(&source_revision(src)),
+        json_str(session_id),
         json_str(overlay),
         json_str(overlay),
         active_line
@@ -46,7 +233,7 @@ pub(super) fn debug_ok(
         json_str(&active_graph),
         json_str(&active_node),
         json_str(&active_wire),
-        breakpoint_json(src, breakpoint_lines),
+        breakpoint_json(src, breakpoint_lines, stale_breakpoints),
         locals_json(transcript),
         watches_json(transcript, watches),
         call_stack_json(transcript),
@@ -60,6 +247,15 @@ pub(super) fn debug_error(kind: &str, message: &str) -> String {
         DEBUG_SCHEMA_VERSION,
         json_str(kind),
         json_str(message)
+    )
+}
+
+pub(super) fn debug_stop_ok(src: &str, session_id: &str) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"revision\":{},\"session\":{{\"id\":{},\"state\":\"stopped\",\"tier\":\"jet-dev-interpreter\",\"persistence\":\"local-source-span\"}},\"overlay\":null}}",
+        DEBUG_SCHEMA_VERSION,
+        json_str(&source_revision(src)),
+        json_str(session_id)
     )
 }
 
@@ -132,9 +328,23 @@ fn line_of_offset(src: &str, offset: usize) -> usize {
 }
 
 pub(super) fn line_from_anchor(src: &str, anchor: &str) -> Option<usize> {
-    let (start, _) = anchor.split_once(':')?;
-    let offset = start.parse::<usize>().ok()?;
-    Some(line_of_offset(src, offset))
+    let span = anchor_span(src, anchor)?;
+    Some(line_of_offset(src, span.start))
+}
+
+fn anchor_span(src: &str, anchor: &str) -> Option<SourceSpan> {
+    let (start, end) = anchor.split_once(':')?;
+    let start = start.parse::<usize>().ok()?;
+    let end = end.parse::<usize>().ok()?;
+    if start >= src.len()
+        || start > end
+        || end > src.len()
+        || !src.is_char_boundary(start)
+        || !src.is_char_boundary(end)
+    {
+        return None;
+    }
+    Some(SourceSpan { start, end })
 }
 
 fn record_id_for_span(json: &str, id_key: &str, active: SourceSpan) -> Option<String> {
@@ -184,19 +394,29 @@ fn graph_id_from_node_id(node_id: &str) -> Option<String> {
     None
 }
 
-fn breakpoint_json(src: &str, lines: &[usize]) -> String {
-    lines
+fn breakpoint_json(src: &str, lines: &[usize], stale_anchors: &[String]) -> String {
+    let mut entries = lines
         .iter()
         .map(|line| {
-            let span = line_span(src, *line);
+            let valid = *line > 0 && *line <= src.lines().count();
+            let span = valid.then(|| line_span(src, *line));
             format!(
-                "{{\"line\":{},\"source_span\":{},\"state\":\"valid\"}}",
+                "{{\"line\":{},\"source_span\":{},\"state\":{}}}",
                 line,
-                span_json(span)
+                span.map(span_json).unwrap_or_else(|| "null".to_string()),
+                json_str(if valid { "valid" } else { "stale" })
             )
         })
-        .collect::<Vec<_>>()
-        .join(",")
+        .collect::<Vec<_>>();
+    entries.extend(stale_anchors.iter().map(|anchor| {
+        let span = anchor_span(src, anchor);
+        format!(
+            "{{\"line\":null,\"source_span\":{},\"anchor\":{},\"state\":\"stale\"}}",
+            span.map(span_json).unwrap_or_else(|| "null".to_string()),
+            json_str(anchor)
+        )
+    }));
+    entries.join(",")
 }
 
 fn locals_json(transcript: &str) -> String {
@@ -236,6 +456,7 @@ fn parse_assignments(text: &str) -> String {
         return String::new();
     }
     text.split("   ")
+        .take(64)
         .filter_map(|part| {
             let (name, value) = part.split_once(" = ")?;
             Some(format!(
@@ -252,6 +473,11 @@ fn call_stack_json(transcript: &str) -> String {
     transcript
         .lines()
         .filter(|line| line.starts_with('#') && line.contains(" at "))
+        .rev()
+        .take(32)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
         .map(json_str)
         .collect::<Vec<_>>()
         .join(",")
@@ -260,6 +486,11 @@ fn call_stack_json(transcript: &str) -> String {
 fn trace_json(transcript: &str) -> String {
     transcript
         .lines()
+        .rev()
+        .take(128)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
         .map(json_str)
         .collect::<Vec<_>>()
         .join(",")
@@ -341,6 +572,8 @@ mod tests {
             &graph,
             transcript,
             jet_debug::SessionStatus::Running,
+            "test-session",
+            &[],
             &[],
             &[],
         );
@@ -348,7 +581,10 @@ mod tests {
         assert!(out.contains("\"state\":\"running\""), "{out}");
         assert!(out.contains("\"debug_overlay\":\"running\""), "{out}");
         assert!(out.contains("\"active_line\":2"), "{out}");
-        assert!(out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""), "{out}");
+        assert!(
+            out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""),
+            "{out}"
+        );
         assert!(
             out.contains("\"active_node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\""),
             "{out}"

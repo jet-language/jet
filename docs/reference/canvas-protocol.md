@@ -96,6 +96,11 @@ Failure response:
 A stale `project_revision` or touched-file `revision` fails before any write.
 Preview mode and rejected transactions leave source untouched. Apply mode writes
 only after the changed Package file parses through Jetpack's manifest parser.
+The publish step compares each expected source snapshot again, atomically
+replaces each changed file from a synced temporary, and uses the same source
+transaction seam for rollback when a later file cannot be published. A conflict
+or I/O failure leaves every source file and the client's undo history at its
+previous committed snapshot.
 
 ## Graph Document V1
 
@@ -195,6 +200,13 @@ state are private editor view state. They do not appear in graph JSON and do not
 write Jet source until a staged node is connected to a source-backed pin or a
 paste operation creates a valid source transaction.
 
+Source-backed paste uses a `replace_source` transaction with
+`source_edit:"paste_clone"`. The client renames cloned bindings against the
+current source, inserts the clone after the selected source span, and shows the
+rename pairs in Details. The clipboard carries the source revision; a changed
+revision rejects paste without writing source. “Paste as staged” always keeps
+the result local until a compatible source-backed connection materializes it.
+
 Collapsed graph views also persist as ordinary comments:
 
 ```jet
@@ -230,21 +242,35 @@ Request fields:
 | `schema_version` | Integer debug schema version. Current value: `1`. |
 | `source_id` | Optional project-relative `.jet` source selected in the Canvas file rail. The revision, breakpoints, values, and execution state apply to this file. |
 | `revision` | Source revision from the graph document. |
+| `session_id` | Returned by a running response and required to continue or stop that source- and revision-bound session. Omit it to start a session. |
 | `commands` | Debugger commands using the `jet debug` vocabulary: `step`, `next`, `continue`, `finish`, `locals`, `print`, `backtrace`. |
 | `breakpoint_spans` | Local source-span anchors encoded as `start:end`. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
 | `watches` | Local names to print at the stopped frame. |
+| `stop` | Optional boolean. With `session_id`, ends the live session without changing source. |
 
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"revision":"sha256-...","session":{"id":"local-source-span","state":"finished","persistence":"local-source-span"},"overlay":{"debug_overlay":"finished","active_line":null,"active_span":{"start":0,"end":0},"active_graph_id":"","active_node_id":"","active_wire_id":"","breakpoints":[],"locals":[],"watches":[],"call_stack":[],"trace":[]}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span"},"overlay":{"debug_overlay":"running","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"]}}
 ```
 
-The response keeps observed locals, watches, call frames, and trace entries as
-history. It clears active source and graph IDs after the scripted run finishes.
-Each request currently runs its script to `finished` or a diagnostic. The
-endpoint does not keep a resumable process.
+The first request creates a live source-level session. A later request sends
+the returned `session_id` and one or more commands to continue the same
+source/revision session. The active line, node, wire, locals, watches, call
+stack, and trace are all projections of that one stop. A finished or stopped
+session has no active source or graph IDs, so Canvas never pulses without a
+live session. The response includes `tier` so a compiled run can project its
+native lldb/DAP session through the same protocol while `jet dev` projects its
+executing tier's own session.
+
+Breakpoints that no longer map to the current source are returned with
+`"state":"stale"`; they are not silently moved. Session state is bounded to
+32 live sessions, 64 commands, 128 breakpoints, 32 watches, 32 call-stack
+frames, and 128 trace entries. Stale revisions, missing sessions, runtime
+disconnects, and unsupported debugger boundaries return a structured Canvas
+diagnostic. Source edits are never part of this endpoint and remain intact on
+every failure.
 
 Unsupported interpreter/native boundaries return Jet diagnostics through the
 same protocol. They never expose rustc output.
@@ -335,6 +361,11 @@ Diagnostic failure response:
 Every successful write runs through `jet fmt`, re-checks through the front end,
 then reprojects from source. Canvas does not own a parser, checker, graph asset,
 or semantic sidecar.
+No semantic sidecars carry source meaning.
+The final publish is compare-and-publish against the request's source snapshot.
+If the source changes after validation, the transaction returns `kind:"conflict"`
+without replacing it; the successful response's `source_text` is the committed
+snapshot used by local undo/redo. Failed saves never create an undo entry.
 
 ## Query V1
 
@@ -356,7 +387,7 @@ the project document already shown by the client.
 | `references` | `symbol` | Returns project-wide definition/reference sites plus impact facts. |
 | `source_to_graph` | `start`, `end` | Maps a source byte span to matching graph nodes/inline expressions. |
 | `preview_rename` | `symbol`, `to` | Returns the exact text diff for a rename without writing source. |
-| `actions` / `palette_entries` | none | Returns source-backed palette entries, `project_functions`, and ratified Canvas actions derived from checked semindex facts. |
+| `actions` / `palette_entries` | none | Returns source-backed `project_functions` metadata and one authoritative, ranked Canvas action list derived from checked semindex facts. The browser menu consumes the action list once. |
 | `core_catalog` / `corelib_catalog` | optional `query` | Returns read-only `core.*` modules and members from the canonical Core library reference. |
 
 Successful response:

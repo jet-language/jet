@@ -371,6 +371,24 @@ fn run() {
 }
 "#;
 
+const CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE: &str = r#"module ui {
+    trait Drawable {
+        fn render(self) String -[IO]>
+        fn label(self) String -> {
+            return "drawable"
+        }
+    }
+
+    struct Badge {
+        text: String
+    }
+}
+
+fn run() {
+    print("ready")
+}
+"#;
+
 const CANVAS_TRAIT_ASSOC_TYPE_FIXTURE: &str = r#"trait Indexed {
     type Elem
     fn at(self, i: Int) Elem
@@ -693,6 +711,67 @@ fn run() {
 }
 
 #[test]
+fn canvas_projects_switch_arm_outputs_with_source_provenance() {
+    let path = write_fixture(
+        "multi_exec_switch_outputs",
+        r#"fn choose(value: Int) Int -> {
+    if value == {
+        0 -> { return 0 }
+        1 -> { return 1 }
+        else -> { return 2 }
+    }
+}
+
+fn run() {
+    print(choose(1))
+}
+"#,
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("switch multi-exec graph");
+    let choose = graph_object_for_title(&graph, "choose");
+    let pins = json_top_level_objects(json_array_field(choose, "pins"));
+
+    for (name, pattern) in [("arm1", "0"), ("arm2", "1")] {
+        let pin = pins
+            .iter()
+            .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
+            .unwrap_or_else(|| panic!("missing {name} pin: {choose}"));
+        assert!(pin.contains("\"direction\":\"output\""), "{pin}");
+        assert!(pin.contains("\"type\":\"exec\""), "{pin}");
+        assert!(pin.contains("\"role\":\"arm\""), "{pin}");
+        assert!(
+            pin.contains(&format!("\"pattern_source\":\"{pattern}\"")),
+            "pattern provenance missing: {pin}"
+        );
+        let offset = source
+            .find(&format!("{pattern} ->"))
+            .expect("arm source span");
+        assert!(
+            pin.contains(&format!("\"source_span\":{{\"start\":{offset},\"end\":")),
+            "source span does not identify {pattern} arm: {pin}"
+        );
+    }
+
+    let else_pin = pins
+        .iter()
+        .find(|pin| pin.contains("\"name\":\"else\""))
+        .expect("missing else pin");
+    assert!(else_pin.contains("\"direction\":\"output\""), "{else_pin}");
+    assert!(else_pin.contains("\"type\":\"exec\""), "{else_pin}");
+    assert!(else_pin.contains("\"role\":\"else\""), "{else_pin}");
+    assert!(
+        else_pin.contains("\"source_span\":{\"start\":"),
+        "{else_pin}"
+    );
+    assert!(
+        !source.contains("=>"),
+        "retired arrow spelling leaked: {source}"
+    );
+    assert_eq!(jet::Formatter::format_source(&source).unwrap(), source);
+}
+
+#[test]
 fn canvas_rejects_ambiguous_package_facts_before_projection() {
     let dir = temp_dir("graph_ambiguous_package");
     fs::write(
@@ -955,6 +1034,56 @@ fn canvas_edit_transactions_write_source_and_reproject() {
     assert!(inserted.contains("print(\"canvas\")"));
     let final_graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph final");
     assert!(final_graph.contains("\"title\":\"print\""));
+}
+
+#[test]
+fn canvas_source_paste_is_renamed_checked_and_stale_atomic() {
+    let path = write_fixture("paste_clone", CANVAS_FIXTURE);
+    let before = fs::read_to_string(&path).unwrap();
+    let stale_revision = jet::Canvas::source_revision(&before);
+    let clone = before.replace(
+        "    total := square(limit)\n",
+        "    total := square(limit)\n    total_copy := square(limit)\n",
+    );
+    let escaped_clone = clone
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n");
+    let paste = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source_edit\":\"paste_clone\",\"source\":\"{}\"}}",
+        stale_revision, escaped_clone
+    );
+    let paste_out = jet::Canvas::apply_transaction_json(&path, &paste).expect("paste clone transaction");
+    assert!(paste_out.contains("\"changed\":true"), "{paste_out}");
+    let pasted = fs::read_to_string(&path).unwrap();
+    let original_offset = pasted.find("total := square(limit)").expect("original binding");
+    let clone_offset = pasted.find("total_copy := square(limit)").expect("renamed clone");
+    assert!(clone_offset > original_offset, "paste must insert after the selected source line");
+    assert!(jet::Canvas::graph_json_for_file(&path)
+        .expect("reproject pasted graph")
+        .contains("\"title\":\"total_copy\""));
+
+    let invalid_revision = jet::Canvas::source_revision(&pasted);
+    let invalid = pasted.replace("total_copy := square(limit)", "total_copy := missing(limit)");
+    let escaped_invalid = invalid
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n");
+    let invalid_request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
+        invalid_revision, escaped_invalid
+    );
+    let error = jet::Canvas::apply_transaction_json(&path, &invalid_request).unwrap_err();
+    assert!(error.contains("Error [") || error.contains("diagnostic"), "{error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), pasted, "invalid paste must not write source");
+
+    let stale_request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
+        stale_revision, escaped_clone
+    );
+    let stale_error = jet::Canvas::apply_transaction_json(&path, &stale_request).unwrap_err();
+    assert!(stale_error.contains("source changed since this Canvas graph was drawn"), "{stale_error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), pasted, "stale paste must not write source");
 }
 
 #[test]
@@ -2098,7 +2227,7 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     .unwrap();
     fs::write(
         dir.join("helper.jet"),
-        "pub fn square(n: Int) Int -> {\n    return n * n\n}\n",
+        "fn hidden(n: Int) Int -> {\n    return n\n}\n\npub fn square(n: Int) Int -> {\n    return n * n\n}\n",
     )
     .unwrap();
     let path = dir.join("main.jet");
@@ -2120,7 +2249,9 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     );
     assert!(
         !actions.contains("\"module_path\":\"js.plotly\"")
-            && !actions.contains("\"name\":\"println\""),
+            && !actions.contains("\"name\":\"println\"")
+            && !actions.contains("\"name\":\"hidden\"")
+            && !actions.contains("\"callee\":\"helper.hidden\""),
         "foreign binding functions must not leak into the project palette: {actions}"
     );
 
@@ -3899,9 +4030,11 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("data-project-file"), "{js}");
     assert!(js.contains("const sourceFiles = (project.files || []).filter"), "{js}");
     assert!(js.contains("Showing first ${visibleResults.length}"), "{js}");
-    assert!(js.contains("const requestedSourceId = selectedSourceId || latestDoc.source_id || null"), "{js}");
+    assert!(js.contains("const requestedSourceId = currentCanvasSourceId();"), "{js}");
     assert!(js.contains("Command result is stale; current source was kept"), "{js}");
     assert!(js.contains("Debug result is stale; current source was kept"), "{js}");
+    assert!(js.contains("Debug session disconnected; source was kept"), "{js}");
+    assert!(js.contains("debugSessionId"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("function nodeDescriptorForAction"), "{js}");
     assert!(js.contains("descriptor.palette.insertable"), "{js}");
@@ -3932,6 +4065,33 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(!js.contains("Refused: E0204"), "{js}");
     assert!(!js.contains("Source truth"), "{js}");
     assert!(!js.contains("source-truth"), "{js}");
+    assert!(js.contains("function renderExecConvergencePreview"), "{js}");
+    assert!(js.contains("strategy: \"extract\""), "{js}");
+    assert!(js.contains("const accepted = result && result.changed === true"), "{js}");
+}
+
+#[test]
+fn canvas_details_are_descriptor_driven_and_dom_safe() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let inspector = fs::read_to_string(repo.join("crates/jet-canvas/src/js/inspector-connections.js"))
+        .expect("read inspector JavaScript");
+    let diagnostics = fs::read_to_string(repo.join("crates/jet-canvas/src/js/diagnostics-query.js"))
+        .expect("read diagnostics JavaScript");
+    let project = fs::read_to_string(repo.join("crates/jet-canvas/src/js/project-navigation.js"))
+        .expect("read project JavaScript");
+
+    assert!(inspector.contains("function renderFieldDescriptors"), "{inspector}");
+    assert!(inspector.contains("function validatedFieldDescriptors"), "{inspector}");
+    assert!(inspector.contains("apply_op"), "{inspector}");
+    assert!(inspector.contains("function variableDetailDescriptors"), "{inspector}");
+    assert!(inspector.contains("function functionDetailDescriptors"), "{inspector}");
+    assert!(inspector.contains("function nodeDetailDescriptors"), "{inspector}");
+    assert!(!inspector.contains("innerHTML"), "Details retained an HTML sink: {inspector}");
+    assert!(!inspector.contains("row.innerHTML"), "Details retained per-row HTML construction: {inspector}");
+    assert!(diagnostics.contains("function diagnosticDetailDescriptors"), "{diagnostics}");
+    assert!(!diagnostics.contains("problemsList.innerHTML"), "diagnostics retained an HTML sink: {diagnostics}");
+    assert!(project.contains("function projectMiniCard"), "{project}");
+    assert!(!project.contains("projectRail.innerHTML"), "project selection retained an HTML sink: {project}");
 }
 
 #[test]
@@ -4373,6 +4533,50 @@ fn canvas_refuses_trait_impl_guess_for_associated_types() {
     let err = jet::Canvas::apply_transaction_json(&path, &edit).unwrap_err();
     assert!(err.contains("needs_associated_types"), "{err}");
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
+}
+
+#[test]
+fn canvas_trait_impl_authoring_preserves_nested_scope_and_provenance() {
+    let path = write_fixture(
+        "nested_trait_interface",
+        CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    for field in [
+        "\"kind\":\"trait_interface\"",
+        "\"trait\":\"Drawable\"",
+        "\"scope\":\"ui\"",
+        "\"signature\":\"fn render(self) String -[IO]>\"",
+        "\"source_span\"",
+    ] {
+        assert!(
+            graph.contains(field),
+            "nested trait graph missing {field}: {graph}"
+        );
+    }
+
+    let src = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"create_trait_impl\",\"revision\":\"{}\",\"type_name\":\"Badge\",\"trait_name\":\"ui.Drawable\"}}",
+        revision
+    );
+    let out =
+        jet::Canvas::apply_transaction_json(&path, &edit).expect("create nested trait impl");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("impl Badge.Drawable"), "{after}");
+    assert!(after.contains("fn render(self) String -[IO]>"), "{after}");
+    assert!(after.contains("return \"canvas\""), "{after}");
+    assert_eq!(
+        jet::format_source(&after).expect("format nested trait impl"),
+        after
+    );
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("nested trait impl graph");
+    assert!(graph.contains("\"kind\":\"trait_impl\""), "{graph}");
+    assert!(graph.contains("\"trait\":\"Drawable\""), "{graph}");
+    assert!(graph.contains("\"scope\":\"ui\""), "{graph}");
 }
 
 #[test]

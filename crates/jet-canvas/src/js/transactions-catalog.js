@@ -176,6 +176,20 @@
 
   function postTransaction(body) {
     if (!body) return showToast("Action needs a source transaction");
+    const inlinePlan = typeof inlineEditPlan === "function" ? inlineEditPlan(body) : null;
+    if (inlinePlan && !inlinePlan.ok) {
+      const refusal = {
+        ok: false,
+        changed: false,
+        reason: inlinePlan.label,
+        message: inlinePlan.label,
+        code: "client_type_gate"
+      };
+      window.__jetCanvasLastTx = null;
+      window.__jetCanvasLastTxResult = refusal;
+      showToast("Edit refused: " + inlinePlan.label, { isError: true });
+      return Promise.resolve(refusal);
+    }
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
     const request = Object.assign({}, body);
@@ -195,9 +209,10 @@
               { label: "Retry", primary: true, run: () => postTransaction(body) }
             ]);
             setSaveState("source unchanged", "error");
+            if (body.op === "replace_source" && body.source_edit === "paste_clone") pasteRenameChips = [];
             showToast(result.json.message || "Edit rejected", { isError: true });
           }
-          return;
+          return { ok: false, json: result.json };
         }
         if (result.json.protocol === "jet.canvas.action") {
           window.__jetCanvasLastTxResult = result.json;
@@ -209,7 +224,7 @@
           searchState.stale = false;
           renderSearchResults();
           showToast("Canvas action preview validated");
-          return;
+          return { ok: true, json: result.json };
         }
         if (result.json.changed && beforeSource && result.json.source_text) {
           recordUndoEntry(body, beforeSource, result.json.source_text);
@@ -217,6 +232,7 @@
           searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
           renderSearchResults();
         }
+        if (!(body.op === "replace_source" && body.source_edit === "paste_clone")) pasteRenameChips = [];
         if (latestDoc && result.json.revision) {
           latestDoc = Object.assign({}, latestDoc, {
             revision: result.json.revision,
@@ -229,6 +245,7 @@
         showToast(result.json.changed ? "Source updated" : "No change");
         return loadGraph().then(() => {
           window.__jetCanvasLastTxResult = result.json;
+          return { ok: true, json: result.json };
         });
       })
       .catch((e) => {
@@ -238,6 +255,7 @@
         ]);
         setSaveState("source unchanged", "error");
         showToast(String(e), { isError: true });
+        return { ok: false, error: e };
       });
   }
 
@@ -345,7 +363,12 @@
           selectedGraphId = null;
           selectedNodeId = null;
           selectedNodeIds = new Set();
+          selectionExplicitlyCleared = false;
+          debugRequestGeneration++;
+          debugSessionId = null;
+          debugSessionInfo = null;
           debugOverlay = null;
+          syncDebugActive();
           searchState.results = [];
           searchState.spans = [];
           searchState.active = -1;
@@ -356,6 +379,11 @@
           searchState.stale = false;
           if (typeof renderSearchResults === "function") renderSearchResults();
         } else if (revisionChanged) {
+          debugRequestGeneration++;
+          debugSessionId = null;
+          debugSessionInfo = null;
+          debugOverlay = null;
+          syncDebugActive();
           searchState.stale = true;
           if (typeof renderSearchResults === "function") renderSearchResults();
         }
@@ -425,33 +453,6 @@
       .then((doc) => {
         if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
         if (!doc || !doc.actions) return;
-        const projectFunctions = (doc.project_functions || []).map((fn) => withNodeDescriptor({
-          title: fn.name || fn.callee,
-          detail: (fn.module_path || "project") + " · " + (fn.signature || fn.callee || ""),
-          kind: "project_function",
-          node_descriptor_id: fn.node_descriptor_id,
-          group: "Project",
-          op: fn.insert_op || "insert_call",
-          callee: fn.callee || fn.name,
-          insert_callee: fn.insert_callee || fn.callee || fn.name,
-          rank: Number(fn.rank || 0),
-          rank_terms: fn.rank_terms || [],
-          source_span: fn.source_span || null,
-          module_path: fn.module_path || "project",
-          action_id: "project:" + (fn.callee || fn.name),
-          signature: fn.signature || "",
-          pure: !!fn.pure,
-          pins: fn.pins || [],
-          ret: actionReturnType(fn) || fn.ret || "Void",
-          available: fn.available !== false,
-          stageable: !!fn.stageable,
-          stage_reason_code: fn.stage_reason_code || "",
-          stage_reason: fn.stage_reason || "",
-          receiver_type: fn.receiver_type || "",
-          denied_reason: fn.denied_reason || "",
-          unavailable_reason_code: fn.unavailable_reason_code || "",
-          args: fn.default_args || []
-        }));
         const canvasActions = doc.actions.map((action) => withNodeDescriptor({
           title: action.title || action.callee,
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
@@ -484,10 +485,14 @@
           ret: action.ret || actionReturnType(action) || "Void",
           args: action.default_args || ["\"canvas\""]
         }));
-        actionEntries = projectFunctions.concat(canvasActions);
+        // `project_functions` is the query's source metadata view. The
+        // authoritative action view already contains those exports with
+        // authority and descriptor-owned ranking facts; adding both creates
+        // duplicate menu rows for every project function.
+        actionEntries = canvasActions;
         actionEntriesRevision = loadRevision;
         if (canvasActions.some((action) => action.kind === "canvas.core_catalog")) coreCatalogLoaded = true;
-        if (latestDoc && latestDoc.revision === loadRevision) drawGraph(latestDoc);
+        if (latestDoc && latestDoc.revision === loadRevision && !document.getElementById("execute-command-authority")) drawGraph(latestDoc);
         return actionEntries;
       })
       .catch(() => actionEntries)

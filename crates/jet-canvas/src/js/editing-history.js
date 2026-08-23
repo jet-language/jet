@@ -356,10 +356,114 @@
     return close >= 0 ? sourceLineStart(src, close) : src.length;
   }
 
+  function isIdentifierStart(ch) {
+    return !!ch && /[A-Za-z_]/.test(ch);
+  }
+
+  function isIdentifierPart(ch) {
+    return !!ch && /[A-Za-z0-9_]/.test(ch);
+  }
+
+  function sourceIdentifiers(src) {
+    const names = new Set();
+    for (const match of String(src || "").matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) names.add(match[0]);
+    return names;
+  }
+
+  function sourceBindingNames(src) {
+    const names = [];
+    const seen = new Set();
+    const re = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|::)/gm;
+    let match;
+    while ((match = re.exec(String(src || "")))) {
+      if (seen.has(match[1])) continue;
+      seen.add(match[1]);
+      names.push(match[1]);
+    }
+    return names;
+  }
+
+  function cloneRenames(src, snippet) {
+    const used = sourceIdentifiers(src);
+    const renames = [];
+    for (const from of sourceBindingNames(snippet)) {
+      let suffix = 1;
+      let to = from + "_copy";
+      while (used.has(to)) to = from + "_copy" + (++suffix);
+      used.add(to);
+      renames.push({ from, to });
+    }
+    return renames;
+  }
+
+  function renameSourceIdentifiers(src, renames) {
+    const names = new Map((renames || []).map((rename) => [rename.from, rename.to]));
+    if (!names.size) return src;
+    let out = "";
+    let quote = null;
+    for (let i = 0; i < src.length;) {
+      const ch = src[i];
+      if (quote) {
+        out += ch;
+        if (ch === "\\" && i + 1 < src.length) out += src[++i];
+        else if (ch === quote) quote = null;
+        i += 1;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        out += ch;
+        i += 1;
+        continue;
+      }
+      if (ch === "/" && src[i + 1] === "/") {
+        const end = src.indexOf("\n", i);
+        const stop = end < 0 ? src.length : end;
+        out += src.slice(i, stop);
+        i = stop;
+        continue;
+      }
+      if (!isIdentifierStart(ch)) {
+        out += ch;
+        i += 1;
+        continue;
+      }
+      let end = i + 1;
+      while (end < src.length && isIdentifierPart(src[end])) end += 1;
+      const word = src.slice(i, end);
+      const replacement = names.get(word);
+      let next = end;
+      while (next < src.length && /\s/.test(src[next])) next += 1;
+      const isFieldLabel = src[next] === ":" && src[next + 1] !== ":" && src[next + 1] !== "=";
+      out += replacement && !isFieldLabel ? replacement : word;
+      i = end;
+    }
+    return out;
+  }
+
+  function stagingActionForNode(node) {
+    if (!node) return null;
+    if (node.staged && node.action) return JSON.parse(JSON.stringify(node.action));
+    const descriptor = nodeDescriptor(node);
+    if (!descriptor || !descriptor.palette || !descriptor.palette.insertable) return null;
+    const pins = (node.pins || []).map((pin) => Object.assign({}, pin));
+    const output = pins.find((pin) => pin.direction === "output" && !isExecPin(pin));
+    return Object.assign({}, node.action || {}, {
+      title: node.title || "node",
+      kind: node.kind || descriptor.kind,
+      node_descriptor_id: descriptor.id,
+      op: node.action && node.action.op || descriptor.transaction || "",
+      callee: node.action && node.action.callee || node.title || "",
+      insert_callee: node.action && node.action.insert_callee || node.title || "",
+      ret: node.action && node.action.ret || output && output.type || "Void",
+      pins
+    });
+  }
+
   function selectedRealCloneSnippet(graph, nodes) {
     const src = latestDoc && latestDoc.source_text || "";
     if (!src || !graph || !nodes.length) return null;
-    if (nodes.some((node) => node.staged || node.kind === "entry" || !node.source_span || node.source_span.end <= node.source_span.start)) return null;
+    if (nodes.some((node) => node.staged || node.kind === "entry" || node.kind === "return" || !node.source_span || node.source_span.end <= node.source_span.start)) return null;
     const spans = nodes.map((node) => ({ start: sourceLineStart(src, node.source_span.start), end: sourceLineEnd(src, node.source_span.end), node })).sort((a, b) => a.start - b.start);
     const start = spans[0].start;
     const end = spans[spans.length - 1].end;
@@ -370,7 +474,14 @@
       if (span.start < start || span.end > end) return null;
     }
     if (!/^\s*(if|loop|return|break|next|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|::|\())/m.test(snippet)) return null;
-    return { text: snippet.endsWith("\n") ? snippet : snippet + "\n", title: nodes.map((n) => n.title || n.kind).join(", ") };
+    const renames = cloneRenames(src, snippet);
+    const text = renameSourceIdentifiers(snippet, renames);
+    return {
+      text: text.endsWith("\n") ? text : text + "\n",
+      title: nodes.map((n) => n.title || n.kind).join(", "),
+      insert_after: Math.min(end, graphSourceInsertOffset(graph)),
+      renames
+    };
   }
 
   function selectedClipboardPayload() {
@@ -384,13 +495,15 @@
     const sourceClone = real.length === nodes.length ? selectedRealCloneSnippet(graph, real) : null;
     return {
       graph_id: graph.graph_id,
+      source_id: latestDoc && latestDoc.source_id || null,
+      revision: latestDoc && latestDoc.revision || null,
       source: sourceClone,
       staged: staged.map((node) => JSON.parse(JSON.stringify(node))),
       fallback_nodes: nodes.map((node) => ({
         title: node.title,
         kind: node.kind,
         archetype: node.archetype,
-        action: node.action || { title: node.title, op: "insert_call", callee: node.title, insert_callee: node.title, ret: "Value", pins: [] },
+        action: stagingActionForNode(node),
         x: nodeX(node),
         y: nodeY(node)
       })),
@@ -400,51 +513,106 @@
 
   function copySelection() {
     const payload = selectedClipboardPayload();
-    if (!payload) return showToast("Select nodes to copy");
+    if (!payload) {
+      showToast("Select nodes to copy");
+      return false;
+    }
     clipboardState = payload;
     window.__jetCanvasClipboard = payload.source ? "source" : "staged";
+    pasteRenameChips = [];
     showToast("Copied selection");
+    return true;
+  }
+
+  function clipboardIsFresh() {
+    if (!clipboardState || !latestDoc) return false;
+    const currentSource = currentCanvasSourceId();
+    const currentGraph = currentGraphOrNull();
+    const graphChanged = clipboardState.graph_id && currentGraph && clipboardState.graph_id !== currentGraph.graph_id;
+    if ((clipboardState.source_id && currentSource && clipboardState.source_id !== currentSource)
+      || (clipboardState.revision && clipboardState.revision !== latestDoc.revision)
+      || graphChanged) {
+      setCanvasState("stale", "Selection is stale", "The source or graph changed after copy. Copy the current selection again; the source was not changed.", [
+        { label: "Show source", run: openSourceRecovery },
+        { label: "Reload", primary: true, run: () => loadGraph() }
+      ]);
+      showToast("Selection is stale; copy the current selection again", { isError: true });
+      return false;
+    }
+    return true;
   }
 
   function pasteSourceClone(payload, graph, point) {
     if (!payload.source || !latestDoc || !graph) return false;
     const src = latestDoc.source_text || "";
-    const insert = graphSourceInsertOffset(graph);
+    const requestedInsert = Number(payload.source.insert_after);
+    const insert = Number.isFinite(requestedInsert)
+      ? Math.max(0, Math.min(requestedInsert, graphSourceInsertOffset(graph)))
+      : graphSourceInsertOffset(graph);
     const text = payload.source.text.replace(/\s*$/, "\n");
     const next = src.slice(0, insert) + text + src.slice(insert);
-    pendingInsertPlacement = { graph_id: graph.graph_id, title: payload.source.title.split(", ")[0] || "", x: point.x + 24, y: point.y + 24 };
+    const firstRename = (payload.source.renames || [])[0];
+    pasteRenameChips = (payload.source.renames || []).map((rename) => Object.assign({}, rename));
+    pendingInsertPlacement = { graph_id: graph.graph_id, title: firstRename && firstRename.to || payload.source.title.split(", ")[0] || "", x: point.x + 24, y: point.y + 24 };
     postTransaction({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source: next, source_edit: "paste_clone" });
     return true;
   }
 
-  function pasteSelection() {
-    if (!clipboardState) return showToast("Nothing copied");
-    const graph = currentGraphOrNull();
-    if (!graph) return;
-    const point = lastPointer || viewportCenterGraphPoint();
-    if (clipboardState.source && pasteSourceClone(clipboardState, graph, point)) {
-      showToast("Pasted source-backed clone");
-      return;
-    }
+  function pasteStagedPayload(payload, graph, point) {
     const pasted = [];
-    const baseNodes = clipboardState.staged.length ? clipboardState.staged : clipboardState.fallback_nodes;
+    const commentIds = [];
+    const baseNodes = payload.staged.length ? payload.staged : payload.fallback_nodes;
     for (const item of baseNodes) {
-      const action = item.action || { title: item.title || "node", op: "insert_call", callee: item.title || "print", insert_callee: item.title || "print", ret: "Value" };
+      const action = item.action;
+      if (!action) continue;
       const node = createStagedNodeFromAction(action, { x: point.x + 24 + pasted.length * 24, y: point.y + 24 + pasted.length * 18 });
       if (node) pasted.push(node.node_id);
     }
-    for (const box of clipboardState.comments || []) {
-      createCommentBox({ x: point.x + 24, y: point.y + 24, w: box.w || 260, h: box.h || 160 }, box.title || "Comment", box.color || COMMENT_TINTS[0], false);
+    for (const box of payload.comments || []) {
+      const comment = createCommentBox({ x: point.x + 24, y: point.y + 24, w: box.w || 260, h: box.h || 160 }, box.title || "Comment", box.color || COMMENT_TINTS[0], false);
+      if (comment) commentIds.push(comment.comment_id);
     }
-    selectedNodeIds = new Set(pasted);
-    selectedNodeId = pasted[0] || selectedNodeId;
-    showToast("Pasted staged copy");
+    selectedNodeIds = new Set(pasted.concat(commentIds));
+    selectionExplicitlyCleared = selectedNodeIds.size === 0;
+    selectedNodeId = pasted[0] || commentIds[0] || null;
+    if (!pasted.length && !commentIds.length) {
+      showToast("Selection cannot be pasted as staged; choose a stageable node", { isError: true });
+      return false;
+    }
+    showToast("Pasted as staged; connect it to save source");
     if (latestDoc) drawGraph(latestDoc);
+    return true;
+  }
+
+  function pasteAsStaged() {
+    if (!clipboardState) {
+      showToast("Nothing copied");
+      return false;
+    }
+    if (!clipboardIsFresh()) return false;
+    const graph = currentGraphOrNull();
+    if (!graph) return false;
+    return pasteStagedPayload(clipboardState, graph, lastPointer || viewportCenterGraphPoint());
+  }
+
+  function pasteSelection() {
+    if (!clipboardState) {
+      showToast("Nothing copied");
+      return false;
+    }
+    if (!clipboardIsFresh()) return false;
+    const graph = currentGraphOrNull();
+    if (!graph) return false;
+    const point = lastPointer || viewportCenterGraphPoint();
+    if (clipboardState.source && pasteSourceClone(clipboardState, graph, point)) {
+      showToast("Pasted source-backed clone");
+      return true;
+    }
+    return pasteStagedPayload(clipboardState, graph, point);
   }
 
   function duplicateSelection() {
-    copySelection();
-    pasteSelection();
+    if (copySelection()) pasteSelection();
   }
 
   function deleteLocalSelection() {
@@ -463,6 +631,7 @@
     saveEditorState();
     selectedNodeIds = new Set();
     selectedNodeId = null;
+    selectionExplicitlyCleared = true;
     showToast("Removed local item");
     if (latestDoc) drawGraph(latestDoc);
     return true;
@@ -498,7 +667,7 @@
     if (!request || typeof request.then !== "function") return;
     request.then(() => {
       const result = window.__jetCanvasLastTxResult;
-      const accepted = result && (Object.prototype.hasOwnProperty.call(result, "changed") || result.protocol === "jet.canvas.action");
+      const accepted = result && result.changed === true;
       if (!accepted || !stagedNodeForPin({ node_id: stagedId })) return;
       removeStagedNode(stagedId);
       window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
@@ -737,7 +906,8 @@
   }
 
   function syncDebugActive() {
-    document.body.classList.toggle("is-debug-active", !!debugOverlay);
+    document.body.classList.toggle("is-debug-active", !!(debugOverlay && debugOverlay.debug_overlay === "running"));
+    if (typeof syncDebugSessionPicker === "function") syncDebugSessionPicker();
   }
 
   function renderCommandAuthority(item) {
@@ -827,7 +997,7 @@
 
   function showCheckAuthority() {
     if (!latestDoc) return;
-    const item = actionEntries.find((entry) => entry.action_id === "canvas.command:check") || {
+    const fallback = {
       action_id: "canvas.command:check",
       title: "Check project",
       command: ["jet", "check"],
@@ -835,7 +1005,15 @@
       requires_confirmation: false,
       available: true
     };
-    renderCommandAuthority(item);
+    const render = () => renderCommandAuthority(actionEntries.find((entry) => entry.action_id === "canvas.command:check") || fallback);
+    if (typeof loadCanvasActions === "function") {
+      const actions = loadCanvasActions();
+      if (actions && typeof actions.then === "function") {
+        actions.then(render, render);
+        return;
+      }
+    }
+    render();
   }
 
   function setDeveloperMode(on) {

@@ -764,6 +764,16 @@ async function catalogSweep(ctx) {
     || !projectRank.rank_terms.includes("function")) {
     throw new Error("project palette rank facts drifted from the node descriptor: " + JSON.stringify({ projectRank, functionDescriptor }));
   }
+  const browserEntries = await ctx.driver.evaluate("window.__jetCanvasTest.actionEntries()");
+  const browserProjectEntries = browserEntries.filter((entry) => entry.kind === "project_function" || entry.kind === "canvas.action");
+  const browserSquareEntries = browserProjectEntries.filter((entry) => entry.title === "square");
+  if (browserProjectEntries.some((entry) => entry.kind === "project_function") || browserSquareEntries.length !== 1) {
+    throw new Error(`project palette contains metadata duplicates: ${JSON.stringify(browserSquareEntries)}`);
+  }
+  if (browserSquareEntries[0].rank !== functionDescriptor?.palette?.rank
+    || !browserSquareEntries[0].rank_terms.includes("function")) {
+    throw new Error(`browser palette rank facts drifted from the node descriptor: ${JSON.stringify({ entry: browserSquareEntries[0], functionDescriptor })}`);
+  }
   const seen = new Set();
   const unique = targets.filter((entry) => {
     const id = entry.action_id || entry.callee || entry.title;
@@ -943,6 +953,14 @@ function controlWireExists(graph, fromTitle, toTitle) {
   return (graph.wires || []).some((w) => w.wire_kind === "control" && fromPins.has(w.from_pin) && toPins.has(w.to_pin));
 }
 
+function dataWireExists(graph, fromTitle, toTitle) {
+  const from = nodeByTitle(graph, fromTitle);
+  const to = nodeByTitle(graph, toTitle);
+  const fromPins = new Set((graph.pins || []).filter((p) => p.node_id === from.node_id).map((p) => p.pin_id));
+  const toPins = new Set((graph.pins || []).filter((p) => p.node_id === to.node_id).map((p) => p.pin_id));
+  return (graph.wires || []).some((w) => w.wire_kind === "data" && fromPins.has(w.from_pin) && toPins.has(w.to_pin));
+}
+
 async function dragExecEndpoint(ctx, graphTitle, oldTargetTitle, newTargetTitle) {
   await ctx.switchGraph(graphTitle);
   await ctx.waitForCanvas();
@@ -979,6 +997,88 @@ async function dragExecPin(ctx, graphTitle, fromTitle, fromPinName, toTitle) {
     { x: targetPoint.client_x, y: targetPoint.client_y },
     16
   );
+  await sleep(500);
+}
+
+async function dataPinPoints(ctx, graphTitle, fromTitle, fromPinName, toTitle, toPinName) {
+  await ctx.switchGraph(graphTitle);
+  await ctx.waitForCanvas();
+  const graph = graphByTitle(await ctx.graph(), graphTitle);
+  const fromPin = namedPinForNode(graph, fromTitle, "output", fromPinName);
+  const targetPin = namedPinForNode(graph, toTitle, "input", toPinName);
+  const state = await ctx.state();
+  const fromPoint = state.pinPoints[fromPin.pin_id];
+  const targetPoint = state.pinPoints[targetPin.pin_id];
+  if (!fromPoint || !targetPoint) throw new Error(`data pin points missing: ${fromPin.pin_id} -> ${targetPin.pin_id}`);
+  return { graph, fromPin, targetPin, fromPoint, targetPoint };
+}
+
+async function dragDataPin(ctx, graphTitle, fromTitle, fromPinName, toTitle, toPinName, inspectPreview = false) {
+  const points = await dataPinPoints(ctx, graphTitle, fromTitle, fromPinName, toTitle, toPinName);
+  const { fromPoint, targetPoint } = points;
+  const dispatch = async (stage, params) => {
+    try {
+      await ctx.driver.send("Input.dispatchMouseEvent", params, ctx.driver.pageSession);
+    } catch (error) {
+      throw new Error(`data drag ${stage}: ${error && error.message || error}`);
+    }
+  };
+  await dispatch("press", { type: "mousePressed", x: fromPoint.client_x, y: fromPoint.client_y, button: "left", clickCount: 1 });
+  for (let i = 1; i <= 16; i++) {
+    const t = i / 16;
+    await dispatch(`move-${i}`, {
+      type: "mouseMoved",
+      x: fromPoint.client_x + (targetPoint.client_x - fromPoint.client_x) * t,
+      y: fromPoint.client_y + (targetPoint.client_y - fromPoint.client_y) * t,
+      button: "left",
+      buttons: 1,
+    });
+  }
+  await dispatch("target", {
+    type: "mouseMoved",
+    x: targetPoint.client_x,
+    y: targetPoint.client_y,
+    button: "left",
+    buttons: 1,
+  });
+  if (inspectPreview) {
+    const preview = await ctx.driver.evaluate("window.__jetCanvasWirePreview || null");
+    const expectedColor = { Int: "#2ec4b6", Float: "#9acd32", Bool: "#c0392b", String: "#c678dd" }[points.fromPin.type] || null;
+    if (!preview || !preview.ok || preview.to_pin_id !== points.targetPin.pin_id || (expectedColor && preview.color !== expectedColor)) {
+      throw new Error(`data wire preview missing type-colored compatible state: ${JSON.stringify(preview)}`);
+    }
+  }
+  await dispatch("release", { type: "mouseReleased", x: targetPoint.client_x, y: targetPoint.client_y, button: "left", clickCount: 1 });
+  await sleep(500);
+  return points;
+}
+
+async function beginDataPinDrag(ctx, graphTitle, fromTitle, fromPinName) {
+  const graph = graphByTitle(await ctx.graph(), graphTitle);
+  const fromPin = namedPinForNode(graph, fromTitle, "output", fromPinName);
+  const state = await ctx.state();
+  const fromPoint = state.pinPoints[fromPin.pin_id];
+  if (!fromPoint) throw new Error(`data source pin point missing: ${fromPin.pin_id}`);
+  await ctx.driver.send("Input.dispatchMouseEvent", { type: "mousePressed", x: fromPoint.client_x, y: fromPoint.client_y, button: "left", clickCount: 1 }, ctx.driver.pageSession);
+  return { graph, fromPin, fromPoint };
+}
+
+async function finishDataPinDrag(ctx, targetPin) {
+  const state = await ctx.state();
+  const targetPoint = state.pinPoints[targetPin.pin_id];
+  if (!targetPoint) throw new Error(`data target pin point missing: ${targetPin.pin_id}`);
+  for (let i = 1; i <= 16; i++) {
+    const t = i / 16;
+    await ctx.driver.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: targetPoint.client_x,
+      y: targetPoint.client_y,
+      button: "left",
+      buttons: 1,
+    }, ctx.driver.pageSession);
+    if (i < 16) await sleep(2);
+  }
+  await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: targetPoint.client_x, y: targetPoint.client_y, button: "left", clickCount: 1 }, ctx.driver.pageSession);
   await sleep(500);
 }
 
@@ -1172,6 +1272,37 @@ async function selectNodeTitles(ctx, titles, label) {
   const count = await ctx.driver.evaluate(`window.__jetCanvasTest.selectNodeTitles(${JSON.stringify(titles)})`);
   if (count !== titles.length) throw new Error(`${label} selected ${count}/${titles.length} nodes`);
   await sleep(120);
+}
+
+async function canvasModifiedClick(ctx, point, modifiers) {
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: point.x, y: point.y, button: "left", buttons: 1, clickCount: 1, modifiers,
+  }, ctx.driver.pageSession);
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: point.x, y: point.y, button: "left", buttons: 0, clickCount: 1, modifiers,
+  }, ctx.driver.pageSession);
+  await sleep(120);
+}
+
+async function canvasModifiedDrag(ctx, from, to, modifiers = 0, steps = 16) {
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1, modifiers,
+  }, ctx.driver.pageSession);
+  for (let step = 1; step <= steps; step++) {
+    const fraction = step / steps;
+    await ctx.driver.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: from.x + (to.x - from.x) * fraction,
+      y: from.y + (to.y - from.y) * fraction,
+      button: "left",
+      buttons: 1,
+      modifiers,
+    }, ctx.driver.pageSession);
+  }
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1, modifiers,
+  }, ctx.driver.pageSession);
+  await sleep(150);
 }
 
 async function doubleClickCanvasPoint(ctx, point) {
@@ -1663,6 +1794,138 @@ export const scenarios = {
     if (sourceReloaded !== sourceBefore) throw new Error("reload after node drag changed Jet source bytes");
   },
 
+  "selection-marquee-modifiers-local-move": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("summarize");
+    const sourceBefore = await ctx.source();
+    let state = await ctx.state();
+    const nodes = Object.values(state.nodeBounds || {});
+    const total = nodes.find((node) => node.title === "total");
+    const square = nodes.find((node) => node.title === "square");
+    if (!total || !square) throw new Error(`selection fixture nodes missing: ${JSON.stringify(nodes.map((node) => node.title))}`);
+    const rect = await ctx.canvasRect();
+    const center = (node) => ({ x: rect.left + node.x + node.w / 2, y: rect.top + node.y + node.h / 2 });
+
+    await ctx.driver.click(center(total).x, center(total).y);
+    await sleep(100);
+    await canvasModifiedClick(ctx, center(square), 8); // Shift: additive selection.
+    state = await ctx.state();
+    const additive = new Set(state.selectedNodeIds || []);
+    if (!additive.has(total.node_id) || !additive.has(square.node_id)) {
+      throw new Error(`shift-click did not add to selection: ${JSON.stringify(state.selectedNodeIds)}`);
+    }
+    await canvasModifiedClick(ctx, center(square), 2); // Control: toggle the selected node off.
+    state = await ctx.state();
+    if (new Set(state.selectedNodeIds || []).size !== 1 || state.selectedNodeIds[0] !== total.node_id) {
+      throw new Error(`ctrl-click did not toggle selection: ${JSON.stringify(state.selectedNodeIds)}`);
+    }
+
+    const minX = Math.min(total.x, square.x);
+    const minY = Math.min(total.y, square.y);
+    const maxX = Math.max(total.x + total.w, square.x + square.w);
+    const maxY = Math.max(total.y + total.h, square.y + square.h);
+    const blank = await ctx.driver.evaluate(`(() => {
+      const canvas = document.getElementById("jet-canvas-view");
+      const r = canvas.getBoundingClientRect();
+      const bounds = window.__jetCanvasNodeBounds || {};
+      const candidates = [
+        { x: Math.max(2, ${maxX} + 24), y: Math.max(2, ${maxY} + 24) },
+        { x: Math.max(2, ${minX} - 24), y: Math.max(2, ${minY} - 24) },
+        { x: r.width - 4, y: r.height - 4 },
+        { x: 4, y: 4 },
+      ];
+      const inside = (point, box) => point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+      return candidates.find((point) => point.x > 1 && point.y > 1 && point.x < r.width - 1 && point.y < r.height - 1
+        && !Object.values(bounds).some((box) => inside(point, box))) || null;
+    })()`);
+    if (!blank) throw new Error("could not find a blank canvas point for marquee");
+    await canvasModifiedDrag(
+      ctx,
+      { x: rect.left + blank.x, y: rect.top + blank.y },
+      { x: rect.left + minX - 12, y: rect.top + minY - 12 },
+    );
+    state = await ctx.state();
+    const marquee = new Set(state.selectedNodeIds || []);
+    if (!marquee.has(total.node_id) || !marquee.has(square.node_id)) {
+      throw new Error(`marquee did not select both nodes: ${JSON.stringify(state.selectedNodeIds)}`);
+    }
+
+    const selectedBeforeMove = Object.fromEntries([total, square].map((node) => [node.node_id, { x: node.x, y: node.y }]));
+    const move = { x: 41, y: 27 };
+    await canvasModifiedDrag(ctx, center(total), { x: center(total).x + move.x, y: center(total).y + move.y });
+    state = await ctx.state();
+    for (const node of [total, square]) {
+      const moved = state.nodeBounds[node.node_id];
+      const delta = { x: moved.x - selectedBeforeMove[node.node_id].x, y: moved.y - selectedBeforeMove[node.node_id].y };
+      if (Math.abs(delta.x - move.x) > 1 || Math.abs(delta.y - move.y) > 1) {
+        throw new Error(`multi-selection move lost ${node.title}: ${JSON.stringify(delta)}`);
+      }
+    }
+    if (await ctx.source() !== sourceBefore) throw new Error("local selection move changed source bytes");
+    await ctx.openCanvas();
+    state = await ctx.state();
+    for (const node of [total, square]) {
+      const reloaded = state.nodeBounds[node.node_id];
+      const expected = selectedBeforeMove[node.node_id];
+      if (Math.abs((reloaded.x - expected.x) - move.x) > 1 || Math.abs((reloaded.y - expected.y) - move.y) > 1) {
+        throw new Error(`local move did not persist for ${node.title}: ${JSON.stringify(reloaded)}`);
+      }
+    }
+
+    const reloadedSquare = state.nodeBounds[square.node_id];
+    await ctx.driver.press("Escape");
+    await sleep(80);
+    await ctx.driver.click(center(reloadedSquare).x, center(reloadedSquare).y);
+    await sleep(100);
+    await ctx.driver.evaluate("window.__jetCanvasTest.copySelection()");
+    const stagedBefore = (await ctx.state()).stagedRegistry?.length || 0;
+    const sourceBeforeStagedPaste = await ctx.source();
+    await ctx.driver.evaluate("window.__jetCanvasTest.pasteAsStaged()");
+    await ctx.waitFor(async () => ((await ctx.state()).stagedRegistry?.length || 0) > stagedBefore, "explicit staged paste");
+    if (await ctx.source() !== sourceBeforeStagedPaste) throw new Error("paste as staged changed source bytes");
+    const stagedToast = await ctx.driver.evaluate("document.getElementById('toast').textContent");
+    if (!stagedToast.includes("staged")) throw new Error(`explicit staged paste lacked local-state text: ${stagedToast}`);
+    await ctx.driver.press("Delete");
+    await ctx.waitFor(async () => ((await ctx.state()).stagedRegistry?.length || 0) === stagedBefore, "staged paste cleanup");
+
+    const reloadedTotal = state.nodeBounds[total.node_id];
+    await ctx.driver.press("Escape");
+    await sleep(80);
+    await ctx.driver.click(center(reloadedTotal).x, center(reloadedTotal).y);
+    await sleep(100);
+    await ctx.driver.evaluate("window.__jetCanvasTest.copySelection()");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasClipboard === 'source'"), "source clipboard");
+    await ctx.driver.evaluate("window.__jetCanvasTest.pasteSelection()");
+    await ctx.waitFor(async () => (await ctx.source()).includes("total_copy :="), "renamed source paste");
+    state = await ctx.state();
+    if (!state.pasteRenameChips?.some((rename) => rename.from === "total" && rename.to === "total_copy")) {
+      throw new Error(`source paste did not expose rename chip: ${JSON.stringify(state.pasteRenameChips)}`);
+    }
+    const chips = await ctx.driver.evaluate("!!document.querySelector('[data-paste-renames]')");
+    if (!chips) throw new Error("source paste rename chip was not rendered in Details");
+
+    await ctx.undo();
+    if ((await ctx.source()).includes("total_copy :=")) throw new Error("undo did not remove pasted source clone");
+    await ctx.redo();
+    if (!(await ctx.source()).includes("total_copy :=")) throw new Error("redo did not restore pasted source clone");
+
+    state = await ctx.state();
+    const currentTotal = state.nodeBounds[total.node_id];
+    await ctx.driver.press("Escape");
+    await sleep(80);
+    await ctx.driver.click(center(currentTotal).x, center(currentTotal).y);
+    await sleep(100);
+    await ctx.driver.evaluate("window.__jetCanvasTest.copySelection()");
+    const changed = (await ctx.source()).replace("print(summarize(4))", "print(summarize(5))");
+    await ctx.replaceSource(changed);
+    const sourceBeforeStalePaste = await ctx.source();
+    await ctx.driver.evaluate("window.__jetCanvasTest.pasteSelection()");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasCanvasState?.kind === 'stale'"), "stale clipboard rejection");
+    if (await ctx.source() !== sourceBeforeStalePaste) throw new Error("stale paste changed source bytes");
+    const staleToast = await ctx.driver.evaluate("document.getElementById('toast').textContent");
+    if (!staleToast.includes("stale") || !staleToast.includes("copy")) throw new Error(`stale paste lacked recovery text: ${staleToast}`);
+  },
+
   "read-graph-overview": async (ctx) => {
     await ctx.openCanvas();
     const overview = await ctx.driver.evaluate("window.__jetCanvasGraphOverview");
@@ -1758,6 +2021,172 @@ export const scenarios = {
       wire_expr: "limit",
     }, "data wire insert");
     await ctx.expectSourceContains("wired_value :: square(limit)");
+  },
+
+  "data-pin-drag-to-wire": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn run() {
+    source :: 4
+    other :: 9
+    first :: 1
+    second :: 2
+    print(source)
+    print(other)
+    print(first)
+    print(second)
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await dragDataPin(ctx, "run", "source", "source", "first", "value", true);
+    await ctx.waitFor(async () => (await ctx.source()).includes("first :: source"), "data wire source transaction");
+    let graph = graphByTitle(await ctx.graph(), "run");
+    if (!dataWireExists(graph, "source", "first")) throw new Error(`filled data wire missing after drag: ${JSON.stringify(graph.wires)}`);
+    await assertCleanSourceSync(ctx, ["data drag source"]);
+
+    await dragDataPin(ctx, "run", "source", "source", "second", "value");
+    await ctx.waitFor(async () => (await ctx.source()).includes("second :: source"), "fan-out data wire");
+    graph = graphByTitle(await ctx.graph(), "run");
+    if (!dataWireExists(graph, "source", "second")) throw new Error("fan-out data wire missing");
+
+    const beforeRewire = await ctx.source();
+    await dragDataPin(ctx, "run", "other", "other", "first", "value");
+    await ctx.waitFor(async () => (await ctx.source()).includes("first :: other"), "data rewire source");
+    const afterRewire = await ctx.source();
+    if (afterRewire === beforeRewire) throw new Error("data rewire did not change source");
+    graph = graphByTitle(await ctx.graph(), "run");
+    if (!dataWireExists(graph, "other", "first")) throw new Error("rewired data wire missing");
+
+    const restored = await ctx.undo();
+    if (restored !== beforeRewire) throw new Error(`data undo did not restore exact source\nexpected:\n${beforeRewire}\nactual:\n${restored}`);
+    const redone = await ctx.redo();
+    if (redone !== afterRewire) throw new Error("data redo did not restore rewire source");
+    await assertCleanSourceSync(ctx, ["data fan-out", "data rewire", "undo", "redo"]);
+
+    const escapeBefore = await ctx.source();
+    const escapePoints = await dataPinPoints(ctx, "run", "source", "source", "second", "value");
+    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mousePressed", x: escapePoints.fromPoint.client_x, y: escapePoints.fromPoint.client_y, button: "left", clickCount: 1 }, ctx.driver.pageSession);
+    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: escapePoints.targetPoint.client_x, y: escapePoints.targetPoint.client_y, button: "left", buttons: 1 }, ctx.driver.pageSession);
+    const previewBeforeEscape = await ctx.driver.evaluate("window.__jetCanvasWirePreview || null");
+    if (!previewBeforeEscape) throw new Error("data wire preview missing before Escape");
+    await ctx.driver.press("Escape");
+    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: escapePoints.targetPoint.client_x, y: escapePoints.targetPoint.client_y, button: "left", clickCount: 1 }, ctx.driver.pageSession);
+    await sleep(250);
+    if (await ctx.source() !== escapeBefore) throw new Error("Escape changed data-wire source");
+    const escaped = await ctx.driver.evaluate("({ preview: window.__jetCanvasWirePreview, focus: document.activeElement && document.activeElement.id })");
+    if (escaped.preview) throw new Error(`Escape did not clear wire preview: ${JSON.stringify(escaped)}`);
+    if (before === escapeBefore) throw new Error("data gesture fixture never changed source");
+    await assertCleanSourceSync(ctx, ["Escape restoration"]);
+  },
+
+  "data-pin-type-gate": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`enum ParseError {
+    Empty
+}
+
+fn helper(value: Int) Int -[]> {
+    return value
+}
+
+fn use_callback(callback: fn(Int) Int -[]>) {
+    print("callback")
+}
+
+fn parse(raw: String) Int ParseError! -> {
+    if raw == "" -> return Err(ParseError.Empty)
+    return Ok(7)
+}
+
+fn write_int(value: &Int) {}
+
+fn run() ParseError! {
+    source := 4
+    text :: "text"
+    bad :: 0
+    other :: 1
+    use_callback(helper)
+    write_int(&source)
+    parsed :: parse("")
+    print(source)
+    print(text)
+    print(bad)
+    print(other)
+    print(parsed)
+    return Ok(())
+}
+
+fn other_graph() {
+    target :: 0
+    print(target)
+}
+`);
+    await ctx.openCanvas();
+    await ctx.switchGraph("run");
+
+    const refusal = async (fromTitle, fromPin, toTitle, toPin, reason) => {
+      const before = await ctx.source();
+      await dragDataPin(ctx, "run", fromTitle, fromPin, toTitle, toPin);
+      await expectVisibleRefusal(ctx, reason, `${fromTitle} -> ${toTitle} refusal`);
+      if (await ctx.source() !== before) throw new Error(`${fromTitle} -> ${toTitle} refusal changed source`);
+      const plan = await ctx.driver.evaluate("window.__jetCanvasLastConnectionPlan || null");
+      if (!plan || !String(plan.label || "").toLowerCase().includes(reason.toLowerCase())) {
+        throw new Error(`refusal reason not retained: ${JSON.stringify(plan)}`);
+      }
+    };
+
+    await refusal("text", "text", "bad", "value", "Type mismatch String -> Int");
+    await refusal("helper", "helper", "bad", "value", "Function value cannot connect");
+    await refusal("parse", "result", "bad", "value", "Fallible output cannot connect");
+    await refusal("source", "source", "write_int", "value", "Capability mismatch");
+
+    const cross = await dataPinPoints(ctx, "run", "text", "text", "bad", "value");
+    const crossBefore = await ctx.source();
+    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mousePressed", x: cross.fromPoint.client_x, y: cross.fromPoint.client_y, button: "left", clickCount: 1 }, ctx.driver.pageSession);
+    await ctx.switchGraph("other_graph");
+    const otherGraph = graphByTitle(await ctx.graph(), "other_graph");
+    const otherTarget = namedPinForNode(otherGraph, "target", "input", "value");
+    await finishDataPinDrag(ctx, otherTarget);
+    await expectVisibleRefusal(ctx, "different graphs", "cross-graph refusal");
+    if (await ctx.source() !== crossBefore) throw new Error("cross-graph refusal changed source");
+
+    await ctx.switchGraph("run");
+    const staleStart = await beginDataPinDrag(ctx, "run", "text", "text");
+    const staleBase = await ctx.source();
+    await ctx.replaceSource(staleBase.replace("other :: 1", "other :: 2"));
+    const staleGraph = graphByTitle(await ctx.graph(), "run");
+    const staleTarget = namedPinForNode(staleGraph, "bad", "input", "value");
+    await expectVisibleRefusal(ctx, "source changed since drag started", "stale-revision refusal");
+    if (await ctx.source() === staleBase || !(await ctx.source()).includes("other :: 2")) throw new Error("stale-revision setup was lost");
+    if (staleStart.fromPin.pin_id === staleTarget.pin_id) throw new Error("stale test did not use distinct pins");
+
+    await ctx.switchGraph("run");
+    await ctx.driver.evaluate(`window.__jetCanvasGatePosts = 0; (() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = (input, init = {}) => {
+        if (String(input).includes("/canvas/transaction")) window.__jetCanvasGatePosts += 1;
+        return originalFetch(input, init);
+      };
+    })()`);
+    const beforeInline = await ctx.source();
+    await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable("bad")`);
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`!!document.querySelector('[data-details-input="value"]')`), "bad inline editor");
+    const inlineState = await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      const apply = document.getElementById("apply-variable-details");
+      if (!input || !apply) return { ok: false };
+      input.focus();
+      const focused = document.activeElement === input;
+      input.value = "\\\"wrong\\\"";
+      apply.click();
+      return { ok: true, focused };
+    })()`);
+    if (!inlineState.ok || !inlineState.focused) throw new Error(`inline editor keyboard focus missing: ${JSON.stringify(inlineState)}`);
+    await expectVisibleRefusal(ctx, "Type mismatch String -> Int", "inline wrong-type refusal");
+    if (await ctx.source() !== beforeInline) throw new Error("inline wrong-type refusal changed source");
+    const gatePosts = await ctx.driver.evaluate("window.__jetCanvasGatePosts");
+    if (gatePosts !== 0) throw new Error(`client gate posted invalid inline edit: ${gatePosts}`);
+    await assertSourceUnchangedAfterReload(ctx, beforeInline, "inline wrong-type refusal");
   },
 
   "exec-rewire-reorders-statements": async (ctx) => {
@@ -1878,6 +2307,18 @@ fn run() {
       throw new Error(`convergence preview did not expose safe choices: ${details}`);
     }
     if (await ctx.source() !== before) throw new Error("second execution drop wrote source before a strategy was applied");
+    const rejected = await ctx.transaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: (await ctx.graph()).revision,
+      source: "fn converge("
+    });
+    if (rejected.ok) throw new Error(`invalid convergence source unexpectedly accepted: ${JSON.stringify(rejected.json)}`);
+    if (await ctx.source() !== before) throw new Error("rejected convergence edit changed source");
+    const recoverable = await ctx.state();
+    if (!recoverable.execConvergencePreview || recoverable.execConvergencePreview.strategy !== "extract") {
+      throw new Error(`rejected convergence edit discarded recoverable preview: ${JSON.stringify(recoverable)}`);
+    }
     await ctx.openCanvas();
     if (await ctx.source() !== before) throw new Error("reloading convergence preview changed source");
   },
@@ -1890,7 +2331,7 @@ fn run() {
     C(Int)
 }
 
-fn choose(x: Choice) => Int {
+fn choose(x: Choice) Int -> {
     if x == {
         .A(n) -> { return n }
         else -> { return 0 }
@@ -1948,7 +2389,7 @@ fn run() {
     B(Int)
 }
 
-fn choose(x: Choice) => Int {
+fn choose(x: Choice) Int -> {
     if x == {
         .A(n) -> { return n }
         else -> { return 0 }
@@ -1977,11 +2418,11 @@ fn run() {
 
   "multi-input-append-remove": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) => Int {
+    await ctx.replaceSource(`fn to_int(n: Int) Int -> {
     return n
 }
 
-fn demo() => Int {
+fn demo() Int -> {
     xs :: [1, 2, 3]
     ys :: [1, 2]
     return xs[0] + ys[0]
@@ -2102,7 +2543,7 @@ fn run() {
 
   "conversion-keyboard-gesture": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) => Int {
+    await ctx.replaceSource(`fn to_int(n: Int) Int -> {
     return n
 }
 
@@ -2292,7 +2733,7 @@ fn run() {
       mobile: false,
     }, ctx.driver.pageSession);
     await sleep(120);
-    await ctx.replaceSource(`fn child(n: Int) => Int {
+    await ctx.replaceSource(`fn child(n: Int) Int -> {
     return n * 2
 }
 
@@ -2625,6 +3066,64 @@ fn run() {
       throw new Error(`binding metadata missing from Details: ${JSON.stringify(metadata)}`);
     }
     if (metadata.kind !== "scalar" || metadata.type !== "number") throw new Error(`scalar editor missing: ${JSON.stringify(metadata)}`);
+    const descriptorSurface = await ctx.driver.evaluate(`(() => {
+      const root = document.getElementById("details");
+      return {
+        fields: root && root.querySelectorAll("[data-details-field]").length,
+        unsafeHandlers: root && root.querySelectorAll("[onclick], [onchange], [onerror], [onload]").length,
+        state: window.__jetCanvasDetailsState && window.__jetCanvasDetailsState.phase
+      };
+    })()`);
+    if (!descriptorSurface || descriptorSurface.unsafeHandlers !== 0 || descriptorSurface.fields < 1) {
+      throw new Error(`Details did not use safe descriptor rows: ${JSON.stringify(descriptorSurface)}`);
+    }
+
+    const beforeEscape = await ctx.source();
+    await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      input.focus();
+      input.value = "99";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await ctx.driver.press("Escape");
+    await ctx.waitFor(async () => (await ctx.driver.evaluate(`window.__jetCanvasDetailsState && window.__jetCanvasDetailsState.phase`)) === "clean", "Details Escape reset");
+    if (await ctx.source() !== beforeEscape) throw new Error("Escape wrote a Details edit");
+    const escapedValue = await ctx.driver.evaluate(`document.querySelector('[data-details-input="value"]').value`);
+    if (escapedValue !== "3") throw new Error(`Escape did not restore Details value: ${escapedValue}`);
+
+    await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      input.focus();
+      input.value = "8";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await ctx.driver.press("Enter");
+    await ctx.waitFor(async () => (await ctx.source()).includes("amount :: 8"), "Details Enter apply");
+    await ctx.waitForCanvas();
+
+    await selectVariable("amount");
+    await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      input.focus();
+      input.value = "6";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      document.getElementById("toolbar-search").focus();
+    })()`);
+    await ctx.waitFor(async () => (await ctx.source()).includes("amount :: 6"), "Details blur apply");
+    await ctx.waitForCanvas();
+
+    await selectVariable("amount");
+    const beforeSelectionChange = await ctx.source();
+    await ctx.driver.evaluate(`(() => {
+      const input = document.querySelector('[data-details-input="value"]');
+      input.focus();
+      input.value = "77";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable("other")`);
+    await ctx.waitFor(async () => (await ctx.state()).selectedVariableName === "other", "Details selection change");
+    if (await ctx.source() !== beforeSelectionChange) throw new Error("selection change wrote a dirty Details edit");
+
     await applyValue("flag", "false", "scalar", "boolean Details edit");
     await applyValue("label", "done", "scalar", "string Details edit");
     await applyValue("amount", "7", "scalar", "scalar Details edit");
@@ -2943,6 +3442,30 @@ fn run() {
     }, "run passed", 15000);
     const receipt = await ctx.driver.evaluate(`document.getElementById("details").textContent`);
     if (!receipt.includes("stdout") || !receipt.includes("16")) throw new Error(`run output not visible: ${receipt}`);
+  },
+
+  "debug-live-session": async (ctx) => {
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.querySelector("#debug-menu summary")`, "debug controls");
+    await clickElement(ctx, `document.getElementById("debug-start")`, "start debug");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && state.debugSession && state.debugSession.state === "running"
+        && state.debugOverlay && state.debugOverlay.active_line !== null;
+    }, "live debug stop");
+    const first = await ctx.state();
+    await clickElement(ctx, `document.getElementById("debug-step")`, "debug step");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && state.debugSession && state.debugSession.state === "running"
+        && state.debugOverlay && state.debugOverlay.active_line !== first.debugOverlay.active_line;
+    }, "second live debug stop");
+    await clickElement(ctx, `document.getElementById("debug-stop")`, "stop debug");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      const active = await ctx.driver.evaluate(`document.body.classList.contains("is-debug-active")`);
+      return !state.debugSession && !active;
+    }, "debug session stopped");
   },
 
   "graph-source-toggle-preserves-selection": async (ctx) => {

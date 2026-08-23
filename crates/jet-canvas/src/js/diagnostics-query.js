@@ -4,7 +4,9 @@
     const message = String(text || "");
     const isError = !!opts.isError || /^Error \[[A-Z0-9]+\]:/.test(message) || message.includes("\n Why:") || message.includes("\n Fix:");
     if (opts.showDetails) {
-      toast.innerHTML = `<span>${escapeHtml(message)}</span><button type="button" data-show-problems>Show details</button>`;
+      clearDom(toast);
+      appendText(toast, "span", "", message);
+      appendButton(toast, "", "Show details", "", { "data-show-problems": "true" });
     } else {
       toast.textContent = message;
     }
@@ -207,30 +209,49 @@
     return entries.some((entry) => entry.severity === "error") ? "error" : "warning";
   }
 
+  function diagnosticDetailDescriptors(entries) {
+    return entries.map((entry, index) => {
+      const loc = entry.line ? `line ${entry.line}, column ${entry.column || 1}` : (entry.source || "source");
+      return {
+        key: entry.id || String(index),
+        label: entry.code,
+        value: entry.what,
+        detail: loc + " · " + (entry.fix || ""),
+        fullText: diagnosticFullText(entry),
+        severity: entry.severity,
+        layout: "diagnostic",
+        rowAttributes: { "data-problem-index": index },
+        valueAttributes: { "data-problem-jump": index },
+        editable: false,
+        apply_op: {
+          id: "diagnostic-jump:" + (entry.id || index),
+          mode: "action",
+          run: () => jumpToDiagnostic(entry)
+        },
+        actions: [{
+          label: "Dismiss",
+          attributes: { "data-problem-dismiss": index },
+          run: () => {
+            diagnosticsState.dismissed.add(entry.id);
+            renderProblemsPanel();
+            if (latestDoc) drawGraph(latestDoc);
+          }
+        }]
+      };
+    });
+  }
+
   function renderProblemsPanel() {
     const entries = activeDiagnostics();
     if (problemsCount) problemsCount.textContent = entries.length ? String(entries.length) : "0";
     if (!problemsList) return;
+    clearDom(problemsList);
     if (!entries.length) {
-      problemsList.innerHTML = "<div class=\"problem-empty\">No problems</div>";
+      appendText(problemsList, "div", "problem-empty", "No problems");
       window.__jetCanvasProblems = [];
       return;
     }
-    problemsList.innerHTML = entries.map((entry, i) => {
-      const loc = entry.line ? `line ${entry.line}, column ${entry.column || 1}` : (entry.source || "source");
-      return `<div class="problem-row" data-problem-index="${i}" data-severity="${escapeAttr(entry.severity)}"><b>${escapeHtml(entry.code)}</b><button type="button" data-problem-jump="${i}">${escapeHtml(entry.what)}</button><button type="button" data-problem-dismiss="${i}">Dismiss</button><small>${escapeHtml(loc)} · ${escapeHtml(entry.fix || "")}</small><pre class="problem-detail">${escapeHtml(diagnosticFullText(entry))}</pre></div>`;
-    }).join("");
-    problemsList.querySelectorAll("[data-problem-jump]").forEach((button) => {
-      button.addEventListener("click", () => jumpToDiagnostic(entries[Number(button.getAttribute("data-problem-jump"))]));
-    });
-    problemsList.querySelectorAll("[data-problem-dismiss]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const entry = entries[Number(button.getAttribute("data-problem-dismiss"))];
-        if (entry) diagnosticsState.dismissed.add(entry.id);
-        renderProblemsPanel();
-        if (latestDoc) drawGraph(latestDoc);
-      });
-    });
+    renderFieldDescriptors(problemsList, diagnosticDetailDescriptors(entries), { fieldsClass: "problem-list" });
     window.__jetCanvasProblems = entries.map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, source_span: entry.source_span, rendered: diagnosticFullText(entry) }));
   }
 
@@ -282,7 +303,7 @@
     rightDrawer.classList.toggle("is-drawer-open", which === "details");
     dockGraphs.classList.toggle("is-active", which === "graphs");
     dockDetails.classList.toggle("is-active", which === "details");
-    if (latestDoc) window.requestAnimationFrame(fitGraph);
+    if (latestDoc && !document.getElementById("execute-command-authority")) window.requestAnimationFrame(fitGraph);
   }
 
   function fit() {

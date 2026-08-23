@@ -528,6 +528,7 @@ impl DevStatus {
 pub struct WebHost {
     listener: Mutex<Option<TcpListener>>,
     status: Arc<DevStatus>,
+    debug_sessions: Arc<crate::Canvas::DebugSessions>,
     canvas_file: String,
 }
 
@@ -543,6 +544,7 @@ impl WebHost {
         Ok(Self {
             listener: Mutex::new(Some(listener)),
             status,
+            debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
             canvas_file: file.to_string(),
         })
     }
@@ -551,8 +553,9 @@ impl WebHost {
         let listener = self.listener.lock().unwrap().take();
         if let Some(listener) = listener {
             let status = Arc::clone(&self.status);
+            let debug_sessions = Arc::clone(&self.debug_sessions);
             let canvas_file = self.canvas_file.clone();
-            thread::spawn(move || serve_forever(listener, status, canvas_file));
+            thread::spawn(move || serve_forever(listener, status, debug_sessions, canvas_file));
         }
         {
             let status = Arc::clone(&self.status);
@@ -799,13 +802,19 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
 
 /// Accept connections forever, one thread per connection (a dev tool serving
 /// a handful of small files has no need for a worker pool).
-fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, canvas_file: String) {
+fn serve_forever(
+    listener: TcpListener,
+    status: Arc<DevStatus>,
+    debug_sessions: Arc<crate::Canvas::DebugSessions>,
+    canvas_file: String,
+) {
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             let status = Arc::clone(&status);
+            let debug_sessions = Arc::clone(&debug_sessions);
             let canvas_file = canvas_file.clone();
             thread::spawn(move || {
-                let _ = handle_connection(stream, &status, &canvas_file);
+                let _ = handle_connection(stream, &status, &debug_sessions, &canvas_file);
             });
         }
     }
@@ -816,6 +825,7 @@ fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, canvas_file: Str
 fn handle_connection(
     stream: TcpStream,
     status: &DevStatus,
+    debug_sessions: &crate::Canvas::DebugSessions,
     canvas_file: &str,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -1118,7 +1128,11 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match crate::Canvas::debug_session_json_for_entry(Path::new(canvas_file), &request) {
+        return match crate::Canvas::debug_session_json_for_entry_with_sessions(
+            Path::new(canvas_file),
+            &request,
+            debug_sessions,
+        ) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",

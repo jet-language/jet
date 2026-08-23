@@ -9,8 +9,8 @@ use super::graph_json::add_wire_with_span;
 use super::project_scan::project_file;
 use super::query_actions::canvas_authority_context;
 use super::schema_api::{
-    ACTION_SCHEMA_VERSION, EDIT_SCHEMA_VERSION, GraphBuilder, NodeQueryRef,
-    PROJECT_SCHEMA_VERSION, Projection, QUERY_SCHEMA_VERSION, source_revision,
+    source_revision, GraphBuilder, NodeQueryRef, Projection, ACTION_SCHEMA_VERSION,
+    EDIT_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION, QUERY_SCHEMA_VERSION,
 };
 use super::validation_json::{json_str, span_json};
 
@@ -51,7 +51,10 @@ pub(super) fn graph_id_name_span(graph_id: &str) -> Option<SourceSpan> {
     })
 }
 
-pub(super) fn function_signature_span(src: &str, name_span: SourceSpan) -> Result<SourceSpan, String> {
+pub(super) fn function_signature_span(
+    src: &str,
+    name_span: SourceSpan,
+) -> Result<SourceSpan, String> {
     let start = line_start(src, name_span.start);
     let Some(brace_rel) = src[name_span.end.min(src.len())..].find('{') else {
         return Err(edit_error(
@@ -270,6 +273,10 @@ pub(super) fn edit(span: SourceSpan, text: &str) -> TextEdit {
 
 pub(super) fn edit_ok(changed: bool, path: &Path) -> String {
     let src = fs::read_to_string(path).unwrap_or_default();
+    edit_ok_source(changed, &src)
+}
+
+pub(super) fn edit_ok_source(changed: bool, src: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"changed\":{},\"revision\":{},\"source_text\":{}}}",
         EDIT_SCHEMA_VERSION,
@@ -593,7 +600,11 @@ fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
         }
         None => "null".to_string(),
     };
-    let rendered = jet_driver::Diagnostics::render_all(&path.display().to_string(), src, std::slice::from_ref(d));
+    let rendered = jet_driver::Diagnostics::render_all(
+        &path.display().to_string(),
+        src,
+        std::slice::from_ref(d),
+    );
     format!(
         "{{\"code\":{},\"severity\":{},\"what\":{},\"why\":{},\"fix\":{},\"message\":{},\"rendered\":{},\"source_span\":{},\"source_path\":{}}}",
         json_str(&d.code),

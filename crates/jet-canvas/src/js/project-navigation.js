@@ -457,13 +457,24 @@
     };
   }
 
-  function projectMiniCard(title, small, code) {
-    return `<div class="project-card"><b>${escapeHtml(title || "")}</b><small>${escapeHtml(small || "")}</small><code>${escapeHtml(code || "")}</code></div>`;
+  function projectMiniCard(title, small, code, apply_op, className) {
+    return {
+      label: String(title || ""),
+      value: String(small || ""),
+      detail: String(code || ""),
+      editable: false,
+      apply_op: apply_op || null,
+      layout: "card",
+      className: className || "project-card"
+    };
   }
 
   function syncProjectPanel(panel, title, rows, empty) {
     if (!panel) return;
-    panel.innerHTML = `<h3>${escapeHtml(title)}</h3>` + (rows.length ? rows.join("") : `<div class="tag">${escapeHtml(empty)}</div>`);
+    clearDom(panel);
+    appendText(panel, "h3", "", title);
+    if (rows.length) renderFieldDescriptors(panel, rows, { fieldsClass: "project-list" });
+    else appendText(panel, "div", "tag", empty);
   }
 
   function collectProjectDiagnostics(project) {
@@ -509,10 +520,11 @@
       const packageName = (project.packages || [])[0] && ((project.packages || [])[0].name || (project.packages || [])[0].path);
       const sourceFiles = (project.files || []).filter((f) => f.kind === "source").length;
       const diagCount = diagRows.length;
-      statusSummary.innerHTML = [
-        `<div class="status-card"><b>${escapeHtml(packageName || project.mode || "Single file")}</b><small>${escapeHtml(sourceFiles + " source file" + (sourceFiles === 1 ? "" : "s"))}</small></div>`,
-        `<div class="status-card"><b>${diagCount === 0 ? "Clean" : diagCount + " issue" + (diagCount === 1 ? "" : "s")}</b><small>${escapeHtml((project.mode || "file") + " mode")}</small></div>`
-      ].join("");
+      clearDom(statusSummary);
+      renderFieldDescriptors(statusSummary, [
+        { label: packageName || project.mode || "Single file", value: sourceFiles + " source file" + (sourceFiles === 1 ? "" : "s"), detail: "", editable: false, layout: "card", className: "status-card" },
+        { label: diagCount === 0 ? "Clean" : diagCount + " issue" + (diagCount === 1 ? "" : "s"), value: (project.mode || "file") + " mode", detail: "", editable: false, layout: "card", className: "status-card" }
+      ], { fieldsClass: "status-list" });
       if (statusCount) statusCount.textContent = diagCount === 0 ? "clean" : String(diagCount);
     }
     window.__jetCanvasWorkspacePanels = {
@@ -532,22 +544,21 @@
     const cards = [];
     const fileCount = (project.files || []).length;
     for (const file of sourceFiles) {
-      const active = (selectedSourceId || project.entry) === file.path ? " is-active" : "";
-      cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(active ? "open" : "click to open")}</small><code class="dev-only">${escapeHtml(file.revision || "")}</code></button>`);
+      const active = (selectedSourceId || project.entry) === file.path;
+      cards.push(projectMiniCard(
+        file.path || "source",
+        active ? "open" : "click to open",
+        file.revision || "",
+        { id: "project-file:" + (file.path || "source"), mode: "action", run: () => loadGraph(file.path) },
+        "project-card" + (active ? " is-active" : "")
+      ));
+      cards[cards.length - 1].buttonAttributes = { "data-project-file": file.path || "" };
     }
-    if (!cards.length) cards.push(`<button class="project-card is-active" type="button"><b>${escapeHtml(project.entry || "source")}</b><small>open</small></button>`);
-    projectRail.innerHTML = cards.join("");
+    if (!cards.length) cards.push(projectMiniCard(project.entry || "source", "open", "", null, "project-card is-active"));
+    clearDom(projectRail);
+    renderFieldDescriptors(projectRail, cards, { fieldsClass: "project-list" });
     syncProjectPanels(project);
     window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
-  }
-
-  if (projectRail) {
-    projectRail.addEventListener("click", (event) => {
-      const card = event.target.closest("[data-project-file]");
-      if (!card) return;
-      const sourceId = card.getAttribute("data-project-file");
-      if (sourceId) loadGraph(sourceId);
-    });
   }
 
   let projectLoadGeneration = 0;
@@ -571,7 +582,10 @@
           if (projectMode) projectMode.textContent = "project unavailable · showing last project";
           return latestProject;
         }
-        if (projectRail) projectRail.innerHTML = "<div class=\"tag\">project unavailable</div>";
+        if (projectRail) {
+          clearDom(projectRail);
+          appendText(projectRail, "div", "tag", "project unavailable");
+        }
         return null;
       });
   }
@@ -830,6 +844,7 @@
   function nodeContextActions(graph, node) {
     const actions = [
       { title: "Copy", detail: "selection", group: "edit", run: copySelection },
+      { title: "Paste as staged", detail: "local selection", group: "edit", run: pasteAsStaged },
       { title: "Duplicate", detail: "selection", group: "edit", run: duplicateSelection },
       { title: "Add comment", detail: "around selection", group: "Comment", run: addCommentAroundSelection },
       { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
@@ -886,6 +901,7 @@
       } },
       { title: "Show source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
       { title: "Paste", detail: "selection", group: "Execution", run: pasteSelection },
+      { title: "Paste as staged", detail: "local selection", group: "Execution", run: pasteAsStaged },
       { title: "Duplicate", detail: "selection", group: "Execution", run: duplicateSelection },
       { title: "Add comment", detail: "local view", group: "Comment", run: addCommentAroundSelection },
       { title: "Align top", detail: "local view", group: "Execution", run: () => alignSelectedNodes("y") },
@@ -998,6 +1014,7 @@
     hoverDiagnostic = null;
     selectedNodeId = opts.nodeId || graph.entry_node;
     selectedNodeIds = new Set([selectedNodeId]);
+    selectionExplicitlyCleared = false;
     setViewMode("graph");
     if (opts.fit === false) drawGraph(latestDoc);
     else fitGraph();
@@ -1023,6 +1040,7 @@
   function loadDebugState(doc) {
     const key = debugStorageKey(doc);
     if (debugState.key === key && debugState.revision === doc.revision) return;
+    const previous = debugState;
     try {
       debugState = JSON.parse(localStorage.getItem(key) || "null") || { breakpoints: [], watches: [] };
     } catch (_) {
@@ -1030,8 +1048,12 @@
     }
     debugState.key = key;
     debugState.revision = doc.revision;
-    debugState.breakpoints = (debugState.breakpoints || []).filter((b) => b.revision === doc.revision);
+    debugState.breakpoints = debugState.breakpoints || [];
+    debugState.staleBreakpoints = debugState.breakpoints.filter((b) => b.revision && b.revision !== doc.revision);
     debugState.watches = debugState.watches || [];
+    if (debugState.staleBreakpoints.length && (!previous || previous.revision !== doc.revision)) {
+      showToast(debugState.staleBreakpoints.length + " breakpoint" + (debugState.staleBreakpoints.length === 1 ? " is" : "s are") + " stale; source was kept", { isError: true });
+    }
   }
 
   function saveDebugState() {
@@ -1077,9 +1099,22 @@
     showToast("Watch added: " + name);
   }
 
+  function syncDebugSessionPicker() {
+    if (!debugSession) return;
+    debugSession.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = debugSessionId || "none";
+    option.textContent = debugSessionInfo && debugSessionInfo.state === "running"
+      ? "Canvas · " + (debugSessionInfo.tier || "live session")
+      : "No live session";
+    debugSession.appendChild(option);
+    debugSession.disabled = !debugSessionId;
+  }
+
   function runDebug(commands) {
     if (!latestDoc) return;
     loadDebugState(latestDoc);
+    const requestGeneration = ++debugRequestGeneration;
     const requestedRevision = latestDoc.revision;
     const requestedSourceId = currentCanvasSourceId();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
@@ -1087,36 +1122,72 @@
       schema_version: 1,
       revision: requestedRevision,
       commands,
-      breakpoint_spans: (debugState.breakpoints || []).map((b) => b.anchor),
+      breakpoint_spans: (debugState.breakpoints || [])
+        .filter((b) => !b.revision || b.revision === requestedRevision)
+        .map((b) => b.anchor),
       watches: debugState.watches || []
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
+    if (debugSessionId) body.session_id = debugSessionId;
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
+        if (requestGeneration !== debugRequestGeneration) return;
         if (latestDoc && (latestDoc.revision !== requestedRevision || currentCanvasSourceId() !== requestedSourceId)) {
+          debugSessionId = null;
+          debugSessionInfo = null;
+          debugOverlay = null;
+          syncDebugSessionPicker();
+          syncDebugActive();
           showToast("Debug result is stale; current source was kept", { isError: true });
           return;
         }
         if (!result.ok) {
+          debugSessionId = null;
+          debugSessionInfo = null;
           debugOverlay = null;
+          syncDebugSessionPicker();
           syncDebugActive();
-          showToast((result.json.message || "Debug rejected").split("\n")[0]);
+          showToast((result.json.message || "Debug rejected").split("\n")[0], { isError: true });
           return;
         }
+        debugSessionInfo = result.json.session || null;
+        debugSessionId = debugSessionInfo && debugSessionInfo.state === "running" ? debugSessionInfo.id : null;
         debugOverlay = result.json.overlay || null;
+        syncDebugSessionPicker();
         syncDebugActive();
         if (debugOverlay && debugOverlay.active_graph_id) selectedGraphId = debugOverlay.active_graph_id;
         if (debugOverlay && debugOverlay.active_node_id) selectedNodeId = debugOverlay.active_node_id;
         showToast("Debug " + ((debugOverlay && debugOverlay.debug_overlay) || "updated"));
         drawGraph(latestDoc);
       })
-      .catch((e) => showToast(String(e)));
+      .catch(() => {
+        if (requestGeneration !== debugRequestGeneration) return;
+        debugSessionId = null;
+        debugSessionInfo = null;
+        debugOverlay = null;
+        syncDebugSessionPicker();
+        syncDebugActive();
+        showToast("Debug session disconnected; source was kept", { isError: true });
+      });
   }
 
   function stopDebug() {
+    const id = debugSessionId;
+    const doc = latestDoc;
+    const requestedSourceId = currentCanvasSourceId();
+    const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
+    debugRequestGeneration++;
+    debugSessionId = null;
+    debugSessionInfo = null;
     debugOverlay = null;
+    syncDebugSessionPicker();
     syncDebugActive();
+    if (id && doc) {
+      const body = { schema_version: 1, revision: doc.revision, session_id: id, stop: true };
+      if (requestedSourceId) body.source_id = requestedSourceId;
+      fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => {});
+    }
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);
   }

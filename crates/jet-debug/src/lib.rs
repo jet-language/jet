@@ -85,6 +85,10 @@ enum IO {
     Scripted {
         inputs: std::collections::VecDeque<String>,
         out: String,
+        /// Keep the interpreter at the current stop when scripted input ends.
+        /// Canvas uses this to expose one live command boundary; transcript
+        /// tests retain the historical run-to-completion behavior.
+        pause_on_input_end: bool,
     },
 }
 
@@ -92,6 +96,16 @@ impl IO {
     /// True for the scripted (test/transcript) path.
     fn is_scripted(&self) -> bool {
         matches!(self, IO::Scripted { .. })
+    }
+
+    fn pause_on_input_end(&self) -> bool {
+        matches!(
+            self,
+            IO::Scripted {
+                pause_on_input_end: true,
+                ..
+            }
+        )
     }
     /// Append a line of debugger/program output (scripted buffer only; the
     /// interactive path writes the terminal directly at the call site).
@@ -130,6 +144,9 @@ struct Debugger {
     started: bool,
     /// Set when the user typed `quit`: the hook returns E2204 to abort the run.
     quit: bool,
+    /// Set when Canvas input ends at a live stop. This is an internal unwind
+    /// signal; the paused transcript is not a diagnostic.
+    paused: bool,
 }
 
 impl Debugger {
@@ -145,6 +162,7 @@ impl Debugger {
             io,
             started: false,
             quit: false,
+            paused: false,
         }
     }
 
@@ -185,7 +203,7 @@ impl Debugger {
                     Err(_) => None,
                 }
             }
-            IO::Scripted { inputs, out } => {
+            IO::Scripted { inputs, out, .. } => {
                 let next = inputs.pop_front()?;
                 // Echo the typed command after the prompt so the transcript
                 // reads like a real session.
@@ -234,8 +252,14 @@ impl Debugger {
             let cmd = match self.read_command() {
                 Some(c) => c,
                 None => {
-                    // End of input: let the program run to completion.
-                    self.resume = Resume::Continue;
+                    if self.io.pause_on_input_end() {
+                        // Canvas owns the next command. Unwind the current
+                        // interpreter invocation while retaining this stop.
+                        self.paused = true;
+                    } else {
+                        // Transcript tests and terminal EOF run to completion.
+                        self.resume = Resume::Continue;
+                    }
                     return;
                 }
             };
@@ -402,6 +426,16 @@ impl DebugHook for Debugger {
 
         self.show_stop(line, scope);
         self.prompt_loop(line, depth, scope);
+        if self.paused {
+            return Err(Diagnostic::error(
+                "E2204",
+                "debug session paused at the Canvas command boundary".to_string(),
+                "Canvas keeps the source-level debugger stopped until the next command arrives"
+                    .to_string(),
+                "send another Canvas debug command or stop the session".to_string(),
+                None,
+            ));
+        }
         if self.quit {
             return Err(Diagnostic::error(
                 "E2204",
@@ -434,7 +468,7 @@ fn render_locals(scope: &HashMap<String, CtValue>) -> String {
 /// Load + check `file`, then run it under the debugger driving `io`. Returns
 /// the process exit code and the captured transcript (empty in interactive
 /// mode, where output already went to the terminal).
-fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
+fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool) {
     let scripted = io.is_scripted();
     let checked = jet_driver::run_compiler_work(|| {
         let mut bundle = crate::Loader::load_entry(file).map_err(|diags| (None, diags))?;
@@ -461,11 +495,11 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
                     eprintln!("{}", line);
                 }
             }
-            return (ExitCodes::USER_ERROR, io.into_output());
+            return (ExitCodes::USER_ERROR, io.into_output(), false);
         }
         Err((Some(src), errors)) => {
             emit_diags(&mut io, file, &src, &errors);
-            return (ExitCodes::USER_ERROR, io.into_output());
+            return (ExitCodes::USER_ERROR, io.into_output(), false);
         }
     };
     let src = bundle.modules[bundle.entry].source.clone();
@@ -474,7 +508,7 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
     // points at the real build (D-DBG3 step 2, the native backend follow-on).
     if let Some(b) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
         emit_diags(&mut io, file, &src, &[b]);
-        return (ExitCodes::USER_ERROR, io.into_output());
+        return (ExitCodes::USER_ERROR, io.into_output(), false);
     }
     run_checked(&bundle, file, io)
 }
@@ -489,7 +523,7 @@ fn emit_diags(io: &mut IO, file: &str, src: &str, diags: &[Diagnostic]) {
 
 /// Drive the interpreter with the debugger hook attached, then flush the
 /// program's own stdout/stderr around the debugger's `(jet)` session.
-fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i32, String) {
+fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i32, String, bool) {
     let funcs = collect_funcs(bundle);
     let main = match funcs.get("run") {
         Some(f) => *f,
@@ -505,7 +539,7 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
             );
             let src = bundle.modules[bundle.entry].source.clone();
             emit_diags(&mut io, file, &src, &[diag]);
-            return (ExitCodes::USER_ERROR, io.into_output());
+            return (ExitCodes::USER_ERROR, io.into_output(), false);
         }
     };
     let base_dir = &bundle.project_root;
@@ -533,11 +567,14 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
         if !sink.stderr.is_empty() {
             dbg.io.push_line(sink.stderr.trim_end_matches('\n'));
         }
+        if dbg.paused {
+            return (ExitCodes::OK, dbg.io.into_output(), true);
+        }
         match &result {
             Ok(()) => dbg.io.push_line("program finished"),
             Err(d) => dbg.io.push_line(&format!("[{}] {}", d.code, d.what)),
         }
-        (code, dbg.io.into_output())
+        (code, dbg.io.into_output(), false)
     } else {
         print!("{}", sink.stdout);
         eprint!("{}", sink.stderr);
@@ -545,7 +582,7 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
             Ok(()) => println!("program finished"),
             Err(d) => eprintln!("[{}] {}", d.code, d.what),
         }
-        (code, String::new())
+        (code, String::new(), false)
     }
 }
 
@@ -567,7 +604,7 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
 /// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
 /// the process exit code.
 pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured) = run_with_io(file, IO::Interactive);
+    let (code, _captured, _paused) = run_with_io(file, IO::Interactive);
     code
 }
 
@@ -594,9 +631,35 @@ pub fn run_session_result(file: &str, inputs: &[&str]) -> SessionResult {
         let io = IO::Scripted {
             inputs: queue,
             out: String::new(),
+            pause_on_input_end: false,
         };
-        let (code, transcript) = run_with_io(file, io);
+        let (code, transcript, _paused) = run_with_io(file, io);
         let status = if code == ExitCodes::OK {
+            SessionStatus::Finished
+        } else {
+            SessionStatus::Failed
+        };
+        SessionResult { status, transcript }
+    })
+}
+
+/// One live Canvas command boundary. The debugger pauses at the next stopped
+/// Jet source statement when `inputs` end, instead of treating EOF as
+/// `continue`. The Canvas server replays the bounded command history to resume
+/// the same deterministic source session on the next request.
+pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
+    jet_driver::run_compiler_work(|| {
+        let queue: std::collections::VecDeque<String> =
+            inputs.iter().map(|s| s.to_string()).collect();
+        let io = IO::Scripted {
+            inputs: queue,
+            out: String::new(),
+            pause_on_input_end: true,
+        };
+        let (code, transcript, paused) = run_with_io(file, io);
+        let status = if paused {
+            SessionStatus::Running
+        } else if code == ExitCodes::OK {
             SessionStatus::Finished
         } else {
             SessionStatus::Failed

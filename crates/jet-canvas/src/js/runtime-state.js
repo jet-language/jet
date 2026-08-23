@@ -73,6 +73,8 @@
   const debugNext = document.getElementById("debug-next");
   const debugContinue = document.getElementById("debug-continue");
   const debugStop = document.getElementById("debug-stop");
+  const debugStart = document.getElementById("debug-start");
+  const debugSession = document.getElementById("debug-session");
   const debugBreak = document.getElementById("debug-break");
   const debugWatch = document.getElementById("debug-watch");
   let hit = [];
@@ -88,7 +90,10 @@
   let latestProject = null;
   let selectedSourceId = null;
   let debugOverlay = null;
-  let debugState = { breakpoints: [], watches: [] };
+  let debugSessionId = null;
+  let debugSessionInfo = null;
+  let debugRequestGeneration = 0;
+  let debugState = { breakpoints: [], watches: [], staleBreakpoints: [] };
   let searchState = { results: [], spans: [], active: -1, diff: null, impact: null, stale: false };
   let diagnosticsState = { baseRevision: null, diagnosticRevision: null, entries: [], dismissed: new Set() };
   let scm = null;
@@ -106,6 +111,8 @@
   let graphForwardStack = [];
   let selectedNodeId = null;
   let selectedNodeIds = new Set();
+  let selectionExplicitlyCleared = false;
+  let pasteRenameChips = [];
   let view = { x: 64, y: 42, zoom: 1 };
   let drag = null;
   let lastPointer = { x: 240, y: 140 };
