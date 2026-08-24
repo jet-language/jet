@@ -13,7 +13,7 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let compose = self.allow_environment_reads && name == "compose";
+                let compose = self.allow_environment_reads && name == crate::Syntax::SECRET_COMPOSE;
                 while compose && matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
@@ -112,7 +112,8 @@ impl<'a> Parser<'a> {
                 }
             }
             let expr = if allow_compose_template
-                && label.as_ref().map(|(name, _)| name.as_str()) == Some("template")
+                && label.as_ref().map(|(name, _)| name.as_str())
+                    == Some(crate::Syntax::SECRET_COMPOSE_FIELD_TEMPLATE)
                 && self.looks_like_unquoted_compose_template()
             {
                 self.unquoted_compose_template()
@@ -161,7 +162,9 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.toks.get(index) {
             match &token.kind {
                 TokKind::RParen | TokKind::Comma | TokKind::Semi if index > self.pos => break,
-                TokKind::Ident(name) if index > self.pos && name == "from" => {
+                TokKind::Ident(name)
+                    if index > self.pos && name == crate::Syntax::SECRET_COMPOSE_FIELD_FROM =>
+                {
                     if matches!(
                         self.toks.get(index + 1).map(|next| &next.kind),
                         Some(TokKind::Colon)
@@ -189,7 +192,7 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(name)
                     if brace_depth == 0
                         && !parts.is_empty()
-                        && name == "from"
+                        && name == crate::Syntax::SECRET_COMPOSE_FIELD_FROM
                         && matches!(self.peek2().kind, TokKind::Colon) => true,
                 TokKind::Eof => true,
                 _ => false,

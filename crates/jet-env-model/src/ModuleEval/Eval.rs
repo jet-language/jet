@@ -860,7 +860,7 @@ fn evaluate_package_profile_fields(
     }
     let extends = match resolved.get(Syntax::PROFILE_FIELD_EXTENDS) {
         None => Vec::new(),
-        Some(value) => names_from(value).ok_or_else(|| {
+        Some(value) => string_names_from(value).ok_or_else(|| {
             Diagnostic::error(
                 "E1333",
                 format!("package generation `{name}` has invalid `extends`"),
@@ -1387,9 +1387,9 @@ fn prompt_word(v: &crate::Comptime::CtValue) -> Option<String> {
     }
 }
 
-/// U13: `[String]` → `Vec<String>`, or `None` if `v` isn't a list of strings
-/// (caller falls back to capturing it as an opaque fact setting).
-fn names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
+/// Lower a general `[String]` field. This is used by package-generation
+/// inheritance; secret declarations use the typed map parser below.
+fn string_names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
     let crate::Comptime::CtValue::List(xs) = v else {
         return None;
     };
@@ -1472,7 +1472,7 @@ fn parse_secret_specs(
             ));
         }
         let spec = match declaration.without_parens() {
-            Expr::Call(call) if call.name == "compose" => {
+            Expr::Call(call) if call.name == Syntax::SECRET_COMPOSE => {
                 parse_secret_compose(&name, call, base_dir, funcs, globals)?
             }
             Expr::StructLit { .. } => {
@@ -1517,12 +1517,12 @@ fn parse_secret_metadata(
         ));
     }
     let allowed = [
-        "description",
-        "required",
-        "allowed_environments",
-        "rotation",
-        "default",
-        "generate",
+        Syntax::SECRET_META_FIELD_DESCRIPTION,
+        Syntax::SECRET_META_FIELD_REQUIRED,
+        Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS,
+        Syntax::SECRET_META_FIELD_ROTATION,
+        Syntax::SECRET_META_FIELD_DEFAULT,
+        Syntax::SECRET_META_FIELD_GENERATE,
     ];
     let mut values = BTreeMap::<String, (crate::Diagnostics::Span, CtValue)>::new();
     for (field, span, expression) in fields {
@@ -1548,41 +1548,55 @@ fn parse_secret_metadata(
     }
 
     let description = values
-        .get("description")
+        .get(Syntax::SECRET_META_FIELD_DESCRIPTION)
         .map(|(span, value)| match value {
             CtValue::Str(value) => Ok(value.clone()),
             _ => Err(secret_decl_error(
-                format!("secret `{name}` field `description` must be a string"),
+                format!(
+                    "secret `{name}` field `{}` must be a string",
+                    Syntax::SECRET_META_FIELD_DESCRIPTION
+                ),
                 *span,
             )),
         })
         .transpose()?;
-    let required = match values.get("required") {
+    let required = match values.get(Syntax::SECRET_META_FIELD_REQUIRED) {
         None => true,
         Some((_span, CtValue::Bool(value))) => *value,
         Some((span, _)) => {
             return Err(secret_decl_error(
-                format!("secret `{name}` field `required` must be a boolean"),
+                format!(
+                    "secret `{name}` field `{}` must be a boolean",
+                    Syntax::SECRET_META_FIELD_REQUIRED
+                ),
                 *span,
             ));
         }
     };
-    let allowed_environments = match values.get("allowed_environments") {
+    let allowed_environments = match values.get(Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS) {
         None => Vec::new(),
         Some((span, value)) => secret_environment_list(name, value, *span)?,
     };
-    let rotation = match values.get("rotation") {
+    let rotation = match values.get(Syntax::SECRET_META_FIELD_ROTATION) {
         None => SecretRotationPolicy::None,
         Some((span, value)) => secret_rotation(name, value, *span)?,
     };
-    let default = match values.get("default") {
+    let default = match values.get(Syntax::SECRET_META_FIELD_DEFAULT) {
         None => SecretDefault::None,
         Some((span, value)) => secret_default(name, value, *span)?,
     };
-    let generate = match values.get("generate") {
+    let generate = match values.get(Syntax::SECRET_META_FIELD_GENERATE) {
         None => SecretGenerator::None,
         Some((span, value)) => secret_generator(name, value, *span)?,
     };
+    validate_secret_policies(
+        name,
+        required,
+        &allowed_environments,
+        &default,
+        &generate,
+        value.span(),
+    )?;
     Ok(SecretSpec {
         name: name.to_string(),
         description,
@@ -1594,6 +1608,54 @@ fn parse_secret_metadata(
         declaration: SecretDeclaration::Stored,
         implicit: false,
     })
+}
+
+fn validate_secret_policies(
+    name: &str,
+    required: bool,
+    allowed_environments: &[String],
+    default: &SecretDefault,
+    generate: &SecretGenerator,
+    span: crate::Diagnostics::Span,
+) -> Result<(), Diagnostic> {
+    let has_default = matches!(default, SecretDefault::PerProfile(values) if !values.is_empty());
+    let has_generator = !matches!(generate, SecretGenerator::None);
+    if has_default && has_generator {
+        return Err(secret_decl_error(
+            format!(
+                "secret `{name}` cannot declare both `{}` and `{}`",
+                Syntax::SECRET_META_FIELD_DEFAULT,
+                Syntax::SECRET_META_FIELD_GENERATE
+            ),
+            span,
+        ));
+    }
+    if required && (has_default || has_generator) {
+        return Err(secret_decl_error(
+            format!(
+                "secret `{name}` is required and cannot declare `{}` or `{}`",
+                Syntax::SECRET_META_FIELD_DEFAULT,
+                Syntax::SECRET_META_FIELD_GENERATE
+            ),
+            span,
+        ));
+    }
+    if !allowed_environments.is_empty() {
+        if let SecretDefault::PerProfile(values) = default {
+            for profile in values.keys() {
+                if !allowed_environments.iter().any(|allowed| allowed == profile) {
+                    return Err(secret_decl_error(
+                        format!(
+                            "secret `{name}` default profile `{profile}` is outside `{}`",
+                            Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS
+                        ),
+                        span,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn parse_secret_compose(
@@ -1620,7 +1682,7 @@ fn parse_secret_compose(
             ));
         }
         match label.as_str() {
-            "template" => {
+            Syntax::SECRET_COMPOSE_FIELD_TEMPLATE => {
                 let value = secret_template_value(&argument.expr, base_dir, funcs, globals)
                     .map_err(|_| {
                         secret_decl_error(
@@ -1630,7 +1692,7 @@ fn parse_secret_compose(
                     })?;
                 template = Some((value, argument.expr.span()));
             }
-            "from" => {
+            Syntax::SECRET_COMPOSE_FIELD_FROM => {
                 let value = secret_eval_value(&argument.expr, base_dir, funcs, globals).map_err(|_| {
                     secret_decl_error(
                         format!("secret `{name}` compose `from` must be a list of names"),
@@ -1698,7 +1760,14 @@ fn secret_environment_list(
     value: &CtValue,
     span: crate::Diagnostics::Span,
 ) -> Result<Vec<String>, Diagnostic> {
-    let values = secret_string_list(value, &format!("secret `{name}` field `allowed_environments`"), span)?;
+    let values = secret_string_list(
+        value,
+        &format!(
+            "secret `{name}` field `{}`",
+            Syntax::SECRET_META_FIELD_ALLOWED_ENVIRONMENTS
+        ),
+        span,
+    )?;
     let mut seen = HashSet::new();
     for environment in &values {
         if !valid_env_name(environment) {
@@ -1723,7 +1792,7 @@ fn secret_rotation(
     span: crate::Diagnostics::Span,
 ) -> Result<SecretRotationPolicy, Diagnostic> {
     match value {
-        CtValue::Str(value) if value == "none" => Ok(SecretRotationPolicy::None),
+        CtValue::Str(value) if value == Syntax::SECRET_NONE => Ok(SecretRotationPolicy::None),
         CtValue::Struct { type_name, fields } if type_name == "SecretMaxAge" => {
             let seconds = fields
                 .iter()
@@ -1741,7 +1810,12 @@ fn secret_rotation(
             Ok(SecretRotationPolicy::MaxAge { seconds })
         }
         _ => Err(secret_decl_error(
-            format!("secret `{name}` field `rotation` must be `none` or `max_age(…)`"),
+            format!(
+                "secret `{name}` field `{}` must be `{}` or `{}`(…)",
+                Syntax::SECRET_META_FIELD_ROTATION,
+                Syntax::SECRET_NONE,
+                Syntax::SECRET_ROTATION_MAX_AGE
+            ),
             span,
         )),
     }
@@ -1752,7 +1826,7 @@ fn secret_default(
     value: &CtValue,
     span: crate::Diagnostics::Span,
 ) -> Result<SecretDefault, Diagnostic> {
-    if matches!(value, CtValue::Str(value) if value == "none") {
+    if matches!(value, CtValue::Str(value) if value == Syntax::SECRET_NONE) {
         return Ok(SecretDefault::None);
     }
     let fields = match value {
@@ -1809,14 +1883,16 @@ fn secret_generator(
     value: &CtValue,
     span: crate::Diagnostics::Span,
 ) -> Result<SecretGenerator, Diagnostic> {
-    if matches!(value, CtValue::Str(value) if value == "none") {
+    if matches!(value, CtValue::Str(value) if value == Syntax::SECRET_NONE) {
         return Ok(SecretGenerator::None);
     }
     if let CtValue::Struct { type_name, fields } = value {
         if type_name == "SecretRandom" {
             let length = fields
                 .iter()
-                .find_map(|(field, value)| (field == "length").then_some(value))
+                .find_map(|(field, value)| {
+                    (field == Syntax::SECRET_GENERATOR_FIELD_LENGTH).then_some(value)
+                })
                 .and_then(|value| match value {
                     CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
                     _ => None,
@@ -1831,7 +1907,13 @@ fn secret_generator(
         }
     }
     Err(secret_decl_error(
-        format!("secret `{name}` field `generate` must be `none` or `random(length: …)`"),
+        format!(
+            "secret `{name}` field `{}` must be `{}` or `{}`({}: …)",
+            Syntax::SECRET_META_FIELD_GENERATE,
+            Syntax::SECRET_NONE,
+            Syntax::SECRET_GENERATOR_RANDOM,
+            Syntax::SECRET_GENERATOR_FIELD_LENGTH
+        ),
         span,
     ))
 }
@@ -2067,7 +2149,7 @@ fn secret_eval_value(
                 fields: vec![("value".to_string(), CtValue::Int(*amount))],
             })
         }
-        Expr::Call(call) if call.name == "max_age" => {
+        Expr::Call(call) if call.name == Syntax::SECRET_ROTATION_MAX_AGE => {
             if call.args.len() != 1 || call.args[0].label.is_some() {
                 return Err(secret_decl_error(
                     "`max_age` needs one duration argument",
@@ -2083,10 +2165,12 @@ fn secret_eval_value(
                 fields: vec![("seconds".to_string(), CtValue::Int(seconds as i64))],
             })
         }
-        Expr::Call(call) if call.name == "random" => {
+        Expr::Call(call) if call.name == Syntax::SECRET_GENERATOR_RANDOM => {
             let mut length = None;
             for argument in &call.args {
-                if argument.label.as_ref().map(|(name, _)| name.as_str()) != Some("length") {
+                if argument.label.as_ref().map(|(name, _)| name.as_str())
+                    != Some(Syntax::SECRET_GENERATOR_FIELD_LENGTH)
+                {
                     return Err(secret_decl_error(
                         "`random` needs a labeled `length` argument",
                         argument.span,
@@ -2115,7 +2199,10 @@ fn secret_eval_value(
             };
             Ok(CtValue::Struct {
                 type_name: "SecretRandom".to_string(),
-                fields: vec![("length".to_string(), CtValue::Int(length))],
+                fields: vec![(
+                    Syntax::SECRET_GENERATOR_FIELD_LENGTH.to_string(),
+                    CtValue::Int(length),
+                )],
             })
         }
         Expr::Paren(inner, _) => secret_eval_value(inner, base_dir, funcs, globals),

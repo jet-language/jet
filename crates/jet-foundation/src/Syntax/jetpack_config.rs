@@ -5,6 +5,22 @@
 /// missing).
 pub const ENV_FIELD_SECRETS: &str = "secrets";
 
+/// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the one typed secret-map
+/// grammar. Keep every user-written declaration name registered here (I7).
+pub const SECRET_COMPOSE: &str = "compose";
+pub const SECRET_COMPOSE_FIELD_TEMPLATE: &str = "template";
+pub const SECRET_COMPOSE_FIELD_FROM: &str = "from";
+pub const SECRET_META_FIELD_DESCRIPTION: &str = "description";
+pub const SECRET_META_FIELD_REQUIRED: &str = "required";
+pub const SECRET_META_FIELD_ALLOWED_ENVIRONMENTS: &str = "allowed_environments";
+pub const SECRET_META_FIELD_ROTATION: &str = "rotation";
+pub const SECRET_META_FIELD_DEFAULT: &str = "default";
+pub const SECRET_META_FIELD_GENERATE: &str = "generate";
+pub const SECRET_NONE: &str = "none";
+pub const SECRET_ROTATION_MAX_AGE: &str = "max_age";
+pub const SECRET_GENERATOR_RANDOM: &str = "random";
+pub const SECRET_GENERATOR_FIELD_LENGTH: &str = "length";
+
 /// U19: `jetpack config <verb>` — today only `trust` pattern management.
 pub const CONFIG_SUBCOMMAND: &str = "config";
 pub const CONFIG_VERB_TRUST: &str = "trust";

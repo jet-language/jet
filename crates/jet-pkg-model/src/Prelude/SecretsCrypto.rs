@@ -197,6 +197,7 @@ fn secret_compose_plan() -> Vec<SecretComposePlan> {
             continue;
         }
         from.sort();
+        from.dedup();
         plans.push(SecretComposePlan {
             output: output.to_string(),
             from,
@@ -259,21 +260,28 @@ fn substitute_secret_template(
     Some(output)
 }
 
-fn append_secret_read_audit(output: &str, inputs: &[String]) {
+fn secret_read_audit_line(output: &str, inputs: &[String]) -> Option<String> {
     if output.chars().any(char::is_control)
         || inputs.iter().any(|input| input.chars().any(char::is_control))
     {
-        return;
+        return None;
     }
+    let mut inputs = inputs.to_vec();
+    inputs.sort();
+    inputs.dedup();
+    Some(format!("read output={output} from=[{}]\n", inputs.join(",")))
+}
+
+fn append_secret_read_audit(output: &str, inputs: &[String]) {
+    let Some(line) = secret_read_audit_line(output, inputs) else {
+        return;
+    };
     let path = std::path::Path::new(".jet").join("secrets-audit");
     if let Some(parent) = path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
             return;
         }
     }
-    let mut line = format!("read output={output} from=[");
-    line.push_str(&inputs.join(","));
-    line.push_str("]\n");
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = file.write_all(line.as_bytes());
     }
@@ -877,5 +885,48 @@ mod tests {
         let mut bytes = jet_vault_encode_pairs(&pairs);
         bytes.truncate(bytes.len() - 1);
         assert_eq!(jet_vault_decode_pairs(&bytes), None);
+    }
+
+    #[test]
+    fn composed_reads_recompute_and_audit_names_only() {
+        let mut source = std::collections::BTreeMap::from([
+            ("DB_HOST".to_string(), "host-value".to_string()),
+            ("DB_PASSWORD".to_string(), "password-value".to_string()),
+            ("DB_USER".to_string(), "user-value".to_string()),
+        ]);
+        let plans = vec![SecretComposePlan {
+            output: "DB_URL".to_string(),
+            from: vec![
+                "DB_HOST".to_string(),
+                "DB_PASSWORD".to_string(),
+                "DB_USER".to_string(),
+            ],
+            template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app".to_string(),
+        }];
+        let first = resolve_secret_read("DB_URL", &source, &plans, &mut Vec::new());
+        source.insert("DB_HOST".to_string(), "rotated-host".to_string());
+        let second = resolve_secret_read("DB_URL", &source, &plans, &mut Vec::new());
+        assert!(first.is_some() && second.is_some());
+        assert!(first != second);
+
+        source.remove("DB_PASSWORD");
+        assert!(resolve_secret_read("DB_URL", &source, &plans, &mut Vec::new()).is_none());
+        let audit = secret_read_audit_line(
+            "DB_URL",
+            &[
+                "DB_USER".to_string(),
+                "DB_HOST".to_string(),
+                "DB_PASSWORD".to_string(),
+                "DB_HOST".to_string(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            audit,
+            "read output=DB_URL from=[DB_HOST,DB_PASSWORD,DB_USER]\n"
+        );
+        assert!(!audit.contains("host-value"));
+        assert!(!audit.contains("password-value"));
+        assert!(!audit.contains("user-value"));
     }
 }

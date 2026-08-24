@@ -56,15 +56,18 @@ pub fn write_runtime_plan(project_dir: &Path, specs: &[SecretSpec]) -> Result<()
         let SecretDeclaration::Compose { template, from } = &spec.declaration else {
             continue;
         };
+        let mut inputs = from.clone();
+        inputs.sort();
+        inputs.dedup();
         if has_plan_control_character(&spec.name)
             || has_plan_control_character(template)
-            || from.iter().any(|name| has_plan_control_character(name))
+            || inputs.iter().any(|name| has_plan_control_character(name))
         {
             return Err(format!("secret composition plan for {} contains a control character", spec.name));
         }
         lines.push_str(&spec.name);
         lines.push('\t');
-        lines.push_str(&from.join(","));
+        lines.push_str(&inputs.join(","));
         lines.push('\t');
         lines.push_str(template);
         lines.push('\n');
