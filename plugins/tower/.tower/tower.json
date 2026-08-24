@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2188,
-    "rev": 44229,
+    "rev": 44236,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -145440,7 +145440,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:55.606Z",
-      "updated": "2026-08-24T23:10:13.844Z",
+      "updated": "2026-08-24T23:16:59.372Z",
       "updatedBy": "Main"
     },
     {
@@ -146159,7 +146159,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:39.181Z",
-      "updated": "2026-08-24T23:10:18.148Z",
+      "updated": "2026-08-24T23:17:00.060Z",
       "updatedBy": "Main"
     },
     {
@@ -146264,7 +146264,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:43.369Z",
-      "updated": "2026-08-24T23:10:18.699Z",
+      "updated": "2026-08-24T23:17:00.830Z",
       "updatedBy": "Main"
     },
     {
@@ -146370,7 +146370,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:47.598Z",
-      "updated": "2026-08-24T23:10:19.236Z",
+      "updated": "2026-08-24T23:17:01.459Z",
       "updatedBy": "Main"
     },
     {
@@ -146476,7 +146476,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:51.717Z",
-      "updated": "2026-08-24T23:10:19.766Z",
+      "updated": "2026-08-24T23:18:14.499Z",
       "updatedBy": "Main"
     },
     {
@@ -146582,7 +146582,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:55.233Z",
-      "updated": "2026-08-24T23:10:20.307Z",
+      "updated": "2026-08-24T23:18:16.083Z",
       "updatedBy": "Main"
     },
     {
@@ -146688,7 +146688,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:58.324Z",
-      "updated": "2026-08-24T23:10:20.858Z",
+      "updated": "2026-08-24T23:18:16.528Z",
       "updatedBy": "Main"
     }
   ],
@@ -202539,6 +202539,472 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-24T23:15:27.541Z"
+    },
+    {
+      "id": "D-BUILD-FAIL1",
+      "cardId": "cs2bko2y",
+      "group": "tooling",
+      "title": "How should a build entry declare its failure type?",
+      "gist": "Choose the default failure contract for `fn build`.",
+      "lesson": "A build entry must return a `BuildPlan`. BuildContext operations fail with structured build errors. The entry is already a recognized compiler hook, so Jet can supply that common error contract or require it in source.",
+      "explainer": "",
+      "story": "Morgan writes a small package build. The happy path should name the plan, while an expert build can add a domain-specific failure.",
+      "inWild": "fn build(b: BuildContext) BuildPlan -> {\n    app :: b.add_executable(\"app\", [\"main.jet\"], [])?\n    b.plan(app)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Implicit `BuildError` for build entries",
+          "detail": "A recognized `fn build` writes only `BuildPlan`. Jet supplies `BuildError!` as the default failure domain. Experts can declare a wider explicit error union.",
+          "technical": "The special entry contract is `fn(BuildContext) BuildPlan BuildError!`. Source may write `BuildPlan CustomBuildError!`; sema includes BuildError through declared conversion or an explicit union.",
+          "code": "fn build(b: BuildContext) BuildPlan -> {\n    app :: b.add_executable(\"app\", [\"main.jet\"], [])?\n    b.plan(app)\n}\n\nfn build(b: BuildContext) BuildPlan (BuildError | ReleaseError)! -> { … }"
+        },
+        {
+          "key": "B",
+          "name": "Always write `BuildError!`",
+          "detail": "Every build entry writes `BuildPlan BuildError!`. The contract is fully visible and uses ordinary suffix rules. Small package builds repeat a type fixed by every BuildContext operation.",
+          "technical": "No entry-only defaulting. Sema requires the ordinary explicit signature and validates exact BuildContext error propagation.",
+          "code": "fn build(b: BuildContext) BuildPlan BuildError! -> {\n    app :: b.add_executable(\"app\", [\"main.jet\"], [])?\n    b.plan(app)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Use the generic default error",
+          "detail": "Build entries write `BuildPlan Error!` or the bare default form if it remains legal. Build-specific cases become report details rather than a stable public BuildError domain.",
+          "technical": "BuildContext errors convert into the global default report. Callers and tooling lose exhaustive BuildError cases.",
+          "code": "fn build(b: BuildContext) BuildPlan Error! -> {\n    app :: b.add_executable(\"app\", [\"main.jet\"], [])?\n    b.plan(app)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives the recognized entry a safe useful default and keeps `BuildPlan` in the success position. Experts can expose more errors without changing the beginner form.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The explicit type is honest but repeats a contract already fixed by BuildContext on every ordinary build entry."
+          },
+          {
+            "key": "C",
+            "reason": "A generic report hides stable build cases that tools, tests, and custom error conversion can use."
+          }
+        ],
+        "tradeoff": "The source omits one error type on a special entry. Hover, docs, and diagnostics must always show the expanded contract."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared implicit BuildError, explicit BuildError, and the generic default error. It recommended the recognized entry default.",
+        "boilOcean": "The breadth pass also tested a `build` keyword, a BuildResult wrapper, and body inference. Each adds a second entry or failure mechanism.",
+        "hybrid": "The hybrid pass kept the beginner default and allowed an explicit wider union for experts. This complete pair became option A.",
+        "cooperative": "The cooperative pass strengthened explicit BuildError because source alone shows the whole contract. Expanded hover and generated docs give option A that visibility.",
+        "adversarial": "The adversarial pass tested custom errors, no BuildContext use, generated build files, and ordinary functions named build. The default applies only to the recognized entry shape."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:16:59.372Z"
+    },
+    {
+      "id": "D-DEFAULT-ERROR1",
+      "cardId": "cz2ys9cb",
+      "group": "safety",
+      "title": "May a declaration use bare `!`?",
+      "gist": "Choose whether a fallible declaration must name its error type.",
+      "lesson": "Bare `!` currently means the built-in default error. It saves a type name, but the source does not show which failures a caller can inspect. Typed suffixes were adopted to make failure roles visible.",
+      "explainer": "",
+      "story": "Nina reviews a file-writing function. She wants its signature to state whether it fails with IOError, validation errors, or a generic report.",
+      "inWild": "fn save(path: String) IOError! { … }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Require an explicit error type",
+          "detail": "Every fallible declaration names `Error!`, `IOError!`, or an explicit union. Bare `!` is rejected. Call-site `?` and `??` stay short.",
+          "technical": "Retire bare `!` in every type and signature position. Sema may suggest a unique inferred error type, but it never invents an incomplete union.",
+          "code": "fn save(path: String) IOError! { … }\nfn run() Error! { … }\n\nfn hidden() ! { … }\n// Error: name the error type before `!`"
+        },
+        {
+          "key": "B",
+          "name": "Keep bare `!` as `Error!`",
+          "detail": "Bare `!` remains exact shorthand for the built-in `Error!`, not inference or erasure. Hover expands it. Source stays short for command entry points.",
+          "technical": "The default carrier stores one structured Error report. Known typed errors convert into Error at propagation boundaries.",
+          "code": "fn run() ! { … }\n// exactly the same contract as:\nfn run_explicit() Error! { … }"
+        },
+        {
+          "key": "C",
+          "name": "Infer a closed error union",
+          "detail": "Bare `!` means the compiler infers all reachable error types and exposes the union in tooling. Source is short, but a body edit can change the public function type.",
+          "technical": "Sema computes a closed error row from reachable propagation sites. Public signatures and separate compilation must include the inferred row in their interface hash.",
+          "code": "fn load() ! {\n    parse()?\n    read()?\n}\n// inferred: (ParseError | IOError)!"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes every declared failure contract visible and stable. It preserves short propagation while blocking silent conversion to a generic report.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Exact shorthand is safer than inference, but readers still cannot see the default error type in source."
+          },
+          {
+            "key": "C",
+            "reason": "Body inference lets implementation edits change public API and makes separate compilation depend on hidden reachability."
+          }
+        ],
+        "tradeoff": "Entry points and small scripts write `Error!` instead of one character. That small cost buys an explicit contract."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared explicit errors, exact default shorthand, and inferred unions. It recommended explicit types.",
+        "boilOcean": "The breadth pass also tested `throws`, effect-row errors, and file-level defaults. Each hides or duplicates the suffix contract.",
+        "hybrid": "The hybrid pass kept explicit declarations and left call-site propagation unchanged. There is no need for a source shorthand to keep bodies concise.",
+        "cooperative": "The cooperative pass strengthened bare shorthand as exactly `Error!`, never inference. It remains a hidden source contract.",
+        "adversarial": "The adversarial pass tested command entries, lambdas, aliases, generics, public APIs, and conversion. Explicit types remain stable in every position."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:17:00.060Z"
+    },
+    {
+      "id": "D-MARKER-SITES1",
+      "cardId": "c10086k5d",
+      "group": "syntax",
+      "title": "How should a marker declare its legal sites?",
+      "gist": "Choose one legal-site clause for all marker declarations.",
+      "lesson": "A marker has ordinary arguments and a list of legal targets. Jet currently writes that list as `@sites` inside parameters for most markers, but text heads use `on [...]`. Both forms describe the same registry fact.",
+      "explainer": "",
+      "story": "Tariq publishes two rules. One applies to types and another to checked text. He expects their declarations to differ only in the site list.",
+      "inWild": "marker Audited on [.Type]\nmarker Pattern on [.Text] {\n    check @body\n    hole escape(@value)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Use `on [...]` after parameters",
+          "detail": "Ordinary arguments stay in parentheses. Every marker then writes `on [sites]`. Registry metadata is no longer disguised as a parameter.",
+          "technical": "Grammar: `marker Name [ ( params ) ] on [ Site, ... ] [ body ]`. Inheritance, repeatability, and status stay registry facts or gain separate named clauses by later ballot.",
+          "code": "marker Inline(mode: InlineMode{.Hint}) on [.Function, .Method]\nmarker Pattern on [.Text] { check @body; hole escape(@value) }"
+        },
+        {
+          "key": "B",
+          "name": "Use `@sites:` inside parameters",
+          "detail": "Every marker, including text heads, keeps sites in one metadata parameter list. The form already covers generated Prelude rows. It mixes callable arguments with declaration metadata.",
+          "technical": "Grammar keeps reserved metadata parameters such as `@sites`, `@inherits`, and `@repeatable`. The `on` text-head clause retires.",
+          "code": "marker Inline(mode: InlineMode{.Hint}, @sites: [.Function, .Method])\nmarker Pattern(@sites: [.Text]) { check @body; hole escape(@value) }"
+        },
+        {
+          "key": "C",
+          "name": "Infer sites from first use",
+          "detail": "Marker declarations omit legal sites. The compiler records the first applied target or derives sites from body operations. Libraries become shorter, but errors and interfaces depend on use order.",
+          "technical": "The registry stores inferred sites after checking a package. Published marker interfaces must serialize those inferred facts.",
+          "code": "marker Audited\n#Audited struct Order { id: Int }\n// The first use makes Audited a type marker"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A separates user arguments from declaration metadata and gives every marker the same readable site clause. It also matches the owner-preferred text-head form.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Reserved metadata inside parameters makes a declaration look callable and preserves the divergence the owner noticed."
+          },
+          {
+            "key": "C",
+            "reason": "Inferred sites make published interfaces depend on use order and delay errors until application."
+          }
+        ],
+        "tradeoff": "The Prelude marker registry gets a broad source migration. Greenfield policy makes this a clean one-time cutover."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared `on`, metadata parameters, and inference. It recommended the explicit clause outside parameters.",
+        "boilOcean": "The breadth pass also tested per-site keywords, decorators on declarations, and separate registry files. Each spreads one fact across more syntax or files.",
+        "hybrid": "The hybrid pass kept ordinary parameters and moved only legal sites to `on`. Other registry facts remain data until a real user surface needs them.",
+        "cooperative": "The cooperative pass strengthened `@sites` as the least parser work and current generated form. It still reads as a callable argument.",
+        "adversarial": "The adversarial pass tested no-argument markers, many sites, bodies, text heads, generated rows, and future site kinds. The `on` clause handles each without ambiguity."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:17:00.830Z"
+    },
+    {
+      "id": "D-STATE-TERMINAL1",
+      "cardId": "c11y6itr6",
+      "group": "syntax",
+      "title": "How should typestate mark a terminal state?",
+      "gist": "Choose whether no outgoing transition is a valid final state.",
+      "lesson": "Many protocols end in Confirmed, Closed, Completed, Failed, or Cancelled. A state with no outgoing transition can be intentional or accidental. Jet must decide whether absence is enough or needs an explicit final mark.",
+      "explainer": "",
+      "story": "Ari models an order. Confirmed orders can be inspected and audited, but they never transition again.",
+      "inWild": "struct Order {\n    state { Draft, Confirmed }\n    id: Int\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "No outgoing transition means terminal",
+          "detail": "A state with no outgoing transition is a valid terminal state. No warning appears. Separate checks still report states that no path can reach.",
+          "technical": "Remove unconditional L0151. Reflection derives `terminal: true` from the checked transition graph. Methods may still require the terminal state.",
+          "code": "state Order { Draft, Confirmed }\n#Transition(Draft, Confirmed) fn confirm(self) Order -> { … }\n#State(Confirmed) fn audit(self) Report -> { … }"
+        },
+        {
+          "key": "B",
+          "name": "Mark terminal states explicitly",
+          "detail": "The declaration labels final states. An unmarked state with no outgoing transition keeps a warning. Readers can tell intent from the state list, but Jet adds syntax.",
+          "technical": "Add a terminal modifier or marker in the state declaration. Reflection stores declared terminal status and checks that no outgoing transition contradicts it.",
+          "code": "state Order { Draft, terminal Confirmed }\n// or the ratified equivalent"
+        },
+        {
+          "key": "C",
+          "name": "Keep the dead-end warning",
+          "detail": "Every state needs an outgoing transition or a local warning suppression. The checker catches accidental omissions, but normal final states create routine warning policy.",
+          "technical": "Keep L0151 and its current trigger. Projects may allow or deny it through lint policy.",
+          "code": "state Order { Draft, Confirmed }\n// Warning L0151: Confirmed has no outgoing transition"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A treats a normal graph property as normal. Reachability checks still catch genuinely unused states, while terminal methods remain legal and useful.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "An explicit final mark repeats information the transition graph already proves and adds syntax to every closed protocol."
+          },
+          {
+            "key": "C",
+            "reason": "The warning makes intentional final states look suspicious and teaches users to ignore or suppress a common false alarm."
+          }
+        ],
+        "tradeoff": "A missing outgoing transition no longer warns by itself. Reachability, tests, diagrams, and explicit transition review must catch accidental final states."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared implicit terminal states, explicit final marks, and the current warning. It recommended the graph-derived rule.",
+        "boilOcean": "The breadth pass also tested naming conventions, a `#Terminal` marker, and lint heuristics. Each is a weaker version of explicit marking.",
+        "hybrid": "The hybrid pass kept silent graph-derived terminals and separate unreachable-state checks. This catches a real defect without warning on a valid end.",
+        "cooperative": "The cooperative pass strengthened explicit marking as visible intent and typo protection. It still repeats a fact the compiler can derive exactly.",
+        "adversarial": "The adversarial pass tested accidental omissions, cycles, self-loops, read-only terminal methods, reopenable resources, and failure states. Separate reachability and transition checks cover the defects."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:17:01.459Z"
+    },
+    {
+      "id": "D-TEXTHEAD-TYPE1",
+      "cardId": "c12uacgqe",
+      "group": "syntax",
+      "title": "What kind of declaration creates a checked text head?",
+      "gist": "Choose whether a checked text head is a marker, a type, or both.",
+      "lesson": "A checked head is constructed as `Pattern{...}` and accepted as the type `Pattern`. The current declaration starts with `marker`, but users never apply `#Pattern`. The declaration and use should describe the same ontology.",
+      "explainer": "",
+      "story": "Mei publishes a route-pattern library. Users pass Pattern values through functions, collections, and modules like any other nominal type.",
+      "inWild": "#TextHead(check: check_pattern, hole: escape_pattern)\nPattern :: distinct String\n\nfn route(pattern: Pattern) { … }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A dedicated checked-text type declaration",
+          "detail": "Add one declaration such as `text Pattern { ... }`. It clearly creates a type and keeps check and hole rules together. Jet gains a special type declaration for one domain.",
+          "technical": "The new I7 keyword creates a nominal String-backed type with typed-head construction, comptime checking, hole encoding, reflection, and audited raw construction.",
+          "code": "text Pattern {\n    check @body\n    hole escape(@value)\n}\nfn route(pattern: Pattern) { … }"
+        },
+        {
+          "key": "B",
+          "name": "A marker declaration that mints a type",
+          "detail": "Keep `marker Pattern on [.Text]`. Text is a special marker site that creates a nominal type instead of an applied `#Pattern`. The existing implementation stays, but marker meaning has one exception.",
+          "technical": "D-BOUND-SINK1 stands. The marker registry records the generated text type and constructor. No separate applied marker exists.",
+          "code": "marker Pattern on [.Text] {\n    check @body\n    hole escape(@value)\n}\nfn route(pattern: Pattern) { … }"
+        },
+        {
+          "key": "C",
+          "name": "A normal type with `#TextHead`",
+          "detail": "Declare a normal distinct String type and apply one registered marker that supplies checking and hole encoding. The type is visibly a type, and the marker is visibly applied with `#`.",
+          "technical": "`#TextHead` accepts named comptime check and hole callables on a String-backed distinct type. It synthesizes typed-head construction and `.raw()` under the existing marker and type machinery.",
+          "code": "fn check_pattern(body: String) Error! { … }\nfn escape_pattern(value: String) String -> { … }\n\n#TextHead(check: check_pattern, hole: escape_pattern)\nPattern :: distinct String\n\nfn route(pattern: Pattern) { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "recommendation": {
+        "why": "C makes each surface honest without adding a declaration kind. `Pattern` is an ordinary nominal type, and `#TextHead` is an ordinary applied rule that grants checked construction.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A reads clearly but adds a special declaration mechanism beside ordinary nominal types and applied rules."
+          },
+          {
+            "key": "B",
+            "reason": "B keeps the exact mismatch the owner found: a marker declaration creates a type that is never applied with `#`."
+          }
+        ],
+        "tradeoff": "The declaration is longer and names two helper callables. Libraries pay that one-time cost so every user sees an ordinary type."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared a dedicated type form, the current marker form, and an applied marker on a normal type. It recommended the applied marker.",
+        "boilOcean": "The breadth pass also tested sink registration, expected-type string checking, and compiler-known head names. Each hides construction policy or closes the library surface.",
+        "hybrid": "The hybrid pass combined ordinary distinct types with one applied `#TextHead` rule. This reuses both existing mechanisms without making markers mint types.",
+        "cooperative": "The cooperative pass strengthened the current marker form as compact and already implemented. Its declaration and use still claim different kinds of thing.",
+        "adversarial": "The adversarial pass tested imports, generics, reflection, raw escape, helper visibility, compile-time effects, and runtime layout. The applied marker can specify each contract."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:18:14.498Z"
+    },
+    {
+      "id": "D-STATE-HOME1",
+      "cardId": "c13gfyz5l",
+      "group": "syntax",
+      "title": "Where should a type declare its typestates?",
+      "gist": "Choose the source home for a type state machine.",
+      "lesson": "States belong to one type and resolve as `Type.State.Name`. A separate `state Order` declaration repeats the type name and looks like a competing declaration. The source should make ownership unmistakable.",
+      "explainer": "",
+      "story": "Dina opens the Order model. She wants its fields, states, and transitions to lead back to one type definition.",
+      "inWild": "struct Order {\n    state { Draft, Confirmed }\n    id: Int\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A `state` section inside the type",
+          "detail": "Structs and other eligible types declare `state { ... }` inside their body. Ownership and namespace are visible in one place. The type body gains one reserved section.",
+          "technical": "The parser stores a state section on the owning type item. It is allowed once. Qualified paths remain `Type.State.Name`; transitions may live in any impl.",
+          "code": "struct Order {\n    state { Draft, Confirmed }\n    id: Int\n}\n\nimpl Order {\n    #Transition(Draft, Confirmed) fn confirm(self) Order -> { … }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep a companion declaration",
+          "detail": "Keep `state Order { ... }` beside the type. Sema requires an existing owner and treats the declaration as an extension, not a second type. Large state machines can stay outside field bodies.",
+          "technical": "A companion state item resolves its owner by semantic identity. Missing, duplicate, and cross-module owners are errors. Tools link both declarations.",
+          "code": "struct Order { id: Int }\nstate Order { Draft, Confirmed }"
+        },
+        {
+          "key": "C",
+          "name": "Use a fact enum plus a type marker",
+          "detail": "Declare `OrderState` as an enum and attach it to Order with a marker. States become ordinary names, but the owner and state set use two public declarations and an extra name.",
+          "technical": "`#StateMachine(OrderState)` attaches one compile-time enum fact domain. Marker arguments use enum variants. Runtime construction of the fact enum must remain unavailable or erased.",
+          "code": "enum OrderState { Draft, Confirmed }\n#StateMachine(OrderState)\nstruct Order { id: Int }\n\n#Transition(OrderState.Draft, OrderState.Confirmed)\nfn confirm(self: Order) Order -> { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A puts the state set where readers look for the type and removes the apparent namespace collision. Transitions stay in impl blocks, so large behavior does not crowd fields.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Semantic linking can make the companion safe, but the repeated declaration head still looks like two Orders."
+          },
+          {
+            "key": "C",
+            "reason": "A separate enum and marker add a second public name and more ceremony for facts that already belong to the type."
+          }
+        ],
+        "tradeoff": "Type bodies gain a reserved `state` section. Formatter and tools must present it clearly beside fields and nested declarations."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared an in-type section, a checked companion, and a fact enum attachment. It recommended the in-type section.",
+        "boilOcean": "The breadth pass also tested a type-header clause, impl-owned states, and transition-only inference. The header crowds signatures, impl ownership fragments facts, and inference hides the full set.",
+        "hybrid": "The hybrid pass kept states in the type and transitions in impl blocks. This preserves local ownership without centralizing behavior.",
+        "cooperative": "The cooperative pass strengthened companion declarations for large generated machines and partial modules. Tool links help, but the source still repeats the type head.",
+        "adversarial": "The adversarial pass tested generics, forward references, multiple modules, generated code, empty states, and nested types. One optional in-type section gives deterministic ownership."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:18:16.082Z"
+    },
+    {
+      "id": "D-ABILITY-NAME2",
+      "cardId": "c14vk3sif",
+      "group": "syntax",
+      "title": "What final word should replace capabilities?",
+      "gist": "Choose the final names for granted effects.",
+      "lesson": "Jet already removed `Capability` and `#Caps`. The current public words are `Ability`, `Abilities`, and `#Abilities`. Effect rows describe what code may do; an ability value describes what a caller grants.",
+      "explainer": "",
+      "story": "Kai reads a network function, narrows its grant for one block, and inspects the granted set in a build receipt.",
+      "inWild": "fn fetch() String -[Net]> -> { … }\n\n#Abilities(Net) {\n    fetch()?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep Ability and `#Abilities`",
+          "detail": "Use `Ability.Net` for the fact menu, `Abilities` for the carried set, and `#Abilities` for a lexical grant. Effect rows keep effect names. The words are plain but longer than FX.",
+          "technical": "Confirm D-AUTHORITY-WORD2=E. Browser uses `.abilities()` and CLI uses `--abilities-json`. No Capability or Caps aliases remain.",
+          "code": "fn fetch() String -[Net]> -> { … }\n#Abilities(Net) { fetch()? }\nfn serve(granted: Abilities) Error! { … }"
+        },
+        {
+          "key": "B",
+          "name": "Use FX and `#FX`",
+          "detail": "Use `FX.Net`, `FXSet`, and `#FX`. The spelling is short and visually matches effect rows. Beginners must learn an abbreviation that is not plain English.",
+          "technical": "Amend D-AUTHORITY-WORD2. Browser uses `.fx()`, CLI uses `--fx-json`, and manifest and report fields use `fx`. FX remains distinct from the effect row type by `FXSet`.",
+          "code": "fn fetch() String -[Net]> -> { … }\n#FX(Net) { fetch()? }\nfn serve(granted: FXSet) Error! { … }"
+        },
+        {
+          "key": "C",
+          "name": "Use Effect and `#Effects` everywhere",
+          "detail": "Use `Effect.Net`, `Effects`, and `#Effects`. One familiar word covers declarations and grants. It blurs what code does with what a caller authorizes.",
+          "technical": "The effect vocabulary and authority value share one root name. Tools must label required, granted, denied, and observed effects as separate roles.",
+          "code": "fn fetch() String -[Effect.Net]> -> { … }\n#Effects(Effect.Net) { fetch()? }\nfn serve(granted: Effects) Error! { … }"
+        },
+        {
+          "key": "D",
+          "name": "Use Right and `#Rights`",
+          "detail": "Use `Right.Net`, `Rights`, and `#Rights` for grants. Effect rows stay unchanged. The distinction is precise, but the word sounds legal and policy-heavy for beginner code.",
+          "technical": "Browser uses `.rights()`, CLI uses `--rights-json`, and manifests use `rights:`. The carried type is Rights.",
+          "code": "fn fetch() String -[Net]> -> { … }\n#Rights(Net) { fetch()? }\nfn serve(granted: Rights) Error! { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps a plain word and preserves the key distinction: effects describe actions, while abilities describe granted permission to perform them. It also avoids another wide rename.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "FX is short, but it is an unexplained abbreviation and `FXSet` adds a different name for the carried value."
+          },
+          {
+            "key": "C",
+            "reason": "Using Effect for both requirement and grant collapses two roles that diagnostics and audits must keep separate."
+          },
+          {
+            "key": "D",
+            "reason": "Rights is precise but adds policy language to the beginner surface and reads like legal authorization."
+          }
+        ],
+        "tradeoff": "`#Abilities` is longer than `#FX`. The extra letters buy an ordinary searchable word with no glossary expansion."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared Ability, FX, Effect, and Rights. It recommended the current Ability vocabulary because it separates grants from actions.",
+        "boilOcean": "The breadth pass also tested Authority, Grant, Permit, Power, and Access. Each either echoes authentication, names an action, or narrows the model too far.",
+        "hybrid": "The hybrid pass tested FX as short syntax with Ability in prose. It was removed because two names recreate the vocabulary split this card must end.",
+        "cooperative": "The cooperative pass strengthened FX as compact, memorable, and visually close to effect rows. It still requires a glossary and awkward carried-value name.",
+        "adversarial": "The adversarial pass tested search, spoken teaching, diagnostics, browser protocol terms, manifests, and audit reports. Ability stays clear across all surfaces."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:18:16.528Z"
     }
   ],
   "questions": [
@@ -204557,6 +205023,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-24T23:18:16.528Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ABILITY-NAME2",
+      "note": "What final word should replace capabilities?"
+    },
+    {
+      "at": "2026-08-24T23:18:16.083Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-STATE-HOME1",
+      "note": "Where should a type declare its typestates?"
+    },
+    {
+      "at": "2026-08-24T23:18:14.499Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-TEXTHEAD-TYPE1",
+      "note": "What kind of declaration creates a checked text head?"
+    },
+    {
+      "at": "2026-08-24T23:17:01.459Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-STATE-TERMINAL1",
+      "note": "How should typestate mark a terminal state?"
+    },
+    {
+      "at": "2026-08-24T23:17:00.831Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MARKER-SITES1",
+      "note": "How should a marker declare its legal sites?"
+    },
+    {
+      "at": "2026-08-24T23:17:00.060Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DEFAULT-ERROR1",
+      "note": "May a declaration use bare `!`?"
+    },
+    {
+      "at": "2026-08-24T23:16:59.372Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BUILD-FAIL1",
+      "note": "How should a build entry declare its failure type?"
+    },
     {
       "at": "2026-08-24T23:15:27.541Z",
       "by": "Main",
@@ -208007,55 +208522,6 @@
       "action": "decision.add",
       "ref": "D-CTX1",
       "note": "D-CTX1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:45.202Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CTOR2",
-      "note": "D-CTOR2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:44.815Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CTOR1",
-      "note": "D-CTOR1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:44.439Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CTMARKER1",
-      "note": "D-CTMARKER1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:44.048Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CRYPTOENV1",
-      "note": "D-CRYPTOENV1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:43.646Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-COV1",
-      "note": "D-COV1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:43.252Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CORESURFACE1",
-      "note": "D-CORESURFACE1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:42.845Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CORENS1",
-      "note": "D-CORENS1 (spec-only import) (draft)"
     }
   ],
   "nextNum": 368,

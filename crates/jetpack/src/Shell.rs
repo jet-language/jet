@@ -9,6 +9,7 @@ use super::Output::Theme;
 use crate::Syntax;
 use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use jet_foundation::Terminal::Theme as SharedTheme;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -250,7 +251,6 @@ fn nix_projection_command(
     .ok_or_else(|| {
         NixProjectionError::unsupported("rootless `/nix/store` projection needs `unshare`")
     })?;
-    check_rootless_namespace(&unshare)?;
     let mount = [
         "/run/current-system/sw/bin/mount",
         "/usr/bin/mount",
@@ -269,6 +269,10 @@ fn nix_projection_command(
         .ok_or_else(|| {
             NixProjectionError::unsupported("rootless `/nix/store` projection needs `sh`")
         })?;
+    // Probe with an absolute shell rather than a bare `true`: the projection
+    // may itself run inside a sandbox with an empty PATH, where a PATH lookup
+    // fails with exit 127 and is indistinguishable from a refused namespace.
+    check_rootless_namespace(&unshare, &shell)?;
     let (unshare, unshare_file, _) = inherited_tool_path(&unshare, None)
         .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
     let (shell, shell_file, _) = inherited_tool_path(&shell, None)
@@ -440,15 +444,17 @@ fn logical_executable_path(
 }
 
 #[cfg(target_os = "linux")]
-fn check_rootless_namespace(unshare: &Path) -> Result<(), NixProjectionError> {
+fn check_rootless_namespace(unshare: &Path, shell: &Path) -> Result<(), NixProjectionError> {
     let status = Command::new(unshare)
         .args([
-            "--user",
-            "--map-root-user",
-            "--mount",
-            "--propagation",
-            "private",
-            "true",
+            OsStr::new("--user"),
+            OsStr::new("--map-root-user"),
+            OsStr::new("--mount"),
+            OsStr::new("--propagation"),
+            OsStr::new("private"),
+            shell.as_os_str(),
+            OsStr::new("-c"),
+            OsStr::new(":"),
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
