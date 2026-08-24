@@ -107,6 +107,7 @@ pub mod BuildCache;
 pub mod RunCache;
 pub mod RuntimeCache;
 pub mod BudgetProviders;
+mod NativeLinker;
 pub mod BudgetStore;
 pub use jet_driver::BudgetView;
 pub use jet_driver::ProjectParts;

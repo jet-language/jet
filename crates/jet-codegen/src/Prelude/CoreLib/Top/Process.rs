@@ -72,7 +72,11 @@ fn jet_process_resource_limits_check(
             "detached Windows children cannot carry CPU or memory Job Object limits; refusing before spawn",
         ));
     }
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )))]
     if spec.cpu_time_limit_ms.is_some()
         || spec.memory_limit_bytes.is_some()
         || spec.open_file_limit.is_some()

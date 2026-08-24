@@ -18,7 +18,7 @@ pub(crate) fn run(
     authority_only: bool,
 ) {
     let Some(file) = entry_file(args) else {
-        crate::cli_error!(@fix "E2104", "`jet inspect gates` needs an entry file", "jet inspect gates Source/main.jet");
+        crate::cli_error!(@fix "E2104", "`jet inspect gates` needs an entry file", "jet inspect gates run.jet");
         exit(jet::ExitCodes::USAGE);
     };
     let bundle = jet::Loader::load_entry_with_diagnostics(&file).unwrap_or_else(|diagnostics| {

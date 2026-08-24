@@ -2159,6 +2159,76 @@ fn canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target() {
 }
 
 #[test]
+fn canvas_structural_incomplete_wire_refuses_without_writing() {
+    let path = write_fixture(
+        "structural_incomplete_wire",
+        "fn run() {\n    print(\"target\")\n}\n",
+    );
+    let before = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("incomplete wire graph");
+    let graph_id = graph_id_for_title(&graph, "run");
+    let target_node_id = field_before(&graph, "\"source\":\"\\\"target\\\"\"", "node_id");
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:exec\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id,
+        target_node_id,
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &request)
+        .expect_err("incomplete structural wire must be rejected");
+    assert!(
+        err.contains("Canvas structural wire target is missing"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    let target_only_request = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id,
+    );
+    let target_only_err = jet::Canvas::apply_transaction_json(&path, &target_only_request)
+        .expect_err("structural wire without an origin must be rejected");
+    assert!(
+        target_only_err.contains("Canvas structural wire origin is missing"),
+        "{target_only_err}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+    let data_path = write_fixture(
+        "structural_data_wire",
+        "fn run() {\n    doubled :: 1\n}\n",
+    );
+    let data_before = fs::read_to_string(&data_path).unwrap();
+    let data_graph = jet::Canvas::graph_json_for_file(&data_path).expect("data wire graph");
+    let data_graph_id = graph_id_for_title(&data_graph, "run");
+    let data_pin = data_graph
+        .split("\"pin_id\":\"")
+        .skip(1)
+        .find_map(|chunk| {
+            let pin_id = chunk.split('"').next()?;
+            (pin_id.starts_with(&data_graph_id)
+                && chunk.contains("\"direction\":\"output\"")
+                && chunk.contains("\"type\":\"Int\""))
+            .then(|| pin_id.to_string())
+        })
+        .expect("entry data pin");
+    let data_request = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&data_before),
+        data_graph_id,
+        data_pin,
+    );
+    let data_err = jet::Canvas::apply_transaction_json(&data_path, &data_request)
+        .expect_err("data structural wire must be rejected");
+    assert!(
+        data_err.contains("Canvas structural nodes connect through the exec pin"),
+        "{data_err}"
+    );
+    assert_eq!(fs::read_to_string(&data_path).unwrap(), data_before);
+}
+
+#[test]
 fn canvas_fallible_rail_is_excluded_outside_fallible_function() {
     let path = write_fixture("fallible_rail_nonfallible", "fn compute() {\n    print(1)\n}\n");
     let before = fs::read_to_string(&path).unwrap();
@@ -2883,6 +2953,45 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         args_catalog.contains("Use this as a method on an ArgsSpec value."),
         "{args_catalog}"
     );
+}
+
+#[test]
+fn canvas_core_catalog_uses_default_alias_without_import() {
+    let path = write_fixture(
+        "core_catalog_default_alias",
+        "fn run() {\n    print(\"core\")\n}\n",
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&source);
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let actions = jet::Canvas::query_json_for_file(&path, &request).expect("query core actions");
+    assert!(actions.contains("\"insert_callee\":\"math.abs\""), "{actions}");
+    assert!(!actions.contains("\"insert_callee\":\"core.math.abs\""), "{actions}");
+}
+
+#[test]
+fn canvas_core_insert_synthesizes_default_alias_import_without_import() {
+    let path = write_fixture(
+        "core_insert_default_alias",
+        "fn run() {\n    print(1)\n}\n",
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("default alias graph");
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"math.abs\",\"args\":[\"1\"]}}",
+        jet::Canvas::source_revision(&source),
+        graph_id,
+    );
+    jet::Canvas::apply_transaction_json(&path, &insert)
+        .expect("default alias insert should synthesize Core import");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("use core.math as math"), "{after}");
+    assert!(after.contains("math.abs(1)"), "{after}");
+    assert_eq!(jet::Formatter::format_source(&after).unwrap(), after);
 }
 
 #[test]

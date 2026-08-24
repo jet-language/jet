@@ -46,7 +46,7 @@ The eighteen machines. Every row verified at file:line in the audit evidence; th
 | 10 | Walk the call graph for a property | 5 walkers | One `IMPURE_BUILTINS` table, three independent walkers over it |
 | 11 | Render help for a command | 7 paths | `jet build --help` is error E2102; the guard against it is hand-copied 21 times; compiled Jet programs get `--help` free via `#CLI` |
 | 12 | Keep a closed list of legal names | 8 registries | `Syntax.rs:77` forbids a second marker table; `STDLIB_DSL_BLOCK_MARKERS` is that second table, and sema branches on it |
-| 13 | Retire a spelling | 0 mechanisms | `run.jet` (ratified default): 0 files. `main.jet` ("compatibility fallback"): 94. Both accepted silently |
+| 13 | Retire a spelling | 1 migration seam + ratchet | `run.jet` (ratified default): 136 files. `main.jet` (retired): 0. Bare-project resolution migrates pure entry renames with a notice; ambiguous layouts are diagnosed |
 | 14 | Grant a type a trait | 4 spellings, 3 generators | One generator emits raw Rust with no sema re-check (I3) |
 | 15 | Track what is not done | 6 ledgers | `jit_gaps.txt` holds 48 named parity holes; AGENTS.md forbids parking work there; the truthfulness suite is red and frozen |
 | 16 | Record a ratified decision | 2 ledgers | 927 decision IDs cited in the spec; 675 have no Tower record; the drift linter scans neither |
@@ -74,12 +74,14 @@ The dedicated differential test (`tests/comptime_diff.rs`) passes, because its f
 
 | Ratified current form | Files using it | Retired form | Files using it | What the loader says |
 |---|---|---|---|---|
-| `run.jet` (entry, D-VERDICT-678-1) | 0 | `main.jet` | 94 | silence |
+| `run.jet` (entry, D-VERDICT-678-1) | 136 | `main.jet` | 0 | bare-project resolution auto-renames pure entry-file renames and prints a notice |
 | `package.jet` (D-ECO-FILEROOT1) | 7 | `pkg.jet` | 45 | silence |
 | bare `name:`/`version:` fields (D-CONF-NAME1) | new | `payload:{}` gen-1 | a live sema test (`crates/jet-sema/tests/generic_module_body.rs:218-236`) | silence |
 | `target@provider` package refs (D-JPK-REF1) | most | `provider@target` order | the repo's own `env.jet` | E1317 is registered, yet the file ships unflagged |
 
-Greenfield law says the replaced form is deleted in the same change. Nothing implements that law: there is no diagnostic, no `fmt` rewrite, no ratchet. So every rename ratified this week joins this table next week. The mechanism is the missing feature; the rows are just its evidence.
+Greenfield law says the replaced form is deleted in the same change. The entry-file
+rename now has one production migration seam, an ambiguity guard, a notice, and a
+zero-ceiling adoption ratchet. Other rows still need their owning migration slices.
 ## The proposal
 
 Twelve elements. Each one deletes coats, and each one is shown as code on the page. Markers: **[ratified]** = already law, this finishes it; **[amends]** = changes a named ratified decision, the ballot says which; **[new]** = a fresh owner decision.
@@ -181,20 +183,18 @@ One `Report` type, rendered by one renderer, on every surface: compile diagnosti
 - Expert rung: `--json` is one schema everywhere; every failure is `jet explain`-able; severity words obey D-REPORT-SEV1.
 - The exit: none needed — there is no magic here, only fewer formats.
 
-### 5. Retiring a spelling is a mechanism, not a memo **[new — ballot B3]**
+### 5. Retiring a spelling is a mechanism, not a memo **[ratified — D-ONCE-RETIRE1=C]**
 
-Greenfield law says: migrate every consumer, delete the replaced form, same change. The corpus shows what happens without a mechanism: 94/94 entry files on the retired name, 45/52 manifests on the retired name, a ratified-this-week field shape already coexisting with two dead generations. The proposal: when a spelling is retired, the retirement ships as code —
+Greenfield law says: migrate every consumer, delete the replaced form, same change. The entry-file sweep now migrates all 102 retired filenames, deletes the old form from the repository, and keeps the adoption ratchet at zero. D-ONCE-RETIRE1=C splits the mechanism by category: pure renames auto-rewrite with a notice; semantic changes hard-error with a fix line.
 
 ```text
-a retirement ships all three, in the same change:
-  1. an error:      E13xx "`main.jet` was retired 2026-07-17; the entry file is `run.jet`"  (what/why/fix)
-  2. a rewrite:     `jet fmt` / `jet fix` performs the rename mechanically where it can
+a pure rename ships all three, in the same change:
+  1. a rewrite:     bare project resolution performs the safe file rename
+  2. a notice:      the migration names the old and canonical paths and its decision ID
   3. a ratchet:     a test asserting the retired form's count in-repo is 0 — and stays 0
 ```
 
-Ballot B3 picks the default posture (hard error vs auto-rewrite-with-notice vs both by category). Either way, "silently accepted forever" stops being one of the outcomes.
-
-The mechanism's own ladder, since it touches user files: see it — every rewrite prints what it changed and why, with the retirement row's ID; spell it — `jet fix --dry-run` shows the exact renames before any write; refuse it — a project switch pins a retired spelling only through the same named-exception path greenfield law already requires, so refusal is possible but never silent. The first sweep applies it to the known rows: `main.jet`, `pkg.jet`, `payload:{}`, `provider@target`, and — if B5 ratifies — the body-line `derive` (element 6).
+The mechanism's own ladder, since it touches user files: see it — every rewrite prints what it changed and why, with the retirement row's ID; refuse it — ambiguous layouts are never overwritten, and the user gets a recovery line to keep one entry. The first sweep applies the pure rename rule to `main.jet`; semantic retirement rows keep their hard-error path.
 
 ### 6. One word, one mechanism **[new — ballots B4–B6]**
 
@@ -375,7 +375,7 @@ Each ballot stands alone; any subset adopts cleanly. Full worked options live in
 |---|---|---|---|
 | B1 | corpus law + guards | Adopt "say it once": one home per truth, rendered surfaces, guard-or-prose — and the uniqueness-net doctrine | extends D-FACT-LAW1/WORD1; amends nothing |
 | B2 | tier parity | Resolve I9's blanket parity vs D-VERDICT-1254-1's interpreter carve-out — full parity / named carve-out / tiered guarantee | amends one of I9 (text) or D-VERDICT-1254-1 |
-| B3 | retirement mechanism | Retired spellings: hard error / auto-rewrite + notice / both by category — plus the first sweep (main.jet, pkg.jet, payload:{}, provider@target) | implements greenfield law; amends nothing |
+| B3 | retirement mechanism | Ratified D-ONCE-RETIRE1=C: pure renames auto-rewrite with notice; semantic changes hard-error; every retirement has a zero adoption ratchet | implements greenfield law; amends nothing |
 | B4 | word: stream/yield | Adopt the vocabulary dispositions (prose + spec renames, zero user spelling changes; `module` excluded — D-NAME-ROLEMOD1 owns it) | amends spec prose only |
 | B5 | word: derive | One request spelling (`#Marker`); body-line `derive X` retires; keyword keeps only the provider meaning | amends D-USERDERIVE1; keeps D-METADERIVE1 |
 | B6 | word: wasm/sandbox | `target: plugin`'s user-facing word becomes `sandbox`; `Wasm` stays the browser bucket | amends D-PLUGIN1 naming |

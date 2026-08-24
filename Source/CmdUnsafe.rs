@@ -26,7 +26,7 @@ pub(crate) fn run(
         !argument.starts_with('-') && !argument.contains('=')
     });
     let Some(file) = file else {
-        crate::cli_error!(@fix "E2104", "`jet inspect unsafe` needs an entry file", "jet inspect unsafe Source/main.jet");
+        crate::cli_error!(@fix "E2104", "`jet inspect unsafe` needs an entry file", "jet inspect unsafe run.jet");
         exit(jet::ExitCodes::USAGE);
     };
     let bundle = jet::Loader::load_entry_with_diagnostics(file).unwrap_or_else(|diagnostics| {

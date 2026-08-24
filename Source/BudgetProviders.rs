@@ -493,7 +493,7 @@ pub fn compiler_probe_version(
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
     Ok(format!(
         "jet-compile-latency-v1;mode={mode};target={target};profile={profile};backend=rustc;linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
-        std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into()),
+        crate::NativeLinker::for_target(None).label(),
         descriptor.source_tree_sha256, descriptor.patch_sha256
     ))
 }
@@ -653,7 +653,7 @@ fn compile_latency_samples(
     let core_digest = env!("JET_STDLIB_BUILD_ID").to_string();
     let host = format!("{}:{}", std::env::consts::OS, env!("JET_BUILD_TARGET"));
     let backend = "rustc";
-    let linker = std::env::var("RUSTC_LINKER").or_else(|_| std::env::var("CC")).unwrap_or_else(|_| "native".into());
+    let linker = crate::NativeLinker::for_target(None).label();
     let mut sample_values = Vec::with_capacity(sample_count);
     let mut sample_records = Vec::with_capacity(sample_count);
     let edit_patch = if mode == "Edit" {

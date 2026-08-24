@@ -443,17 +443,38 @@ become dependencies of the compiler workspace crates.
 
 D-LSP1 makes editor tooling a client of the front end, not a second checker.
 `crates/jet-queries` is a std-only demand cache for file inputs and derived
-queries. The LSP stores open-buffer text as query inputs and memoizes lexing,
-diagnostics, checked bundles, and fix data through that cache. A changed root is
-reloaded through the canonical parser; sema then reuses span-exact checked
-function bodies while their signature/import/global environment is unchanged.
-Signature and dependency changes invalidate that item cache, and disk import
-checks conservatively revalidate their module closure. Warm-session timings are
-reported as observations; deterministic query/item counters and retained-byte
-totals are the regression gates. The server records cancellation concurrently
-with request execution and replaces a cancelled in-flight result with JSON-RPC
-`-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
-in `tests/lsp.rs`; the server must not advertise speculative features.
+queries. LSP and batch clients store source text as query inputs and memoize
+checked bundles and fix data through that cache. The staged loader prepares
+multiple open sources with a bounded pool of at most eight workers, then
+consumes the results in stable module order. A changed root is reloaded through
+the canonical parser; sema reuses span-exact checked function bodies while the
+global environment and that module's interface are unchanged. An interface
+change invalidates the changed module and its reverse import closure; a
+body-only change leaves unrelated modules warm. Disk import checks conservatively
+revalidate their module closure. Warm-session timings are reported as
+observations; deterministic query/item counters and retained-byte totals are the
+regression gates. The server records cancellation concurrently with request
+execution and replaces a cancelled in-flight result with JSON-RPC `-32800`.
+D-LSP2 requires every advertised LSP feature to have named coverage in
+`tests/lsp.rs`; the server must not advertise speculative features.
+
+### Compiler-speed evidence boundary (#666)
+
+Compiler-speed evidence stays on the production compiler path. The differential
+gate sends the same checked example to optimized AOT and the default tiered
+lens, then compares exit status, stdout, and stderr. A record identifies
+resident Cranelift execution or interpreter deopt; a refusal, newly broken AOT
+oracle, missing record, or divergent result remains visible as a failure.
+
+The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
+checked corpus pins source and expected-output digests. A measurement records
+compiler/Core identities, target, profile, backend, linker, host, cache state,
+fixed warmups and samples, elapsed variance, and phase totals. Clean,
+no-change, and representative-edit runs are distinct. Partial timing, changed
+inputs, incompatible identities, nondeterminism, pathological inputs, and
+unstable samples are unavailable/failure; they cannot be made green by changing
+the workload or hiding cold-cache work. A baseline is valid only for its pinned
+machine and toolchain.
 
 The code-action engine uses the same semantic index. It ships unique workspace
 imports, binding and function extraction, and immutable-binding inline actions.
@@ -617,11 +638,20 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   depend on either responsibility. Another backend replaces the codegen and
   binary-build edges without changing the front end.
 - **R8 — Small, self-contained binaries.** The root binary build path in
-  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO.
-  It links a content-addressed runtime `rlib`, so rustc does not compile the
-  fixed embedded runtime for each program. The cache key includes the exact
-  runtime bytes, rustc identity, target and profile flags, and explicit profile
-  environment.
+  `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags,
+  `strip=symbols`, and thin LTO for optimized AOT. Its shared native-linker
+  selector honors explicit `RUSTC_LINKER`/`CC`, then chooses mold or lld through
+  the C driver before falling back to the system linker. The selected
+  driver/backend identity is part of native cache and timing evidence.
+  It links content-addressed `jet_runtime` and reachable `jet_runtime_core`
+  rlibs, so rustc does not compile the fixed embedded runtime or an unused Core
+  closure for each program. The object keys include the exact emitted/exported
+  source, the runtime dependency key, rustc identity, target and profile flags,
+  and explicit profile environment. The final native key carries the same
+  relevant runtime/Core digests; it does not read or hash the compiler binary.
+  A verified warm object is reused; a malformed, corrupt, or rejected object
+  falls back to the complete inline program, and the shared cache remains
+  bounded.
   The linker keeps only what the program uses ("only link what's needed"). The
   output is one self-contained native binary. Rust's std links a baseline
   (low-hundreds-of-KB), accepted as the cost of a beginner-friendly

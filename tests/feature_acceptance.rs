@@ -437,7 +437,7 @@ fn maturity_convention() {
 #[test]
 fn public_build_product() {
     // FEATURE_CLAIM: claim.package-build / public-build-product
-    let example = read("examples/features/tooling/programmable_build/main.jet");
+    let example = read("examples/features/tooling/programmable_build/run.jet");
     assert!(
         example.contains("fn build(b: BuildContext)")
             && example.contains("b.generate")
@@ -446,7 +446,7 @@ fn public_build_product() {
         "I5 example must be a public root fn build graph"
     );
 
-    let entry = root().join("examples/features/tooling/programmable_build/main.jet");
+    let entry = root().join("examples/features/tooling/programmable_build/run.jet");
     let compiled = jet::compile_programmable_build(entry.to_str().unwrap(), &[])
         .unwrap_or_else(|diags| panic!("fn build path failed: {diags:#?}"));
     assert!(

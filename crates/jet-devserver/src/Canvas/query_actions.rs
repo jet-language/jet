@@ -1121,6 +1121,18 @@ fn core_member_direct_exclusion(
             "Needs an #Unsafe region before Canvas can insert it.".to_string(),
         ));
     }
+    if module_path == "core.event"
+        && matches!(
+            member.name.as_str(),
+            "new" | "with_policy" | "async_result" | "hook" | "decision_hook"
+        )
+    {
+        return Some((
+            "needs_signature",
+            "Needs explicit event type arguments and constructor inputs before Canvas can insert it."
+                .to_string(),
+        ));
+    }
     let params = core_member_params(module_path, &member.name, &member.signature);
     let generated_signature = member.signature == format!("{module_path}.{}", member.name);
     if generated_signature && params.is_empty() {
@@ -1486,7 +1498,11 @@ fn core_source_callee(src: &str, module_path: &str) -> String {
     if let Some(alias) = imported_core_alias(src, module_path) {
         alias
     } else {
-        module_path.to_string()
+        module_path
+            .rsplit('.')
+            .next()
+            .unwrap_or(module_path)
+            .to_string()
     }
 }
 
@@ -1883,6 +1899,7 @@ fn core_member_return_type(module_path: &str, member_name: &str) -> &'static str
             | "trunc" | "fract" | "sign" | "degrees" | "radians" | "lerp" | "pi" | "e",
         ) => "Float",
         ("core.math", "is_nan" | "is_inf" | "is_finite" | "is_even" | "is_odd") => "Bool",
+        ("core.event", "policy_sync") => "EventPolicy",
         ("core.event", "scope") => "EventScope",
         _ => "Void",
     }
@@ -2132,5 +2149,47 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
             .unwrap_or("current.jet")
             .to_string(),
         project_root: dir.to_path_buf(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event_member(name: &str) -> CoreCatalogMember {
+        CoreCatalogMember {
+            name: name.to_string(),
+            signature: if name == "scope" {
+                "event.scope()".to_string()
+            } else {
+                format!("core.event.{name}")
+            },
+            summary: String::new(),
+            source: String::new(),
+            pure: false,
+            available: true,
+            stageable: false,
+            stage_reason_code: String::new(),
+            stage_reason: String::new(),
+            receiver_type: String::new(),
+            unavailable_reason_code: String::new(),
+            unavailable_reason: String::new(),
+        }
+    }
+
+    #[test]
+    fn event_catalog_keeps_incomplete_constructors_recoverable() {
+        for name in ["new", "with_policy", "async_result", "hook", "decision_hook"] {
+            let member = event_member(name);
+            let (code, reason) = core_member_direct_exclusion("core.event", &member)
+                .expect("incomplete event constructor must be excluded");
+            assert_eq!(code, "needs_signature", "wrong refusal for {name}");
+            assert!(reason.contains("explicit event type arguments"), "{name}: {reason}");
+        }
+        assert!(core_member_direct_exclusion("core.event", &event_member("scope")).is_none());
+        let (code, _) = core_member_direct_exclusion("core.event", &event_member("policy_sync"))
+            .expect("sema-only event policy constructor must remain excluded");
+        assert_eq!(code, "needs_signature");
+        assert_eq!(core_member_return_type("core.event", "policy_sync"), "EventPolicy");
     }
 }

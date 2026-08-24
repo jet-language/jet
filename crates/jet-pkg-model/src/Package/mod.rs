@@ -27,9 +27,10 @@ pub use Edit::{add_dep, remove_dep};
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
 use crate::Lexer;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::fmt;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageOutputKind {
@@ -826,8 +827,8 @@ impl PackageFacts {
     }
 
     /// Resolve the selected runnable output. A canonical checked `run.jet`
-    /// wins before any other selector; retired `main.jet` is never a
-    /// fallback or an ambiguity source.
+    /// wins before any other selector. Retired entry filenames are migrated
+    /// once, before the authority snapshot is refreshed.
     pub fn resolve_run_entry(
         &self,
         root: &std::path::Path,
@@ -847,6 +848,11 @@ impl PackageFacts {
     ) -> Result<Option<CheckedFile>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
+        if migrate_retired_entry(resolver.root(), &self.origin)? {
+            let fresh = AuthorityResolver::open(resolver.root())
+                .map_err(|error| format!("{}: {error}", self.origin))?;
+            return self.resolve_run_entry_checked(&fresh);
+        }
         match resolver.checked_file(Path::new(crate::Syntax::DEFAULT_ENTRY_FILE)) {
             Ok(file) => {
                 resolver
@@ -1303,6 +1309,102 @@ impl PackageFacts {
         self.checked_members_in(resolver)
             .map(|packages| packages.into_iter().map(|package| package.facts.name).collect())
             .map_err(authority_package_error)
+    }
+}
+
+/// D-ONCE-RETIRE1=C / D-VERDICT-678-1: migrate the old project entry
+/// locations before a default run resolves its authority snapshot. The old
+/// `.jet/main.jet` layout wrote generated state beside source, so it maps to
+/// the project-root `run.jet`; `src/main.jet` stays under `src`.
+fn migrate_retired_entry(root: &Path, origin: &str) -> Result<bool, String> {
+    let resolver = AuthorityResolver::open(root)
+        .map_err(|error| format_entry_error(origin, error.to_string()))?;
+    let candidates = [
+        (
+            PathBuf::from(crate::Syntax::LEGACY_ENTRY_FILE),
+            PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+        ),
+        (
+            Path::new("src").join(crate::Syntax::LEGACY_ENTRY_FILE),
+            Path::new("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+        ),
+        (
+            Path::new(crate::Syntax::SOURCE_ROOT_DIR)
+                .join(crate::Syntax::LEGACY_ENTRY_FILE),
+            PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+        ),
+    ];
+    let mut retired = Vec::new();
+    let mut canonical = Vec::new();
+    for (old, new) in &candidates {
+        match resolver.checked_file(new) {
+            Ok(_) => canonical.push(new.clone()),
+            Err(error) if error.is_missing() => {}
+            Err(error) => return Err(format_entry_error(origin, error.to_string())),
+        }
+        match resolver.checked_file(old) {
+            Ok(file) => retired.push((file, old.clone())),
+            Err(error) if error.is_missing() => {}
+            Err(error) => return Err(format_entry_error(origin, error.to_string())),
+        }
+    }
+    if retired.is_empty() {
+        return Ok(false);
+    }
+    if retired.len() != 1 || !canonical.is_empty() {
+        let old = retired
+            .iter()
+            .map(|(_, path)| format!("`{}`", path.display()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let current = if canonical.is_empty() {
+            "no canonical entry".to_string()
+        } else {
+            canonical
+                .iter()
+                .map(|path| format!("`{}`", path.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        return Err(format_entry_error(
+            origin,
+            format!(
+                "ambiguous project entry: retired {old} and {current} both identify this project; keep one entry and run again"
+            ),
+        ));
+    }
+    let (file, old) = retired.pop().expect("one retired entry was checked");
+    resolver
+        .revalidate_file(&file)
+        .map_err(|error| format_entry_error(origin, error.to_string()))?;
+    let new = candidates
+        .iter()
+        .find(|(candidate, _)| candidate.as_path() == old.as_path())
+        .map(|(_, target)| resolver.root().join(target))
+        .expect("retired entry came from the migration candidates");
+    fs::rename(&file.path, &new).map_err(|error| {
+        format_entry_error(
+            origin,
+            format!(
+                "could not migrate `{}` to `{}`: {error}",
+                old.display(),
+                new.strip_prefix(resolver.root()).unwrap_or(&new).display()
+            ),
+        )
+    })?;
+    eprintln!(
+        "notice: migrated retired entry `{}` to `{}` (D-VERDICT-678-1)",
+        old.display(),
+        new.strip_prefix(resolver.root()).unwrap_or(&new).display()
+    );
+    Ok(true)
+}
+
+fn format_entry_error(origin: &str, error: String) -> String {
+    if origin.is_empty() {
+        error
+    } else {
+        format!("{origin}: {error}")
     }
 }
 
@@ -3749,7 +3851,7 @@ outputs: .{ app: .Executable.{ entry: launch } }"#,
     }
 
     #[test]
-    fn public_entry_selectors_reject_main_and_prefer_run() {
+    fn public_entry_selectors_migrate_main_and_prefer_run() {
         let dir = temp_dir("canonical-run");
         std::fs::write(dir.join("main.jet"), "fn run() { print(1) }\n").unwrap();
         let facts = PackageFacts::parse(
@@ -3760,14 +3862,19 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         )
         .unwrap();
         assert_eq!(facts.select_output("run", Some("app"), None).unwrap().name, "app");
-        let error = facts.resolve_run_entry(&dir).unwrap_err();
-        assert!(error.contains("requires canonical `run.jet`"));
-        assert!(error.contains("retired `main.jet`"));
+        assert_eq!(
+            facts.resolve_run_entry(&dir).unwrap(),
+            Some(dir.join("run.jet"))
+        );
+        assert!(!dir.join("main.jet").exists());
         let output = facts
             .outputs
             .get("app")
             .expect("typed selector fixture has one output");
-        assert_eq!(facts.entry_path(&dir, output).unwrap(), None);
+        assert_eq!(
+            facts.entry_path(&dir, output).unwrap(),
+            Some(dir.join("run.jet"))
+        );
 
         std::fs::write(dir.join("run.jet"), "fn run() { print(2) }\n").unwrap();
         std::fs::write(dir.join("other.jet"), "fn run() { print(3) }\n").unwrap();
@@ -3781,7 +3888,6 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
             Some(dir.join("run.jet"))
         );
 
-        std::fs::remove_file(dir.join("main.jet")).unwrap();
         assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),

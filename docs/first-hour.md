@@ -1,220 +1,135 @@
-# Your first hour with Jet
+# Install Jet and run your first project
 
-In this tour, you install Jet, run one program, fix one error, and build a
-native command-line tool.
+This guide covers the beginner path from a supported-host install to the
+first successful `jet run`. It ends there. Ordered lessons continue in #1034;
+diagnostic recovery exercises are in #1035.
 
-## 1. Install Jet
+## 1. Check the supported host
 
-On a supported host with Nix, install the current Jet package without a repository checkout:
+The measured release install path covers x86_64 Linux and x86_64 macOS. It
+uses Nix flakes. Windows and other architectures are outside this release
+install path, so do not replace it with an SSH session or a manual remote
+rebuild.
+
+If your host is in the supported set, check that Nix is available:
 
 ```bash
-nix profile install github:jet-language/jet
+nix --version
+```
+
+If the command is missing, install Nix using its host instructions before
+continuing. If the host is outside the supported set, stop here and use the
+platform-specific project track instead of guessing at a compiler install.
+
+## 2. Install Jet
+
+Install the current Jet package into your user profile. The extra feature
+setting makes the command work on Nix installations that have not enabled
+flakes yet:
+
+```bash
+nix --extra-experimental-features "nix-command flakes" profile install github:jet-language/jet
 jet version
 ```
 
-Contributors can build from source instead:
+The second command is the install check. If Nix reports an offline or network
+failure, reconnect and repeat the install. If installation succeeds but the
+shell cannot find `jet`, start a new shell and run `jet version` again. Do not
+continue with a partial install.
+
+Contributors can use a source build as an explicit expert path:
 
 ```bash
 git clone https://github.com/jet-language/jet.git
 cd jet
-nix build
+nix --extra-experimental-features "nix-command flakes" build
 export PATH="$PWD/result/bin:$PATH"
 jet version
 ```
 
-The installed `jet` binary is the compiler. For a source build, `result/bin/jet` is the compiler and the `PATH` change applies to the current shell.
+## 3. Create and run the first project
 
-## 2. Run your first program
-
-Make a work directory outside the repository. Save this as `hello.jet`:
-
-```jet
-fn run() {
-    print("hello, world")
-}
-```
-
-Run the file:
+Choose a clean parent directory. `jet new` creates the canonical project
+layout and uses `run.jet` as the default entry file:
 
 ```bash
-jet run hello.jet
+mkdir -p "$HOME/jet-projects"
+cd "$HOME/jet-projects"
+jet new hello
+cd hello
+jet run
 ```
 
-Jet prints:
+The scaffold contains:
+
+```text
+package.jet
+run.jet
+.gitignore
+```
+
+The generated `run.jet` contains a zero-argument `fn run()` and prints:
 
 ```text
 hello, world
 ```
 
-`fn run()` is the entry point. `print` is built in, so this program needs no imports, manifest, or project setup. This snippet is also the [golden-tested hello example](../examples/features/basics/hello.jet).
-
-## 3. Read your first error
-
-Change `print` to `pirnt`, then check the file:
+Bare `jet run` resolves `run.jet`. You can name the file explicitly when you
+need to make the target clear:
 
 ```bash
-jet check hello.jet
+jet run run.jet
 ```
 
-Jet reports the problem and its fix:
+If `hello` already exists, choose another project name. `jet new` does not
+overwrite an existing directory.
 
-```text
-Error [E0102]: nothing named `pirnt` exists here
- Why: only functions that have been defined (or built in, like `print` / `input`) can be called
- Fix: did you mean `print`?
-```
+## 4. Edit, check, and test
 
-Change `pirnt` back to `print`. Run `jet check hello.jet` again.
-
-The error code stays stable. The full [E0102 reference](reference/errors/E0102.md) links to its tested failing program.
-
-## 4. Use the shared REPL and notebook
-
-If `jet` is already installed on your host, this journey needs no repository checkout. Verify the binary first:
-
-```bash
-jet version
-```
-
-Start the terminal REPL:
-
-```bash
-jet repl
-```
-
-Enter a binding and an expression. The session keeps both values:
-
-```text
-name :: "Jet"
-name
-```
-
-For the first-party notebook, create a document and open the browser client:
-
-```bash
-jet notebook first-hour.jetnb
-```
-
-Open the printed local URL. Add a Jet cell, edit it, and run it. Add a
-Markdown cell to explain the result. The same session provides inspect,
-debug, profile, interrupt, completion, and queued `input()` controls.
-
-Input and file access are explicit. Queue `Ada` in the browser's **Input**
-control, then run this cell:
+Open `run.jet` in your editor and change the message:
 
 ```jet
-#Abilities(abilities: IO, FS) {
-    name :: input("name: ") ?? "world"
-    assert(name == "Ada")
-    write_file("notes.txt", name) ?? panic("write failed")
-    assert(file_exists("notes.txt"))
-    assert_eq(file_exists("notes.txt"), true)
-    print(read_file(Path.from("notes.txt")) ?? panic("read failed"))
-}
-```
-
-The block is the cell's explicit ability boundary. `input`, `write_file`,
-`file_exists`, and `read_file` are the same Prelude ambients used by the
-terminal REPL; the relative file stays inside the notebook directory. The
-`Path.from` call also shows the expert form used when a Core file operation
-needs a `Path` value.
-
-Save the document, stop the process, and run the same command again. **Reopen**
-restores the cells and source. **Merge** combines another `.jetnb` by stable
-cell ID. Export to `ipynb` or `.jet` shows an explicit loss report; imported
-Jupyter output is quarantined until Jet runs it locally.
-
-The first-party browser, Canvas lens, Jupyter adapter, and headless protocol
-all call this one REPL session. They share stale-output rules, rich output,
-source links, and trust decisions.
-
-For a terminal-only or CI journey, use the same session as JSONL. Each input
-line produces one JSON reply, so a consumer can stop after any observable
-claim without waiting for end-of-file:
-
-```bash
-printf '%s\n' 'add-jet answer :: 42' 'exec first' 'state' |
-  jet notebook --protocol first-hour.jetnb
-```
-
-If the browser or server stops, local drafts remain in the browser until the
-server is reachable again. A stale cached result is shown as stale and must be
-run again. An imported result remains plain text and quarantined. A merge with
-the same cell ID edited on both sides is marked as a conflict; edit that cell
-before running it.
-
-## 5. Build something you can ship
-
-Save the following program as `ship.jet`:
-
-```jet
-use core.process as process
-
 fn run() {
-    args :: process.argv()
-    project :: if args.len() > 1 {
-        args.get(1) ?? "first-hour"
-    } else {
-        "first-hour"
-    }
-    steps :: ["check source", "build binary", "run smoke test"]
-    print("Shipping {project}")
-    loop step in steps {
-        print("[ok] {step}")
-    }
+    print("hello from Jet")
 }
 ```
 
-Run it:
+Run the same source through the explicit development checks:
 
 ```bash
-jet run ship.jet
+jet check run.jet
+jet test run.jet
+jet run run.jet
 ```
 
-The output is:
+`jet check` reports source errors without running the program. `jet test` runs
+any `#Test` blocks in the file. `jet run` compiles and runs the entry function.
+These commands are expert escapes from the zero-ceremony `jet run` default;
+they do not require a different project layout.
 
-```text
-Shipping first-hour
-[ok] check source
-[ok] build binary
-[ok] run smoke test
-```
+The small executable hello example is also an
+[executable, golden-tested example](../examples/features/basics/hello.jet).
+Use the [examples index](../examples/README.md) when the first run is complete.
 
-Build the native executable and run it:
+## 5. Recover when the path breaks
 
-```bash
-jet build --release ship.jet
-./build/ship
-```
+| Situation | Recovery |
+|---|---|
+| `jet` is not found after install | Start a new shell and run `jet version`. If it still fails, repeat the Nix install check before creating a project. |
+| `jet new` says the directory exists | Pick a new project name. The scaffold never overwrites a directory. |
+| Bare `jet run` has no entry file | Run it in the generated project, or use `jet run path/to/run.jet` for an explicit target. |
+| A workspace has more than one possible project | Select the member with `jet run -p <member>`, or pass the intended `run.jet` path. |
+| The source is invalid | Run `jet check run.jet`, read the stable diagnostic code and fix, then use the recovery exercises in #1035. |
+| The first install is offline | The generated project has no registry dependency, but the installer still needs its package source. Reconnect and finish installation before the first run. |
+| An old project uses `pkg.jet`, `pack.jet`, `payload.jet`, or `jet.toml` | Rename the manifest to `package.jet`; Jet reports E1226 with that fix. |
+| An old project uses `main.jet` | Rename the entry file to `run.jet`; the old spelling is retired under D-VERDICT-678-1. |
 
-Pass a project name after `--`:
+Do not teach SSH plus a manual rebuild as the remote path. Installation ends
+when a local supported host runs the project. Later remote updates use
+`jet deploy`.
 
-```bash
-jet run ship.jet -- dashboard
-```
+## Continue learning
 
-The delimiter tells Jet to forward later arguments to your program.
-`process.argv()` reads them. The complete program is the
-[golden-tested first-hour example](../examples/features/basics/first_hour.jet).
-
-## Expert checkpoint
-
-The beginner path and expert tools use the same program:
-
-```bash
-jet fmt --check ship.jet
-jet check ship.jet --json
-jet build --release ship.jet
-```
-
-Use `--json` for machine-readable diagnostics. Use
-[`core.term`](reference/core-library.md#coreterm--terminal) for terminal
-streams and [`core.process`](reference/core-library.md#coreprocess--exit-and-subprocesses)
-for command-line arguments. Read the
-[language spec](spec/spec.md) for exact semantics and
-[syntax decisions](spec/syntax-decisions.md) for ratified spellings.
-
-You now have one source file that runs directly and builds as a native
-executable. Continue with the
-[Core library guide](reference/core-library.md) or the
-[executable feature examples](../examples/features/).
+After the first `hello, world`, continue with the ordered lessons in #1034.
+When a diagnostic needs practice, use the diagnostic-led exercises in #1035
+instead of repeating this install walkthrough.

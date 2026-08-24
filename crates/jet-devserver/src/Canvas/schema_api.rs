@@ -1262,11 +1262,15 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
             let wire_expr = json_string_field(request, "wire_expr");
             let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
             let wire_target_pin = json_string_field(request, "wire_target_pin");
+            let module_path = json_string_field(request, "module_path");
             if let Some(name) = &bind {
                 validate_ident(name)?;
             }
             if let Some(expr) = &wire_expr {
                 validate_qualified_name(expr)?;
+            }
+            if let Some(module) = &module_path {
+                validate_qualified_name(module)?;
             }
             apply_insert_call(
                 path,
@@ -1279,6 +1283,7 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
                 wire_expr.as_deref(),
                 wire_origin_pin_id.as_deref(),
                 wire_target_pin.as_deref(),
+                module_path.as_deref(),
             )
         }
         "create_trait_impl" => {

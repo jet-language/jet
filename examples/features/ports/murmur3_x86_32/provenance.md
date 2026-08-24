@@ -83,7 +83,7 @@ Exact stdout:
 Command:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet test --serial --show-default examples/features/ports/murmur3_x86_32/main.jet
+TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet test --serial --show-default examples/features/ports/murmur3_x86_32/run.jet
 ```
 
 Result:
@@ -98,7 +98,7 @@ MurmurHash3 x86 32 vectors: pass
 Command:
 
 ```sh
-golden_actual="$HOME/.cache/jet-test-scratch/murmur3-golden.out"; TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet run examples/features/ports/murmur3_x86_32/main.jet > "$golden_actual" && cmp "$golden_actual" examples/features/expected/ports/murmur3_x86_32.out
+golden_actual="$HOME/.cache/jet-test-scratch/murmur3-golden.out"; TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet run examples/features/ports/murmur3_x86_32/run.jet > "$golden_actual" && cmp "$golden_actual" examples/features/expected/ports/murmur3_x86_32.out
 ```
 
 Result: exit status `0`; `cmp` found the run output byte-for-byte equal to the
@@ -109,7 +109,7 @@ golden file. The nine output lines are the oracle stdout above.
 Command:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet prove examples/features/ports/murmur3_x86_32/main.jet --json
+TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet prove examples/features/ports/murmur3_x86_32/run.jet --json
 ```
 
 The exact machine result was `"result":"pass"` with `"exitCode":0`.

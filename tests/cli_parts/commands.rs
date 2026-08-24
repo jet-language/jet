@@ -848,7 +848,7 @@ fn simple_exec_runs_without_a_manifest() {
     // A single file with a top-level `fn run` and no package.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/run.jet");
     // Isolated cwd: this fixture's stem is `main`, a common stem other tests
     // and examples also use — see `isolated_cwd`.
     let out = Command::new(jet())

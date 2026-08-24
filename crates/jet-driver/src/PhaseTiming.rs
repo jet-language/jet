@@ -4,12 +4,16 @@
 //! collected only when the `JET_TIMING` env var is set, so normal builds pay
 //! nothing. JSON is hand-rolled — no serde, no external crate (I6).
 
-use std::time::Instant;
 use jet_foundation::JSON::json_escape;
+use std::time::Instant;
 
 /// Whether phase timing is requested for this process. Set `JET_TIMING=1`.
 pub fn enabled() -> bool {
-    std::env::var_os("JET_TIMING").is_some()
+    timing_requested(std::env::var("JET_TIMING").ok().as_deref())
+}
+
+fn timing_requested(value: Option<&str>) -> bool {
+    value == Some("1")
 }
 
 /// Directory that must receive `jet-timing.json` for a compile-latency probe.
@@ -64,7 +68,11 @@ impl PhaseTimer {
             if i > 0 {
                 s.push(',');
             }
-            s.push_str(&format!("{{\"name\":\"{}\",\"us\":{}}}", json_escape(name), us));
+            s.push_str(&format!(
+                "{{\"name\":\"{}\",\"us\":{}}}",
+                json_escape(name),
+                us
+            ));
         }
         s.push_str("]}\n");
         s
@@ -105,5 +113,13 @@ mod tests {
         assert!(j.contains("\"name\":\"lex\""));
         assert!(j.contains("\"name\":\"rust_bytes\",\"us\":4096"));
         assert!(j.trim_end().ends_with("]}"));
+    }
+
+    #[test]
+    fn timing_flag_accepts_only_one() {
+        assert!(timing_requested(Some("1")));
+        assert!(!timing_requested(Some("0")));
+        assert!(!timing_requested(Some("true")));
+        assert!(!timing_requested(None));
     }
 }

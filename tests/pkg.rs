@@ -3576,15 +3576,15 @@ fn extract_rev_from_lock(lock_raw: &str) -> String {
 }
 
 // ─────────────────────────────────────────────
-// CLI binary end-to-end (skip if binary not built)
+// CLI binary end-to-end
 // ─────────────────────────────────────────────
 
 #[test]
 fn cli_jet_new_creates_project_structure() {
-    if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_jet_new (run `cargo build` first)");
-        return;
-    }
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist for this production-path test"
+    );
 
     let tmp = tmp_dir("cli_new");
     let store = tmp.join("store");
@@ -3631,6 +3631,98 @@ fn cli_jet_new_creates_project_structure() {
     );
 
     let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_run_migrates_all_retired_entry_layouts() {
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_run_migrates_all_retired_entry_layouts (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("cli_run_entry_migration");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    for (label, retired, canonical) in [
+        ("root", "main.jet", "run.jet"),
+        ("src", "src/main.jet", "src/run.jet"),
+        ("managed", ".jet/main.jet", "run.jet"),
+    ] {
+        let project = tmp.join(label);
+        fs::create_dir_all(&project).unwrap();
+        write(&project, "package.jet", &min_manifest(label, "0.1.0"));
+        write(
+            &project,
+            retired,
+            &format!("fn run() {{ print(\"{label}\") }}\n"),
+        );
+
+        let out = jet_cmd(&["run"], &project, &store);
+        assert!(
+            out.status.success(),
+            "jet run failed for {label} layout:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout), format!("{label}\n"));
+        assert!(project.join(canonical).is_file());
+        assert!(!project.join(retired).exists());
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("notice: migrated retired entry"), "{stderr}");
+        assert!(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}");
+    }
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn cli_run_reports_ambiguous_retired_entry_layout() {
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_run_reports_ambiguous_retired_entry_layout (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("cli_run_entry_ambiguous");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"));
+    write(&tmp, "run.jet", "fn run() { print(\"current\") }\n");
+    write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n");
+
+    let out = jet_cmd(&["run"], &tmp, &store);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("ambiguous project entry"), "{stderr}");
+    assert!(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}");
+    assert!(tmp.join("main.jet").is_file());
+    assert!(tmp.join("run.jet").is_file());
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn cli_run_keeps_explicit_retired_entry_target() {
+    if !jet_bin().is_file() {
+        eprintln!("note: skipping cli_run_keeps_explicit_retired_entry_target (run `cargo build` first)");
+        return;
+    }
+
+    let tmp = tmp_dir("cli_run_explicit_retired");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "main.jet", "fn run() { print(\"explicit\") }\n");
+
+    let out = jet_cmd(&["run", "main.jet"], &tmp, &store);
+    assert!(
+        out.status.success(),
+        "explicit source target failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "explicit\n");
+    assert!(tmp.join("main.jet").is_file());
+    assert!(!tmp.join("run.jet").exists());
+
+    fs::remove_dir_all(&tmp).unwrap();
 }
 
 #[test]

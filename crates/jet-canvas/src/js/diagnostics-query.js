@@ -416,16 +416,16 @@
   }
 
   function setSourceEditMode(active) {
-    sourceEditMode = !!active && !!latestDoc;
+    sourceEditMode = !!active && !!sourceEditor;
     stage.classList.toggle("is-source-edit", sourceEditMode);
     if (sourceEditMode) {
       if (viewMode === "graph") viewMode = "split";
       stage.classList.toggle("is-code", viewMode === "code");
       stage.classList.toggle("is-split", viewMode === "split");
       if (sourceEditor) {
-        const draft = readSourceDraft(latestDoc);
-        sourceEditor.value = draft !== null ? draft : (latestDoc.source_text || "");
-        setSaveState(draft !== null && draft !== latestDoc.source_text ? "local draft" : "source saved", draft !== null && draft !== latestDoc.source_text ? "draft" : "saved");
+        const draft = latestDoc ? readSourceDraft(latestDoc) : null;
+        if (latestDoc) sourceEditor.value = draft !== null ? draft : (latestDoc.source_text || "");
+        setSaveState(draft !== null && latestDoc && draft !== latestDoc.source_text ? "local draft" : "source saved", draft !== null && latestDoc && draft !== latestDoc.source_text ? "draft" : "saved");
         sourceEditor.focus();
       }
     }
@@ -627,6 +627,11 @@
           scm = null;
           scmState.textContent = "git stale";
           scmState.style.color = "#f8c76a";
+          if (latestDoc && !(latestDoc.graphs && latestDoc.graphs.length)
+            && sourceIsTeachingEmpty(latestDoc.source_text)) {
+            setTeachingEmptyCanvasState();
+            return null;
+          }
           setCanvasState("stale", "Source control is stale", "The source changed while Canvas read Git state. The current source stays visible; reload source control.", [
             { label: "Open source", run: openSourceRecovery },
             { label: "Retry", primary: true, run: loadSourceControl }

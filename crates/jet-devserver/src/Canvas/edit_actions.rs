@@ -469,6 +469,7 @@ pub(super) fn apply_insert_call(
     wire_expr: Option<&str>,
     wire_origin_pin_id: Option<&str>,
     wire_target_pin: Option<&str>,
+    module_path: Option<&str>,
 ) -> Result<String, String> {
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let final_args = if args.is_empty() {
@@ -478,7 +479,7 @@ pub(super) fn apply_insert_call(
     } else {
         args.to_vec()
     };
-    let plan = insert_call_plan(src, callee, &final_args);
+    let plan = insert_call_plan(src, callee, &final_args, module_path);
     let call = if plan.fallible {
         format!(
             "{}({}) ?? panic(\"canvas\")",
@@ -590,8 +591,13 @@ struct InsertCallPlan {
     import: Option<TextEdit>,
 }
 
-fn insert_call_plan(src: &str, callee: &str, args: &[String]) -> InsertCallPlan {
-    let Some(target) = core_target_for_callee(src, callee) else {
+fn insert_call_plan(
+    src: &str,
+    callee: &str,
+    args: &[String],
+    module_path: Option<&str>,
+) -> InsertCallPlan {
+    let Some(target) = core_target_for_callee(src, callee, module_path) else {
         return InsertCallPlan {
             callee: callee.to_string(),
             args: args.to_vec(),
@@ -619,12 +625,28 @@ struct CoreCallTarget {
     member: String,
 }
 
-fn core_target_for_callee(src: &str, callee: &str) -> Option<CoreCallTarget> {
+fn core_target_for_callee(
+    src: &str,
+    callee: &str,
+    module_path: Option<&str>,
+) -> Option<CoreCallTarget> {
     let parts = callee.split('.').collect::<Vec<_>>();
     if parts.len() < 2 {
         return None;
     }
     let member = parts.last()?.to_string();
+    if let Some(module) = module_path {
+        let alias = default_core_alias(module);
+        if module.starts_with("core.")
+            && parts.len() == 2
+            && parts.first().copied() == Some(alias.as_str())
+        {
+            return Some(CoreCallTarget {
+                module: module.to_string(),
+                member,
+            });
+        }
+    }
     if parts.first() == Some(&"core") && parts.len() >= 3 {
         return Some(CoreCallTarget {
             module: parts[..parts.len() - 1].join("."),
@@ -644,6 +666,29 @@ fn core_target_for_callee(src: &str, callee: &str) -> Option<CoreCallTarget> {
             module: format!("{}{}", import.module, suffix),
             member,
         });
+    }
+    let alias = parts[0];
+    let mut modules = jet_driver::Syntax::KNOWN_CORE_MODULES
+        .iter()
+        .copied()
+        .filter(|module| {
+            module
+                .strip_prefix("core.")
+                .and_then(|path| path.rsplit('.').next())
+                == Some(alias)
+        });
+    if let Some(module) = modules.next() {
+        if modules.next().is_none() {
+            let suffix = if parts.len() > 2 {
+                format!(".{}", parts[1..parts.len() - 1].join("."))
+            } else {
+                String::new()
+            };
+            return Some(CoreCallTarget {
+                module: format!("{module}{suffix}"),
+                member,
+            });
+        }
     }
     None
 }
@@ -922,15 +967,25 @@ fn structural_insert_target(
     wire_target_pin: Option<&str>,
 ) -> Result<(usize, String), String> {
     let Some(pin_id) = wire_origin_pin_id else {
-        return Ok((anchor.insert_offset, "    ".to_string()));
-    };
-    if let Some(target) = wire_target_pin {
-        if target != "exec" {
+        if wire_target_pin.is_some() {
             return Err(edit_error(
                 "bad_request",
-                "Canvas structural nodes connect through the exec pin",
+                "Canvas structural wire origin is missing",
             ));
         }
+        return Ok((anchor.insert_offset, "    ".to_string()));
+    };
+    let Some(target) = wire_target_pin else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas structural wire target is missing",
+        ));
+    };
+    if target != "exec" {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas structural nodes connect through the exec pin",
+        ));
     }
     let (node_id, direction) = pin_id
         .rsplit_once(":input:")
@@ -946,6 +1001,18 @@ fn structural_insert_target(
         return Err(edit_error(
             "not_found",
             "Canvas insertion pin no longer exists",
+        ));
+    }
+    let pin_is_exec = projection.json.split(&pin_marker).skip(1).any(|chunk| {
+        chunk
+            .split("\"pin_id\":")
+            .next()
+            .is_some_and(|pin| pin.contains("\"type\":\"exec\""))
+    });
+    if !pin_is_exec {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas structural nodes connect through the exec pin",
         ));
     }
     let node = projection

@@ -26,19 +26,58 @@ LLVM optimizes). Interim levers, all invariant-clean:
 - Instrument the rustc/link step (`PhaseTiming` never laps it today) + a
   compiler self-speed benchmark corpus vs cargo in CI. You can't beat a number
   you don't record.
-- Fast linker (mold → lld → system), tuned rustc flags.
-- Precompiled stdlib object store keyed on (prelude, rustc identity, profile) —
-  the prelude currently recompiles from source text on every build. R10
-  pay-for-what-you-call preserved.
-- Promote the jet-queries demand cache (LSP-only today) onto the batch compile
-  path: per-module memoized lex/parse/check, invalidate dependents only.
-- Hand-rolled (I6) parallel per-module front end; deterministic diagnostics.
+- Fast linker (mold → lld → system), tuned rustc flags. Native rustc builds
+  honor explicit `RUSTC_LINKER`/`CC`; otherwise Jet selects mold, then lld
+  through the C driver, and leaves the target's system linker alone when
+  neither is available. The selected driver/backend enters cache and timing
+  identity. Fast builds pass explicit `opt-level=0`, `codegen-units=256`, and
+  `lto=off`; optimized AOT passes explicit `opt-level=2`, thin LTO, and strip.
+- Reusable stdlib objects: native AOT splits the fixed Prelude/runtime and the
+  reachable Core closure into content-addressed `jet_runtime` and
+  `jet_runtime_core` rlibs. Their keys include the exact emitted/exported
+  source, rustc identity, target/profile flags and environment, plus the
+  runtime dependency key. A warm build links the objects instead of compiling
+  them again; corruption, rejection, or malformed markers stay visible and
+  fail open to the complete inline program. R10 pay-for-what-you-call is
+  preserved.
+- Relevant-digest cache: the native binary key carries the exact fixed runtime
+  and reachable Core-closure digests, not a hash of the compiler executable.
+  The fixed-runtime digest is memoized per compiler process and the Core digest
+  cache is bounded and keyed by the sorted used-Core closure. Disk objects are
+  digest-verified and the shared runtime cache is bounded.
+- Promote the jet-queries demand cache onto the batch compile path: per-module
+  memoized check, module-interface fingerprints, and dependent-only invalidation.
+- Hand-rolled (I6) bounded staged-source lex/parse fan-out; deterministic
+  diagnostics and stable module discovery order.
 - Widen JIT TIR coverage so `jet dev` reloads never touch rustc for pure-Jet
   programs.
 
 D-BUILD-DEFAULT1=B settles everyday defaults: `jet run` and `jet dev` use the
 fast profile; `jet build` remains optimized. D-AOT-CRANELIFT1 is ratified on
 card #666 under the two-lens law.
+
+## Interim closeout contract (#666)
+
+The closeout measures the production path, not a replacement benchmark path.
+The cross-backend proof runs the same checked example through optimized AOT and
+the default tiered lens, then compares exit status, stdout, and stderr. A
+resident Cranelift row names resident execution; a deopt-interpreter row names
+the interpreter path. A missing row, a newly broken oracle, a tier refusal, or
+a divergent result is a failed differential, not a workload exclusion.
+
+The speed proof uses the existing phase reports and typed `CompilerProbe`
+provider. Its corpus pins each source and expected-output digest. Each measured
+row records compiler and Core identities, target, profile, backend, linker,
+host, cache state, fixed warmup/sample counts, elapsed variance, and phase
+totals. Clean, no-change, and representative-edit measurements remain separate.
+Missing, partial, stale, or incompatible evidence is unavailable/failure; it
+never passes by changing the corpus, hiding a cold run, or increasing warmups.
+
+The report may establish a measured baseline only for the pinned machine and
+toolchain identity. It does not claim the clean/incremental JIT and optimized
+AOT budgets until those rows and their variance are present. The same report
+must retain the failure rail for cache invalidation, nondeterminism, pathological
+inputs, and unstable samples.
 
 ## Anti-goals from Xcode / Swift (Theo, 2026-08-05)
 

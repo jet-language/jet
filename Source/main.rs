@@ -53,6 +53,7 @@ mod CmdGates;
 mod CmdStructure;
 mod CmdStructuralMerge;
 mod EngineDispatch;
+mod NativeLinker;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
@@ -231,7 +232,7 @@ fn parse_color(raw: &[String]) -> ColorChoice {
 pub(crate) enum OptimizeLevel {
     /// `optimize: none` — rustc opt-level=0; fast compile, no optimization.
     None,
-    /// `optimize: basic` — rustc `-O` (opt-level=2); the driver default.
+    /// `optimize: basic` — rustc opt-level=2; the driver default.
     Basic,
     /// `optimize: full` — rustc `-C opt-level=3`; maximum throughput.
     Full,
@@ -265,6 +266,7 @@ impl From<jet::Package::BuildOptimize> for OptimizeLevel {
 pub(crate) struct ProfileConfig {
     pub optimize: OptimizeLevel,
     pub debug_info: bool,
+    pub codegen_units: Option<u16>,
     pub small: bool,
     pub panic_abort: bool,
     pub settings: BTreeMap<String, String>,
@@ -275,6 +277,7 @@ impl ProfileConfig {
         Self {
             optimize: OptimizeLevel::Full,
             debug_info: false,
+            codegen_units: None,
             small: false,
             panic_abort: false,
             settings: BTreeMap::new(),
@@ -285,6 +288,7 @@ impl ProfileConfig {
         Self {
             optimize: OptimizeLevel::None,
             debug_info: true,
+            codegen_units: Some(256),
             small: false,
             panic_abort: false,
             settings: BTreeMap::new(),
@@ -295,6 +299,7 @@ impl ProfileConfig {
         Self {
             optimize: OptimizeLevel::Basic,
             debug_info: true,
+            codegen_units: None,
             small: false,
             panic_abort: false,
             settings: BTreeMap::new(),
@@ -306,6 +311,7 @@ impl ProfileConfig {
         Self {
             optimize: OptimizeLevel::from(def.optimize),
             debug_info: def.debug_info,
+            codegen_units: None,
             small: def.small,
             panic_abort: matches!(def.panic, Some(BuildPanic::Abort)),
             settings: def.settings.clone(),
@@ -324,6 +330,9 @@ impl ProfileConfig {
         }
         if self.panic_abort {
             parts.push("panic=abort".into());
+        }
+        if let Some(units) = self.codegen_units {
+            parts.push(format!("codegen-units={units}"));
         }
         if !self.settings.is_empty() {
             parts.push(format!(
@@ -351,10 +360,20 @@ impl ProfileConfig {
             }
             return args;
         }
+        if let Some(units) = self.codegen_units {
+            args.extend(["-C".to_string(), format!("codegen-units={units}")]);
+        }
         match self.optimize {
-            OptimizeLevel::None => {}
+            OptimizeLevel::None => {
+                args.extend([
+                    "-C".to_string(),
+                    "opt-level=0".to_string(),
+                    "-C".to_string(),
+                    "lto=off".to_string(),
+                ]);
+            }
             OptimizeLevel::Basic => {
-                args.push("-O".to_string());
+                args.extend(["-C".to_string(), "opt-level=2".to_string()]);
             }
             OptimizeLevel::Full => {
                 args.extend(["-C".to_string(), "opt-level=3".to_string()]);
@@ -377,8 +396,10 @@ impl ProfileConfig {
 
 #[derive(Clone)]
 pub(crate) enum BuildProfile {
-    /// Default: speed-oriented (`-O`, thin LTO). No `--profile` flag.
+    /// Default `jet build` profile: optimized (opt-level=2, thin LTO).
     Default,
+    /// D-BUILD-DEFAULT1: fast `jet run`/`jet dev` profile.
+    Fast,
     /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization.
     Release,
     /// D-BUILDPROFILE1: `--profile=debug`. No optimization.
@@ -394,12 +415,21 @@ pub(crate) enum BuildProfile {
 }
 
 impl BuildProfile {
+    /// D-BUILD-DEFAULT1: command defaults are explicit, never ambient.
+    pub(crate) fn default_for_command(command: &str) -> Self {
+        match command {
+            "run" | "dev" => BuildProfile::Fast,
+            _ => BuildProfile::Default,
+        }
+    }
+
     /// Ratified performance-budget applicability name. Default builds retain
     /// the existing `dev` profile identity; named profiles use their declared
     /// name, never their cache-settings suffix.
     pub(crate) fn budget_name(&self) -> &str {
         match self {
             BuildProfile::Default => "dev",
+            BuildProfile::Fast => "dev",
             BuildProfile::Release => "release",
             BuildProfile::Debug => "debug",
             BuildProfile::Ci => "ci",
@@ -412,6 +442,7 @@ impl BuildProfile {
     pub(crate) fn cache_tag(&self) -> String {
         match self {
             BuildProfile::Default => "default".to_string(),
+            BuildProfile::Fast => "fast".to_string(),
             BuildProfile::Release => "release".to_string(),
             BuildProfile::Debug => "debug".to_string(),
             BuildProfile::Ci => "ci".to_string(),
@@ -428,6 +459,15 @@ impl BuildProfile {
             BuildProfile::Default => ProfileConfig {
                 optimize: OptimizeLevel::Basic,
                 debug_info: false,
+                codegen_units: None,
+                small: false,
+                panic_abort: false,
+                settings: BTreeMap::new(),
+            },
+            BuildProfile::Fast => ProfileConfig {
+                optimize: OptimizeLevel::None,
+                debug_info: false,
+                codegen_units: Some(256),
                 small: false,
                 panic_abort: false,
                 settings: BTreeMap::new(),
@@ -439,6 +479,7 @@ impl BuildProfile {
             BuildProfile::Small => ProfileConfig {
                 optimize: OptimizeLevel::Basic,
                 debug_info: false,
+                codegen_units: None,
                 small: true,
                 panic_abort: true,
                 settings: BTreeMap::new(),
@@ -446,6 +487,7 @@ impl BuildProfile {
             BuildProfile::Freestanding => ProfileConfig {
                 optimize: OptimizeLevel::Basic,
                 debug_info: false,
+                codegen_units: None,
                 small: true,
                 panic_abort: true,
                 settings: BTreeMap::new(),
@@ -1513,7 +1555,7 @@ fn main() {
         // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
         // source path (not a typo'd subcommand like `buld`).
         if looks_like_jet_source(cmd) {
-            let resolved = resolve_source_path(cmd);
+            let resolved = resolve_command_target("run", cmd, flag_value(&raw, "-p"));
             let program_args: Vec<&String> = if passthrough_sep.is_some() {
                 passthrough.clone()
             } else {
@@ -2253,14 +2295,10 @@ fn main() {
             // --restart / --swap / --watch=off.
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
             let bare_member = flag_value(&raw, "-p");
-            let bare_file;
-            let file = match args.get(1) {
-                Some(f) => f.as_str(),
+            let file: String = match args.get(1) {
+                Some(f) => resolve_command_target("dev", f, bare_member),
                 None => match resolve_bare_entry("dev", &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), bare_member) {
-                    Some(entry) => {
-                        bare_file = entry.to_string_lossy().into_owned();
-                        bare_file.as_str()
-                    }
+                    Some(entry) => entry.to_string_lossy().into_owned(),
                     None => {
                         crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                         exit(ExitCodes::USAGE);
@@ -2274,9 +2312,15 @@ fn main() {
             if let Some(target) = cross_target.as_deref() {
                 validate_target(target, mode);
             }
-            if let Some(profile) = named_profile.as_deref() {
-                let _ = resolve_named_profile(profile, file, mode);
-            }
+            let dev_profile = if freestanding {
+                BuildProfile::Freestanding
+            } else if small {
+                BuildProfile::Small
+            } else if let Some(profile) = named_profile.as_deref() {
+                resolve_named_profile(profile, &file, mode)
+            } else {
+                BuildProfile::default_for_command("dev")
+            };
             // c-devserver (owner-directed 2026-07-01): a `.jet` file can define
             // its own `jet dev` behavior as ordinary Jet code — a top-level
             // `fn dev()` becomes the program's real (native) entry point,
@@ -2291,22 +2335,28 @@ fn main() {
             // cut checked #Target(Web) first, which made `fn dev()` totally
             // unreachable on any file that also declared #Target(Web), e.g.
             // ui_web_click.jet, which has both.)
-            if has_dev_entry_fn(file) {
-                run_dev_entry(file, mode, &setting_overrides, record_name.as_deref());
+            if has_dev_entry_fn(&file) {
+                run_dev_entry(
+                    &file,
+                    dev_profile,
+                    mode,
+                    &setting_overrides,
+                    record_name.as_deref(),
+                );
                 return;
             }
-            if entry_returns_app(file) {
+            if entry_returns_app(&file) {
                 if use_interpreter {
                     std::env::set_var("JET_APP_DEV", "1");
-                    let dev_file = std::fs::canonicalize(file)
+                    let dev_file = std::fs::canonicalize(&file)
                         .map(|path| path.display().to_string())
-                        .unwrap_or_else(|_| file.to_string());
+                        .unwrap_or_else(|_| file.clone());
                     std::env::set_var("JET_DEV_FILE", dev_file);
                     if let Some(port) = dev_port {
                         std::env::set_var("JET_APP_PORT", port.to_string());
                     }
                     run_dev(
-                        file,
+                        &file,
                         try_anyway,
                         policy,
                         gates,
@@ -2317,7 +2367,7 @@ fn main() {
                         record_name.as_deref(),
                     );
                 }
-                run_web_app_dev_entry(file, mode, dev_port, &setting_overrides, record_name.as_deref());
+                run_web_app_dev_entry(&file, mode, dev_port, &setting_overrides, record_name.as_deref());
                 return;
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
@@ -2327,14 +2377,14 @@ fn main() {
             // inside `run_dev`'s interpreter machinery.
             // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
             // file's own `#Target(Web)` marker, if any.
-            if effective_target("dev", file, cross_target.as_deref()).as_deref()
+            if effective_target("dev", &file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
             {
-                run_dev_web(file, mode, verbose, dev_port, &setting_overrides);
+                run_dev_web(&file, mode, verbose, dev_port, &setting_overrides);
                 return;
             }
             run_dev(
-                file,
+                &file,
                 try_anyway,
                 policy,
                 gates,
@@ -2363,7 +2413,7 @@ fn main() {
             // entry the same way run/build/check/dev do; outside a package
             // the usage error is unchanged.
             let file: String = match args.get(1) {
-                Some(f) => f.to_string(),
+                Some(f) => resolve_command_target("debug", f, flag_value(&raw, "-p")),
                 None => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     let member_flag = flag_value(&raw, "-p");
@@ -2812,7 +2862,7 @@ fn main() {
             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
             // for the path-accepting compile commands.
             let resolved = if matches!(cmd, "run" | "build" | "check") {
-                resolve_source_path(target)
+                resolve_command_target(cmd, target, bare_member_flag)
             } else {
                 target.to_string()
             };
@@ -2992,6 +3042,20 @@ fn manifest_default_target(file: &str) -> Option<String> {
     manifest.target
 }
 
+/// Resolve a command target through the shared bare-entry rule when it names a
+/// project directory. Explicit files keep the ordinary path resolver, so a
+/// directory target and a bare command have one workspace/member decision.
+fn resolve_command_target(cmd: &str, raw: &str, member_flag: Option<&str>) -> String {
+    if Path::new(raw).is_dir() {
+        if let Some(entry) = resolve_bare_entry(cmd, Path::new(raw), member_flag) {
+            if let Some(checked) = checked_explicit_file(&entry) {
+                return checked.to_string_lossy().into_owned();
+            }
+        }
+    }
+    resolve_source_path(raw)
+}
+
 pub(crate) fn resolve_source_path(raw: &str) -> String {
     let path = Path::new(raw);
     // A directory argument is a project root: resolve its canonical entry.
@@ -3092,6 +3156,14 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         Ok(resolver) => resolver,
         Err(error) => report_entry_authority_error(error),
     };
+    if let Err(error) = jet::Package::PackageFacts::default().resolve_run_entry_checked(&resolver) {
+        crate::cli_error!(
+            @fix "E2105",
+            error,
+            "keep one project entry, using `run.jet`, or point at a `.jet` file directly"
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
     let package = match resolver.checked_package(Path::new(".")) {
         Ok(package) => Some(package),
         Err(error) if error.is_missing() => None,

@@ -34,7 +34,27 @@ Live development status and work order are in [Tower](docs/README.md); the
 [roadmap](docs/spec/roadmap.md) records verified history and durable program
 ownership.
 
-## Quickstart
+## Install and first run
+
+The supported release install path in this guide is x86_64 Linux or x86_64
+macOS with Nix flakes:
+
+```bash
+nix --extra-experimental-features "nix-command flakes" profile install github:jet-language/jet
+jet version
+jet new hello
+cd hello
+jet run
+```
+
+The first run prints `hello, world`. For the complete walkthrough, recovery
+routes, and expert file/check/test commands, see the
+[first-hour guide](docs/first-hour.md). Continue with the ordered lessons in
+#1034 after the first successful run.
+
+## Contributor quickstart
+
+Build from a checkout when working on Jet itself:
 
 ```bash
 scripts/agent/jet-env cargo build
@@ -48,10 +68,6 @@ scripts/agent/jet-env jet check examples/features/basics/functions.jet
 scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
 cargo test --test golden examples_compile_and_run -- --nocapture
 ```
-
-For the first user journey after installation, follow the
-[first-hour guide](docs/first-hour.md). It includes the shared terminal REPL,
-the browser notebook, save/reopen, merge, and stated-loss exports.
 
 The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
 

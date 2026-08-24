@@ -176,7 +176,7 @@ fn examples_compile_and_run() {
     }
 
     // Recursive discovery: examples/features/<topic>/<name>.jet or
-    // examples/features/<topic>/<name>/main.jet. Test id (`stem`) is the
+    // examples/features/<topic>/<name>/run.jet. Test id (`stem`) is the
     // relative path without extension, e.g. "net/http_server". `expected/`
     // mirrors the same <topic>/<name> tree.
     let mut entries: Vec<GoldenEntry> = Vec::new();
@@ -210,14 +210,14 @@ fn examples_compile_and_run() {
                     shown: format!("examples/features/{}.{}", stem, ext),
                 });
             } else if path.is_dir() {
-                let main = path.join(format!("main.{}", ext));
-                if main.is_file() {
+                let run = path.join(format!("run.{}", ext));
+                if run.is_file() {
                     let name = path.file_name().unwrap().to_string_lossy().into_owned();
                     let stem = format!("{}/{}", topic_name, name);
                     entries.push(GoldenEntry {
-                        path: main.clone(),
+                        path: run.clone(),
                         stem: stem.clone(),
-                        shown: format!("examples/features/{}/main.{}", stem, ext),
+                        shown: format!("examples/features/{}/run.{}", stem, ext),
                     });
                 }
             }
@@ -721,9 +721,8 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
 }
 
 /// Use the production package resolver to decide whether an example needs the
-/// programmable-build path. The source-text check remains for the retired
-/// `main.jet` convention, which is intentionally excluded from package-wide
-/// source discovery as the legacy entry filename.
+/// programmable-build path. The source-text check remains for source files
+/// whose package build entry is declared in their ordinary Jet source.
 fn has_package_build_entry(path: &Path, source: &str) -> bool {
     if source.contains("fn build(") {
         return true;
@@ -810,7 +809,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source_dir = entry.path.parent().expect("polyglot example directory");
-    fs::copy(&entry.path, dir.join("main.jet")).unwrap();
+    fs::copy(&entry.path, dir.join("run.jet")).unwrap();
     fs::copy(
         source_dir.join(foreign_source),
         dir.join(foreign_source),
@@ -827,7 +826,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     bind.current_dir(&dir).env("NO_COLOR", "1");
     bind.args(["inspect", "bind", language, foreign_source]);
     if language == "dart" {
-        bind.args(["--jet", "main.jet"]);
+        bind.args(["--jet", "run.jet"]);
     }
     let bind = bind.args(["--pkg", package]).output().unwrap();
     assert!(
@@ -838,7 +837,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     );
     if language == "dart" {
         let check = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["check", "main.jet"])
+            .args(["check", "run.jet"])
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .output()
@@ -858,7 +857,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
             .unwrap()
     } else {
         Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["run", "main.jet"])
+            .args(["run", "run.jet"])
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .output()
@@ -892,7 +891,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
                 entry.stem,
                 unified_diff(
                     &format!("examples/features/expected/{}.out", entry.stem),
-                    &format!("examples/features/{}/main.jet stdout (actual)", entry.stem),
+                    &format!("examples/features/{}/run.jet stdout (actual)", entry.stem),
                     &expected,
                     &actual,
                 )

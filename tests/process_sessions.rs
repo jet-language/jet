@@ -220,7 +220,8 @@ fn process_session_resource_limit_exhaustion_names_each_limit_all_tiers() {
 use core.process as process
 
 fn run() {{
-    cpu :: process.cmd(["{fixture}", "cpu"]).cpu_time_limit(Duration.milliseconds(1000)).run()
+    cpu_budget :: Duration.milliseconds(1000) ?? panic("duration failed")
+    cpu :: process.cmd(["{fixture}", "cpu"]).cpu_time_limit(cpu_budget).run()
     if cpu == {{
         .Ok(_) -> print("cpu:missed")
         .Err(error) -> {{

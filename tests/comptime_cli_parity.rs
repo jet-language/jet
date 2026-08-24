@@ -647,7 +647,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
 #[test]
 fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source = root.join("examples/features/tooling/test_target/main.jet");
+    let source = root.join("examples/features/tooling/test_target/run.jet");
     let golden = fs::read(root.join("examples/features/expected/tooling/test_target.out"))
         .expect("read measured test target golden");
     let scratch = common::Scratch::new("test_cli_parity");

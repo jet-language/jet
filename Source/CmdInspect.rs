@@ -697,7 +697,7 @@ pub(crate) fn run_guarantees(
     freestanding: bool,
 ) {
     let Some(file) = entry_file(args) else {
-        crate::cli_error!(@fix "E2104", "`jet inspect guarantees` needs an entry file", "jet inspect guarantees Source/main.jet");
+        crate::cli_error!(@fix "E2104", "`jet inspect guarantees` needs an entry file", "jet inspect guarantees run.jet");
         exit(jet::ExitCodes::USAGE);
     };
     let checked = check_projection_with_options(

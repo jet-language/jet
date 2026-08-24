@@ -208,7 +208,7 @@ baseline is refreshed.
     },
     {
       "package": "tests",
-      "file": "tests/fixtures/unsafe_obligations/main.jet",
+      "file": "tests/fixtures/unsafe_obligations/run.jet",
       "line": 5,
       "column": 5,
       "reason": "local pointer"
@@ -481,7 +481,7 @@ baseline is refreshed.
     },
     {
       "package": "tests",
-      "file": "tests/ui/unsafe_forbidden/main.jet",
+      "file": "tests/ui/unsafe_forbidden/run.jet",
       "line": 2,
       "column": 5,
       "reason": "not allowed"
@@ -502,7 +502,7 @@ baseline is refreshed.
     },
     {
       "package": "tests",
-      "file": "tests/ui/unsafe_per_site/main.jet",
+      "file": "tests/ui/unsafe_per_site/run.jet",
       "line": 2,
       "column": 5,
       "reason": "selection required"
@@ -549,7 +549,7 @@ baseline is refreshed.
 | examples | examples/features/memory/unsafe_sentries_package_off/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
 | examples | examples/features/memory/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
 | examples | examples/features/memory/unsafe_sentries_source_off.jet | 7:5 | "the local cell is live for this raw read" |
-| tests | tests/fixtures/unsafe_obligations/main.jet | 5:5 | "local pointer" |
+| tests | tests/fixtures/unsafe_obligations/run.jet | 5:5 | "local pointer" |
 | tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 26:5 | "AES-256-GCM protocol interoperability" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
@@ -588,8 +588,8 @@ baseline is refreshed.
 | tests | tests/ui/lowlevel_volatile_write_without_mem.jet | 2:5 | "addr is valid" |
 | tests | tests/ui/lowlevel_volatile_write_wrong_ptr.jet | 4:5 | "plain ints are not raw pointers" |
 | tests | tests/ui/lowlevel_volatile_write_wrong_value.jet | 6:5 | "slot is live and pointer never escapes" |
-| tests | tests/ui/unsafe_forbidden/main.jet | 2:5 | "not allowed" |
+| tests | tests/ui/unsafe_forbidden/run.jet | 2:5 | "not allowed" |
 | tests | tests/ui/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
 | tests | tests/ui/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
-| tests | tests/ui/unsafe_per_site/main.jet | 2:5 | "selection required" |
+| tests | tests/ui/unsafe_per_site/run.jet | 2:5 | "selection required" |
 <!-- unsafe-ratchet:end -->

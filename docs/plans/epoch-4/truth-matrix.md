@@ -26,7 +26,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #13 | compatibility-only | `Source/Publish/Sign.rs` | Author TOFU exists; #421/#434 own cache/registry trust. |
 | #179 | compatibility-only | `crates/jetpack/src/Toolchain.rs` | #419/#426 landed complete action and platform identity; #433 owns live tier-1 acceptance. |
 | #85 | model-only | `tests/build_cache_normalization.rs` | #419 landed complete executable action identity; #395 owns live cache protocol and substitution. |
-| #5 | live | `tests/ui/plugin_e1257_version_mismatch/main.jet` | Narrow sandboxed plugin target only. |
+| #5 | live | `tests/ui/plugin_e1257_version_mismatch/run.jet` | Narrow sandboxed plugin target only. |
 | #229 | model-only | `crates/jetpack/src/Trust.rs` | #421/#427/#431/#434 own production authority. |
 | #231 | model-only | `crates/jetpack/src/PackageGraph.rs` | #423/#424 own resolver and lock wiring. |
 | #232 | model-only | `crates/jetpack/src/SemanticLock.rs` | #424 landed the unified atomic semantic lock; #423 owns live resolver consumption. |

@@ -44,11 +44,11 @@ Then run these Jet checks:
 
 ```sh
 TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet test \
-  --show-default examples/features/ports/<library>/main.jet
+  --show-default examples/features/ports/<library>/run.jet
 TMPDIR="$HOME/.cache/jet-test-scratch" JET_GOLDEN_FILTER=ports/<library> \
   scripts/agent/jet-env cargo test --test golden examples_compile_and_run -- --nocapture
 TMPDIR="$HOME/.cache/jet-test-scratch" scripts/agent/jet-env jet prove \
-  examples/features/ports/<library>/main.jet --json
+  examples/features/ports/<library>/run.jet --json
 ```
 
 `jet test` checks named behavioral cases. The golden example checks the
@@ -82,6 +82,6 @@ Files:
 
 - `examples/features/ports/murmur3_x86_32/corpus/murmur3_x86_32.c` — selected C corpus;
 - `examples/features/ports/murmur3_x86_32/corpus/oracle.c` — vector oracle;
-- `examples/features/ports/murmur3_x86_32/main.jet` — Jet port, tests, and golden entry;
+- `examples/features/ports/murmur3_x86_32/run.jet` — Jet port, tests, and golden entry;
 - `examples/features/ports/murmur3_x86_32/provenance.md` — source and proof record;
 - `examples/features/expected/ports/murmur3_x86_32.out` — golden output.

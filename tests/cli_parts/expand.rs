@@ -196,7 +196,7 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
 #[test]
 fn expand_derive_lens_projects_derived_capabilities() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/types/auto_derive_policy/main.jet");
+        .join("examples/features/types/auto_derive_policy/run.jet");
     let human = Command::new(jet())
         .args(["inspect", "expand", "--facts", "derive"])
         .arg(&fixture)
@@ -887,6 +887,63 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
         stderr.contains("no file given and no `package.jet` found"),
         "outside-package bare error text must stay the current usage error:\n{stderr}"
     );
+}
+
+#[test]
+fn explicit_workspace_directory_uses_shared_entry_resolver() {
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+    let root = isolated_cwd("monorepo_explicit_directory");
+    fs::remove_dir_all(&root).ok();
+    copy_dir_all(&fixture, &root);
+
+    let ambiguous = Command::new(jet())
+        .args(["run", "."])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(ambiguous.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&ambiguous.stderr);
+    assert!(
+        stderr.contains("ambiguous") && stderr.contains("hello") && stderr.contains("ranker"),
+        "{stderr}"
+    );
+
+    let selected = Command::new(jet())
+        .args(["run", ".", "-p", "hello"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        selected.status.success(),
+        "explicit directory member selection failed:\n{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    assert!(String::from_utf8_lossy(&selected.stdout).contains("hello from the monorepo"));
+}
+
+#[test]
+fn explicit_project_directory_missing_entry_reports_run_jet() {
+    let root = isolated_cwd("missing_explicit_project_entry");
+    fs::remove_dir_all(&root).ok();
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("package.jet"),
+        "name: \"missing-entry\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let output = Command::new(jet())
+        .args(["run", "."])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2105") && stderr.contains("run.jet"), "{stderr}");
 }
 
 #[test]

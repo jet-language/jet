@@ -16,7 +16,8 @@ use crate::Syntax;
 use crate::Traits;
 use crate::AST::FfiLink;
 use crate::AST::{Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef, Type};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
 
@@ -33,6 +34,15 @@ pub(crate) fn canonical_prefix() -> String {
 
 /// Non-identifier marker used by the web source-map protocol.
 pub(crate) const SOURCE_MAP_MARKER: &str = concat!("//# __jet_", "source_map");
+
+// Native cache identity must digest the emitted stdlib closure, not the whole
+// compiler binary. Keep the fixed Prelude digest for the process and keep the
+// used-Core digests bounded: a long-lived compiler service can see many
+// programs, but the digest cache must not become another unbounded cache.
+const CORELIB_DIGEST_CACHE_LIMIT: usize = 32;
+static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
+static CORELIB_EMISSION_FINGERPRINTS: OnceLock<Mutex<BTreeMap<Vec<String>, String>>> =
+    OnceLock::new();
 
 #[macro_export]
 macro_rules! jet_generated_format {
@@ -450,11 +460,18 @@ fn is_in_cached_runtime(source: &str, position: usize) -> bool {
 }
 
 /// Exact fixed-runtime identity used by the final native-binary cache as well
-/// as the rlib cache. A Prelude edit must invalidate both layers.
+/// as the rlib cache. A Prelude edit must invalidate both layers. The value is
+/// memoized because it is the same relevant input for every native program;
+/// unrelated compiler edits must not make each key derivation rebuild and hash
+/// the fixed runtime block.
 pub fn cached_runtime_fingerprint() -> String {
-    let mut source = String::new();
-    push_cached_runtime(&mut source, None);
-    crate::SHA256::sha256_hex(source.as_bytes())
+    CACHED_RUNTIME_FINGERPRINT
+        .get_or_init(|| {
+            let mut source = String::new();
+            push_cached_runtime(&mut source, None);
+            crate::SHA256::sha256_hex(source.as_bytes())
+        })
+        .clone()
 }
 
 fn emit_command_metadata(
@@ -1094,15 +1111,33 @@ fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: boo
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
-/// compiler/runtime fragments a program will link.
+/// compiler/runtime fragments a program will link. The cache key is the sorted
+/// used-Core closure, so two programs with the same relevant closure reuse the
+/// digest while a changed closure gets a distinct identity. The bounded cache
+/// is process-local; the emitted source remains the source of truth.
 pub fn corelib_emission_fingerprint(
     used_core: &std::collections::HashSet<String>,
 ) -> String {
+    let mut cache_key = used_core.iter().cloned().collect::<Vec<_>>();
+    cache_key.sort_unstable();
+    let cache = CORELIB_EMISSION_FINGERPRINTS.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Some(fingerprint) = cache.lock().unwrap().get(&cache_key).cloned() {
+        return fingerprint;
+    }
+
     let mut body = String::new();
     if core_needs_embedded_runtime(used_core) {
         push_corelib_prelude_body(&mut body, used_core, false);
     }
-    corelib_emission_identity(&body, used_core)
+    let fingerprint = corelib_emission_identity(&body, used_core);
+    let mut entries = cache.lock().unwrap();
+    if entries.len() >= CORELIB_DIGEST_CACHE_LIMIT {
+        if let Some(oldest) = entries.keys().next().cloned() {
+            entries.remove(&oldest);
+        }
+    }
+    entries.insert(cache_key, fingerprint.clone());
+    fingerprint
 }
 
 fn push_corelib_prelude_body(
@@ -2996,6 +3031,30 @@ mod tests {
             "{emitted}fn main() {{ jet_gc::runtime_or_exit(jet_gc::initialize_trace()); }}\n"
         ));
         assert!(used.contains("mod jet_gc"));
+    }
+
+    #[test]
+    fn relevant_stdlib_digest_is_exact_and_core_closure_sensitive() {
+        let mut runtime_source = String::new();
+        push_cached_runtime(&mut runtime_source, None);
+        assert_eq!(
+            cached_runtime_fingerprint(),
+            crate::SHA256::sha256_hex(runtime_source.as_bytes()),
+            "native cache identity must hash the emitted fixed runtime"
+        );
+
+        let files = HashSet::from(["core.files::read".to_string()]);
+        let net = HashSet::from(["core.net::tcp_connect".to_string()]);
+        assert_ne!(
+            corelib_emission_fingerprint(&files),
+            corelib_emission_fingerprint(&net),
+            "native cache identity must include the relevant Core closure"
+        );
+        assert_eq!(
+            corelib_emission_fingerprint(&files),
+            corelib_emission_fingerprint(&files),
+            "the same relevant Core closure must reuse one stable digest"
+        );
     }
 
     #[test]

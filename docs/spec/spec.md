@@ -1266,11 +1266,15 @@ measurement.
 `jet-timing.json` (load/sema/ffi/codegen µs, plus `build_plan` µs when a build
 entry runs, and generated-Rust bytes), prints
 `jet-timing binary_bytes=…` after link, and the LSP appends per-request latency
-to `jet-lsp-timing.json`. All gated by the env var (zero cost otherwise; I6
-hand-rolled JSON, no external crate). **`tools/perf/dashboard.sh`** aggregates a
-table across representative programs; **`tools/perf/ci-perf-check.sh`** gates
-against the committed **`tools/perf/baseline.json`** (sema time + binary size,
-15% threshold); **`tools/perf/update-baseline.sh`** refreshes it.
+to `jet-lsp-timing.json`. Other values do not enable timing. All gated by the
+env var (zero cost otherwise; I6 hand-rolled JSON, no external crate).
+**`tools/perf/corpus.tsv`** pins representative source and golden-output
+digests. **`tools/perf/dashboard.sh`** builds that checked corpus through the
+optimized production AOT path with an isolated cold cache, checks output parity,
+and records phase totals, generated-Rust bytes, binary bytes, release stage, and
+machine identity. **`tools/perf/ci-perf-check.sh`** fails on changed or missing
+corpus/identity/timing evidence or a sema-time/binary-size regression over the
+15% threshold; **`tools/perf/update-baseline.sh`** refreshes the pinned baseline.
 
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
 and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then

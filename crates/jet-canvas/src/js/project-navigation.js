@@ -1378,7 +1378,8 @@
     window.__jetCanvasGraphTabCount = graphStrip.children.length;
   }
 
-  function graphActionItems() {
+  function graphActionItems(options = {}) {
+    const sourceTransactionOnly = options.sourceTransactionOnly === true;
     const graph = currentGraphOrNull();
     const actions = [
       { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
@@ -1401,20 +1402,23 @@
     ];
     actions.push(...variableActionsForGraph(graph));
     actions.push(...traitMethodActions(latestDoc));
-    actions.push(...eventDispatcherActions(latestDoc));
+    if (!sourceTransactionOnly) actions.push(...eventDispatcherActions(latestDoc));
     for (const item of palette.concat(actionEntries)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, stageable: item.stageable, stage_reason_code: item.stage_reason_code, stage_reason: item.stage_reason, receiver_type: item.receiver_type, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
+      const run = sourceTransactionOnly && item.kind === "canvas.core_catalog"
+        ? () => runLibraryAction(item)
+        : () => runPalette(item);
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, stageable: item.stageable, stage_reason_code: item.stage_reason_code, stage_reason: item.stage_reason, receiver_type: item.receiver_type, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run });
     }
     return actions;
   }
 
-  function openGraphActionPalette(x, y, query, graphPoint) {
+  function openGraphActionPalette(x, y, query, graphPoint, options = {}) {
     if (latestDoc && actionEntries.length && actionEntriesRevision === latestDoc.revision) {
-      openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
+      openActionPalette(x, y, "Canvas actions", graphActionItems(options), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
       return;
     }
     loadCanvasActions({ skipRedraw: true }).then(() => {
-      openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
+      openActionPalette(x, y, "Canvas actions", graphActionItems(options), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
     });
   }
 

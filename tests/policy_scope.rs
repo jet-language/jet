@@ -29,7 +29,7 @@ fn manifest_memory_denial_uses_the_effects_rights_tree() {
 #[test]
 fn package_gc_policy_applies_once_across_imported_modules() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/policy_gc_multimodule/main.jet");
+        .join("tests/fixtures/policy_gc_multimodule/run.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0355"));
@@ -55,7 +55,7 @@ fn hosted_gc_policy_matches_all_tiers() {
 
 #[test]
 fn unsafe_obligations_are_checked_before_codegen() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsafe_obligations/main.jet");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsafe_obligations/run.jet");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3107"));

@@ -313,9 +313,10 @@ pub(crate) fn run_compile_cmd(
     mode: OutputMode,
     record_name: Option<&str>,
 ) {
-    // D-BUILDPROFILE1: profile selection. Precedence: --freestanding > --small >
-    // --release/--profile=<name> > default. Named profiles are resolved against
-    // package.jet's `build {}` block; unknown names emit E1219 and exit.
+    // D-BUILD-DEFAULT1/D-BUILDPROFILE1: profile selection. Precedence:
+    // --freestanding > --small > --release/--profile=<name> > command default.
+    // `run` uses Fast; `build` keeps Default (optimized). Named profiles are
+    // resolved against package.jet's `build {}` block; unknown names emit E1219.
     let profile = if freestanding {
         BuildProfile::Freestanding
     } else if small {
@@ -323,7 +324,7 @@ pub(crate) fn run_compile_cmd(
     } else if let Some(name) = resolve_profile_name(named_profile) {
         resolve_named_profile(&name, file, mode)
     } else {
-        BuildProfile::Default
+        BuildProfile::default_for_command(cmd)
     };
     let release_profile = matches!(&profile, BuildProfile::Release);
 
@@ -499,7 +500,7 @@ pub(crate) fn run_compile_cmd(
     // profiles and artifact-oriented flags keep the AOT escape hatch, and a
     // selected `fn build` is one of them: this lens cannot stage a build entry.
     if cmd == "run"
-        && matches!(profile, BuildProfile::Default)
+        && matches!(profile, BuildProfile::Fast)
         && cross_target.is_none()
         && output_name.is_none()
         && !emit_rust
@@ -1163,6 +1164,7 @@ fn cli_requests_interpreter() -> bool {
 /// that behavior (I3: codegen/the driver stay dumb about what `dev()` does).
 pub(crate) fn run_dev_entry(
     file: &str,
+    profile: BuildProfile,
     mode: OutputMode,
     setting_overrides: &BTreeMap<String, String>,
     record_name: Option<&str>,
@@ -1198,7 +1200,7 @@ pub(crate) fn run_dev_entry(
         file,
         &out.rust,
         bin.clone(),
-        BuildProfile::Default,
+        profile,
         out.ffi.as_ref(),
         &clinks,
         false,
@@ -3609,7 +3611,7 @@ fn native_cache_salt(
     jet::SHA256::sha256_hex(&bytes)
 }
 
-const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v4";
+const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v5";
 
 fn command_identity(program: &str, args: &[&str]) -> String {
     match Command::new(program).args(args).output() {
@@ -3667,16 +3669,23 @@ fn rustc_identity() -> (String, String) {
 static NATIVE_TOOLCHAIN_IDENTITY: LazyLock<String> = LazyLock::new(|| {
     let compiler_build = env!("JET_COMPILER_BUILD_ID");
     let (rustc, backend) = rustc_identity();
-    let linker_name = Command::new("rustc").args(["--print", "linker"])
-        .output().ok().filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "cc".into());
-    let linker = command_identity(&linker_name, &["--version"]);
+    let linker_selection = crate::NativeLinker::for_target(None);
+    let (linker_driver, linker_backend_name, linker_backend_program) = linker_selection.identity();
+    let linker_name = linker_driver.unwrap_or("system");
+    let linker = linker_driver
+        .map(|name| command_identity(name, &["--version"]))
+        .unwrap_or_else(|| "system".into());
+    let linker_backend_name = linker_backend_name.unwrap_or("system");
+    let linker_backend_program_name = linker_backend_program.unwrap_or("system");
+    let linker_backend = linker_backend_program
+        .map(|name| command_identity(name, &["--version"]))
+        .unwrap_or_else(|| "system".into());
     format!(
-        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-name={linker_name}\u{1}linker={linker}",
+        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-selection={}\u{1}linker-name={linker_name}\u{1}linker={linker}\u{1}linker-backend={}\u{1}linker-backend-name={linker_backend_program_name}\u{1}linker-backend-identity={linker_backend}",
         jet::Manifest::COMPILER_VERSION,
         jet_semindex::SCHEMA_VERSION,
+        linker_selection.label(),
+        linker_backend_name,
     )
 });
 
@@ -4486,8 +4495,15 @@ fn library_rustc(
         command.arg("--cfg").arg("jet_release");
     }
     command.args(config.rustc_args(false));
+    let linker = crate::NativeLinker::for_target(None);
+    command.args(linker.rustc_args());
     if verbose {
-        eprintln!("[build] rustc {} -> {}", source.display(), output.display());
+        eprintln!(
+            "[build] rustc {} -> {} (linker {})",
+            source.display(),
+            output.display(),
+            linker.label()
+        );
     }
     let result = command.output().unwrap_or_else(|error| {
         crate::cli_error!(
@@ -4812,6 +4828,11 @@ pub(crate) fn build(
         rustc_flags.push("jet_release".to_string());
     }
     rustc_flags.extend(config.rustc_args(ffi_present));
+    let linker = crate::NativeLinker::for_target(cross_target);
+    rustc_flags.extend(linker.rustc_args());
+    if verbose {
+        step(format!("linker     -> {}", linker.label()));
+    }
     let cache_flags = rustc_flags.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
     let cache_env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
     // Rust FFI glue can implement runtime traits for foreign types. Keep that
@@ -5104,6 +5125,73 @@ fn missing_linker(stderr: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::BuildProfile;
+
+    #[test]
+    fn command_defaults_route_dev_commands_to_fast_profile() {
+        assert!(matches!(
+            BuildProfile::default_for_command("run"),
+            BuildProfile::Fast
+        ));
+        assert!(matches!(
+            BuildProfile::default_for_command("dev"),
+            BuildProfile::Fast
+        ));
+        assert!(matches!(
+            BuildProfile::default_for_command("build"),
+            BuildProfile::Default
+        ));
+    }
+
+    #[test]
+    fn fast_profile_is_unoptimized_parallel_and_without_lto() {
+        let args = BuildProfile::Fast.config().rustc_args(false);
+        assert_eq!(
+            args,
+            vec![
+                "-C",
+                "codegen-units=256",
+                "-C",
+                "opt-level=0",
+                "-C",
+                "lto=off",
+            ]
+        );
+    }
+
+    #[test]
+    fn optimized_default_and_debug_profiles_keep_distinct_flags() {
+        let optimized = BuildProfile::Default.config().rustc_args(false);
+        assert!(optimized.contains(&"opt-level=2".to_string()));
+        assert!(!optimized.contains(&"-O".to_string()));
+        assert!(optimized.contains(&"lto=thin".to_string()));
+        assert!(optimized.contains(&"strip=symbols".to_string()));
+        assert!(!optimized.iter().any(|arg| arg.starts_with("codegen-units=")));
+
+        let debug = BuildProfile::Debug.config().rustc_args(false);
+        assert!(debug.contains(&"codegen-units=256".to_string()));
+        assert!(debug.contains(&"debuginfo=2".to_string()));
+        assert!(!debug.contains(&"-O".to_string()));
+        assert!(!debug.contains(&"lto=thin".to_string()));
+    }
+
+    #[test]
+    fn fast_and_optimized_defaults_have_distinct_cache_identity() {
+        assert_ne!(
+            BuildProfile::Fast.cache_tag(),
+            BuildProfile::Default.cache_tag()
+        );
+        assert!(
+            BuildProfile::Fast
+                .config()
+                .settings_tag()
+                .contains("codegen-units=256")
+        );
+    }
 }
 
 #[cfg(test)]

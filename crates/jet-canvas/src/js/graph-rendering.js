@@ -865,7 +865,12 @@
         diagnosticsByNode: [],
         nodeCount: 0,
         hoveredNodeTitle: "",
-        hoveredNodeDescription: ""
+        hoveredNodeDescription: "",
+        setSourceEditor: (text) => {
+          setSourceEditMode(true);
+          if (sourceEditor) sourceEditor.value = String(text || "");
+          return true;
+        }
       });
       return;
     }

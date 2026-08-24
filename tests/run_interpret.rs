@@ -109,7 +109,7 @@ fn c_extern_calls_match_aot_and_interpreter() {
             _ => {}
         }
         command
-            .arg("examples/features/lowlevel/cbind/main.jet")
+            .arg("examples/features/lowlevel/cbind/run.jet")
             .current_dir(&root)
             .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
             .env("JET_CACHE_DIR", cache.join(mode).join("build"))

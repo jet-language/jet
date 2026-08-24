@@ -106,6 +106,9 @@
     const methodName = String(baseCallee).split(".").pop();
     const callee = receiverExpr ? receiverExpr + "." + methodName : baseCallee;
     const body = { schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: receiverExpr ? args.slice(1) : args };
+    if (item.kind === "canvas.core_catalog" && typeof item.module_path === "string" && item.module_path.trim()) {
+      body.module_path = item.module_path;
+    }
     const ret = actionReturnType(item) || item.ret || "Void";
     if ((!pin || isExecPin(pin)) && ret && ret !== "Void") body.bind = "canvas_value";
     if (pin && target) {
@@ -447,6 +450,22 @@
       .catch(() => null);
   }
 
+  function setTeachingEmptyCanvasState() {
+    setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
+      { label: "Open source", run: openSourceRecovery },
+      { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
+    ]);
+  }
+
+  function preserveTeachingEmptyStateAfterSourceControl(sourceId, revision) {
+    Promise.resolve(loadSourceControl()).then(() => {
+      const doc = latestDoc;
+      if (!doc || doc.source_id !== sourceId || doc.revision !== revision
+        || (doc.graphs && doc.graphs.length) || !sourceIsTeachingEmpty(doc.source_text)) return;
+      setTeachingEmptyCanvasState();
+    });
+  }
+
   function showEmptyCanvasGraph(payload, sourceId, sourceText) {
     const base = latestDoc || {
       protocol: "jet.canvas.graph",
@@ -455,18 +474,17 @@
       revision: payload && payload.revision || "",
       node_descriptors: []
     };
+    const emptySourceId = sourceId || base.source_id || "";
     drawGraph(Object.assign({}, base, {
-      source_id: base.source_id || sourceId || "",
+      source_id: emptySourceId,
       revision: payload && payload.revision || base.revision || "",
       source_text: sourceText,
       graphs: []
     }));
-    setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
-      { label: "Open source", run: openSourceRecovery },
-      { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
-    ]);
+    setTeachingEmptyCanvasState();
     setSaveState("source saved");
     setViewMode(viewMode);
+    preserveTeachingEmptyStateAfterSourceControl(emptySourceId, payload && payload.revision || base.revision || "");
     return true;
   }
 
@@ -560,16 +578,21 @@
         if (doc.graphs && doc.graphs.length) {
           clearCanvasState();
         } else {
-          setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
-            { label: "Open source", run: openSourceRecovery },
-          { label: "Reload", primary: true, run: () => loadGraph(requestedSourceId) }
-          ]);
+          setTeachingEmptyCanvasState();
         }
         const draft = readSourceDraft(doc);
         setSaveState(draft !== null && draft !== doc.source_text ? "local draft" : "source saved", draft !== null && draft !== doc.source_text ? "draft" : "saved");
         setViewMode(viewMode);
         loadProject();
-        loadSourceControl();
+        const sourceControlPromise = loadSourceControl();
+        if (!(doc.graphs && doc.graphs.length) && sourceIsTeachingEmpty(doc.source_text)) {
+          Promise.resolve(sourceControlPromise).then(() => {
+            if (latestDoc && latestDoc.source_id === doc.source_id && latestDoc.revision === doc.revision
+              && !(latestDoc.graphs && latestDoc.graphs.length) && sourceIsTeachingEmpty(latestDoc.source_text)) {
+              setTeachingEmptyCanvasState();
+            }
+          });
+        }
         loadProofRail();
         loadCanvasActions({ skipRedraw: firstLoad });
         applySourceHash();
@@ -662,6 +685,9 @@
       })
       .catch((error) => {
         if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
+        if (!actionEntries.length && typeof loadCoreCatalogActions === "function") {
+          return loadCoreCatalogActions().then(() => actionEntries);
+        }
         const offline = navigator.onLine === false;
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Checked actions unavailable", offline
           ? "Jet source and the current graph stay visible. Reconnect, then retry the checked action query."

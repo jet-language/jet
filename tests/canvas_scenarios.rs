@@ -495,6 +495,10 @@ fn node_drag_persists_without_source_change() {
 
 #[test]
 fn selection_marquee_modifiers_local_move() {
+    assert!(
+        canvas_tools().is_some(),
+        "selection/marquee/local-move proof requires Chromium and Node; run scripts/agent/jet-env full"
+    );
     run_canvas_scenario("selection-marquee-modifiers-local-move");
 }
 

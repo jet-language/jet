@@ -674,6 +674,8 @@ fn validate_declared_effects(
 #[derive(Default)]
 pub struct IncrementalSemaCache {
     environment: Vec<u8>,
+    module_interfaces: HashMap<String, Vec<u8>>,
+    module_dependencies: HashMap<String, Vec<String>>,
     functions: HashMap<String, CachedFunctionBody>,
     hits: u64,
     recomputes: u64,
@@ -690,6 +692,19 @@ impl IncrementalSemaCache {
             recomputes: self.recomputes,
             live_items: self.functions.len(),
             live_item_bytes: self.environment.len()
+                + self
+                    .module_interfaces
+                    .iter()
+                    .map(|(module, fingerprint)| module.len() + fingerprint.len())
+                    .sum::<usize>()
+                + self
+                    .module_dependencies
+                    .iter()
+                    .map(|(module, dependencies)| {
+                        module.len()
+                            + dependencies.iter().map(String::len).sum::<usize>()
+                    })
+                    .sum::<usize>()
                 + self
                     .functions
                     .iter()
@@ -710,15 +725,66 @@ impl IncrementalSemaCache {
 
     pub fn clear(&mut self) {
         self.environment.clear();
+        self.module_interfaces.clear();
+        self.module_dependencies.clear();
         self.functions.clear();
     }
 
     fn begin_bundle(&mut self, bundle: &ProgramBundle) {
-        let environment = incremental_environment(bundle);
-        if self.environment != environment {
+        // D-INCR-UNIT1=A: dirty the module interface and its reverse import
+        // closure only. Private body edits are handled by the per-function
+        // input below and do not fan out to unrelated modules.
+        let environment = incremental_global_environment(bundle);
+        let environment_changed = self.environment != environment;
+        if environment_changed {
             self.environment = environment;
-            self.functions.clear();
         }
+
+        let interfaces = bundle
+            .modules
+            .iter()
+            .map(|module| (module.display.clone(), incremental_module_interface(module)))
+            .collect::<HashMap<_, _>>();
+        let dependencies = incremental_module_dependencies(bundle);
+        let mut dirty = self
+            .module_interfaces
+            .iter()
+            .filter_map(|(module, _)| (!interfaces.contains_key(module)).then_some(module.clone()))
+            .collect::<HashSet<_>>();
+        dirty.extend(interfaces.iter().filter_map(|(module, fingerprint)| {
+            (self.module_interfaces.get(module) != Some(fingerprint)).then_some(module.clone())
+        }));
+        if environment_changed {
+            dirty.extend(interfaces.keys().cloned());
+        }
+
+        // An interface change invalidates the changed module and every module
+        // that imports it. Body-only edits keep dependents warm: their effect
+        // summaries are solved again below from the changed callee summary.
+        loop {
+            let newly_dirty = dependencies
+                .iter()
+                .filter_map(|(module, imported)| {
+                    (!dirty.contains(module)
+                        && imported.iter().any(|dependency| dirty.contains(dependency)))
+                    .then_some(module.clone())
+                })
+                .collect::<Vec<_>>();
+            if newly_dirty.is_empty() {
+                break;
+            }
+            dirty.extend(newly_dirty);
+        }
+
+        if !dirty.is_empty() {
+            self.functions.retain(|key, _| {
+                !dirty.iter().any(|module| {
+                    key == module || key.starts_with(&format!("{module}::"))
+                })
+            });
+        }
+        self.module_interfaces = interfaces;
+        self.module_dependencies = dependencies;
     }
 
     pub(super) fn get(&mut self, key: &str, input: &[u8]) -> Option<CachedFunctionBody> {
@@ -739,7 +805,7 @@ impl IncrementalSemaCache {
     }
 }
 
-fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
+fn incremental_global_environment(bundle: &ProgramBundle) -> Vec<u8> {
     let mut out = crate::CanonicalAST::canonical_fragment(&(
         bundle.entry,
         &bundle.project_root,
@@ -749,32 +815,117 @@ fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
         bundle.layer_ceiling,
     ));
     out.extend(format!("{:?}", bundle.project_root).into_bytes());
-    for module in &bundle.modules {
-        let metadata = (
-            &module.path,
-            &module.display,
-            &module.alias,
-            &module.imports,
-            module.web_target_ceiling,
-            module.pub_file,
-            module.no_prelude,
-            &module.default_target,
-            &module.html_path,
-            &module.policy_declarations,
-        );
-        out.extend(crate::CanonicalAST::canonical_fragment(&metadata));
-        out.extend(format!("{metadata:?}").into_bytes());
-        for item in &module.items {
-            let mut item = item.clone();
-            clear_callable_bodies(&mut item);
-            out.extend(crate::CanonicalAST::canonical_fragment(&item));
-            // Canonical AST deliberately omits locations. The exact signature
-            // locations are part of IDE facts, so include the body-free Debug
-            // form as a conservative span fingerprint.
-            out.extend(format!("{item:?}").into_bytes());
-        }
+    out
+}
+
+fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
+    let mut out = Vec::new();
+    let metadata = (
+        &module.path,
+        &module.display,
+        &module.alias,
+        &module.imports,
+        module.web_target_ceiling,
+        module.pub_file,
+        module.no_prelude,
+        &module.default_target,
+        &module.html_path,
+        &module.policy_declarations,
+    );
+    out.extend(crate::CanonicalAST::canonical_fragment(&metadata));
+    out.extend(format!("{metadata:?}").into_bytes());
+    let additional_metadata = (
+        &module.user_policy_declarations,
+        &module.rule_facts,
+        &module.script_body,
+    );
+    out.extend(crate::CanonicalAST::canonical_fragment(&additional_metadata));
+    out.extend(format!("{additional_metadata:?}").into_bytes());
+    for item in &module.items {
+        let mut item = item.clone();
+        clear_callable_bodies(&mut item);
+        out.extend(crate::CanonicalAST::canonical_fragment(&item));
+        // Canonical AST deliberately omits locations. The exact signature
+        // locations are part of IDE facts, so include the body-free Debug
+        // form as a conservative span fingerprint.
+        out.extend(format!("{item:?}").into_bytes());
     }
     out
+}
+
+fn incremental_module_dependencies(
+    bundle: &ProgramBundle,
+) -> HashMap<String, Vec<String>> {
+    bundle
+        .modules
+        .iter()
+        .map(|module| {
+            let mut dependencies = module
+                .imports
+                .iter()
+                .filter_map(|import| incremental_import_target(bundle, module, import))
+                .collect::<Vec<_>>();
+            dependencies.sort();
+            dependencies.dedup();
+            (module.display.clone(), dependencies)
+        })
+        .collect()
+}
+
+fn incremental_import_target(
+    bundle: &ProgramBundle,
+    source: &crate::AST::LoadedModule,
+    import: &crate::AST::ImportDecl,
+) -> Option<String> {
+    let requested = match &import.kind {
+        ImportKind::File(path, _) | ImportKind::Module(path, _) => path.as_str(),
+        ImportKind::Unqualified { module_alias, .. } => module_alias.as_str(),
+    };
+    let requested_stem = Path::new(requested)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(requested);
+    let requested_path = if matches!(&import.kind, ImportKind::File(_, _)) {
+        let mut path = source
+            .path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(requested);
+        if path.extension().is_none() {
+            path.set_extension(Syntax::FILE_EXT.trim_start_matches('.'));
+        }
+        Some(normalize_incremental_path(&path))
+    } else {
+        None
+    };
+    bundle
+        .modules
+        .iter()
+        .filter(|candidate| candidate.display != source.display)
+        .find(|candidate| {
+            requested_path.as_ref().is_some_and(|path| {
+                normalize_incremental_path(&candidate.path) == *path
+            }) || candidate.alias == requested
+                || candidate.alias == requested_stem
+                || candidate.display == requested
+                || candidate.display.ends_with(&format!("/{requested}"))
+                || candidate.display.ends_with(&format!("/{requested_stem}.jet"))
+        })
+        .map(|candidate| candidate.display.clone())
+}
+
+fn normalize_incremental_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn clear_callable_bodies(item: &mut Item) {

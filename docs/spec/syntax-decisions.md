@@ -4469,8 +4469,13 @@ local path. Core vs nix is inferred by probing the target for `package.jet`
 **D-TGT1–4 — Targets**: packages declare `targets:` (no `kind:`); shipped:
 `library`, `executable`, `test`, `example`, `benchmark`; `plugin` reserved.
 Bare keyword or block (`executable { entry: "src/cli.jet" }`); bare
-`executable` searches `run.jet`, `src/run.jet`, then `<package>.jet`; legacy
-`main.jet` locations remain compatibility fallbacks. **D-ILE1**:
+`executable` searches `run.jet`, `src/run.jet`, then `<package>.jet`.
+The retired `main.jet` entry locations are pure renames: a bare project
+resolution auto-renames root `main.jet` to `run.jet`, `src/main.jet` to
+`src/run.jet`, and the old `.jet/main.jet` layout to root `run.jet`, with a
+notice. A canonical entry beside a retired entry, or multiple retired entries,
+is an ambiguity error; an explicitly named source remains explicit.
+**D-ILE1**:
 omitted targets infer from `fn run()` (executable else library; two entries
 E_DUPMAIN).
 
@@ -5908,7 +5913,8 @@ one shared entry-resolution rule makes `run`, `dev`, and `debug`,
 `check`, and `build` bare-capable inside a package: the entry resolves via
 `targets:`/D-ILE1; ambiguity is an error listing the targets (pick with
 `-p <member>` or an explicit file); outside a package the bare form stays
-the current usage error. An explicit file argument always wins.
+the current usage error. An explicit directory target uses this same resolver;
+an explicit file argument always wins.
 
 **D-CLI-SURFACE2=A**: `jet fuzz` remains flat beside testing. The language
 server is canonically `jet self lsp`; first-party editors launch that argv.

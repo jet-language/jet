@@ -51,7 +51,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("effect-flat-ffi-cpp", 0),
     ("effect-flat-ffi-py", 0),
     ("effect-flat-ffi-octave", 0),
-    ("entry-file", 94),
+    ("entry-file", 0),
     // The two corelib archives and the seven out-of-scope engine fixtures
     // remain until their owning migration slices land.
     ("manifest-file", 2),

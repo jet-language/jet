@@ -367,6 +367,55 @@ fn compiler_self_speed_reports_clean_and_incremental_medians() {
     );
     assert!(clean_median > 0);
     assert!(incremental_median > 0);
+    assert!(
+        incremental_median <= clean_median,
+        "incremental median exceeded clean median: clean={clean_median}us incremental={incremental_median}us"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn compiler_speed_phase_timing_reports_real_release_build() {
+    let root = project("compiler-speed-phase-timing");
+    let entry = root.join("main.jet");
+    let timing = root.join("timing");
+    fs::create_dir_all(&timing).unwrap();
+    write(&entry, "fn run() { print(\"timing\") }\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", "--release", "main.jet"])
+        .current_dir(&root)
+        .env("JET_TIMING", "1")
+        .env("JET_TIMING_DIR", &timing)
+        .env("JET_CACHE_DIR", root.join("cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run optimized compiler-speed build");
+    assert!(
+        output.status.success(),
+        "release build failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let frontend = fs::read_to_string(timing.join("jet-timing.json")).unwrap();
+    for phase in ["load", "sema", "ffi", "codegen", "rust_bytes"] {
+        assert!(
+            frontend.contains(&format!("\"name\":\"{phase}\"")),
+            "frontend timing report is missing {phase}: {frontend}"
+        );
+    }
+    let backend = fs::read_to_string(timing.join("build/jet-timing-backend.json")).unwrap();
+    assert!(
+        backend.contains("\"name\":\"backend_link\""),
+        "backend timing report is missing backend_link: {backend}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("jet-timing binary_bytes="),
+        "optimized production build did not report binary size: {stderr}"
+    );
+    assert!(root.join("build/main").is_file());
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -231,18 +231,18 @@ one owner. Fifteen are closed.
 
 | File | Owner | State |
 | --- | --- | --- |
-| `examples/interop/cobol/main.jet` | project step | closed |
-| `examples/interop/lua/main.jet` | generator + project step | closed |
-| `examples/interop/perl/main.jet` | project step | closed |
-| `examples/interop/php/main.jet` | project step | closed |
-| `examples/interop/r/main.jet` | project step | closed |
-| `examples/interop/ruby/main.jet` | project step | closed |
-| `examples/features/lowlevel/polyglot_go/main.jet` | generator + project step | closed |
-| `examples/features/lowlevel/polyglot_java/main.jet` | project step | closed |
-| `examples/features/lowlevel/polyglot_dotnet/main.jet` | project step | closed |
-| `examples/features/lowlevel/polyglot_pascal/main.jet` | generator + project step | closed |
-| `examples/features/lowlevel/polyglot_fortran/main.jet` | generator + project step | closed |
-| `examples/features/tooling/programmable_build/main.jet` | compiler | open |
+| `examples/interop/cobol/run.jet` | project step | closed |
+| `examples/interop/lua/run.jet` | generator + project step | closed |
+| `examples/interop/perl/run.jet` | project step | closed |
+| `examples/interop/php/run.jet` | project step | closed |
+| `examples/interop/r/run.jet` | project step | closed |
+| `examples/interop/ruby/run.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_go/run.jet` | generator + project step | closed |
+| `examples/features/lowlevel/polyglot_java/run.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_dotnet/run.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_pascal/run.jet` | generator + project step | closed |
+| `examples/features/lowlevel/polyglot_fortran/run.jet` | generator + project step | closed |
+| `examples/features/tooling/programmable_build/run.jet` | compiler | open |
 | `examples/features/comptime/comptime_block.jet` | compiler | closed |
 | `examples/features/comptime/embed.jet` | compiler | open |
 | `examples/features/comptime/embed_bytes.jet` | compiler | open |

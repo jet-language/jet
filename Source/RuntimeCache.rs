@@ -1435,9 +1435,21 @@ use std::fmt::Debug;
         let second = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(second.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"x");
-
         let runtime_rlib = second.runtime_rlib.as_ref().unwrap().clone();
         drop(second);
+
+        // The user program is not part of the reusable stdlib object. A
+        // program edit with the same runtime must stay on the warm rlib.
+        let program_changed = format!(
+            "{BEGIN}fn runtime() {{}}\n{END}fn main() {{ println!(\"changed\"); }}\n"
+        );
+        let program_hit =
+            prepare_at(&root.join("cache"), rustc.as_os_str(), &program_changed, &[], &[])
+                .unwrap();
+        assert!(program_hit.cache_hit());
+        assert_eq!(fs::read(&count).unwrap(), b"x");
+        drop(program_hit);
+
         fs::write(runtime_rlib, b"corrupt!").unwrap();
         let repaired = prepare_at(&root.join("cache"), rustc.as_os_str(), &one, &[], &[]).unwrap();
         assert!(!repaired.cache_hit());

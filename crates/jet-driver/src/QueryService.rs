@@ -42,6 +42,9 @@ impl CompilerQueries {
         Self::default()
     }
 
+    /// Check one root through the shared query path. `is_lsp = false` is the
+    /// batch frontend mode; both modes retain the same sema cache and module
+    /// interface invalidation rules.
     pub fn check_text(&mut self, path: &str, text: &str, is_lsp: bool) -> CheckedQuery {
         let root = canonical_path(Path::new(path));
         self.set_document_path(root.clone(), text);
@@ -380,6 +383,61 @@ mod tests {
         assert_eq!(
             service.recompute_count(&checked_key(&main)),
             2
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn batch_interface_change_keeps_unrelated_module_warm() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-query-batch-interface-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let dependency = root.join("b.jet");
+        let unrelated = root.join("c.jet");
+        let main_source =
+            "module b;\nmodule c;\nfn run() Int -> { return b.value() }\n";
+        let dependency_source = "pub fn value() Int -> { return 1 }\n";
+        let changed_dependency = "pub fn value() String -> { return \"changed\" }\n";
+        let unrelated_source = "pub fn other() Int -> { return 2 }\n";
+        std::fs::write(&main, main_source).unwrap();
+        std::fs::write(&dependency, dependency_source).unwrap();
+        std::fs::write(&unrelated, unrelated_source).unwrap();
+
+        let mut service = CompilerQueries::new();
+        service.set_document(&dependency.to_string_lossy(), dependency_source);
+        service.set_document(&unrelated.to_string_lossy(), unrelated_source);
+        assert!(service
+            .check_text(&main.to_string_lossy(), main_source, false)
+            .diagnostics
+            .is_empty());
+        let cold = service.stats();
+
+        service.set_document(&dependency.to_string_lossy(), changed_dependency);
+        let changed = service.check_text(&main.to_string_lossy(), main_source, false);
+        assert!(
+            !changed.diagnostics.is_empty(),
+            "a changed imported interface must recheck the real batch path"
+        );
+        let warm = service.stats();
+        assert!(
+            warm.item_hits > cold.item_hits,
+            "an unrelated module must remain reusable after dependency invalidation"
+        );
+
+        let fresh = {
+            let mut fresh = CompilerQueries::new();
+            fresh.set_document(&dependency.to_string_lossy(), changed_dependency);
+            fresh.set_document(&unrelated.to_string_lossy(), unrelated_source);
+            fresh.check_text(&main.to_string_lossy(), main_source, false)
+        };
+        assert_eq!(
+            diagnostic_summary(&changed.diagnostics),
+            diagnostic_summary(&fresh.diagnostics),
+            "batch invalidation must preserve fresh-check diagnostics"
         );
         let _ = std::fs::remove_dir_all(root);
     }

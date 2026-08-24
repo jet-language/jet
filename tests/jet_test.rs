@@ -1027,7 +1027,7 @@ fn test_target_does_not_reintroduce_retired_command() {
     // D-CLAIM-BENCH1=A: the ordinary test target cannot revive the retired command.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let example = root.join("examples/features/tooling/test_target/main.jet");
+    let example = root.join("examples/features/tooling/test_target/run.jet");
     let out = Command::new(&jet)
         .args(["bench", example.to_str().unwrap()])
         .output()
@@ -1049,7 +1049,54 @@ fn jet_new_creates_project() {
         .output()
         .unwrap();
     assert!(out.status.success(), "jet new failed");
-    assert!(dir.join("run.jet").exists(), "run.jet must be created by jet new");
+    assert!(
+        dir.join("package.jet").exists(),
+        "package.jet must be created by jet new"
+    );
+    let run = dir.join("run.jet");
+    assert!(run.exists(), "run.jet must be created by jet new");
+    assert!(
+        !dir.join("main.jet").exists(),
+        "jet new must not create main.jet"
+    );
+    assert_eq!(
+        fs::read_to_string(&run).unwrap(),
+        "fn run() {\n    print(\"hello, world\");\n}\n",
+        "jet new must emit the canonical fn run template"
+    );
+    let explicit = Command::new(&jet)
+        .args(["run", "run.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        explicit.status.success(),
+        "explicit run.jet target failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&explicit.stdout),
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&explicit.stdout), "hello, world\n");
+    let bare = Command::new(&jet)
+        .arg("run")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        bare.status.success(),
+        "bare run target failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&bare.stdout),
+        String::from_utf8_lossy(&bare.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&bare.stdout), "hello, world\n");
+    let duplicate = Command::new(&jet)
+        .args(["new", &*name])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .unwrap();
+    assert!(
+        !duplicate.status.success(),
+        "jet new must reject an existing project"
+    );
     assert!(dir.join(".gitignore").exists());
     let _ = fs::remove_dir_all(&dir);
 }

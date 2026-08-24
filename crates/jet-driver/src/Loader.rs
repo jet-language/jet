@@ -15,6 +15,83 @@ use crate::AST::{ImportDecl, ImportKind, Item, LoadedModule, PackageGuarantees, 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
+
+const MAX_FRONTEND_WORKERS: usize = 8;
+
+enum PreparedFrontendModule {
+    Parsed(crate::AST::Program, Vec<Diagnostic>),
+    LexFailed(Vec<Diagnostic>),
+    ParseFailed(Vec<Diagnostic>),
+}
+
+type PreparedFrontend = HashMap<PathBuf, PreparedFrontendModule>;
+
+fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
+    let (tokens, lex_diags) = Lexer::lex(source);
+    if !lex_diags.is_empty() {
+        return PreparedFrontendModule::LexFailed(lex_diags);
+    }
+    match Parser::parse_for_check_with_source(&tokens, source) {
+        Ok((program, teaching)) => PreparedFrontendModule::Parsed(program, teaching),
+        Err(diagnostics) => PreparedFrontendModule::ParseFailed(diagnostics),
+    }
+}
+
+fn frontend_worker_count(job_count: usize) -> usize {
+    let available = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1);
+    job_count.min(available).min(MAX_FRONTEND_WORKERS).max(1)
+}
+
+/// Prepare staged source files concurrently, but cap the fan-out and publish
+/// results by source order. The loader still consumes the results serially so
+/// module discovery, diagnostics, and sema keep their canonical order.
+fn prepare_overlay_frontend(overlays: &[(&Path, &str)]) -> PreparedFrontend {
+    let mut sources = overlays
+        .iter()
+        .map(|(path, source)| (normalize_path(path), (*source).to_string()))
+        .collect::<HashMap<_, _>>();
+    let mut jobs = sources.drain().collect::<Vec<_>>();
+    jobs.sort_by(|left, right| left.0.cmp(&right.0));
+    if jobs.is_empty() {
+        return HashMap::new();
+    }
+
+    let workers = frontend_worker_count(jobs.len());
+    let next = AtomicUsize::new(0);
+    let (sender, receiver) = mpsc::channel();
+    let results = std::thread::scope(|scope| {
+        let jobs_ref = &jobs;
+        let next_ref = &next;
+        for _ in 0..workers {
+            let sender = sender.clone();
+            scope.spawn(move || loop {
+                let index = next_ref.fetch_add(1, Ordering::Relaxed);
+                let Some((_, source)) = jobs_ref.get(index) else {
+                    break;
+                };
+                let prepared = prepare_frontend_module(source);
+                sender
+                    .send((index, prepared))
+                    .expect("frontend result receiver remains in scope");
+            });
+        }
+        drop(sender);
+
+        let mut results = (0..jobs.len()).map(|_| None).collect::<Vec<_>>();
+        for (index, prepared) in receiver {
+            results[index] = Some(prepared);
+        }
+        results
+    });
+    jobs.into_iter()
+        .zip(results)
+        .filter_map(|((path, _), prepared)| prepared.map(|prepared| (path, prepared)))
+        .collect()
+}
 
 /// A loader diagnostic with the source file and source text that produced it.
 /// The ordinary loader API still returns bare diagnostics for existing callers;
@@ -505,12 +582,14 @@ pub(crate) fn load_entry_with_overlays_and_dependencies_with_diagnostics(
 ) {
     let mut dependencies = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut prepared_frontend = prepare_overlay_frontend(overlays);
     let result = load_entry_with_overlays_mode_with_sink(
         entry_path,
         overlays,
         for_check,
         false,
         &mut dependencies,
+        Some(&mut prepared_frontend),
         Some(&mut diagnostics),
     );
     (result, dependencies, diagnostics)
@@ -549,6 +628,7 @@ fn load_entry_with_overlays_mode(
         load_adjacent_unqualified,
         dependencies,
         None,
+        None,
     )
 }
 
@@ -574,6 +654,7 @@ fn load_entry_with_overlays_mode_with_sink(
     for_check: bool,
     load_adjacent_unqualified: bool,
     dependencies: &mut Vec<PathBuf>,
+    prepared_frontend: Option<&mut PreparedFrontend>,
     sink: Option<&mut Vec<LoaderDiagnostic>>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     crate::run_compiler_work(move || {
@@ -583,6 +664,7 @@ fn load_entry_with_overlays_mode_with_sink(
             for_check,
             load_adjacent_unqualified,
             dependencies,
+            prepared_frontend,
             sink,
         )
     })
@@ -594,6 +676,7 @@ fn load_entry_with_overlays_mode_on_stack(
     for_check: bool,
     load_adjacent_unqualified: bool,
     dependencies: &mut Vec<PathBuf>,
+    mut prepared_frontend: Option<&mut PreparedFrontend>,
     mut sink: Option<&mut Vec<LoaderDiagnostic>>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     // Check/LSP overlays skip `load_entry`; still need TirBridge before derive/comptime.
@@ -1158,6 +1241,7 @@ fn load_entry_with_overlays_mode_on_stack(
         &project_parts,
         &project_part_failures,
         dependencies,
+        prepared_frontend.as_deref_mut(),
     ) {
         return Err(record_loader_error(&mut sink, error));
     }
@@ -1250,6 +1334,7 @@ fn load_entry_with_overlays_mode_on_stack(
                     &project_parts,
                     &project_part_failures,
                     dependencies,
+                    prepared_frontend.as_deref_mut(),
                 ) {
                     return Err(record_loader_error(&mut sink, error));
                 }
@@ -2032,6 +2117,7 @@ fn load_file(
     project_parts: &crate::ProjectParts::ProjectPartsReport,
     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
     dependencies: &mut Vec<PathBuf>,
+    mut prepared_frontend: Option<&mut PreparedFrontend>,
 ) -> Result<(), LoaderError> {
     let norm = normalize_path(path);
     if !dependencies.contains(&norm) {
@@ -2069,16 +2155,33 @@ fn load_file(
         .or_else(|| checked_authority.as_ref().map(|(_, _, source)| source.clone()))
         .expect("one source reader must provide the module text");
 
-    let (toks, lex_diags) = Lexer::lex(&source);
-    if !lex_diags.is_empty() {
-        return Err(LoaderError::at(display, &source, lex_diags));
-    }
-    let mut prog = match Parser::parse_for_check_with_source(&toks, &source) {
-        Ok((p, teaching)) => {
+    let prepared = prepared_frontend
+        .as_deref_mut()
+        .and_then(|cache| cache.remove(&norm));
+    let mut prog = match prepared {
+        Some(PreparedFrontendModule::Parsed(program, teaching)) => {
             parse_teaching.extend(teaching);
-            p
+            program
         }
-        Err(diags) => return Err(LoaderError::at(display, &source, diags)),
+        Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
+            return Err(LoaderError::at(display, &source, diagnostics));
+        }
+        Some(PreparedFrontendModule::ParseFailed(diagnostics)) => {
+            return Err(LoaderError::at(display, &source, diagnostics));
+        }
+        None => {
+            let (tokens, lex_diags) = Lexer::lex(&source);
+            if !lex_diags.is_empty() {
+                return Err(LoaderError::at(display, &source, lex_diags));
+            }
+            match Parser::parse_for_check_with_source(&tokens, &source) {
+                Ok((program, teaching)) => {
+                    parse_teaching.extend(teaching);
+                    program
+                }
+                Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
+            }
+        }
     };
     let auto_derive_default = auto_derive_default_for_file(
         &norm,
@@ -2178,6 +2281,7 @@ fn load_file(
             project_parts,
             project_part_failures,
             dependencies,
+            prepared_frontend.as_deref_mut(),
         ) {
             stack.pop();
             return Err(diags);
@@ -2240,6 +2344,7 @@ fn load_file(
             project_parts,
             project_part_failures,
             dependencies,
+            prepared_frontend.as_deref_mut(),
         ) {
             stack.pop();
             return Err(diags);
@@ -2885,6 +2990,28 @@ mod stale_manifest_name_tests {
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn staged_frontend_is_bounded_and_deterministic() {
+        let first = PathBuf::from("/virtual/z.jet");
+        let second = PathBuf::from("/virtual/a.jet");
+        let overlays = [
+            (first.as_path(), "fn z() Int -> { return 1 }\n"),
+            (second.as_path(), "fn a() Int -> { return 2 }\n"),
+        ];
+        let prepared = prepare_overlay_frontend(&overlays);
+
+        assert!(frontend_worker_count(overlays.len()) <= MAX_FRONTEND_WORKERS);
+        assert_eq!(prepared.len(), overlays.len());
+        assert!(matches!(
+            prepared.get(&normalize_path(&first)),
+            Some(PreparedFrontendModule::Parsed(_, _))
+        ));
+        assert!(matches!(
+            prepared.get(&normalize_path(&second)),
+            Some(PreparedFrontendModule::Parsed(_, _))
+        ));
     }
 
     #[test]

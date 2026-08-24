@@ -147,11 +147,12 @@ mod unix {
     #[cfg(target_os = "macos")]
     const RLIMIT_NOFILE: i32 = 8;
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn apply_limits(limits: ResourceLimits) -> io::Result<()> {
-        let set = |resource, value| {
+        let set = |resource, current, maximum| {
             let limit = RLimit {
-                current: value,
-                maximum: value,
+                current,
+                maximum,
             };
             // SAFETY: `limit` is a live kernel-shaped value for this call.
             if unsafe { setrlimit(resource, &limit) } != 0 {
@@ -163,14 +164,28 @@ mod unix {
             // POSIX CPU rlimits are whole seconds. Round up so unit conversion
             // never makes the requested budget stricter.
             let seconds = milliseconds.max(0).saturating_add(999) / 1000;
-            set(RLIMIT_CPU, seconds as u64)?;
+            // Keep the hard ceiling one second above the soft ceiling. Equal
+            // ceilings let Linux jump straight to SIGKILL, which loses the
+            // typed SIGXCPU classification in the parent.
+            set(
+                RLIMIT_CPU,
+                seconds as u64,
+                seconds.saturating_add(1) as u64,
+            )?;
         }
         if let Some(bytes) = limits.memory_bytes {
-            set(RLIMIT_MEMORY, bytes.max(0) as u64)?;
+            let bytes = bytes.max(0) as u64;
+            set(RLIMIT_MEMORY, bytes, bytes)?;
         }
         if let Some(files) = limits.open_files {
-            set(RLIMIT_NOFILE, files.max(0) as u64)?;
+            let files = files.max(0) as u64;
+            set(RLIMIT_NOFILE, files, files)?;
         }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn apply_limits(_limits: ResourceLimits) -> io::Result<()> {
         Ok(())
     }
 
