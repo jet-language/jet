@@ -55,7 +55,7 @@ fn structural_diff_classifies_body_and_rename_with_stable_ids() {
         "left",
         "first",
     );
-    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
+    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(report.contains("\"kind\":\"renamed\""), "{report}");
@@ -73,8 +73,7 @@ fn structural_diff_does_not_infer_a_rename_from_hand_text() {
         "--structural",
         before.to_str().unwrap(),
         after.to_str().unwrap(),
-        "--report",
-        "json",
+        "--json",
     ]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
@@ -90,7 +89,7 @@ fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
     fs::create_dir_all(&new_dir).unwrap();
     let before = write(&old_dir, "same.jet", "// old comment\nfn score(n: Int) Int -[]> { return n }\nfn run() { print(score(1)) }\n");
     let after = write(&new_dir, "same.jet", "// new comment\nfn score(n: Int, bonus: Int) Int -[]> {\n    return n + bonus\n}\nfn run() { print(score(1, 2)) }\n");
-    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
+    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(report.contains("\"kind\":\"signature_changed\""), "{report}");
@@ -107,7 +106,7 @@ fn structural_diff_add_remove_reorder_rename_edit_is_deterministic() {
     let root = dir("diff_matrix");
     let before = write(&root, "before.jet", "fn only(value: Int) Int -[]> { return value }\nfn gone() Int -[]> { return 1 }\nfn run() { print(only(7)) }\n");
     let after = write(&root, "after.jet", "fn run() { print(renamed(7)) }\nfn added() Bool -[]> { return true }\nfn renamed(value: Int) Int -[]> { return 9 }\n");
-    let args = ["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"];
+    let args = ["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--json"];
     let first = run(&args);
     let second = run(&args);
     assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
@@ -168,7 +167,7 @@ fn overlapping_edit_conflicts_without_writing_success_output() {
     let ours = write(&root, "ours.jet", "fn left() Int -[]> { return 10 }\nfn right() Int -[]> { return 2 }\nfn run() { print(left() + right()) }\n");
     let theirs = write(&root, "theirs.jet", "fn left() Int -[]> { return 11 }\nfn right() Int -[]> { return 2 }\nfn run() { print(left() + right()) }\n");
     let merged = root.join("must-not-exist.jet");
-    let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "editor"]);
+    let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(!merged.exists());
     let report = String::from_utf8_lossy(&output.stderr);
@@ -183,7 +182,7 @@ fn delete_edit_and_duplicate_stable_identity_never_auto_merge() {
     let ours = write(&root, "ours.jet", "fn c() Int -[]> { return 1 }\nfn b() Int -[]> { return 1 }\nfn run() { print(c() + b()) }\n");
     let theirs = write(&root, "theirs.jet", "fn a() Int -[]> { return 2 }\nfn b() Int -[]> { return 1 }\nfn run() { print(a() + b()) }\n");
     let merged = root.join("must-not-exist.jet");
-    let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "json"]);
+    let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(!merged.exists());
     assert!(String::from_utf8_lossy(&output.stderr).contains("overlapping_edit"));
@@ -238,7 +237,7 @@ fn identical_bilateral_additions_merge_trivia_once() {
     let conflict_out = root.join("must-not-exist.jet");
     let conflict = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
-        theirs.to_str().unwrap(), "--out", conflict_out.to_str().unwrap(), "--report", "json",
+        theirs.to_str().unwrap(), "--out", conflict_out.to_str().unwrap(), "--json",
     ]);
     assert_eq!(conflict.status.code(), Some(1));
     assert!(!conflict_out.exists());
@@ -278,7 +277,7 @@ fn inter_item_trivia_three_way_merges_and_conflicts_honestly() {
     let conflict_out = root.join("trivia-conflict.jet");
     let conflict = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
-        theirs_trivia.to_str().unwrap(), "--out", conflict_out.to_str().unwrap(), "--report", "json",
+        theirs_trivia.to_str().unwrap(), "--out", conflict_out.to_str().unwrap(), "--json",
     ]);
     assert_eq!(conflict.status.code(), Some(1));
     assert!(!conflict_out.exists());
@@ -312,7 +311,7 @@ fn signature_classification_and_move_do_not_depend_on_body_or_basename() {
     fs::create_dir_all(&new).unwrap();
     let before = write(&old, "alpha.jet", "fn score(n: Int) Int -[]> { return n + 1 }\nfn run() { print(score(1)) }\n");
     let after = write(&new, "omega.jet", "fn score(n: Float) Float -[]> { return n + 2.0 }\nfn run() { print(score(1.0)) }\n");
-    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
+    let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(report.contains("\"kind\":\"signature_changed\""), "{report}");
@@ -328,7 +327,7 @@ fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
     let merged = root.join("must-not-exist.jet");
     let output = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
-        theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "json",
+        theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--json",
     ]);
     assert_eq!(output.status.code(), Some(1));
     assert!(!merged.exists());
@@ -341,7 +340,7 @@ fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
     let delete_out = root.join("delete-edit-must-not-exist.jet");
     let delete_edit = run(&[
         "merge", "--structural", delete_base.to_str().unwrap(), deleted.to_str().unwrap(),
-        edited.to_str().unwrap(), "--out", delete_out.to_str().unwrap(), "--report", "json",
+        edited.to_str().unwrap(), "--out", delete_out.to_str().unwrap(), "--json",
     ]);
     assert_eq!(delete_edit.status.code(), Some(1));
     assert!(!delete_out.exists());
@@ -382,7 +381,7 @@ fn git_driver_repairs_exact_keys_and_supports_gitdir_indirection() {
 #[test]
 fn structural_commands_have_specific_help() {
     for (command, needles) in [
-        ("diff", &["--structural", "--report"] as &[&str]),
+        ("diff", &["--structural", "--json"] as &[&str]),
         ("merge", &["--structural", "--out", "install-driver", "--repo"] as &[&str]),
     ] {
         for args in [[command, "--help"], ["help", command]] {

@@ -54,7 +54,7 @@ pub use Archive::*;
 mod Nar;
 pub use Nar::*;
 #[allow(dead_code)]
-mod NixCache;
+pub(crate) mod NixCache;
 #[allow(unused_imports)]
 pub(crate) use NixCache::{
     admit_nix_closure, AdmittedNixClosure, AdmittedNixObject, NixCacheError, NixCacheErrorKind,
@@ -1241,9 +1241,28 @@ pub struct CacheLease {
     status: ConsumptionStatus,
     wrapper_root: Option<PathBuf>,
     /// Logical `/nix/store/<name>` paths mapped to the verified private
-    /// snapshot. Shell consumers use this only inside a rootless namespace.
+    /// snapshot or a verified Hangar object. Shell consumers use this only
+    /// inside a rootless namespace.
     nix_store_projection: Vec<(String, PathBuf)>,
+    #[cfg(target_os = "linux")]
+    nix_projection_bindings: Vec<NixProjectionBinding>,
     _wrapper_dir_handle: Option<fs::File>,
+}
+
+#[cfg(target_os = "linux")]
+struct NixProjectionBinding {
+    logical: String,
+    digest: String,
+    primary: bool,
+    source: PathBuf,
+    handle: fs::File,
+}
+
+struct NixStoreProjection {
+    logical: String,
+    digest: String,
+    primary: bool,
+    source: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1411,6 +1430,77 @@ impl CacheLease {
                 "leased output changed: expected {}, got {actual}",
                 self.expected_digest
             )));
+        }
+        #[cfg(target_os = "linux")]
+        for binding in &self.nix_projection_bindings {
+            let path_metadata = fs::symlink_metadata(&binding.source)?;
+            if path_metadata.file_type().is_symlink()
+                || (!path_metadata.is_dir() && !path_metadata.is_file())
+            {
+                return Err(std::io::Error::other(format!(
+                    "Nix projection source `{}` is not a regular node",
+                    binding.source.display()
+                )));
+            }
+            let opened_metadata = binding.handle.metadata()?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt as _;
+                if path_metadata.dev() != opened_metadata.dev()
+                    || path_metadata.ino() != opened_metadata.ino()
+                {
+                    return Err(std::io::Error::other(format!(
+                        "Nix projection source `{}` changed while leased",
+                        binding.source.display()
+                    )));
+                }
+            }
+            if binding.primary {
+                if binding.digest != self.expected_digest {
+                    return Err(std::io::Error::other(format!(
+                        "Nix primary projection `{}` has the wrong digest",
+                        binding.logical
+                    )));
+                }
+                if binding.source != self.snapshot_root {
+                    return Err(std::io::Error::other(format!(
+                        "Nix primary projection `{}` is not the private lease snapshot",
+                        binding.logical
+                    )));
+                }
+            } else {
+                let expected = self
+                    .store_root
+                    .join("hangar")
+                    .join(OBJECTS_DIR)
+                    .join(&binding.digest);
+                if binding.source != expected {
+                    return Err(std::io::Error::other(format!(
+                        "Nix projection `{}` does not use its canonical Hangar object",
+                        binding.logical
+                    )));
+                }
+                let actual = super::Envelope::try_output_hash_of_in_hangar(
+                    &binding.source.to_string_lossy(),
+                    &self.store_root.join("hangar"),
+                    false,
+                )
+                .map_err(std::io::Error::other)?;
+                if actual != binding.digest {
+                    return Err(std::io::Error::other(format!(
+                        "Nix projection `{}` changed: expected {}, got {actual}",
+                        binding.logical, binding.digest
+                    )));
+                }
+            }
+            if path_metadata.is_dir() != opened_metadata.is_dir()
+                || path_metadata.is_file() != opened_metadata.is_file()
+            {
+                return Err(std::io::Error::other(format!(
+                    "Nix projection source `{}` changed type",
+                    binding.source.display()
+                )));
+            }
         }
         #[cfg(target_os = "linux")]
         if let Some(wrapper) = &self.wrapper_root {
@@ -1673,6 +1763,8 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
             },
             wrapper_root: None,
             nix_store_projection: Vec::new(),
+            #[cfg(target_os = "linux")]
+            nix_projection_bindings: Vec::new(),
             _wrapper_dir_handle: None,
         });
     }
@@ -1702,7 +1794,14 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .flatten();
     let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
     let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
-    let nix_store_projection = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
+    let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
+    #[cfg(target_os = "linux")]
+    let (nix_store_projection, nix_projection_bindings) = open_nix_projection_sources(projections)?;
+    #[cfg(not(target_os = "linux"))]
+    let nix_store_projection = projections
+        .into_iter()
+        .map(|projection| (projection.logical, projection.source))
+        .collect();
     Ok(CacheLease {
         files,
         executables,
@@ -1717,15 +1816,65 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         status: ConsumptionStatus::Consumable,
         wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
         nix_store_projection,
+        #[cfg(target_os = "linux")]
+        nix_projection_bindings,
         _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
     })
+}
+
+#[cfg(target_os = "linux")]
+fn open_nix_projection_sources(
+    projections: Vec<NixStoreProjection>,
+) -> std::io::Result<(Vec<(String, PathBuf)>, Vec<NixProjectionBinding>)> {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::fs::MetadataExt as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mut stable = Vec::with_capacity(projections.len());
+    let mut bindings = Vec::with_capacity(projections.len());
+    for projection in projections {
+        let path_metadata = fs::symlink_metadata(&projection.source)?;
+        if path_metadata.file_type().is_symlink()
+            || (!path_metadata.is_dir() && !path_metadata.is_file())
+        {
+            return Err(std::io::Error::other(format!(
+                "Nix projection source `{}` is not a regular node",
+                projection.source.display()
+            )));
+        }
+        let mut options = fs::OpenOptions::new();
+        options
+            .read(true)
+            .custom_flags(super::Envelope::nofollow_open_flag().map_err(std::io::Error::other)?);
+        let handle = options.open(&projection.source)?;
+        let opened_metadata = handle.metadata()?;
+        if path_metadata.dev() != opened_metadata.dev()
+            || path_metadata.ino() != opened_metadata.ino()
+        {
+            return Err(std::io::Error::other(format!(
+                "Nix projection source `{}` changed while opening",
+                projection.source.display()
+            )));
+        }
+        clear_close_on_exec(&handle)?;
+        let stable_path = PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()));
+        stable.push((projection.logical.clone(), stable_path));
+        bindings.push(NixProjectionBinding {
+            logical: projection.logical,
+            digest: projection.digest,
+            primary: projection.primary,
+            source: projection.source,
+            handle,
+        });
+    }
+    Ok((stable, bindings))
 }
 
 fn nix_store_projection_for_entry(
     roots: &Roots,
     entry: &StoreEntry,
     snapshot_root: &Path,
-) -> std::io::Result<Vec<(String, PathBuf)>> {
+) -> std::io::Result<Vec<NixStoreProjection>> {
     if entry.producer_record.is_empty() {
         return Ok(Vec::new());
     }
@@ -1747,6 +1896,9 @@ fn nix_store_projection_for_entry(
         let Some(name) = key.strip_prefix("nix.output.") else {
             continue;
         };
+        if name.contains('.') {
+            continue;
+        }
         let digest = if name == "out" {
             entry.envelope.output_hash.clone()
         } else {
@@ -1768,50 +1920,81 @@ fn nix_store_projection_for_entry(
     let graph = Closure::closure_graph_structure_unlocked(roots)?;
     let mut closure_digests = BTreeSet::new();
     if let Some(record) = graph.records.get(&entry.id) {
-        if record.primary != entry.envelope.output_hash {
+        let mut expected_outputs = entry.named_outputs.clone();
+        expected_outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+        if record.primary != entry.envelope.output_hash
+            || record.outputs != expected_outputs
+            || record.references != entry.references.iter().cloned().collect()
+        {
             return Err(std::io::Error::other(format!(
-                "Nix closure record `{}` has a different primary object",
+                "Nix closure record `{}` disagrees with the verified entry",
                 entry.id
             )));
         }
-        // Project every transitive object. Selected outputs alone are not a
-        // runtime closure: the loader and shared libraries are references too.
-        closure_digests.extend(graph.closure(&entry.envelope.output_hash));
-        for record in graph.records.values() {
-            for (name, digest) in &record.outputs {
-                if !closure_digests.contains(digest) {
-                    continue;
-                }
-                let producer =
-                    ProducerRecord::decode(&record.producer_record).map_err(|error| {
-                        std::io::Error::other(format!(
-                            "Nix closure record `{}` has invalid producer facts: {error}",
-                            record.id
-                        ))
-                    })?;
-                let Some(path) = producer.facts.get(&format!("nix.output.{name}")) else {
-                    continue;
-                };
-                add_nix_projection_path(&mut logical_digests, path, digest)?;
-            }
-        }
-        if !closure_digests.contains(&entry.envelope.output_hash) {
-            return Err(std::io::Error::other(format!(
-                "Nix closure graph does not contain primary object `{}`",
-                entry.envelope.output_hash
-            )));
+        // Every named root may have references not shared by `out`.
+        for digest in expected_outputs.values() {
+            closure_digests.extend(graph.closure(digest));
         }
         for digest in &closure_digests {
-            if !graph.objects.contains_key(digest) {
-                return Err(std::io::Error::other(format!(
+            let object = graph.objects.get(digest).ok_or_else(|| {
+                std::io::Error::other(format!(
                     "Nix closure object `{digest}` is missing from the Hangar graph"
-                )));
-            }
-            if !logical_digests.values().any(|known| known == digest) {
+                ))
+            })?;
+            let expected_path = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+            if object.external || Path::new(&object.path) != expected_path {
                 return Err(std::io::Error::other(format!(
-                    "Nix closure object `{digest}` has no canonical store path"
+                    "Nix closure object `{digest}` is not a canonical Hangar object"
                 )));
             }
+            let metadata = fs::symlink_metadata(&expected_path)?;
+            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+                return Err(std::io::Error::other(format!(
+                    "Nix closure object `{digest}` is not a regular Hangar node"
+                )));
+            }
+
+            let mut paths = BTreeSet::new();
+            for owner in graph.records.values() {
+                for (name, owner_digest) in &owner.outputs {
+                    if owner_digest != digest {
+                        continue;
+                    }
+                    let producer =
+                        ProducerRecord::decode(&owner.producer_record).map_err(|error| {
+                            std::io::Error::other(format!(
+                                "Nix closure record `{}` has invalid producer facts: {error}",
+                                owner.id
+                            ))
+                        })?;
+                    if producer.provider != "nix" {
+                        return Err(std::io::Error::other(format!(
+                            "Nix closure object `{digest}` is owned by `{}`",
+                            producer.provider
+                        )));
+                    }
+                    let path = producer
+                        .facts
+                        .get(&format!("nix.output.{name}"))
+                        .ok_or_else(|| {
+                            std::io::Error::other(format!(
+                                "Nix closure object `{digest}` has no `{name}` output fact"
+                            ))
+                        })?;
+                    paths.insert(path.clone());
+                }
+            }
+            if paths.len() != 1 {
+                return Err(std::io::Error::other(format!(
+                    "Nix closure object `{digest}` has {} canonical store paths",
+                    paths.len()
+                )));
+            }
+            add_nix_projection_path(
+                &mut logical_digests,
+                paths.first().expect("one path checked above"),
+                digest,
+            )?;
         }
     } else if !entry.references.is_empty()
         || producer.facts.contains_key("nix.closure.receipt")
@@ -1825,14 +2008,24 @@ fn nix_store_projection_for_entry(
         )));
     }
 
+    let primary_logical = producer
+        .facts
+        .get("nix.output.out")
+        .or_else(|| producer.facts.get("nix.output.bin"));
     let mut projection = Vec::new();
     for (logical, digest) in logical_digests {
-        let source = if digest == entry.envelope.output_hash {
+        let primary = primary_logical == Some(&logical);
+        let source = if primary {
             snapshot_root.to_path_buf()
         } else {
             hangar_projection_object(roots, &digest, logical.as_str())?
         };
-        projection.push((logical, source));
+        projection.push(NixStoreProjection {
+            logical,
+            digest,
+            primary,
+            source,
+        });
     }
     Ok(projection)
 }

@@ -7,8 +7,8 @@ use std::process::exit;
 
 use jet::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use jet::ExitCodes;
-use jet_foundation::JSON::{json_escape, JSONValue};
 use jet_foundation::Report::ReportEnvelope;
+use jet_foundation::JSON::{json_escape, JSONValue};
 use jet_semindex::{SemanticOp, SemanticOpTarget, SourceSpan};
 
 #[derive(Clone)]
@@ -201,7 +201,8 @@ fn semantic_ops_for_action(plan: &TryPlan) -> Vec<SemanticOp> {
     let Action::Rename { from, to } = &plan.action else {
         return Vec::new();
     };
-    let index = jet_semindex::open(&plan.entry).unwrap_or_else(|_| fail("try rename could not rebuild its semantic index"));
+    let index = jet_semindex::open(&plan.entry)
+        .unwrap_or_else(|_| fail("try rename could not rebuild its semantic index"));
     let targets = index
         .definition_facts()
         .iter()

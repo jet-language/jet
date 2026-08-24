@@ -167,6 +167,8 @@ pub(super) fn realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     match Store::realize_verified(
         roots,
@@ -241,6 +243,8 @@ pub(super) fn try_realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     let realized = Store::realize_verified(
         roots,

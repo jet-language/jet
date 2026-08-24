@@ -4,6 +4,7 @@ use super::*;
 mod tests {
     use super::*;
     mod late;
+    mod nix_projection;
 
     fn temp_roots() -> (Roots, tempdir::Guard) {
         let g = tempdir::Guard::new("jpk-store");
@@ -1106,7 +1107,10 @@ mod tests {
             last_used_at: 0,
         };
         let projection = nix_store_projection_for_entry(&roots, &entry, &snapshot).unwrap();
-        let projection = projection.into_iter().collect::<BTreeMap<_, _>>();
+        let projection = projection
+            .into_iter()
+            .map(|projection| (projection.logical, projection.source))
+            .collect::<BTreeMap<_, _>>();
         assert_eq!(projection.get("/nix/store/projection-out"), Some(&snapshot));
         assert_eq!(
             projection.get("/nix/store/projection-dev"),
@@ -1122,28 +1126,11 @@ mod tests {
         #[cfg(target_os = "linux")]
         {
             let lease = snapshot_lease(&roots, &entry).unwrap();
-            let env = crate::Shell::Env {
-                bin_dirs: Vec::new(),
-                vars: BTreeMap::new(),
-                unset_vars: Vec::new(),
-                refs: vec![entry.reference.clone()],
-                label: "projection-test".into(),
-                prompt_path: jet_env_model::ModuleEval::PromptPathMode::Short,
-                prompt_strip: jet_env_model::ModuleEval::PromptStripMode::Off,
-                cache_leases: vec![lease],
-            };
-            let code = crate::Shell::run_clean_command(
-                &env,
-                &[
-                    "/bin/sh".into(),
-                    "-c".into(),
-                    "test -d /nix/store/projection-out && test -f /nix/store/projection-dev".into(),
-                ],
-            );
-            assert_eq!(
-                code, 0,
-                "rootless canonical store projection must be consumable"
-            );
+            assert!(lease
+                .nix_store_projection()
+                .iter()
+                .all(|(_, source)| source.starts_with("/proc/self/fd/")));
+            lease.validate().unwrap();
         }
     }
 

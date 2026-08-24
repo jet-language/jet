@@ -29,8 +29,9 @@ pub use Symbols::{
     SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 pub use SemanticOps::{
-    review_semantic_ops, review_semantic_ops_with_receipts, semantic_ops_for_file, ReviewOpKind,
-    ReviewSemanticOp, SemanticOp, SemanticOpFile, SemanticOpTarget,
+    review_semantic_ops, review_semantic_ops_with_receipts, semantic_blame,
+    semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewOpKind,
+    ReviewSemanticOp, SemanticBlameEntry, SemanticOp, SemanticOpFile, SemanticOpTarget,
 };
 pub use jet_pkg_model::Package::PackageFacts;
 

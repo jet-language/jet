@@ -7,6 +7,7 @@ use std::path::Path;
 use jet::Diagnostics::Span;
 use jet::AST::{Expr, Func, Item, ProgramBundle};
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 
 use crate::{CmdInspect::CheckProjection, OutputMode};
 
@@ -48,8 +49,11 @@ pub(crate) fn run_fill(target: &str, mode: OutputMode) {
 
     let report = render_goal_report(&mut checked, Some(path), line, true, mode.json);
     match report {
-        Some(report) => print!("{report}"),
-        None if mode.json => println!("{{\"goals\":[]}}"),
+        Some(report) => println!("{report}"),
+        None if mode.json => println!(
+            "{}",
+            render_status_json("ok", true, "fill", ",\"fill\":{\"goals\":[]}")
+        ),
         None => println!("no goals found in '{file}'"),
     }
 }
@@ -98,8 +102,13 @@ pub(crate) fn render_goal_report(
             )
             .expect("writing to a String cannot fail");
         }
-        out.push_str("]}\n");
-        return Some(out);
+        out.push_str("]}");
+        return Some(render_status_json(
+            "ok",
+            true,
+            "fill",
+            &format!(",\"fill\":{out}"),
+        ));
     }
 
     for goal in &goals {

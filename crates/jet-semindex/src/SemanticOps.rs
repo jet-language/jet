@@ -38,9 +38,17 @@ pub struct SemanticOp {
 }
 
 impl SemanticOp {
-    pub fn matches_transition(&self, before_hash: &str, after_hash: &str) -> bool {
+    /// Match an operation to the paths in one comparison as well as its byte
+    /// checkpoints. Hashes alone are not enough: two files can share them.
+    pub fn matches_file_transition(
+        &self,
+        paths: &[&Path],
+        before_hash: &str,
+        after_hash: &str,
+    ) -> bool {
         self.files.iter().any(|file| {
-            same_hash(&file.before_hash, before_hash)
+            paths.iter().any(|path| normalize(&file.path) == normalize(path))
+                && same_hash(&file.before_hash, before_hash)
                 && same_hash(&file.after_hash, after_hash)
         })
     }
@@ -78,8 +86,15 @@ pub fn semantic_ops_for_file(path: &Path, source_hash: &str) -> Vec<SemanticOp> 
                 let Some(files) = object.get("files").and_then(parse_files) else {
                     continue;
                 };
+                let files = files
+                    .into_iter()
+                    .map(|mut file| {
+                        file.path = normalize_from(&file.path, &dir);
+                        file
+                    })
+                    .collect::<Vec<_>>();
                 if !files.iter().any(|file| {
-                    normalize(&file.path) == path
+                    file.path == path
                         && (same_hash(&file.before_hash, source_hash)
                             || same_hash(&file.after_hash, source_hash))
                 }) {
@@ -97,6 +112,184 @@ pub fn semantic_ops_for_file(path: &Path, source_hash: &str) -> Vec<SemanticOp> 
         directory = dir.parent().map(Path::to_path_buf);
     }
     out
+}
+
+/// Pair compiler facts for a refactor producer. This is deliberately not part
+/// of review: a reviewer must not infer a rename from hand-edited text. A
+/// tool that already owns the edit may use the unchanged checked signature and
+/// module to attach the operation it performed to the edit receipt.
+pub fn semantic_rename_ops(before: &SemIndex, after: &SemIndex) -> Vec<SemanticOp> {
+    let before_defs = before.definition_facts();
+    let after_defs = after.definition_facts();
+    let mut used_after = BTreeSet::new();
+    let mut out = Vec::new();
+    for (before_index, old) in before_defs.iter().enumerate() {
+        let candidates = after_defs
+            .iter()
+            .enumerate()
+            .filter(|(after_index, new)| {
+                !used_after.contains(after_index)
+                    && old.kind == new.kind
+                    && old.module_path == new.module_path
+                    && old.signature_id == new.signature_id
+                    && old.name != new.name
+            })
+            .map(|(after_index, _)| after_index)
+            .collect::<Vec<_>>();
+        let Some(&after_index) = candidates.first() else {
+            continue;
+        };
+        if candidates.len() != 1 {
+            continue;
+        }
+        let new = &after_defs[after_index];
+        let reverse = before_defs
+            .iter()
+            .enumerate()
+            .filter(|(candidate_index, candidate)| {
+                *candidate_index == before_index
+                    || (candidate.kind == new.kind
+                        && candidate.module_path == new.module_path
+                        && candidate.signature_id == new.signature_id
+                        && candidate.name != new.name)
+            })
+            .count();
+        if reverse != 1 {
+            continue;
+        }
+        used_after.insert(after_index);
+        out.push(SemanticOp {
+            kind: "rename".to_string(),
+            rule_id: Some("jet-fix".to_string()),
+            from: Some(old.name.clone()),
+            to: Some(new.name.clone()),
+            node: None,
+            match_template: None,
+            replace_template: None,
+            targets: vec![SemanticOpTarget {
+                stable_id: old.stable_id.clone(),
+                before: old.human_identity.clone(),
+                after: new.human_identity.clone(),
+                kind: new.kind.clone(),
+                module_path: new.module_path.clone(),
+            }],
+            files: Vec::new(),
+        });
+    }
+    out
+}
+
+/// The semantic ownership rows used by a blame consumer. The operation is
+/// copied from a receipt; this function never compares source text or guesses
+/// intent from matching bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemanticBlameEntry {
+    pub stable_id: String,
+    pub identity: String,
+    pub kind: String,
+    pub operation: Option<SemanticOp>,
+}
+
+pub fn semantic_blame(index: &SemIndex, receipts: &[SemanticOp]) -> Vec<SemanticBlameEntry> {
+    index
+        .definition_facts()
+        .iter()
+        .map(|fact| SemanticBlameEntry {
+            stable_id: fact.stable_id.clone(),
+            identity: fact.human_identity.clone(),
+            kind: fact.kind.clone(),
+            operation: receipts
+                .iter()
+                .find(|operation| operation_applies_to_fact(operation, fact))
+                .cloned(),
+        })
+        .collect()
+}
+
+/// Resolve the receipts for one checked file and project them into semantic
+/// ownership rows. This is the complete read-only seam a blame UI needs.
+pub fn semantic_blame_for_file(
+    path: &Path,
+    source_hash: &str,
+    index: &SemIndex,
+) -> Vec<SemanticBlameEntry> {
+    semantic_blame(index, &semantic_ops_for_file(path, source_hash))
+}
+
+fn operation_applies_to_fact(operation: &SemanticOp, fact: &DefinitionFact) -> bool {
+    operation.targets.iter().any(|target| {
+        target.stable_id == fact.stable_id
+            || target.after == fact.human_identity
+            || target.after == fact.name
+            || target
+                .after
+                .ends_with(&format!("::{name}", name = fact.name))
+    }) || (operation.kind == "rename"
+        && operation.to.as_deref().is_some_and(|to| {
+            to == fact.name
+                || to == fact.human_identity
+                || fact.human_identity.ends_with(&format!("::{to}"))
+        }))
+}
+
+#[cfg(test)]
+mod semantic_op_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn semantic_op_producer_and_blame_consumer_use_checked_facts() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-semantic-op-unit-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("run.jet");
+        fs::write(&path, "fn report() Int -[]> { return 1 }\nfn run() {}\n").unwrap();
+        let before = crate::open(&path).unwrap();
+        fs::write(
+            &path,
+            "fn summarize() Int -[]> { return 1 }\nfn run() {}\n",
+        )
+        .unwrap();
+        let after = crate::open(&path).unwrap();
+
+        let operations = semantic_rename_ops(&before, &after);
+        assert_eq!(operations.len(), 1);
+        assert_eq!(operations[0].from.as_deref(), Some("report"));
+        assert_eq!(operations[0].to.as_deref(), Some("summarize"));
+        let rows = semantic_blame(&after, &operations);
+        assert!(rows.iter().any(|row| {
+            row.identity.ends_with("summarize")
+                && row
+                    .operation
+                    .as_ref()
+                    .is_some_and(|operation| operation.kind == "rename")
+        }));
+        let receipt_dir = root.join(".jet/codemods");
+        fs::create_dir_all(&receipt_dir).unwrap();
+        let before_hash = jet_foundation::SHA256::sha256_hex(
+            "fn report() Int -[]> { return 1 }\nfn run() {}\n".as_bytes(),
+        );
+        let after_hash = jet_foundation::SHA256::sha256_hex(
+            "fn summarize() Int -[]> { return 1 }\nfn run() {}\n".as_bytes(),
+        );
+        fs::write(
+            receipt_dir.join("rename.log.json"),
+            format!(
+                r#"{{"semantic_ops":[{{"kind":"rename","from":"report","to":"summarize"}}],"files":[{{"path":"run.jet","before_hash":"{before_hash}","after_hash":"{after_hash}"}}]}}"#
+            ),
+        )
+        .unwrap();
+        assert!(semantic_blame_for_file(&path, &after_hash, &after)
+            .iter()
+            .any(|row| row.operation.is_some()));
+        assert!(semantic_blame(&after, &[])
+            .iter()
+            .all(|row| row.operation.is_none()));
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 fn same_hash(recorded: &str, current: &str) -> bool {
@@ -191,6 +384,14 @@ fn normalize(path: &Path) -> PathBuf {
                 .join(path)
         }
     })
+}
+
+fn normalize_from(path: &Path, root: &Path) -> PathBuf {
+    if path.is_absolute() {
+        normalize(path)
+    } else {
+        normalize(&root.join(path))
+    }
 }
 
 /// One meaning change in a checked change set.  This is separate from the

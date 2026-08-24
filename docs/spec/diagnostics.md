@@ -771,6 +771,9 @@ reports, not compiler warnings.
 | E1345 | sema  | CLI command member has no callable shape (D-CLI-GLOBAL1=E) |
 | E1346 | sema  | callable CLI members are declared on a Codable struct (D-CLI-GLOBAL1=E) |
 | E1347 | sema  | CLI method receiver is writable (D-CLI-GLOBAL1=E) |
+| E1348 | jetpack | signed nixpkgs index proof was rejected (D-JPK-NIXINDEX1) |
+| E1349 | jetpack | requested nixpkgs attr is outside signed index coverage (D-JPK-NIXINDEX1) |
+| E1350 | jetpack | native Nix cache admission failed during {kind} (D-JPK-NIXCACHE1) |
 | E1320 | jetpack | an external hangar root changed between reading its etag and applying a requested mutation |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
@@ -2086,6 +2089,9 @@ front-end `.jet` diagnostics).
 | E1274 | No package record or build attempt exists for `{pkg}`. | `jet explain` reads the Hangar Store and persisted Jetpack build attempts. If neither record exists on this machine, there is no local package explanation. | Run `jet build <ref>` first; for diagnostic-code help, keep using `jet explain E1234`. |
 | E1275 | Build sandboxing is required but unavailable. | D-JPK-SANDBOX2 permits non-executing reuse and trusted substitution, but a local executable action needs the native child boundary. Jetpack refuses to launch it when the platform cannot enforce that boundary. | Provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry. |
 | E1276 | `--offline` forbids network access. | Realize-class verbs must run from the current lock and local hangar when offline. Network-class verbs (`add`, `update`, `outdated`, publish/cache sync) cannot refresh metadata under `--offline`, and a missing local object cannot be fetched. | Drop `--offline` for this command, or realize/fetch the needed object before going offline. |
+| E1348 | The signed nixpkgs index could not be trusted. | The manifest, target, signature, or canonical record failed verification, so Jetpack refused to select or substitute the package. | Refresh the signed index or use a covered locked nixpkgs input. |
+| E1349 | The requested nixpkgs attr is not covered by the signed index. | The signed index records only the published nixpkgs channel, revision, system, and attrs it can prove; this attr is in its explicit not-indexed coverage. | Use a covered attr or a supported native provider, or resolve the input through an explicit compatibility path. |
+| E1350 | native Nix cache admission failed during {kind}. | the signed Nix cache closure was not admitted because its {kind} check failed. | repair the cache metadata or network response, then retry the admission. |
 | E1277 | A jetos option key uses a retired namespace. | D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`. | Rename the option namespace, for example `net.hostName` becomes `network.hostName`. |
 | E1278 | A jetos activation proof is incomplete. | D-WD8 requires `jet os switch` to prove the plan, risk class, generated service artifacts, and rollback evidence before changing the active generation pointers. | Rebuild the generation so the proof artifacts are regenerated, or discard a hand-edited generation. |
 | E1279 | jetos VM proof tools are missing. | D-JOS-VMDEPS1=A requires pinned QEMU, firmware, ISO, bootloader, filesystem, EFI image, and initrd compression tools before install/reboot proof can run. | Realize or expose the required tools, then rerun `jet os vm prove <host> --disk <disk>`. |

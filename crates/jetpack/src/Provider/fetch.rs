@@ -729,6 +729,8 @@ authority: {
             store_dir: &dir,
             offline: false,
             project_dir: Some(&dir),
+            nix_index: None,
+            nix_roots: None,
         };
         let authority = Authority::load(
             &ctx,

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
+use jet_foundation::Report::render_status_json;
 use jet_impact::ImpactReport;
 pub(crate) fn run_impact(args: &[String], json: bool) {
     let mut depth = 3usize;
@@ -38,9 +39,15 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     });
     let report = ImpactReport::analyze(&checked.index, symbol, depth);
     if json {
+        let document = crate::CmdInspect::with_check_json(report.to_json(), &checked.check);
         println!(
             "{}",
-            crate::CmdInspect::with_check_json(report.to_json(), &checked.check)
+            render_status_json(
+                "ok",
+                true,
+                "inspect.impact",
+                &format!(",\"impact\":{document}"),
+            )
         );
     } else {
         print!("{}", crate::CmdInspect::check_result_text(&checked.check));

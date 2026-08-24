@@ -150,12 +150,7 @@ pub fn dispatch(engine: &str, verb: &str, argv: &[String]) -> i32 {
 /// engine boundary as [`dispatch`], capturing its wire output for the compiler
 /// process to validate. The child runs at `cwd`, so project-owned engine state
 /// is resolved exactly as it is for an interactive Jetpack command.
-pub fn capture(
-    engine: &str,
-    verb: &str,
-    argv: &[String],
-    cwd: &Path,
-) -> Result<Output, i32> {
+pub fn capture(engine: &str, verb: &str, argv: &[String], cwd: &Path) -> Result<Output, i32> {
     let bin = compatible_engine(engine, verb)?;
     engine_command(&bin)
         .args(argv)

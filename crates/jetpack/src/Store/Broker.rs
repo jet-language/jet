@@ -2432,6 +2432,8 @@ mod tests {
             store_dir: &store_dir,
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let realized = super::super::realize_verified(
             &local,
@@ -2488,6 +2490,8 @@ mod tests {
             store_dir: &reader_store_dir,
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let reused = super::super::realize_verified(
             &reader,
@@ -2526,6 +2530,8 @@ mod tests {
             store_dir: &denied_store_dir,
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let error = match super::super::realize_verified(
             &denied,

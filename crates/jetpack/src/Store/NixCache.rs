@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const DEFAULT_ENDPOINT: &str = "https://cache.nixos.org";
 const DEFAULT_PUBLIC_KEY: &str = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
 const MAX_METADATA_BYTES: u64 = 1024 * 1024;
-const MAX_NAR_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_PARALLEL_FETCHES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NixCacheErrorKind {
@@ -185,18 +185,33 @@ impl<'a> AdmissionTransaction<'a> {
         let mut scheduled = queue.clone();
         let mut fetched = BTreeMap::new();
 
-        while let Some(store_path) = queue.iter().next().cloned() {
-            queue.remove(&store_path);
-            if fetched.contains_key(&store_path) {
-                continue;
+        while !queue.is_empty() {
+            let wave = queue
+                .iter()
+                .take(MAX_PARALLEL_FETCHES)
+                .cloned()
+                .collect::<Vec<_>>();
+            for store_path in &wave {
+                queue.remove(store_path);
             }
-            if let Some(existing) = existing_object(self.roots, &store_path, store_dir)? {
-                for reference in &existing.references {
-                    if scheduled.insert(reference.clone()) {
-                        queue.insert(reference.clone());
-                    }
+
+            let mut pending = Vec::new();
+            for store_path in wave {
+                if fetched.contains_key(&store_path) {
+                    continue;
                 }
-                fetched.insert(store_path, existing);
+                if let Some(existing) = existing_object(self.roots, &store_path, store_dir)? {
+                    for reference in &existing.references {
+                        if scheduled.insert(reference.clone()) {
+                            queue.insert(reference.clone());
+                        }
+                    }
+                    fetched.insert(store_path, existing);
+                } else {
+                    pending.push(store_path);
+                }
+            }
+            if pending.is_empty() {
                 continue;
             }
             if offline {
@@ -205,22 +220,55 @@ impl<'a> AdmissionTransaction<'a> {
                     "offline admission found no complete verified Hangar object",
                 ));
             }
-            let info = endpoint.narinfo(&store_path, store_dir)?.ok_or_else(|| {
-                NixCacheError::new(
-                    NixCacheErrorKind::MissingReference,
-                    "a requested Nix reference returned no narinfo",
-                )
-            })?;
-            let object = self.fetch_object(&endpoint, &info, store_dir)?;
-            for reference in &object.references {
-                if scheduled.insert(reference.clone()) {
-                    queue.insert(reference.clone());
+
+            let results = std::thread::scope(|scope| {
+                let handles = pending
+                    .iter()
+                    .map(|store_path| {
+                        scope.spawn(|| {
+                            let info =
+                                endpoint.narinfo(store_path, store_dir)?.ok_or_else(|| {
+                                    NixCacheError::new(
+                                        NixCacheErrorKind::MissingReference,
+                                        "a requested Nix reference returned no narinfo",
+                                    )
+                                })?;
+                            let object = self.fetch_object(&endpoint, &info, store_dir)?;
+                            Ok::<_, NixCacheError>((store_path.clone(), object))
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle.join().unwrap_or_else(|_| {
+                            Err(NixCacheError::new(
+                                NixCacheErrorKind::Admission,
+                                "Nix cache worker panicked during closure fetch",
+                            ))
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            let mut results = results;
+            results.sort_by(|left, right| match (left, right) {
+                (Ok((left, _)), Ok((right, _))) => left.cmp(right),
+                (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                (Err(_), Err(_)) => std::cmp::Ordering::Equal,
+            });
+            for result in results {
+                let (store_path, object) = result?;
+                for reference in &object.references {
+                    if scheduled.insert(reference.clone()) {
+                        queue.insert(reference.clone());
+                    }
                 }
+                fetched.insert(store_path, object);
             }
-            fetched.insert(store_path, object);
         }
 
-        let closure_receipt = self.publish(&fetched, &requests, store_dir)?;
+        let closure_receipt = self.publish(&mut fetched, &requests, store_dir)?;
         let mut objects = BTreeMap::new();
         for (store_path, object) in &fetched {
             objects.insert(
@@ -253,7 +301,7 @@ impl<'a> AdmissionTransaction<'a> {
     }
 
     fn fetch_object(
-        &mut self,
+        &self,
         endpoint: &CacheEndpoint,
         info: &FetchedInfo,
         store_dir: &str,
@@ -295,12 +343,6 @@ impl<'a> AdmissionTransaction<'a> {
                 ));
             }
         };
-        if compressed_limit > MAX_NAR_BYTES {
-            return Err(NixCacheError::new(
-                NixCacheErrorKind::CompressedCorruption,
-                "Nix cache compressed object exceeds its bound",
-            ));
-        }
         let tree = self
             .stage
             .join("trees")
@@ -392,21 +434,40 @@ impl<'a> AdmissionTransaction<'a> {
 
     fn publish(
         &mut self,
-        fetched: &BTreeMap<String, FetchedObject>,
+        fetched: &mut BTreeMap<String, FetchedObject>,
+        requests: &BTreeMap<String, NixOutputRequest>,
+        store_dir: &str,
+    ) -> Result<String, NixCacheError> {
+        let lock_root = self.roots.root.clone();
+        Ok(RuntimePolicy::with_lock(&lock_root, "hangar", || {
+            self.publish_locked(fetched, requests, store_dir)
+                .map_err(|error| std::io::Error::other(error.detail))
+        })
+        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?)
+    }
+
+    fn publish_locked(
+        &mut self,
+        fetched: &mut BTreeMap<String, FetchedObject>,
         requests: &BTreeMap<String, NixOutputRequest>,
         _store_dir: &str,
     ) -> Result<String, NixCacheError> {
         let objects_dir = self.roots.hangar_dir().join("objects");
         ensure_dir(&objects_dir, NixCacheErrorKind::Admission)?;
-        let mut published = fetched.clone();
-        let hangar_digests = published
+        let hangar_digests = fetched
             .iter()
             .map(|(store_path, object)| (store_path.clone(), object.hangar_digest.clone()))
             .collect::<BTreeMap<_, _>>();
-        for (store_path, object) in &mut published {
+        for (store_path, object) in fetched.iter_mut() {
             let final_path = objects_dir.join(&object.hangar_digest);
             if let Some(stage) = &object.stage {
-                if fs::symlink_metadata(&final_path).is_ok() {
+                if let Ok(metadata) = fs::symlink_metadata(&final_path) {
+                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                        return Err(NixCacheError::new(
+                            NixCacheErrorKind::Admission,
+                            "existing Hangar object is not a real directory",
+                        ));
+                    }
                     let actual = Envelope::try_output_hash_of_in_hangar(
                         &final_path.to_string_lossy(),
                         &self.roots.hangar_dir(),
@@ -426,9 +487,13 @@ impl<'a> AdmissionTransaction<'a> {
                     }
                     remove_tree(stage);
                 } else {
+                    make_tree_root_writable(stage)
+                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                     fs::rename(stage, &final_path)
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                     self.created_objects.push(final_path.clone());
+                    super::seal_node(&final_path)
+                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                     super::sync_store_directory(&objects_dir)
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                 }
@@ -449,7 +514,7 @@ impl<'a> AdmissionTransaction<'a> {
             let _ = store_path;
         }
 
-        let closure_receipt = closure_receipt_digest(&published, requests);
+        let closure_receipt = closure_receipt_digest(fetched, requests);
         let receipt_path = self
             .roots
             .hangar_dir()
@@ -463,7 +528,7 @@ impl<'a> AdmissionTransaction<'a> {
 
         let mut entries = Vec::new();
         let now = now_secs();
-        for object in published.values() {
+        for object in fetched.values() {
             let name = store_name(&object.store_path)?;
             let reference = format!("{name}@nixpkgs");
             let identity = CacheIdentity {
@@ -532,10 +597,8 @@ impl<'a> AdmissionTransaction<'a> {
                 last_used_at: now,
             });
         }
-        RuntimePolicy::with_lock(&self.roots.root, "hangar", || {
-            Closure::register_entries_unlocked(self.roots, &entries)
-        })
-        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+        Closure::register_entries_unlocked(self.roots, &entries)
+            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
         Ok(closure_receipt.0)
     }
 
@@ -543,7 +606,15 @@ impl<'a> AdmissionTransaction<'a> {
         let receipts = self.roots.hangar_dir().join("receipts");
         ensure_dir(&receipts, NixCacheErrorKind::Admission)?;
         let path = receipts.join(digest);
-        if let Ok(existing) = fs::read(&path) {
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(NixCacheError::new(
+                    NixCacheErrorKind::Admission,
+                    "closure receipt path is not a regular file",
+                ));
+            }
+            let existing =
+                fs::read(&path).map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
             if existing != bytes {
                 return Err(NixCacheError::new(
                     NixCacheErrorKind::Admission,
@@ -751,16 +822,7 @@ impl CacheEndpoint {
     }
 
     fn object_url(&self, relative: &str) -> Result<String, NixCacheError> {
-        if relative.is_empty()
-            || relative.contains('#')
-            || relative.starts_with('/')
-            || relative.contains("//")
-        {
-            return Err(NixCacheError::new(
-                NixCacheErrorKind::PathTraversal,
-                "Nix narinfo URL is not relative to the cache endpoint",
-            ));
-        }
+        validate_relative_endpoint_url(relative)?;
         Ok(format!(
             "{}/{}",
             self.endpoint.trim_end_matches('/'),
@@ -820,12 +882,21 @@ impl<R: Read> HashingReader<R> {
 impl<R: Read> Read for HashingReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if self.count >= self.limit {
-            return Ok(0);
+            let mut extra = [0u8; 1];
+            return match self.reader.read(&mut extra)? {
+                0 => Ok(0),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Nix cache response exceeded its signed byte limit",
+                )),
+            };
         }
         let remaining = (self.limit - self.count).min(buffer.len() as u64) as usize;
         let count = self.reader.read(&mut buffer[..remaining])?;
         if count != 0 {
-            self.count = self.count.saturating_add(count as u64);
+            self.count = self.count.checked_add(count as u64).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Nix cache byte count overflow")
+            })?;
             self.hasher.update(&buffer[..count]);
         }
         Ok(count)
@@ -884,7 +955,11 @@ fn existing_object(
         return Ok(None);
     };
     let output = Path::new(&entry.out);
-    if !output.starts_with(roots.hangar_dir()) || !output.is_dir() {
+    let output_meta = match fs::symlink_metadata(output) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+        _ => return Ok(None),
+    };
+    if !output.starts_with(roots.hangar_dir()) || !output_meta.is_dir() {
         return Ok(None);
     }
     let digest = Envelope::try_output_hash_of_in_hangar(&entry.out, &roots.hangar_dir(), false)
@@ -899,7 +974,7 @@ fn existing_object(
     }
     let producer = ProducerRecord::decode(&entry.producer_record)
         .map_err(|error| NixCacheError::new(NixCacheErrorKind::Admission, error.to_string()))?;
-    let references = producer
+    let references: Vec<String> = producer
         .facts
         .get("nix.references")
         .map(|value| {
@@ -910,7 +985,14 @@ fn existing_object(
                 .collect()
         })
         .unwrap_or_default();
-    let _ = store_dir;
+    if producer.facts.get("nix.proof").is_none_or(String::is_empty)
+        || references
+            .iter()
+            .any(|reference| validate_store_path(reference, store_dir).is_err())
+        || references.len() != entry.references.len()
+    {
+        return Ok(None);
+    }
     Ok(Some(FetchedObject {
         store_path: store_path.to_string(),
         stage: None,
@@ -1011,7 +1093,9 @@ fn push_u64(output: &mut Vec<u8>, value: u64) {
 
 fn validate_endpoint(endpoint: &str) -> Result<(), NixCacheError> {
     if endpoint.is_empty()
-        || endpoint.contains('#')
+        || endpoint
+            .bytes()
+            .any(|byte| matches!(byte, b'?' | b'#' | b'@' | b'\\'))
         || endpoint.bytes().any(|byte| byte.is_ascii_whitespace())
     {
         return Err(NixCacheError::new(
@@ -1019,11 +1103,33 @@ fn validate_endpoint(endpoint: &str) -> Result<(), NixCacheError> {
             "Nix cache endpoint is malformed",
         ));
     }
-    if endpoint.starts_with("https://") {
-        return Ok(());
+    let (scheme, rest) = endpoint.split_once("://").ok_or_else(|| {
+        NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint has no supported scheme",
+        )
+    })?;
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if authority.is_empty() {
+        return Err(NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint has no host",
+        ));
     }
-    if endpoint.starts_with("http://") {
-        let authority = endpoint[7..].split('/').next().unwrap_or_default();
+    let path = &rest[authority_end..];
+    if path
+        .split('/')
+        .any(|component| matches!(component, "." | ".."))
+        || path.contains("//")
+        || path.bytes().any(|byte| byte == b'%')
+    {
+        return Err(NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix cache endpoint path is unsafe",
+        ));
+    }
+    if scheme == "http" {
         let host = authority
             .strip_prefix('[')
             .and_then(|value| value.split(']').next())
@@ -1032,10 +1138,38 @@ fn validate_endpoint(endpoint: &str) -> Result<(), NixCacheError> {
             return Ok(());
         }
     }
+    if scheme == "https" {
+        return Ok(());
+    }
     Err(NixCacheError::new(
         NixCacheErrorKind::PathTraversal,
         "Nix cache endpoint must be HTTPS or loopback HTTP",
     ))
+}
+
+fn validate_relative_endpoint_url(relative: &str) -> Result<(), NixCacheError> {
+    let (path, query) = relative.split_once('?').unwrap_or((relative, ""));
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.contains("//")
+        || path.contains('\\')
+        || path
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || byte == b'%' || byte == b'#')
+        || path
+            .split('/')
+            .any(|component| matches!(component, "." | ".."))
+        || query.len() > MAX_METADATA_BYTES as usize
+        || query
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || byte == b'#')
+    {
+        return Err(NixCacheError::new(
+            NixCacheErrorKind::PathTraversal,
+            "Nix narinfo URL is not relative to the cache endpoint",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_store_dir(value: &str) -> Result<(), NixCacheError> {
@@ -1170,8 +1304,11 @@ fn classify_narinfo_error(error: &io::Error) -> NixCacheErrorKind {
 }
 
 fn classify_nar_error(error: &io::Error) -> NixCacheErrorKind {
-    if error.to_string().contains("duplicate") {
+    let detail = error.to_string();
+    if detail.contains("duplicate") {
         NixCacheErrorKind::DuplicateEntry
+    } else if detail.contains("signed byte limit") || detail.contains("compressed") {
+        NixCacheErrorKind::CompressedCorruption
     } else {
         NixCacheErrorKind::NarCorruption
     }
@@ -1184,8 +1321,21 @@ fn remove_tree(path: &Path) {
     if metadata.file_type().is_symlink() || metadata.is_file() {
         let _ = fs::remove_file(path);
     } else if metadata.is_dir() {
+        let _ = super::make_tree_writable_for_removal(path);
         let _ = fs::remove_dir_all(path);
     }
+}
+
+fn make_tree_root_writable(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions)
 }
 
 fn unique_suffix() -> String {

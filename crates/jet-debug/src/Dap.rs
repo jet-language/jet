@@ -23,10 +23,17 @@ use std::path::{Path, PathBuf};
 
 use super::Inferior::{parse_current_thread_id, parse_exit_signal, Inferior, ResumeResult};
 use super::LineMap::LineMap;
+#[cfg(test)]
+use jet_foundation::JSON::parse_json;
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json, JSONValue, MAX_PROTOCOL_HEADER_BYTES,
-    MAX_PROTOCOL_HEADER_COUNT, MAX_PROTOCOL_MESSAGE_BYTES,
+    json_escape, json_get, json_str, json_u32, parse_json_with_limit, JSONValue,
+    MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT,
 };
+
+/// D-DBG-DAP1=A: DAP accepts larger framed messages than LSP, but never an
+/// unbounded body. The JSON tree is still depth-bounded by the foundation
+/// parser.
+const MAX_DAP_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
@@ -72,6 +79,8 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         pending_specs: Vec::new(),
         hit_counts: Vec::new(),
         source_breakpoint_ids: Vec::new(),
+        client_breakpoint_ids: Vec::new(),
+        next_client_breakpoint_id: 1,
         entry_breakpoint_id: None,
         stop_on_entry: true,
         target: None,
@@ -82,6 +91,9 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         last_signal: None,
         exception_filters: default_exception_filters(),
         show_raw_frames: false,
+        lines_start_at_1: true,
+        columns_start_at_1: true,
+        supports_ansi_styling: false,
         unmapped_steps: 0,
         references: ObjectReferences::default(),
         state: State::New,
@@ -135,6 +147,8 @@ struct DapServer {
     pending_specs: Vec<BreakpointSpec>,
     hit_counts: Vec<u32>,
     source_breakpoint_ids: Vec<usize>,
+    client_breakpoint_ids: Vec<u32>,
+    next_client_breakpoint_id: u32,
     entry_breakpoint_id: Option<usize>,
     stop_on_entry: bool,
     target: Option<TargetKind>,
@@ -145,6 +159,9 @@ struct DapServer {
     last_signal: Option<String>,
     exception_filters: HashSet<String>,
     show_raw_frames: bool,
+    lines_start_at_1: bool,
+    columns_start_at_1: bool,
+    supports_ansi_styling: bool,
     unmapped_steps: usize,
     references: ObjectReferences,
     state: State,
@@ -158,7 +175,7 @@ enum TargetKind {
     Attached,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct BreakpointSpec {
     line: usize,
     condition: Option<String>,
@@ -167,7 +184,7 @@ struct BreakpointSpec {
 }
 
 enum BreakpointAction {
-    Stop,
+    Stop(Vec<u32>),
     Continue,
     Log(String),
 }
@@ -237,6 +254,7 @@ struct ObjectReferences {
     live: HashMap<u32, (u64, ReferenceKind)>,
     frame_ids: HashMap<(u32, usize), u32>,
     frame_positions: HashMap<u32, FrameLocation>,
+    frame_raw: HashMap<u32, bool>,
     scope_positions: HashMap<u32, FrameLocation>,
     values: HashMap<u32, ValueReference>,
 }
@@ -249,6 +267,7 @@ impl Default for ObjectReferences {
             live: HashMap::new(),
             frame_ids: HashMap::new(),
             frame_positions: HashMap::new(),
+            frame_raw: HashMap::new(),
             scope_positions: HashMap::new(),
             values: HashMap::new(),
         }
@@ -287,6 +306,7 @@ impl ObjectReferences {
                 position,
             },
         );
+        self.frame_raw.insert(id, false);
         id
     }
 
@@ -299,7 +319,12 @@ impl ObjectReferences {
                 position,
             },
         );
+        self.frame_raw.insert(id, true);
         id
+    }
+
+    fn frame_is_raw(&self, id: u32) -> Option<bool> {
+        self.frame_raw.get(&id).copied()
     }
 
     fn issue_scope(&mut self, frame_id: u32, kind: ReferenceKind) -> u32 {
@@ -340,6 +365,7 @@ impl ObjectReferences {
         self.live.clear();
         self.frame_ids.clear();
         self.frame_positions.clear();
+        self.frame_raw.clear();
         self.scope_positions.clear();
         self.values.clear();
     }
@@ -367,6 +393,7 @@ impl DapServer {
 
     fn close_target(&mut self, terminate: bool) -> io::Result<()> {
         let Some(mut inf) = self.inf.take() else {
+            self.target = None;
             return Ok(());
         };
         let _entry_breakpoint = self.entry_breakpoint_id.take();
@@ -378,7 +405,26 @@ impl DapServer {
             inf.detach()
         };
         inf.quit();
+        self.target = None;
+        self.source_breakpoint_ids.clear();
         action
+    }
+
+    fn cleanup_after_terminal_state(&mut self, out: &mut impl Write) {
+        let terminate = self.target == Some(TargetKind::Launched);
+        if let Err(error) = self.close_target(terminate) {
+            let (id, message) = cleanup_error_details(&error);
+            let diagnostic = match id {
+                22037 => "E2231",
+                22038 => "E2237",
+                _ => "E2234",
+            };
+            let body = format!(
+                "{{\"category\":\"stderr\",\"output\":\"[{}] {}\\n\"}}",
+                diagnostic, message
+            );
+            self.event(out, "output", &body);
+        }
     }
 
     fn source_line(&self, line: usize) -> &str {
@@ -386,6 +432,104 @@ impl DapServer {
             .lines()
             .nth(line.saturating_sub(1))
             .unwrap_or("")
+    }
+
+    fn dap_line(&self, jet_line: usize) -> usize {
+        if self.lines_start_at_1 {
+            jet_line
+        } else {
+            jet_line.saturating_sub(1)
+        }
+    }
+
+    fn dap_column(&self, jet_column: usize) -> usize {
+        if self.columns_start_at_1 {
+            jet_column
+        } else {
+            jet_column.saturating_sub(1)
+        }
+    }
+
+    fn source_path(&self) -> String {
+        std::fs::canonicalize(&self.jet_file)
+            .unwrap_or_else(|_| PathBuf::from(&self.jet_file))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn assign_client_breakpoint_ids(&mut self, specs: &[BreakpointSpec]) -> Vec<u32> {
+        let old_specs = self.pending_specs.clone();
+        let old_ids = self.client_breakpoint_ids.clone();
+        let mut assigned_specs = Vec::new();
+        let mut assigned_ids = Vec::new();
+        for spec in specs {
+            if let Some(position) = assigned_specs.iter().position(|old| old == spec) {
+                assigned_ids.push(assigned_ids[position]);
+                continue;
+            }
+            let id = old_specs
+                .iter()
+                .zip(old_ids.iter().copied())
+                .find_map(|(old, id)| (old == spec).then_some(id))
+                .unwrap_or_else(|| {
+                    let id = self.next_client_breakpoint_id.max(1);
+                    self.next_client_breakpoint_id = id.checked_add(1).unwrap_or(1);
+                    id
+                });
+            assigned_specs.push(spec.clone());
+            assigned_ids.push(id);
+        }
+        assigned_ids
+    }
+
+    fn emit_target_started_events(&mut self, out: &mut impl Write) {
+        let start_method = if self.target == Some(TargetKind::Attached) {
+            "attach"
+        } else {
+            "launch"
+        };
+        self.event(
+            out,
+            "process",
+            &format!(
+                "{{\"name\":\"Jet\",\"startMethod\":\"{}\",\"isLocalProcess\":true}}",
+                start_method
+            ),
+        );
+        self.event(out, "thread", "{\"reason\":\"started\",\"threadId\":1}");
+    }
+
+    fn raw_frames_for_request(&self, args: Option<&JSONValue>) -> Result<bool, &'static str> {
+        match args.and_then(|args| json_get(args, "showRawFrames")) {
+            None => Ok(self.show_raw_frames),
+            Some(value) => match json_bool(value) {
+                Some(value) if value == self.show_raw_frames => Ok(value),
+                Some(_) => Err("showRawFrames cannot change during a debug session"),
+                None => Err("showRawFrames must be a boolean"),
+            },
+        }
+    }
+
+    fn output_text(&self, text: &str) -> String {
+        if self.supports_ansi_styling {
+            return text.to_string();
+        }
+        let mut clean = String::with_capacity(text.len());
+        let mut escape = false;
+        for ch in text.chars() {
+            if escape {
+                if ch.is_ascii_alphabetic() {
+                    escape = false;
+                }
+                continue;
+            }
+            if ch == '\u{1b}' {
+                escape = true;
+            } else {
+                clean.push(ch);
+            }
+        }
+        clean
     }
 
     fn spawn_target(&self) -> io::Result<(Inferior, Option<usize>)> {
@@ -580,6 +724,7 @@ impl DapServer {
         self.hit_counts = vec![0; self.pending_specs.len()];
         self.target = Some(TargetKind::Launched);
         self.respond(out, request_seq, "restart", true, "{}");
+        self.emit_target_started_events(out);
         self.start_target(out);
     }
 
@@ -630,13 +775,23 @@ impl DapServer {
                     );
                     return Some(());
                 }
+                let initialize = match parse_initialize_arguments(args) {
+                    Ok(arguments) => arguments,
+                    Err(message) => {
+                        self.respond_jet_error(out, request_seq, command, 22032, message);
+                        return Some(());
+                    }
+                };
+                self.lines_start_at_1 = initialize.lines_start_at_1;
+                self.columns_start_at_1 = initialize.columns_start_at_1;
+                self.supports_ansi_styling = initialize.supports_ansi_styling;
                 self.state = State::Ready;
                 self.respond(
                     out,
                     request_seq,
                     "initialize",
                     true,
-                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsPauseRequest\":true,\"supportsRestartRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true}",
+                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
                 );
                 Some(())
             }
@@ -783,22 +938,18 @@ impl DapServer {
                     self.respond_jet_error(out, request_seq, command, 22032, message);
                     return Some(());
                 }
-                let lines = match breakpoint_lines(args) {
-                    Ok(lines) => lines,
-                    Err(message) => {
-                        self.respond_err(out, request_seq, command, message);
-                        return Some(());
-                    }
-                };
-                let specs = match breakpoint_specs(args) {
+                let specs = match breakpoint_specs_for_origin(args, self.lines_start_at_1) {
                     Ok(specs) => specs,
                     Err(message) => {
                         self.respond_err(out, request_seq, command, message);
                         return Some(());
                     }
                 };
+                let lines: Vec<usize> = specs.iter().map(|spec| spec.line).collect();
+                let client_ids = self.assign_client_breakpoint_ids(&specs);
                 self.pending_breakpoints = lines.clone();
                 self.pending_specs = specs;
+                self.client_breakpoint_ids = client_ids.clone();
                 self.hit_counts = vec![0; lines.len()];
                 let statuses = if matches!(self.state, State::Running | State::Stopped) {
                     match self.replace_source_breakpoints() {
@@ -821,16 +972,30 @@ impl DapServer {
                 };
                 let verified: Vec<String> = lines
                     .iter()
+                    .zip(client_ids)
                     .zip(statuses)
-                    .map(|(line, verified)| {
+                    .zip(self.pending_specs.iter())
+                    .map(|(((line, id), verified), spec)| {
+                        let verified = verified
+                            && spec
+                                .condition
+                                .as_deref()
+                                .is_none_or(valid_condition)
+                            && spec
+                                .hit_condition
+                                .as_deref()
+                                .is_none_or(valid_hit_condition);
                         if verified {
-                            format!("{{\"verified\":true,\"line\":{line}}}")
+                            format!(
+                                "{{\"id\":{id},\"verified\":true,\"line\":{}}}",
+                                self.dap_line(*line)
+                            )
                         } else {
                             format!(
-                                "{{\"verified\":false,\"line\":{},\"message\":\"no stoppable Jet statement at {}:{}\"}}",
-                                line,
-                                json_escape(&self.jet_file),
-                                line
+                                "{{\"id\":{id},\"verified\":false,\"line\":{},\"message\":\"E2235: no stoppable Jet statement at {}:{}\"}}",
+                                self.dap_line(*line),
+                                json_escape(&self.source_path()),
+                                self.dap_line(*line)
                             )
                         }
                     })
@@ -851,6 +1016,7 @@ impl DapServer {
                     return Some(());
                 }
                 self.respond(out, request_seq, command, true, "{}");
+                self.emit_target_started_events(out);
                 self.apply_pending_breakpoints_and_run(out);
                 Some(())
             }
@@ -895,9 +1061,15 @@ impl DapServer {
                 let thread_json = threads
                     .iter()
                     .map(|thread| {
+                        let name = if thread.id == 1 {
+                            "main".to_string()
+                        } else {
+                            format!("task {} (stopped)", thread.id)
+                        };
                         format!(
-                            "{{\"id\":{},\"name\":\"Jet task {}\"}}",
-                            thread.id, thread.id
+                            "{{\"id\":{},\"name\":\"{}\"}}",
+                            thread.id,
+                            json_escape(&name)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -922,10 +1094,20 @@ impl DapServer {
                     );
                     return Some(());
                 }
-                let thread_id = args
+                let Some(thread_id) = args
                     .and_then(|args| json_get(args, "threadId"))
                     .and_then(json_u32)
-                    .unwrap_or(self.current_thread);
+                    .filter(|thread_id| *thread_id > 0)
+                else {
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22032,
+                        "stackTrace threadId must be a positive integer",
+                    );
+                    return Some(());
+                };
                 if let Some(inf) = self.inf.as_mut() {
                     if let Err(_error) = inf.select_thread(thread_id) {
                         self.respond_jet_error(
@@ -939,21 +1121,12 @@ impl DapServer {
                     }
                     self.current_thread = thread_id;
                 }
-                let show_raw_frames = match args.and_then(|args| json_get(args, "showRawFrames")) {
-                    None => self.show_raw_frames,
-                    Some(value) => match json_bool(value) {
-                        Some(value) => value,
-                        None => {
-                            self.respond_jet_error(
-                                out,
-                                request_seq,
-                                command,
-                                22032,
-                                "showRawFrames must be a boolean",
-                            );
-                            return Some(());
-                        }
-                    },
+                let show_raw_frames = match self.raw_frames_for_request(args) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        self.respond_jet_error(out, request_seq, command, 22032, message);
+                        return Some(());
+                    }
                 };
                 let frames = match self.inf.as_mut().map(Inferior::backtrace) {
                     Some(Ok(out_text)) => Inferior::parse_frames(&out_text),
@@ -1000,21 +1173,23 @@ impl DapServer {
                     ) {
                         let id = self.references.issue_frame(thread_id, position);
                         entries.push(format!(
-                            "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":1}}",
+                            "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
                             id,
                             json_escape(&Inferior::safe_jet_func(&frame.func)),
-                            json_escape(&self.jet_file),
-                            jline
+                            json_escape(&self.source_path()),
+                            self.dap_line(jline),
+                            self.dap_column(1)
                         ));
                     }
                     if show_raw_frames {
                         let id = self.references.issue_raw_frame(thread_id, position);
                         entries.push(format!(
-                            "{{\"id\":{},\"name\":\"[raw] {}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":1}}",
+                            "{{\"id\":{},\"name\":\"[raw] {}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
                             id,
                             json_escape(&frame.func),
                             json_escape(&self.rust_file),
-                            frame.rust_line
+                            self.dap_line(frame.rust_line),
+                            self.dap_column(1)
                         ));
                     }
                 }
@@ -1083,8 +1258,8 @@ impl DapServer {
                     self.respond_stale_reference(out, request_seq, command);
                     return Some(());
                 };
-                let show_raw_frames = match args.and_then(|args| json_get(args, "showRawFrames")) {
-                    None => self.show_raw_frames,
+                let requested_raw = match args.and_then(|args| json_get(args, "showRawFrames")) {
+                    None => false,
                     Some(value) => match json_bool(value) {
                         Some(value) => value,
                         None => {
@@ -1099,22 +1274,41 @@ impl DapServer {
                         }
                     },
                 };
-                let kind = if show_raw_frames {
-                    ReferenceKind::RawScope
+                let raw_frame = self.references.frame_is_raw(frame_id).unwrap_or(false);
+                let show_raw_frames = requested_raw || self.show_raw_frames || raw_frame;
+                let mut scopes = Vec::new();
+                if raw_frame {
+                    let scope_id = self
+                        .references
+                        .issue_scope(frame_id, ReferenceKind::RawScope);
+                    scopes.push(format!(
+                        "{{\"name\":\"[raw] Locals\",\"variablesReference\":{},\"expensive\":false}}",
+                        scope_id
+                    ));
                 } else {
-                    ReferenceKind::Scope
-                };
-                let scope_id = self.references.issue_scope(frame_id, kind);
-                let scope_name = if show_raw_frames {
-                    "[raw] Locals"
-                } else {
-                    "Locals"
-                };
-                let body = format!(
-                    "{{\"scopes\":[{{\"name\":\"{}\",\"variablesReference\":{},\"expensive\":false}}]}}",
-                    json_escape(scope_name),
-                    scope_id
-                );
+                    let scope_id = self.references.issue_scope(frame_id, ReferenceKind::Scope);
+                    scopes.push(format!(
+                        "{{\"name\":\"Locals\",\"variablesReference\":{},\"expensive\":false}}",
+                        scope_id
+                    ));
+                    if show_raw_frames {
+                        let raw_scope_id = self
+                            .references
+                            .issue_scope(frame_id, ReferenceKind::RawScope);
+                        scopes.push(format!(
+                            "{{\"name\":\"[raw] Locals\",\"variablesReference\":{},\"expensive\":false}}",
+                            raw_scope_id
+                        ));
+                    }
+                    for scope_name in ["Arguments", "Captures"] {
+                        let scope_id = self.references.issue_scope(frame_id, ReferenceKind::Scope);
+                        scopes.push(format!(
+                            "{{\"name\":\"{}\",\"variablesReference\":{},\"expensive\":false}}",
+                            scope_name, scope_id
+                        ));
+                    }
+                }
+                let body = format!("{{\"scopes\":[{}]}}", scopes.join(","));
                 self.respond(out, request_seq, command, true, &body);
                 Some(())
             }
@@ -1216,6 +1410,42 @@ impl DapServer {
                 // I2: only safe Jet bindings cross the adapter boundary. Rust
                 // temporaries, addresses, layouts, and optimized storage stay
                 // inside the backend.
+                let start = match args.and_then(|args| json_get(args, "start")) {
+                    None => 0usize,
+                    Some(value) => {
+                        match json_u32(value).and_then(|value| usize::try_from(value).ok()) {
+                            Some(value) => value,
+                            None => {
+                                self.respond_jet_error(
+                                    out,
+                                    request_seq,
+                                    command,
+                                    22032,
+                                    "variables start must be a nonnegative integer",
+                                );
+                                return Some(());
+                            }
+                        }
+                    }
+                };
+                let count = match args.and_then(|args| json_get(args, "count")) {
+                    None => None,
+                    Some(value) => {
+                        match json_u32(value).and_then(|value| usize::try_from(value).ok()) {
+                            Some(value) => Some(value),
+                            None => {
+                                self.respond_jet_error(
+                                    out,
+                                    request_seq,
+                                    command,
+                                    22032,
+                                    "variables count must be a nonnegative integer",
+                                );
+                                return Some(());
+                            }
+                        }
+                    }
+                };
                 let entries: Vec<String> = locals
                     .iter()
                     .filter_map(|(ty, name, value)| {
@@ -1228,7 +1458,7 @@ impl DapServer {
                         let display_name = if raw_scope {
                             name.clone()
                         } else if value_reference.is_some() {
-                            Inferior::rust_member_to_jet(name).unwrap_or_else(|| name.clone())
+                            Inferior::rust_member_to_jet(name)?
                         } else {
                             Inferior::rust_local_to_jet(name)?
                         };
@@ -1270,7 +1500,17 @@ impl DapServer {
                         ))
                     })
                     .collect();
-                let body = format!("{{\"variables\":[{}]}}", entries.join(","));
+                let total = entries.len();
+                let entries = entries
+                    .into_iter()
+                    .skip(start)
+                    .take(count.unwrap_or(usize::MAX))
+                    .collect::<Vec<_>>();
+                let body = format!(
+                    "{{\"variables\":[{}],\"namedVariables\":{}}}",
+                    entries.join(","),
+                    total
+                );
                 self.respond(out, request_seq, command, true, &body);
                 Some(())
             }
@@ -1284,6 +1524,18 @@ impl DapServer {
                         "evaluate requires a stopped target",
                     );
                     return Some(());
+                }
+                if let Some(context) = args.and_then(|args| json_get(args, "context")) {
+                    if !matches!(json_str(context), Some("hover" | "watch" | "repl")) {
+                        self.respond_jet_error(
+                            out,
+                            request_seq,
+                            command,
+                            22032,
+                            "evaluate context must be hover, watch, or repl",
+                        );
+                        return Some(());
+                    }
                 }
                 let Some(expression) = args
                     .and_then(|args| json_get(args, "expression"))
@@ -1407,6 +1659,17 @@ impl DapServer {
                     );
                     return Some(());
                 }
+                if self.inf.is_none() {
+                    self.invalidate_references();
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22034,
+                        "Jet debugger has no target",
+                    );
+                    return Some(());
+                }
                 self.invalidate_references();
                 let resume_cmd = match command {
                     "continue" => "continue",
@@ -1415,19 +1678,19 @@ impl DapServer {
                     _ => "thread step-out",
                 };
                 self.state = State::Running;
+                self.respond(
+                    out,
+                    request_seq,
+                    command,
+                    true,
+                    "{\"allThreadsContinued\":true}",
+                );
                 let result = self
                     .inf
                     .as_mut()
                     .map(|inf| inf.resume_and_locate(resume_cmd));
                 match result {
                     Some(Ok(result)) => {
-                        self.respond(
-                            out,
-                            request_seq,
-                            command,
-                            true,
-                            "{\"allThreadsContinued\":true}",
-                        );
                         let mode = if command == "continue" {
                             ResumeMode::Continue
                         } else {
@@ -1436,25 +1699,14 @@ impl DapServer {
                         self.emit_resume(out, result, mode);
                     }
                     Some(Err(error)) => {
-                        self.state = State::Terminated;
-                        self.respond_backend_error(
+                        self.terminate_backend(
                             out,
-                            request_seq,
-                            command,
                             &error,
                             "the native debugger lost the running session",
                         );
-                        let body = format!(
-                            "{{\"category\":\"stderr\",\"output\":\"{}\\n\"}}",
-                            "the native debugger lost the running session"
-                        );
-                        self.event(out, "output", &body);
-                        self.event(out, "terminated", "{}");
                     }
                     None => {
-                        self.state = State::Terminated;
-                        self.respond_err(out, request_seq, command, "Jet debugger has no target");
-                        self.event(out, "terminated", "{}");
+                        self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target");
                     }
                 }
                 Some(())
@@ -1470,28 +1722,32 @@ impl DapServer {
                     );
                     return Some(());
                 }
+                if self.inf.is_none() {
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22034,
+                        "Jet debugger has no target",
+                    );
+                    return Some(());
+                }
                 self.invalidate_references();
+                self.respond(out, request_seq, command, true, "{}");
                 let result = self.inf.as_mut().map(Inferior::interrupt);
                 match result {
                     Some(Ok(bt_text)) => {
-                        self.respond(out, request_seq, command, true, "{}");
                         self.emit_resume(out, ResumeResult::Stopped(bt_text), ResumeMode::Pause);
                     }
                     Some(Err(error)) => {
-                        self.state = State::Terminated;
-                        self.respond_backend_error(
+                        self.terminate_backend(
                             out,
-                            request_seq,
-                            command,
                             &error,
                             "the native debugger could not pause the program",
                         );
-                        self.event(out, "terminated", "{}");
                     }
                     None => {
-                        self.state = State::Terminated;
-                        self.respond_err(out, request_seq, command, "Jet debugger has no target");
-                        self.event(out, "terminated", "{}");
+                        self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target");
                     }
                 }
                 Some(())
@@ -1608,8 +1864,8 @@ impl DapServer {
                     true,
                     &format!(
                         "{{\"sources\":[{{\"name\":\"{}\",\"path\":\"{}\"}}]}}",
-                        json_escape(&self.jet_file),
-                        json_escape(&self.jet_file)
+                        json_escape(&self.source_path()),
+                        json_escape(&self.source_path())
                     ),
                 );
                 Some(())
@@ -1753,14 +2009,14 @@ impl DapServer {
         if !stdout.is_empty() {
             let body = format!(
                 "{{\"category\":\"stdout\",\"output\":\"{}\"}}",
-                json_escape(&stdout)
+                json_escape(&self.output_text(&stdout))
             );
             self.event(out, "output", &body);
         }
         if !stderr.is_empty() {
             let body = format!(
                 "{{\"category\":\"stderr\",\"output\":\"{}\"}}",
-                json_escape(&stderr)
+                json_escape(&self.output_text(&stderr))
             );
             self.event(out, "output", &body);
         }
@@ -1777,194 +2033,250 @@ impl DapServer {
         mode: ResumeMode,
         depth: usize,
     ) {
-        if depth >= 200 {
-            self.terminate_with_diagnostic(
-                out,
-                "E2235",
-                "native debugger produced too many stops without a verified Jet source mapping",
-            );
-            return;
-        }
-        self.emit_program_output(out);
-        let bt_text = match result {
-            ResumeResult::Exited { status, signal } => {
-                self.invalidate_references();
-                self.state = State::Terminated;
-                self.last_signal = signal.clone();
-                let body = match (status, signal) {
-                    (Some(code), Some(signal)) => {
-                        format!(
-                            "{{\"exitCode\":{},\"signal\":\"{}\"}}",
-                            code,
-                            json_escape(&signal)
-                        )
-                    }
-                    (Some(code), None) => format!("{{\"exitCode\":{code}}}"),
-                    (None, Some(signal)) => format!("{{\"signal\":\"{}\"}}", json_escape(&signal)),
-                    (None, None) => "{}".to_string(),
-                };
-                self.event(out, "exited", &body);
-                self.event(out, "terminated", "{}");
-                return;
-            }
-            ResumeResult::Stopped(text) => text,
-        };
-        self.last_signal = parse_exit_signal(&bt_text);
-        if mode != ResumeMode::Pause {
-            if let Some(kind) = self.exception_kind(&bt_text) {
-                if !self.exception_filter_enabled(kind) {
-                    self.continue_after_hidden_stop(out, depth, "continue", ResumeMode::Continue);
-                    return;
-                }
-            }
-        }
-        if let Some(thread) = parse_current_thread_id(&bt_text) {
-            self.current_thread = thread;
-        }
-        self.state = State::Stopped;
-        let entry_stop = mode == ResumeMode::Launch
-            && self.entry_breakpoint_id.is_some()
-            && bt_text.contains("stop reason = breakpoint");
-        if entry_stop {
-            let entry_id = self
-                .entry_breakpoint_id
-                .take()
-                .expect("entry breakpoint checked");
-            let removed = self.inf.as_mut().map(|inf| inf.delete_breakpoint(entry_id));
-            if !matches!(removed, Some(Ok(()))) {
+        let mut result = result;
+        let mut mode = mode;
+        let mut depth = depth;
+        loop {
+            if depth >= 200 && matches!(&result, ResumeResult::Stopped(_)) {
                 self.terminate_with_diagnostic(
                     out,
-                    "E2234",
-                    "the native debugger could not retire the entry breakpoint",
+                    "E2235",
+                    "native debugger produced too many stops without a verified Jet source mapping",
                 );
                 return;
             }
-        }
-        let reason = if self.last_signal.is_some()
-            || bt_text.contains("signal")
-            || bt_text.contains("exception")
-        {
-            "exception"
-        } else if entry_stop {
-            "entry"
-        } else if mode == ResumeMode::Step {
-            "step"
-        } else if mode == ResumeMode::Pause {
-            "pause"
-        } else {
-            "breakpoint"
-        };
-        if let Some(frame) = Inferior::parse_top_frame(&bt_text) {
-            match self
-                .map
-                .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
+            self.emit_program_output(out);
+            let bt_text = match result {
+                ResumeResult::Exited { status, signal } => {
+                    self.invalidate_references();
+                    self.state = State::Terminated;
+                    self.last_signal = signal.clone();
+                    let body = match (status, signal) {
+                        (Some(code), Some(signal)) => {
+                            format!(
+                                "{{\"exitCode\":{},\"signal\":\"{}\"}}",
+                                code,
+                                json_escape(&signal)
+                            )
+                        }
+                        (Some(code), None) => format!("{{\"exitCode\":{code}}}"),
+                        (None, Some(signal)) => {
+                            format!("{{\"signal\":\"{}\"}}", json_escape(&signal))
+                        }
+                        (None, None) => "{}".to_string(),
+                    };
+                    self.event(out, "exited", &body);
+                    self.cleanup_after_terminal_state(out);
+                    self.event(out, "terminated", "{}");
+                    return;
+                }
+                ResumeResult::Stopped(text) => text,
+            };
+            self.last_signal = parse_exit_signal(&bt_text);
+            if mode != ResumeMode::Pause {
+                if let Some(kind) = self.exception_kind(&bt_text) {
+                    if !self.exception_filter_enabled(kind) {
+                        match self.resume_hidden_stop("continue") {
+                            Ok(next) => {
+                                result = next;
+                                mode = ResumeMode::Continue;
+                                depth += 1;
+                                continue;
+                            }
+                            Err(error) => {
+                                self.terminate_backend(
+                                out,
+                                &error,
+                                "the native debugger lost the running session while skipping a non-Jet stop",
+                            );
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(thread) = parse_current_thread_id(&bt_text) {
+                self.current_thread = thread;
+            }
+            self.state = State::Stopped;
+            let entry_stop = mode == ResumeMode::Launch
+                && self.entry_breakpoint_id.is_some()
+                && bt_text.contains("stop reason = breakpoint");
+            if entry_stop {
+                let entry_id = self
+                    .entry_breakpoint_id
+                    .take()
+                    .expect("entry breakpoint checked");
+                let removed = self.inf.as_mut().map(|inf| inf.delete_breakpoint(entry_id));
+                if !matches!(removed, Some(Ok(()))) {
+                    self.terminate_with_diagnostic(
+                        out,
+                        "E2234",
+                        "the native debugger could not retire the entry breakpoint",
+                    );
+                    return;
+                }
+            }
+            let reason = if self.last_signal.is_some()
+                || bt_text.contains("signal")
+                || bt_text.contains("exception")
             {
-                None if !self.show_raw_frames && mode != ResumeMode::Pause => {
-                    if self.unmapped_steps >= 200 {
-                        self.terminate_with_diagnostic(
+                "exception"
+            } else if entry_stop {
+                "entry"
+            } else if mode == ResumeMode::Step {
+                "step"
+            } else if mode == ResumeMode::Pause {
+                "pause"
+            } else {
+                "breakpoint"
+            };
+            let mut hit_breakpoint_ids = Vec::new();
+            if let Some(frame) = Inferior::parse_top_frame(&bt_text) {
+                match self
+                    .map
+                    .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
+                {
+                    None if !self.show_raw_frames && mode != ResumeMode::Pause => {
+                        if self.unmapped_steps >= 200 {
+                            self.terminate_with_diagnostic(
                             out,
                             "E2235",
                             "native debugger produced too many stops without a verified Jet source mapping",
                         );
-                        return;
+                            return;
+                        }
+                        self.unmapped_steps += 1;
+                        match self.resume_hidden_stop("thread step-over") {
+                            Ok(next) => {
+                                result = next;
+                                depth += 1;
+                                continue;
+                            }
+                            Err(error) => {
+                                self.terminate_backend(
+                                out,
+                                &error,
+                                "the native debugger lost the running session while skipping a non-Jet stop",
+                            );
+                                return;
+                            }
+                        }
                     }
-                    self.unmapped_steps += 1;
-                    self.continue_after_hidden_stop(out, depth, "thread step-over", mode);
-                    return;
+                    Some(jline)
+                        if !entry_stop && mode != ResumeMode::Step && mode != ResumeMode::Pause =>
+                    {
+                        self.unmapped_steps = 0;
+                        match self.breakpoint_action(jline) {
+                            BreakpointAction::Stop(ids) => {
+                                hit_breakpoint_ids = ids;
+                            }
+                            BreakpointAction::Continue => {
+                                match self.resume_hidden_stop("continue") {
+                                    Ok(next) => {
+                                        result = next;
+                                        mode = ResumeMode::Continue;
+                                        // A verified Jet breakpoint that did not
+                                        // match is normal control flow, not a
+                                        // backend stop storm.
+                                        depth = 0;
+                                        continue;
+                                    }
+                                    Err(error) => {
+                                        self.terminate_backend(
+                                        out,
+                                        &error,
+                                        "the native debugger lost the running session while skipping a non-Jet stop",
+                                    );
+                                        return;
+                                    }
+                                }
+                            }
+                            BreakpointAction::Log(message) => {
+                                self.event(
+                                    out,
+                                    "output",
+                                    &format!(
+                                        "{{\"category\":\"console\",\"output\":\"{}\\n\"}}",
+                                        json_escape(&message)
+                                    ),
+                                );
+                                match self.resume_hidden_stop("continue") {
+                                    Ok(next) => {
+                                        result = next;
+                                        mode = ResumeMode::Continue;
+                                        depth = 0;
+                                        continue;
+                                    }
+                                    Err(error) => {
+                                        self.terminate_backend(
+                                        out,
+                                        &error,
+                                        "the native debugger lost the running session while skipping a non-Jet stop",
+                                    );
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        self.unmapped_steps = 0;
+                    }
+                    Some(_) => {
+                        self.unmapped_steps = 0;
+                    }
                 }
-                Some(jline)
-                    if !entry_stop && mode != ResumeMode::Step && mode != ResumeMode::Pause =>
-                {
-                    self.unmapped_steps = 0;
-                    match self.breakpoint_action(jline) {
-                        BreakpointAction::Stop => {}
-                        BreakpointAction::Continue => {
-                            self.continue_after_hidden_stop(
-                                out,
-                                depth,
-                                "continue",
-                                ResumeMode::Continue,
-                            );
-                            return;
-                        }
-                        BreakpointAction::Log(message) => {
-                            self.event(
-                                out,
-                                "output",
-                                &format!(
-                                    "{{\"category\":\"console\",\"output\":\"{}\\n\"}}",
-                                    json_escape(&message)
-                                ),
-                            );
-                            self.continue_after_hidden_stop(
-                                out,
-                                depth,
-                                "continue",
-                                ResumeMode::Continue,
-                            );
-                            return;
-                        }
-                    }
+            }
+            match Inferior::parse_top_frame(&bt_text) {
+                Some(frame) => {
+                    let _ = self.source_line(
+                        self.map
+                            .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
+                            .unwrap_or(1),
+                    );
+                    let hit_ids = if hit_breakpoint_ids.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            ",\"hitBreakpointIds\":[{}]",
+                            hit_breakpoint_ids
+                                .iter()
+                                .map(u32::to_string)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        )
+                    };
+                    let body = format!(
+                        "{{\"reason\":\"{}\",\"threadId\":{},\"allThreadsStopped\":true{}}}",
+                        reason, self.current_thread, hit_ids
+                    );
+                    self.event(out, "stopped", &body);
                 }
                 None => {
-                    self.unmapped_steps = 0;
+                    // No parseable frame cannot be represented as a Jet stop. A
+                    // raw backend transcript is never a substitute for a Jet
+                    // frame, even when the stop was caused by a signal.
+                    self.terminate_with_diagnostic(
+                        out,
+                        "E2235",
+                        "native debugger stopped without a verified Jet frame",
+                    );
                 }
-                Some(_) => {
-                    self.unmapped_steps = 0;
-                }
             }
-        }
-        match Inferior::parse_top_frame(&bt_text) {
-            Some(frame) => {
-                let _ = self.source_line(
-                    self.map
-                        .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
-                        .unwrap_or(1),
-                );
-                let body = format!(
-                    "{{\"reason\":\"{}\",\"threadId\":{},\"allThreadsStopped\":true}}",
-                    reason, self.current_thread
-                );
-                self.event(out, "stopped", &body);
-            }
-            None => {
-                // No parseable frame cannot be represented as a Jet stop. A
-                // raw backend transcript is never a substitute for a Jet
-                // frame, even when the stop was caused by a signal.
-                self.terminate_with_diagnostic(
-                    out,
-                    "E2235",
-                    "native debugger stopped without a verified Jet frame",
-                );
-            }
+            return;
         }
     }
 
-    fn continue_after_hidden_stop(
-        &mut self,
-        out: &mut impl Write,
-        depth: usize,
-        resume_command: &str,
-        mode: ResumeMode,
-    ) {
+    fn resume_hidden_stop(&mut self, resume_command: &str) -> Result<ResumeResult, io::Error> {
         self.state = State::Running;
-        let result = self
-            .inf
-            .as_mut()
-            .map(|inf| inf.resume_and_locate(resume_command));
-        match result {
-            Some(Ok(next)) => self.emit_resume_inner(out, next, mode, depth + 1),
-            Some(Err(error)) => self.terminate_backend(
-                out,
-                &error,
-                "the native debugger lost the running session while skipping a non-Jet stop",
-            ),
-            None => self.terminate_with_diagnostic(
-                out,
-                "E2234",
+        let Some(inf) = self.inf.as_mut() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
                 "the native debugger has no target while skipping a non-Jet stop",
-            ),
-        }
+            ));
+        };
+        inf.resume_and_locate(resume_command)
     }
 
     fn exception_kind(&self, backtrace: &str) -> Option<&'static str> {
@@ -1994,6 +2306,7 @@ impl DapServer {
     fn terminate_with_diagnostic(&mut self, out: &mut impl Write, diagnostic: &str, message: &str) {
         self.state = State::Terminated;
         self.invalidate_references();
+        self.cleanup_after_terminal_state(out);
         let body = format!(
             "{{\"category\":\"stderr\",\"output\":\"[{}] {}\\n\"}}",
             json_escape(diagnostic),
@@ -2009,6 +2322,8 @@ impl DapServer {
         }
         let mut log = None;
         let mut matched = false;
+        let mut stop_ids = Vec::new();
+        let mut should_stop = false;
         for index in 0..self.pending_specs.len() {
             let spec = self.pending_specs[index].clone();
             if spec.line != line {
@@ -2037,8 +2352,14 @@ impl DapServer {
             if let Some(message) = spec.log_message.as_deref() {
                 log = Some(self.expand_log_message(message));
             } else {
-                return BreakpointAction::Stop;
+                should_stop = true;
+                if let Some(id) = self.client_breakpoint_ids.get(index).copied() {
+                    stop_ids.push(id);
+                }
             }
+        }
+        if should_stop {
+            return BreakpointAction::Stop(stop_ids);
         }
         if let Some(message) = log {
             BreakpointAction::Log(message)
@@ -2288,7 +2609,7 @@ fn cleanup_error_details(error: &io::Error) -> (i64, &'static str) {
 }
 
 fn default_exception_filters() -> HashSet<String> {
-    ["all".to_string()].into_iter().collect()
+    ["panic".to_string()].into_iter().collect()
 }
 
 fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'static str) {
@@ -2347,7 +2668,8 @@ fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'s
 }
 
 fn parse_dap_request(body: &str) -> Result<JSONValue, &'static str> {
-    let message = parse_json(body).map_err(|()| "invalid JSON")?;
+    let message =
+        parse_json_with_limit(body, MAX_DAP_MESSAGE_BYTES).map_err(|()| "invalid JSON")?;
     let JSONValue::Object(_) = &message else {
         return Err("request must be an object");
     };
@@ -2402,6 +2724,45 @@ fn jet_expression(value: &str) -> Option<(String, String)> {
     Some((root.to_string(), suffix.to_string()))
 }
 
+struct InitializeArguments {
+    lines_start_at_1: bool,
+    columns_start_at_1: bool,
+    supports_ansi_styling: bool,
+}
+
+fn parse_initialize_arguments(
+    args: Option<&JSONValue>,
+) -> Result<InitializeArguments, &'static str> {
+    let args = args.ok_or("initialize arguments are required")?;
+    if json_get(args, "adapterID").and_then(json_str) != Some("jet") {
+        return Err("initialize adapterID must be `jet`");
+    }
+    if let Some(path_format) = json_get(args, "pathFormat") {
+        if json_str(path_format) != Some("path") {
+            return Err("initialize pathFormat must be `path`");
+        }
+    }
+    let lines_start_at_1 = match json_get(args, "linesStartAt1") {
+        None => true,
+        Some(value) => json_bool(value).ok_or("initialize linesStartAt1 must be a boolean")?,
+    };
+    let columns_start_at_1 = match json_get(args, "columnsStartAt1") {
+        None => true,
+        Some(value) => json_bool(value).ok_or("initialize columnsStartAt1 must be a boolean")?,
+    };
+    let supports_ansi_styling = match json_get(args, "supportsANSIStyling") {
+        None => false,
+        Some(value) => {
+            json_bool(value).ok_or("initialize supportsANSIStyling must be a boolean")?
+        }
+    };
+    Ok(InitializeArguments {
+        lines_start_at_1,
+        columns_start_at_1,
+        supports_ansi_styling,
+    })
+}
+
 struct LaunchArguments {
     args: Vec<String>,
     cwd: Option<String>,
@@ -2433,12 +2794,24 @@ fn parse_launch_arguments(
         Some(_) => return Err("launch args must be an array"),
     };
     let cwd = match args.and_then(|args| json_get(args, "cwd")) {
-        None => None,
-        Some(value) => Some(
-            json_str(value)
-                .ok_or("launch cwd must be a string")?
-                .to_string(),
-        ),
+        None => std::fs::canonicalize(jet_file)
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .map(|path| path.to_string_lossy().into_owned()),
+        Some(value) => {
+            let raw = json_str(value).ok_or("launch cwd must be a string")?;
+            let path =
+                std::fs::canonicalize(raw).map_err(|_| "launch cwd must be a local directory")?;
+            if !path.is_dir() {
+                return Err("launch cwd must be a local directory");
+            }
+            if let Ok(source) = std::fs::canonicalize(jet_file) {
+                if !source.starts_with(&path) {
+                    return Err("launch cwd must contain the selected Jet source");
+                }
+            }
+            Some(path.to_string_lossy().into_owned())
+        }
     };
     let env = match args.and_then(|args| json_get(args, "env")) {
         None => Vec::new(),
@@ -2489,7 +2862,16 @@ fn same_path(left: &str, right: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 fn breakpoint_lines(args: Option<&JSONValue>) -> Result<Vec<usize>, &'static str> {
+    breakpoint_lines_for_origin(args, true)
+}
+
+#[cfg(test)]
+fn breakpoint_lines_for_origin(
+    args: Option<&JSONValue>,
+    lines_start_at_1: bool,
+) -> Result<Vec<usize>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
@@ -2501,8 +2883,15 @@ fn breakpoint_lines(args: Option<&JSONValue>) -> Result<Vec<usize>, &'static str
         .map(|item| {
             let line = json_get(item, "line")
                 .and_then(json_u32)
-                .filter(|line| *line > 0)
-                .ok_or("breakpoint line must be a positive integer")?;
+                .ok_or("breakpoint line must be a nonnegative integer")?;
+            if lines_start_at_1 && line == 0 {
+                return Err("breakpoint line must be a positive integer");
+            }
+            let line = if lines_start_at_1 {
+                line
+            } else {
+                line.checked_add(1).ok_or("breakpoint line is too large")?
+            };
             usize::try_from(line).map_err(|_| "breakpoint line is too large")
         })
         .collect()
@@ -2522,7 +2911,10 @@ fn breakpoint_source(args: Option<&JSONValue>, jet_file: &str) -> Result<(), &'s
     Ok(())
 }
 
-fn breakpoint_specs(args: Option<&JSONValue>) -> Result<Vec<BreakpointSpec>, &'static str> {
+fn breakpoint_specs_for_origin(
+    args: Option<&JSONValue>,
+    lines_start_at_1: bool,
+) -> Result<Vec<BreakpointSpec>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
@@ -2534,9 +2926,16 @@ fn breakpoint_specs(args: Option<&JSONValue>) -> Result<Vec<BreakpointSpec>, &'s
         .map(|item| {
             let line = json_get(item, "line")
                 .and_then(json_u32)
-                .filter(|line| *line > 0)
-                .and_then(|line| usize::try_from(line).ok())
-                .ok_or("breakpoint line must be a positive integer")?;
+                .ok_or("breakpoint line must be a nonnegative integer")?;
+            if lines_start_at_1 && line == 0 {
+                return Err("breakpoint line must be a positive integer");
+            }
+            let line = if lines_start_at_1 {
+                line
+            } else {
+                line.checked_add(1).ok_or("breakpoint line is too large")?
+            };
+            let line = usize::try_from(line).map_err(|_| "breakpoint line is too large")?;
             let condition = breakpoint_text(item, "condition")?;
             let hit_condition = breakpoint_text(item, "hitCondition")?;
             let log_message = breakpoint_text(item, "logMessage")?;
@@ -2547,7 +2946,13 @@ fn breakpoint_specs(args: Option<&JSONValue>) -> Result<Vec<BreakpointSpec>, &'s
                 log_message,
             })
         })
-        .collect()
+        .try_fold(Vec::new(), |mut specs, spec| {
+            let spec = spec?;
+            if !specs.contains(&spec) {
+                specs.push(spec);
+            }
+            Ok(specs)
+        })
 }
 
 fn breakpoint_text(item: &JSONValue, key: &str) -> Result<Option<String>, &'static str> {
@@ -2563,26 +2968,43 @@ fn breakpoint_text(item: &JSONValue, key: &str) -> Result<Option<String>, &'stat
 
 fn hit_condition_matches(condition: &str, count: u32) -> bool {
     let condition = condition.trim();
-    let count = i64::from(count);
-    for operator in [">=", "<=", "==", ">", "<"] {
-        if let Some(value) = condition.strip_prefix(operator) {
-            let Ok(value) = value.trim().parse::<i64>() else {
-                return false;
-            };
-            return match operator {
-                ">=" => count >= value,
-                "<=" => count <= value,
-                "==" => count == value,
-                ">" => count > value,
-                "<" => count < value,
-                _ => false,
-            };
-        }
+    if let Some(value) = condition.strip_prefix(">=") {
+        return value
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|value| *value > 0)
+            .is_some_and(|value| count >= value);
     }
     condition
-        .parse::<i64>()
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value > 0)
         .map(|value| count == value)
         .unwrap_or(false)
+}
+
+fn valid_hit_condition(condition: &str) -> bool {
+    let condition = condition.trim();
+    let value = condition.strip_prefix(">=").unwrap_or(condition).trim();
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u32>().ok().is_some_and(|value| value > 0)
+}
+
+fn valid_condition(condition: &str) -> bool {
+    let condition = condition.trim();
+    if jet_expression(condition).is_some() {
+        return true;
+    }
+    ["==", "!=", ">=", "<=", ">", "<"]
+        .iter()
+        .find_map(|operator| condition.split_once(operator))
+        .is_some_and(|(left, right)| {
+            jet_expression(left.trim()).is_some()
+                && !right.trim().is_empty()
+                && !right.chars().any(char::is_control)
+        })
 }
 
 fn parse_attach_arguments(args: Option<&JSONValue>) -> Result<AttachArguments, &'static str> {
@@ -2610,6 +3032,10 @@ fn attach_path(args: &JSONValue, key: &str) -> Result<PathBuf, &'static str> {
         .and_then(json_str)
         .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
         .ok_or("attach paths must be non-empty strings")?;
+    let metadata = std::fs::symlink_metadata(raw).map_err(|_| "attach path is not a local file")?;
+    if metadata.file_type().is_symlink() {
+        return Err("attach paths must not be symbolic links");
+    }
     let path = std::fs::canonicalize(raw).map_err(|_| "attach path is not a local file")?;
     if !path.is_file() {
         return Err("attach path is not a local file");
@@ -2668,14 +3094,37 @@ fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
                 "protocol headers exceed the 64-field limit",
             ));
         }
-        if let Some(value) = line.strip_prefix("Content-Length:") {
+        let header = line
+            .strip_suffix("\r\n")
+            .or_else(|| line.strip_suffix('\n'))
+            .unwrap_or(&line);
+        let Some((name, value)) = header.split_once(':') else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "protocol header is malformed",
+            ));
+        };
+        if !name.is_ascii() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "protocol header name is not ASCII",
+            ));
+        }
+        if name.trim().eq_ignore_ascii_case("Content-Length") {
             if content_length.is_some() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "protocol frame has duplicate Content-Length headers",
                 ));
             }
-            content_length = Some(value.trim().parse::<usize>().map_err(|_| {
+            let value = value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "protocol Content-Length is invalid",
+                ));
+            }
+            content_length = Some(value.parse::<usize>().map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "protocol Content-Length is invalid",
@@ -2683,10 +3132,10 @@ fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
             })?);
         }
     };
-    if len > MAX_PROTOCOL_MESSAGE_BYTES {
+    if len > MAX_DAP_MESSAGE_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "protocol message exceeds the 1048576-byte limit",
+            "protocol message exceeds the 16777216-byte limit",
         ));
     }
     let mut body = vec![0u8; len];
@@ -2723,6 +3172,8 @@ mod tests {
             pending_specs: Vec::new(),
             hit_counts: Vec::new(),
             source_breakpoint_ids: Vec::new(),
+            client_breakpoint_ids: Vec::new(),
+            next_client_breakpoint_id: 1,
             entry_breakpoint_id: None,
             stop_on_entry: true,
             target: None,
@@ -2733,6 +3184,9 @@ mod tests {
             last_signal: None,
             exception_filters: default_exception_filters(),
             show_raw_frames: false,
+            lines_start_at_1: true,
+            columns_start_at_1: true,
+            supports_ansi_styling: false,
             unmapped_steps: 0,
             references: ObjectReferences::default(),
             state,
@@ -2748,7 +3202,7 @@ mod tests {
     #[test]
     fn dap_request_envelope_rejects_wrong_shapes_and_numbers() {
         assert!(parse_dap_request(
-            r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
         )
         .is_ok());
         for raw in [
@@ -2766,6 +3220,81 @@ mod tests {
                 "accepted hostile DAP: {raw}"
             );
         }
+    }
+
+    #[test]
+    fn initialize_requires_jet_and_negotiates_origins() {
+        let mut server = test_server(State::New);
+        let rejected = dap_call(
+            &mut server,
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"other"}}"#,
+        );
+        assert!(rejected.contains("\"success\":false"), "{rejected}");
+        assert!(rejected.contains("\"id\":22032"), "{rejected}");
+        assert_eq!(server.state, State::New);
+
+        let accepted = dap_call(
+            &mut server,
+            r#"{"seq":2,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":false,"columnsStartAt1":false,"supportsANSIStyling":true}}"#,
+        );
+        assert!(accepted.contains("\"success\":true"), "{accepted}");
+        assert!(!accepted.contains("supportsPauseRequest"), "{accepted}");
+        assert!(accepted.contains("supportsVariablePaging"), "{accepted}");
+        assert!(!server.lines_start_at_1);
+        assert!(!server.columns_start_at_1);
+        assert!(server.supports_ansi_styling);
+    }
+
+    #[test]
+    fn dap_framing_accepts_case_insensitive_length_and_rejects_duplicates() {
+        let body = r#"{"seq":1,"type":"request","command":"threads"}"#;
+        let wire = format!(
+            "X-Editor: test\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        assert_eq!(
+            read_message(&mut std::io::Cursor::new(wire)).unwrap(),
+            Some(body.to_string())
+        );
+
+        let duplicate = format!("Content-Length: 1\r\ncontent-length: 1\r\n\r\na");
+        assert!(read_message(&mut std::io::Cursor::new(duplicate)).is_err());
+        let invalid = "Content-Length: +1\r\n\r\na";
+        assert!(read_message(&mut std::io::Cursor::new(invalid)).is_err());
+    }
+
+    #[test]
+    fn breakpoint_ids_are_stable_and_client_lines_follow_negotiation() {
+        let mut server = test_server(State::New);
+        let initialized = dap_call(
+            &mut server,
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
+        );
+        assert!(initialized.contains("\"success\":true"), "{initialized}");
+        let first = dap_call(
+            &mut server,
+            r#"{"seq":2,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":2}]}}"#,
+        );
+        let first_id = dap_body_id(&first, "breakpoints", "id");
+        let second = dap_call(
+            &mut server,
+            r#"{"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":2}]}}"#,
+        );
+        assert_eq!(dap_body_id(&second, "breakpoints", "id"), first_id);
+
+        let mut zero_based = test_server(State::New);
+        let initialized = dap_call(
+            &mut zero_based,
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","linesStartAt1":false}}"#,
+        );
+        assert!(initialized.contains("\"success\":true"), "{initialized}");
+        let response = dap_call(
+            &mut zero_based,
+            r#"{"seq":2,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":0}]}}"#,
+        );
+        assert!(response.contains("\"line\":0"), "{response}");
+        assert_eq!(zero_based.pending_breakpoints, vec![1]);
     }
 
     #[test]
@@ -2804,6 +3333,35 @@ mod tests {
                 position: 0,
             })
         );
+    }
+
+    #[test]
+    fn raw_scopes_append_to_jet_scopes_and_raw_frame_handles_stay_raw() {
+        let mut server = test_server(State::Stopped);
+        let jet_frame = server.references.issue_frame(1, 0);
+        let scopes = dap_call(
+            &mut server,
+            &format!(
+                "{{\"seq\":1,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{jet_frame},\"showRawFrames\":true}}}}"
+            ),
+        );
+        assert!(scopes.contains("\"name\":\"Locals\""), "{scopes}");
+        assert!(scopes.contains("\"name\":\"[raw] Locals\""), "{scopes}");
+        assert!(server.references.is_live(2, ReferenceKind::Scope));
+        assert!(server.references.is_live(3, ReferenceKind::RawScope));
+
+        let raw_frame = server.references.issue_raw_frame(1, 1);
+        let raw_scopes = dap_call(
+            &mut server,
+            &format!(
+                "{{\"seq\":2,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{{\"frameId\":{raw_frame},\"showRawFrames\":false}}}}"
+            ),
+        );
+        assert!(
+            raw_scopes.contains("\"name\":\"[raw] Locals\""),
+            "{raw_scopes}"
+        );
+        assert!(!raw_scopes.contains("\"name\":\"Locals\""), "{raw_scopes}");
     }
 
     #[test]
@@ -2860,7 +3418,9 @@ mod tests {
         let mut server = test_server(State::New);
         let input = format!(
             "{}{}",
-            frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#),
+            frame(
+                r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
+            ),
             frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
         );
         let mut output = Vec::new();
@@ -2890,7 +3450,7 @@ mod tests {
             .expect("spawn real attach target");
         let input = format!(
             "{}{}",
-            frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#),
+            frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#),
             frame(&format!(
                 "{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{},\"program\":\"{}\",\"map\":\"{}\"}}}}",
                 target.id(),
@@ -2913,14 +3473,71 @@ mod tests {
         assert!(server.inf.is_none());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dap_attaches_and_disconnects_without_terminating_a_real_target() {
+        if !Inferior::available() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "jet-dap-attach-disconnect-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create debugger test directory");
+        let mut target = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real attach target");
+        let pid = target.id();
+        let program = std::fs::canonicalize(format!("/proc/{pid}/exe"))
+            .expect("resolve real attach target binary");
+        let map = root.join("target.jetmap");
+        LineMap::write_artifact(&map, "main.jet", "", "main.rs", "", &program)
+            .expect("write matching attach map");
+        let input = format!(
+            "{}{}{}",
+            frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#),
+            frame(&format!(
+                "{{\"seq\":2,\"type\":\"request\",\"command\":\"attach\",\"arguments\":{{\"processId\":{},\"program\":\"{}\",\"map\":\"{}\"}}}}",
+                pid,
+                json_escape(&program.to_string_lossy()),
+                json_escape(&map.to_string_lossy())
+            )),
+            frame(r#"{"seq":3,"type":"request","command":"disconnect","arguments":{}}"#),
+        );
+        let mut server = test_server(State::New);
+        let mut output = Vec::new();
+        let code = run_io(&mut server, &mut std::io::Cursor::new(input), &mut output);
+        let text = String::from_utf8(output).expect("DAP output is UTF-8");
+        let target_alive = target.try_wait().expect("check detached target").is_none();
+        let _ = target.kill();
+        let _ = target.wait();
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(code, crate::ExitCodes::OK, "{text}");
+        assert!(text.contains("\"command\":\"attach\""), "{text}");
+        assert!(text.contains("\"command\":\"disconnect\""), "{text}");
+        assert!(!text.contains("\"success\":false"), "{text}");
+        assert!(
+            target_alive,
+            "disconnect must leave an attached target alive"
+        );
+        assert_eq!(server.state, State::Terminated);
+        assert!(server.inf.is_none());
+    }
+
     #[test]
     fn dap_rejects_oversized_frame_before_reading_a_body() {
-        let frame = format!("Content-Length: {}\r\n\r\n", MAX_PROTOCOL_MESSAGE_BYTES + 1);
+        let frame = format!("Content-Length: {}\r\n\r\n", MAX_DAP_MESSAGE_BYTES + 1);
         let error = read_message(&mut std::io::Cursor::new(frame)).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(
             error.to_string(),
-            "protocol message exceeds the 1048576-byte limit"
+            "protocol message exceeds the 16777216-byte limit"
         );
     }
 
@@ -2956,13 +3573,14 @@ mod tests {
             line: 7,
             ..BreakpointSpec::default()
         }];
+        server.client_breakpoint_ids = vec![42];
         assert!(matches!(
             server.breakpoint_action(3),
             BreakpointAction::Continue
         ));
         assert!(matches!(
             server.breakpoint_action(7),
-            BreakpointAction::Stop
+            BreakpointAction::Stop(_)
         ));
     }
 
@@ -3055,7 +3673,7 @@ mod tests {
 
         assert!(dap_call(
             &mut server,
-            r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
         )
         .contains("\"success\":true"));
         let breakpoint = dap_call(
@@ -3125,6 +3743,18 @@ mod tests {
         );
         assert!(continued.contains("\"event\":\"stopped\""), "{continued}");
         assert!(server.state == State::Stopped);
+        let breakpoint_stack = dap_call(
+            &mut server,
+            r#"{"seq":101,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#,
+        );
+        assert!(
+            breakpoint_stack.contains("\"line\":3"),
+            "{breakpoint_stack}"
+        );
+        assert!(
+            breakpoint_stack.contains(&json_escape(&jet_file.to_string_lossy())),
+            "{breakpoint_stack}"
+        );
 
         // Linux keeps the running executable inode busy. Rename a replacement
         // over the path so the stale-artifact check remains live without an
@@ -3208,7 +3838,7 @@ mod tests {
 
         let initialized = dap_call(
             &mut server,
-            r#"{"seq":2,"type":"request","command":"initialize","arguments":{}}"#,
+            r#"{"seq":2,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
         );
         assert!(initialized.contains("\"success\":true"));
         let selected = dap_call(
@@ -3248,6 +3878,27 @@ mod tests {
         assert!(text.contains("E2235"));
         assert!(text.contains("\"event\":\"terminated\""));
         assert!(!text.contains("\"event\":\"stopped\""));
+    }
+
+    #[test]
+    fn exited_target_releases_server_target_state() {
+        let mut server = test_server(State::Running);
+        server.target = Some(TargetKind::Launched);
+        let mut output = Vec::new();
+        server.emit_resume(
+            &mut output,
+            ResumeResult::Exited {
+                status: Some(0),
+                signal: None,
+            },
+            ResumeMode::Continue,
+        );
+        assert_eq!(server.state, State::Terminated);
+        assert!(server.inf.is_none());
+        assert!(server.target.is_none());
+        let text = String::from_utf8(output).expect("DAP output is UTF-8");
+        assert!(text.contains("\"event\":\"exited\""), "{text}");
+        assert!(text.contains("\"event\":\"terminated\""), "{text}");
     }
 
     #[test]

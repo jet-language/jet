@@ -1047,7 +1047,6 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--base-receipt", help: "with review: proof receipt for the base change-set side" },
     FlagSpec { long: "--receipt", help: "with review: proof receipt for the reviewed change-set side" },
     FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
-    FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
     FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
     FlagSpec { long: "--json", help: "emit machine-readable facts or diagnostics" },
     FlagSpec { long: "--topic", help: "with inspect digest: emit one digest topic" },

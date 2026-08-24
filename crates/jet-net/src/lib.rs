@@ -200,7 +200,7 @@ fn get_stream_with_timeout(url: &str, timeout: Duration) -> Result<StreamRespons
         .timeout_read(timeout)
         .redirects(0)
         .build();
-    let response = match agent.get(url).call() {
+    let response = match agent.get(url).set("Accept-Encoding", "identity").call() {
         Ok(response) => response,
         Err(ureq::Error::Status(_, response)) => response,
         Err(error) => return Err(FetchError::http(url, error.to_string())),

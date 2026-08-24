@@ -608,7 +608,8 @@ fn have(tool: &str) -> bool {
     std::process::Command::new(tool)
         .arg("--version")
         .output()
-        .is_ok()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn native_fixture(tag: &str, src: &str) -> String {
@@ -626,7 +627,9 @@ fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     let file = native_fixture("dap_cli_failure", "fn run() {\n    print(\"dap\")\n}\n");
     let input = format!(
         "{}{}",
-        dap_frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#),
+        dap_frame(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true}}"#
+        ),
         dap_frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -656,6 +659,71 @@ fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
     assert!(stdout.contains("\"success\":false"), "{stdout}");
     assert!(stdout.contains("\"id\":22032"), "{stdout}");
+    let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let file = native_fixture("dap_cli_success", LOOPS);
+    let input = format!(
+        "{}{}{}{}{}{}{}{}{}",
+        dap_frame(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true}}"#
+        ),
+        dap_frame(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":7}}]}}}}"#,
+            file
+        )),
+        dap_frame(&format!(
+            r#"{{"seq":3,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":true,"args":[],"env":{{}}}}}}"#,
+            file
+        )),
+        dap_frame(r#"{"seq":4,"type":"request","command":"configurationDone","arguments":{}}"#),
+        dap_frame(r#"{"seq":5,"type":"request","command":"threads","arguments":{}}"#),
+        dap_frame(
+            r#"{"seq":6,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#
+        ),
+        dap_frame(r#"{"seq":7,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
+        dap_frame(r#"{"seq":8,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
+        dap_frame(r#"{"seq":9,"type":"request","command":"disconnect","arguments":{}}"#),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    child
+        .stdin
+        .take()
+        .expect("DAP stdin")
+        .write_all(input.as_bytes())
+        .expect("send framed DAP requests");
+    let output = child
+        .wait_with_output()
+        .expect("wait for the production Jet DAP command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "DAP command failed:\n{stderr}");
+    assert!(stdout.contains("\"command\":\"initialize\""), "{stdout}");
+    assert!(stdout.contains("\"verified\":true"), "{stdout}");
+    assert!(stdout.contains("\"event\":\"stopped\""), "{stdout}");
+    assert!(stdout.contains("\"command\":\"threads\""), "{stdout}");
+    assert!(stdout.contains("\"command\":\"stackTrace\""), "{stdout}");
+    assert!(
+        stdout.contains(&format!("\"path\":\"{}\"", file)),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("__jet_"),
+        "generated Rust leaked into Jet view: {stdout}"
+    );
+    assert!(stdout.contains("\"event\":\"exited\""), "{stdout}");
+    assert!(stdout.contains("\"event\":\"terminated\""), "{stdout}");
     let _ = std::fs::remove_file(&file);
 }
 

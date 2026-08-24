@@ -29,7 +29,8 @@ impl ProjectImportAuthority {
             ));
         }
         let mut source = String::new();
-        file.take(MAX_IMPORT_BYTES + 1).read_to_string(&mut source)?;
+        file.take(MAX_IMPORT_BYTES + 1)
+            .read_to_string(&mut source)?;
         if source.len() as u64 > MAX_IMPORT_BYTES {
             return Err(io::Error::other(
                 "project import exceeds the 1 MiB evaluator limit",
@@ -137,7 +138,9 @@ mod platform {
                 .custom_flags(O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
                 .open(path)?;
             if !root.metadata()?.is_dir() {
-                return Err(io::Error::other("project import authority is not a directory"));
+                return Err(io::Error::other(
+                    "project import authority is not a directory",
+                ));
             }
             Ok(Self { root })
         }

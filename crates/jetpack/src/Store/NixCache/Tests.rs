@@ -1,7 +1,12 @@
+use self::TestCache::{base64_encode, remove_dir, signed_narinfo, unique_dir, TestCacheServer};
 use super::*;
+use ed25519_dalek::SigningKey;
 use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
+
+#[path = "TestCache.rs"]
+mod TestCache;
 
 const STANDARD_NARINFO: &str = concat!(
     "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\n",
@@ -23,6 +28,28 @@ fn standard_narinfo_parses_real_zstd_and_distinct_hashes() {
     assert_eq!(info.file_size, Some(2_133_450));
     assert_eq!(info.nar_size, 7_088_584);
     assert_eq!(info.references.len(), 3);
+}
+
+#[test]
+fn standard_narinfo_defaults_to_bzip2_and_keeps_optional_hashes_optional() {
+    let text = concat!(
+        "StorePath: /nix/store/0123456789abcdfghijklmnpqrsvwxyz-tool\n",
+        "URL: nar/tool.nar.xz?sha256=example\n",
+        "NarHash: sha256:0000000000000000000000000000000000000000000000000000000000000000\n",
+        "NarSize: 1\n",
+    );
+    let info = NixNarInfo::parse(text).unwrap();
+    assert_eq!(info.compression, NixCompression::Bzip2);
+    assert_eq!(info.file_hash, None);
+    assert_eq!(info.file_size, None);
+    assert!(NixNarInfo::parse(&text.replace("tool.nar.xz", "../tool.nar.xz")).is_err());
+    assert!(NixNarInfo::parse(
+        &text.replace(
+            "NarSize: 1",
+            "References: 0123456789abcdfghijklmnpqrsvwxyz-ref 0123456789abcdfghijklmnpqrsvwxyz-ref\nNarSize: 1",
+        )
+    )
+    .is_err());
 }
 
 #[test]
@@ -76,10 +103,9 @@ fn native_nix_cache_streams_without_process_tools() {
     for chunk in nar.chunks(73) {
         streaming.update(chunk);
     }
-    eprintln!(
-        "one-shot={} direct-stream={}",
-        crate::SHA256::sha256_hex(&nar),
-        super::bytes_to_hex(&streaming.finalize())
+    assert_eq!(
+        super::bytes_to_hex(&streaming.finalize()),
+        crate::SHA256::sha256_hex(&nar)
     );
     let destination = root.with_extension("decoded");
     let actual =
@@ -95,10 +121,90 @@ fn native_nix_cache_streams_without_process_tools() {
 
 #[test]
 fn native_nix_cache_recurses_and_admits_closure_atomically() {
-    let source = include_str!("../NixCache.rs");
-    assert!(source.contains("while let Some(store_path) = queue.iter().next().cloned()"));
-    assert!(source.contains("self.rollback()"));
-    assert!(source.contains("Closure::register_entries_unlocked"));
+    let root = unique_dir("closure");
+    let source_root = root.join("source");
+    fs::create_dir_all(source_root.join("root")).unwrap();
+    fs::create_dir_all(source_root.join("leaf")).unwrap();
+    fs::write(source_root.join("root/payload"), b"root").unwrap();
+    fs::write(source_root.join("leaf/payload"), b"leaf").unwrap();
+    let (root_nar, _) = super::super::write_nar(&source_root.join("root")).unwrap();
+    let (leaf_nar, _) = super::super::write_nar(&source_root.join("leaf")).unwrap();
+    let root_path = "/nix/store/00000000000000000000000000000000-root";
+    let leaf_path = "/nix/store/11111111111111111111111111111111-leaf";
+    let signing_key = SigningKey::from_bytes(&[7; 32]);
+    let key_id = "test-cache-1";
+    let root_info = signed_narinfo(
+        root_path,
+        "root.nar",
+        &root_nar,
+        &[leaf_path],
+        key_id,
+        &signing_key,
+    );
+    let leaf_info = signed_narinfo(leaf_path, "leaf.nar", &leaf_nar, &[], key_id, &signing_key);
+    let root_key = format!(
+        "{key_id}:{}\n",
+        base64_encode(&signing_key.verifying_key().to_bytes())
+    );
+    let cache_info = b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec();
+    let routes = BTreeMap::from([
+        ("/nix-cache-info".to_string(), cache_info),
+        (
+            "/00000000000000000000000000000000.narinfo".to_string(),
+            root_info,
+        ),
+        ("/nar/root.nar".to_string(), root_nar),
+    ]);
+    let server = TestCacheServer::start(routes.clone());
+    let jet_root = root.join("jetpack");
+    fs::create_dir_all(jet_root.join("config")).unwrap();
+    fs::create_dir_all(jet_root.join("trust")).unwrap();
+    fs::write(
+        jet_root.join("config/nix-cache-v1.endpoint"),
+        &server.endpoint,
+    )
+    .unwrap();
+    fs::write(jet_root.join("trust/nix-cache-v1.ed25519.pub"), root_key).unwrap();
+    let roots = Roots::at(jet_root);
+    let request = NixOutputRequest {
+        name: "out".to_string(),
+        store_path: root_path.to_string(),
+    };
+
+    let error = admit_nix_closure(&roots, &[request.clone()], false).unwrap_err();
+    assert_eq!(error.kind(), NixCacheErrorKind::MissingReference);
+    assert!(crate::Store::list(&roots).is_empty());
+
+    let mut routes = routes;
+    routes.insert(
+        "/11111111111111111111111111111111.narinfo".to_string(),
+        leaf_info,
+    );
+    routes.insert("/nar/leaf.nar".to_string(), leaf_nar);
+    server.replace_routes(routes);
+    let admitted = admit_nix_closure(&roots, &[request], false).unwrap();
+    assert_eq!(admitted.objects.len(), 2);
+    assert_eq!(admitted.outputs.len(), 1);
+    assert_eq!(
+        admitted.objects[root_path].direct_reference_digests.len(),
+        1
+    );
+    assert!(admitted
+        .objects
+        .values()
+        .all(|object| object.hangar_path.is_dir()));
+    assert_eq!(crate::Store::list(&roots).len(), 2);
+    let offline = admit_nix_closure(
+        &roots,
+        &[NixOutputRequest {
+            name: "out".to_string(),
+            store_path: root_path.to_string(),
+        }],
+        true,
+    )
+    .unwrap();
+    assert_eq!(offline.objects.len(), 2);
+    remove_dir(&root);
 }
 
 #[test]
@@ -134,15 +240,4 @@ fn native_nix_cache_failures_are_e1350_and_snapshot_pinned() {
     ] {
         assert_eq!(NixCacheError::new(kind, "test").code(), "E1350");
     }
-}
-
-fn unique_dir(tag: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("jet-nix-cache-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
-    path
-}
-
-fn remove_dir(path: &PathBuf) {
-    let _ = fs::remove_dir_all(path);
 }

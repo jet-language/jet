@@ -57,6 +57,9 @@ run a shell. Set `jet.executablePath` when the editor must use a specific
 build.
 Restart keeps launch arguments and source breakpoints. It expires stack,
 scope, and variable references, so the editor must refresh them after the stop.
+The adapter accepts strict `Content-Length` frames up to 16 MiB. It requires
+`adapterID: "jet"`, uses canonical local source paths, and follows the
+`linesStartAt1` and `columnsStartAt1` values from DAP `initialize`.
 
 Optional `.vscode/launch.json` configuration:
 
@@ -79,6 +82,8 @@ For a local attach, use the native debug binary and the matching `.jetmap`
 sidecar. The extension reads the Jet source identity from that sidecar before
 starting the adapter; the adapter then verifies the same-user process and
 build identity.
+If the sidecar stores a relative source path, the extension resolves it
+relative to the sidecar itself.
 
 ```json
 {

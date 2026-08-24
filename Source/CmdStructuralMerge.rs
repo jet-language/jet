@@ -9,8 +9,7 @@ use jet::Diagnostics::json_str as json_string;
 use jet_foundation::ExitCodes;
 use jet_foundation::Report::render_status_json;
 use jet_semindex::{
-    open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError,
-    SemanticOp,
+    open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError, SemanticOp,
 };
 
 #[derive(Clone)]
@@ -21,6 +20,7 @@ struct Unit {
 }
 
 struct Document {
+    path: PathBuf,
     units: Vec<Unit>,
     suffix: String,
     source_hash: String,
@@ -33,10 +33,26 @@ struct UnitMatches {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum ChangeKind { Added, Removed, Renamed, Moved, Signature, Body }
+enum ChangeKind {
+    Added,
+    Removed,
+    Renamed,
+    Moved,
+    Signature,
+    Body,
+}
 
 impl ChangeKind {
-    fn name(&self) -> &'static str { match self { Self::Added => "added", Self::Removed => "removed", Self::Renamed => "renamed", Self::Moved => "moved", Self::Signature => "signature_changed", Self::Body => "body_changed" } }
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+            Self::Renamed => "renamed",
+            Self::Moved => "moved",
+            Self::Signature => "signature_changed",
+            Self::Body => "body_changed",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -63,26 +79,56 @@ pub(crate) fn run_diff(args: &[String]) {
         return;
     }
     if !args.iter().any(|arg| arg == "--structural") {
-        fail("`jet diff` currently requires `--structural`", "jet diff --structural before.jet after.jet");
+        fail(
+            "`jet diff` currently requires `--structural`",
+            "jet diff --structural before.jet after.jet",
+        );
     }
     let paths = positional(args, "diff");
-    if paths.len() != 2 { fail("`jet diff --structural` needs two checked Jet files", "jet diff --structural before.jet after.jet"); }
+    if paths.len() != 2 {
+        fail(
+            "`jet diff --structural` needs two checked Jet files",
+            "jet diff --structural before.jet after.jet",
+        );
+    }
     let before = load(Path::new(&paths[0]));
     let after = load(Path::new(&paths[1]));
     let ops = transition_ops(&before, &after);
     let changes = structural_diff(&before.units, &after.units, &ops);
     let report = report_mode(args);
     if report == "text" {
-        if changes.is_empty() { println!("no structural changes"); }
-        for change in changes { println!("{}: {} [{}]", change.kind.name(), change.after.as_deref().or(change.before.as_deref()).unwrap_or("definition"), change.stable_id); }
+        if changes.is_empty() {
+            println!("no structural changes");
+        }
+        for change in changes {
+            println!(
+                "{}: {} [{}]",
+                change.kind.name(),
+                change
+                    .after
+                    .as_deref()
+                    .or(change.before.as_deref())
+                    .unwrap_or("definition"),
+                change.stable_id
+            );
+        }
     } else {
         let payload = format!(
             "{{\"changes\":[{}]}}",
-            changes.iter().map(change_json).collect::<Vec<_>>().join(",")
+            changes
+                .iter()
+                .map(change_json)
+                .collect::<Vec<_>>()
+                .join(",")
         );
         println!(
             "{}",
-            render_status_json("ok", true, "diff.structural", &format!(",\"structural_diff\":{payload}"))
+            render_status_json(
+                "ok",
+                true,
+                "diff.structural",
+                &format!(",\"structural_diff\":{payload}")
+            )
         );
     }
 }
@@ -97,10 +143,18 @@ pub(crate) fn run_merge(args: &[String]) {
         return;
     }
     if !args.iter().any(|arg| arg == "--structural") {
-        fail("`jet merge` currently requires `--structural`", "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet");
+        fail(
+            "`jet merge` currently requires `--structural`",
+            "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet",
+        );
     }
     let paths = positional(args, "merge");
-    if paths.len() != 3 { fail("`jet merge --structural` needs base, ours, and theirs", "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet"); }
+    if paths.len() != 3 {
+        fail(
+            "`jet merge --structural` needs base, ours, and theirs",
+            "jet merge --structural base.jet ours.jet theirs.jet --out merged.jet",
+        );
+    }
     let base_path = Path::new(&paths[0]);
     let ours_path = Path::new(&paths[1]);
     let theirs_path = Path::new(&paths[2]);
@@ -112,22 +166,42 @@ pub(crate) fn run_merge(args: &[String]) {
         render_conflicts(&conflicts, report_mode(args));
         exit(ExitCodes::USER_ERROR);
     }
-    let formatted = jet::format_source(&candidate).unwrap_or_else(|_| fail("structural merge produced source that does not parse", "resolve edits manually; no output was written"));
+    let formatted = jet::format_source(&candidate).unwrap_or_else(|_| {
+        fail(
+            "structural merge produced source that does not parse",
+            "resolve edits manually; no output was written",
+        )
+    });
     let output_path = absolute_normalized(
-        &flag_value(args, "--out").map(PathBuf::from).unwrap_or_else(|| ours_path.to_path_buf()),
+        &flag_value(args, "--out")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ours_path.to_path_buf()),
     );
     let overlays = [(output_path.as_path(), formatted.as_str())];
-    if let Err(err) = open_structural_with_overlays(&output_path, &overlays) { render_index_error("merged output did not pass parser and sema", err); }
-    if let Err(err) = fs::write(&output_path, formatted.as_bytes()) { fail(&format!("could not write `{}`: {err}", output_path.display()), "choose a writable --out path"); }
-    if report_mode(args) == "text" { println!("merged: {}", output_path.display()); }
-    else {
+    if let Err(err) = open_structural_with_overlays(&output_path, &overlays) {
+        render_index_error("merged output did not pass parser and sema", err);
+    }
+    if let Err(err) = fs::write(&output_path, formatted.as_bytes()) {
+        fail(
+            &format!("could not write `{}`: {err}", output_path.display()),
+            "choose a writable --out path",
+        );
+    }
+    if report_mode(args) == "text" {
+        println!("merged: {}", output_path.display());
+    } else {
         let payload = format!(
             "{{\"output\":{}}}",
             json_string(&output_path.display().to_string())
         );
         println!(
             "{}",
-            render_status_json("merged", true, "merge.structural", &format!(",\"structural_merge\":{payload}"))
+            render_status_json(
+                "merged",
+                true,
+                "merge.structural",
+                &format!(",\"structural_merge\":{payload}")
+            )
         );
     }
 }
@@ -141,22 +215,49 @@ pub(crate) fn structural_help(command: &str) -> Option<&'static str> {
 }
 
 fn load(path: &Path) -> Document {
-    let source = fs::read_to_string(path).unwrap_or_else(|err| fail(&format!("could not read `{}`: {err}", path.display()), "pass a readable Jet source file"));
-    let index = open_structural_with_overlays(path, &[]).unwrap_or_else(|err| render_index_error(&format!("`{}` did not pass parser and sema", path.display()), err));
+    let source = fs::read_to_string(path).unwrap_or_else(|err| {
+        fail(
+            &format!("could not read `{}`: {err}", path.display()),
+            "pass a readable Jet source file",
+        )
+    });
+    let index = open_structural_with_overlays(path, &[]).unwrap_or_else(|err| {
+        render_index_error(
+            &format!("`{}` did not pass parser and sema", path.display()),
+            err,
+        )
+    });
     let mut units = Vec::new();
-    for fact in index.definition_facts().iter().filter(|fact| same_module(path, &fact.module_path)) {
-        let Some(slice) = source.get(fact.span.start..fact.span.end) else { fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug"); };
-        units.push(Unit { fact: fact.clone(), source: slice.trim().to_string(), leading: String::new() });
+    for fact in index
+        .definition_facts()
+        .iter()
+        .filter(|fact| same_module(path, &fact.module_path))
+    {
+        let Some(slice) = source.get(fact.span.start..fact.span.end) else {
+            fail(
+                "semantic index returned an invalid source span",
+                "run `jet check` and report this compiler bug",
+            );
+        };
+        units.push(Unit {
+            fact: fact.clone(),
+            source: slice.trim().to_string(),
+            leading: String::new(),
+        });
     }
     units.sort_by_key(|unit| unit.fact.span.start);
     let mut cursor = 0;
     for unit in &mut units {
-        unit.leading = source.get(cursor..unit.fact.span.start).unwrap_or("").to_string();
+        unit.leading = source
+            .get(cursor..unit.fact.span.start)
+            .unwrap_or("")
+            .to_string();
         cursor = unit.fact.span.end;
     }
     let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
     let semantic_ops = semantic_ops_for_file(path, &source_hash);
     Document {
+        path: absolute_normalized(path),
         units,
         suffix: source.get(cursor..).unwrap_or("").to_string(),
         source_hash,
@@ -168,7 +269,11 @@ fn structural_diff(before: &[Unit], after: &[Unit], ops: &[SemanticOp]) -> Vec<C
     let matches = match_units(before, after, ops);
     let mut used = BTreeSet::new();
     let mut changes = Vec::new();
-    for (left, right) in before.iter().enumerate().map(|(i, unit)| (unit, matches.matched.get(&i).copied().flatten())) {
+    for (left, right) in before
+        .iter()
+        .enumerate()
+        .map(|(i, unit)| (unit, matches.matched.get(&i).copied().flatten()))
+    {
         match right {
             None => changes.push(change(ChangeKind::Removed, left, None)),
             Some(index) => {
@@ -194,12 +299,19 @@ fn structural_diff(before: &[Unit], after: &[Unit], ops: &[SemanticOp]) -> Vec<C
                 {
                     changes.push(change(ChangeKind::Moved, left, Some(right)));
                 }
-                if signature_changed { changes.push(change(ChangeKind::Signature, left, Some(right))); }
-                else if content_changed { changes.push(change(ChangeKind::Body, left, Some(right))); }
+                if signature_changed {
+                    changes.push(change(ChangeKind::Signature, left, Some(right)));
+                } else if content_changed {
+                    changes.push(change(ChangeKind::Body, left, Some(right)));
+                }
             }
         }
     }
-    for (index, unit) in after.iter().enumerate() { if !used.contains(&index) { changes.push(change(ChangeKind::Added, unit, Some(unit))); } }
+    for (index, unit) in after.iter().enumerate() {
+        if !used.contains(&index) {
+            changes.push(change(ChangeKind::Added, unit, Some(unit)));
+        }
+    }
     changes.sort_by(|a, b| a.stable_id.cmp(&b.stable_id).then(a.kind.cmp(&b.kind)));
     changes
 }
@@ -235,8 +347,13 @@ fn match_units(base: &[Unit], side: &[Unit], ops: &[SemanticOp]) -> UnitMatches 
     // Reserve exact checked identities first. A later fuzzy match must never
     // steal an unchanged declaration from a same-shape sibling.
     for (index, unit) in base.iter().enumerate() {
-        let base_count = base.iter().filter(|candidate| exact_key(candidate) == exact_key(unit)).count();
-        let candidates: Vec<usize> = side.iter().enumerate()
+        let base_count = base
+            .iter()
+            .filter(|candidate| exact_key(candidate) == exact_key(unit))
+            .count();
+        let candidates: Vec<usize> = side
+            .iter()
+            .enumerate()
             .filter(|(_, candidate)| exact_key(candidate) == exact_key(unit))
             .map(|(i, _)| i)
             .collect();
@@ -247,12 +364,18 @@ fn match_units(base: &[Unit], side: &[Unit], ops: &[SemanticOp]) -> UnitMatches 
     }
 
     for (index, unit) in base.iter().enumerate() {
-        if result.contains_key(&index) { continue; }
+        if result.contains_key(&index) {
+            continue;
+        }
         let semantic = candidates(side, &used, |candidate| {
             semantic_rename(unit, candidate, ops).is_some()
         });
-        let signature = candidates(side, &used, |candidate| candidate.fact.signature_id == unit.fact.signature_id);
-        let ancestry = candidates(side, &used, |candidate| candidate.fact.stable_id == unit.fact.stable_id);
+        let signature = candidates(side, &used, |candidate| {
+            candidate.fact.signature_id == unit.fact.signature_id
+        });
+        let ancestry = candidates(side, &used, |candidate| {
+            candidate.fact.stable_id == unit.fact.stable_id
+        });
         let selected = [semantic, signature, ancestry]
             .into_iter()
             .find(|set| !set.is_empty())
@@ -261,18 +384,31 @@ fn match_units(base: &[Unit], side: &[Unit], ops: &[SemanticOp]) -> UnitMatches 
             used.insert(selected[0]);
             result.insert(index, Some(selected[0]));
         } else {
-            if selected.len() > 1 { ambiguous.insert(index, selected); }
+            if selected.len() > 1 {
+                ambiguous.insert(index, selected);
+            }
             result.insert(index, None);
         }
     }
-    UnitMatches { matched: result, ambiguous }
+    UnitMatches {
+        matched: result,
+        ambiguous,
+    }
 }
 
-fn exact_key(unit: &Unit) -> (&str, &str) { (&unit.fact.kind, &unit.fact.name) }
+fn exact_key(unit: &Unit) -> (&str, &str) {
+    (&unit.fact.kind, &unit.fact.name)
+}
 
 fn candidates<F>(side: &[Unit], used: &BTreeSet<usize>, predicate: F) -> Vec<usize>
-where F: Fn(&Unit) -> bool {
-    side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && predicate(candidate)).map(|(i, _)| i).collect()
+where
+    F: Fn(&Unit) -> bool,
+{
+    side.iter()
+        .enumerate()
+        .filter(|(i, candidate)| !used.contains(i) && predicate(candidate))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 fn semantic_rename<'a>(
@@ -310,15 +446,31 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
         }
         if let Some(indices) = theirs_matches.ambiguous.get(&index) {
             theirs_used.extend(indices.iter().copied());
-            conflicts.push(ambiguous_conflict(original, "theirs", indices, &theirs.units));
+            conflicts.push(ambiguous_conflict(
+                original,
+                "theirs",
+                indices,
+                &theirs.units,
+            ));
             continue;
         }
         let oi = ours_matches.matched.get(&index).copied().flatten();
         let ti = theirs_matches.matched.get(&index).copied().flatten();
-        if let Some(i) = oi { ours_used.insert(i); }
-        if let Some(i) = ti { theirs_used.insert(i); }
+        if let Some(i) = oi {
+            ours_used.insert(i);
+        }
+        if let Some(i) = ti {
+            theirs_used.insert(i);
+        }
         let leading = match (oi.map(|i| &ours.units[i]), ti.map(|i| &theirs.units[i])) {
-            (Some(o), Some(t)) => merge_text("inter_item_trivia", original, &original.leading, &o.leading, &t.leading, &mut conflicts),
+            (Some(o), Some(t)) => merge_text(
+                "inter_item_trivia",
+                original,
+                &original.leading,
+                &o.leading,
+                &t.leading,
+                &mut conflicts,
+            ),
             (Some(o), None) => o.leading.clone(),
             (None, Some(t)) => t.leading.clone(),
             (None, None) => String::new(),
@@ -327,12 +479,21 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
             (None, None) => {}
             (Some(o), None) if o.fact.content_id == original.fact.content_id => {}
             (None, Some(t)) if t.fact.content_id == original.fact.content_id => {}
-            (Some(o), Some(t)) if o.fact.content_id == t.fact.content_id => push_unit(&mut merged, &leading, &o.source),
-            (Some(o), Some(t)) if o.fact.content_id == original.fact.content_id => push_unit(&mut merged, &leading, &t.source),
-            (Some(o), Some(t)) if t.fact.content_id == original.fact.content_id => push_unit(&mut merged, &leading, &o.source),
-            (Some(o), None) | (None, Some(o)) => conflicts.push(conflict("delete_edit", original, o, o)),
+            (Some(o), Some(t)) if o.fact.content_id == t.fact.content_id => {
+                push_unit(&mut merged, &leading, &o.source)
+            }
+            (Some(o), Some(t)) if o.fact.content_id == original.fact.content_id => {
+                push_unit(&mut merged, &leading, &t.source)
+            }
+            (Some(o), Some(t)) if t.fact.content_id == original.fact.content_id => {
+                push_unit(&mut merged, &leading, &o.source)
+            }
+            (Some(o), None) | (None, Some(o)) => {
+                conflicts.push(conflict("delete_edit", original, o, o))
+            }
             (Some(o), Some(t)) => {
-                if let Some(source) = merge_recorded_rename(original, o, t, &ours_ops, &theirs_ops) {
+                if let Some(source) = merge_recorded_rename(original, o, t, &ours_ops, &theirs_ops)
+                {
                     push_unit(&mut merged, &leading, &source);
                 } else {
                     conflicts.push(conflict("overlapping_edit", original, o, t));
@@ -340,12 +501,28 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
             }
         }
     }
-    let ours_added: Vec<&Unit> = ours.units.iter().enumerate().filter(|(i, _)| !ours_used.contains(i)).map(|(_, u)| u).collect();
-    let theirs_added: Vec<&Unit> = theirs.units.iter().enumerate().filter(|(i, _)| !theirs_used.contains(i)).map(|(_, u)| u).collect();
+    let ours_added: Vec<&Unit> = ours
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !ours_used.contains(i))
+        .map(|(_, u)| u)
+        .collect();
+    let theirs_added: Vec<&Unit> = theirs
+        .units
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !theirs_used.contains(i))
+        .map(|(_, u)| u)
+        .collect();
     let mut theirs_paired = BTreeSet::new();
     for ours_unit in ours_added {
-        let candidates: Vec<usize> = theirs_added.iter().enumerate()
-            .filter(|(index, theirs_unit)| !theirs_paired.contains(index) && exact_key(theirs_unit) == exact_key(ours_unit))
+        let candidates: Vec<usize> = theirs_added
+            .iter()
+            .enumerate()
+            .filter(|(index, theirs_unit)| {
+                !theirs_paired.contains(index) && exact_key(theirs_unit) == exact_key(ours_unit)
+            })
             .map(|(index, _)| index)
             .collect();
         match candidates.as_slice() {
@@ -381,7 +558,13 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
             push_unit(&mut merged, &theirs_unit.leading, &theirs_unit.source);
         }
     }
-    let suffix = merge_shell("suffix", &base.suffix, &ours.suffix, &theirs.suffix, &mut conflicts);
+    let suffix = merge_shell(
+        "suffix",
+        &base.suffix,
+        &ours.suffix,
+        &theirs.suffix,
+        &mut conflicts,
+    );
     merged.push_str(&suffix);
     (merged, conflicts)
 }
@@ -392,7 +575,13 @@ fn transition_ops(before: &Document, after: &Document) -> Vec<SemanticOp> {
         .semantic_ops
         .iter()
         .chain(after.semantic_ops.iter())
-        .filter(|op| op.matches_transition(&before.source_hash, &after.source_hash))
+        .filter(|op| {
+            op.matches_file_transition(
+                &[before.path.as_path(), after.path.as_path()],
+                &before.source_hash,
+                &after.source_hash,
+            )
+        })
     {
         if !out.contains(op) {
             out.push(op.clone());
@@ -463,9 +652,15 @@ fn merge_text(
     theirs: &str,
     conflicts: &mut Vec<Conflict>,
 ) -> String {
-    if ours == theirs { return ours.to_string(); }
-    if ours == base { return theirs.to_string(); }
-    if theirs == base { return ours.to_string(); }
+    if ours == theirs {
+        return ours.to_string();
+    }
+    if ours == base {
+        return theirs.to_string();
+    }
+    if theirs == base {
+        return ours.to_string();
+    }
     conflicts.push(Conflict {
         kind,
         stable_id: unit.fact.stable_id.clone(),
@@ -477,13 +672,25 @@ fn merge_text(
 }
 
 fn ambiguous_conflict(base: &Unit, side: &str, indices: &[usize], units: &[Unit]) -> Conflict {
-    let ids = indices.iter().map(|index| units[*index].fact.human_identity.as_str()).collect::<Vec<_>>().join(",");
+    let ids = indices
+        .iter()
+        .map(|index| units[*index].fact.human_identity.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
     Conflict {
         kind: "ambiguous_identity",
         stable_id: base.fact.stable_id.clone(),
         human_identity: base.fact.human_identity.clone(),
-        ours: if side == "ours" { format!("ambiguous:{ids}") } else { base.fact.content_id.clone() },
-        theirs: if side == "theirs" { format!("ambiguous:{ids}") } else { base.fact.content_id.clone() },
+        ours: if side == "ours" {
+            format!("ambiguous:{ids}")
+        } else {
+            base.fact.content_id.clone()
+        },
+        theirs: if side == "theirs" {
+            format!("ambiguous:{ids}")
+        } else {
+            base.fact.content_id.clone()
+        },
     }
 }
 
@@ -494,9 +701,15 @@ fn merge_shell(
     theirs: &str,
     conflicts: &mut Vec<Conflict>,
 ) -> String {
-    if ours == theirs { return ours.to_string(); }
-    if ours == base { return theirs.to_string(); }
-    if theirs == base { return ours.to_string(); }
+    if ours == theirs {
+        return ours.to_string();
+    }
+    if ours == base {
+        return theirs.to_string();
+    }
+    if theirs == base {
+        return ours.to_string();
+    }
     conflicts.push(Conflict {
         kind: "file_scope_edit",
         stable_id: format!("file:{label}"),
@@ -508,95 +721,255 @@ fn merge_shell(
 }
 
 fn conflict(kind: &'static str, base: &Unit, ours: &Unit, theirs: &Unit) -> Conflict {
-    Conflict { kind, stable_id: base.fact.stable_id.clone(), human_identity: base.fact.human_identity.clone(), ours: ours.fact.content_id.clone(), theirs: theirs.fact.content_id.clone() }
+    Conflict {
+        kind,
+        stable_id: base.fact.stable_id.clone(),
+        human_identity: base.fact.human_identity.clone(),
+        ours: ours.fact.content_id.clone(),
+        theirs: theirs.fact.content_id.clone(),
+    }
 }
 
 fn render_conflicts(conflicts: &[Conflict], mode: &str) {
     if mode == "text" {
-        for conflict in conflicts { eprintln!("conflict: {} ({})\n stable id: {}\n ours: {}\n theirs: {}", conflict.human_identity, conflict.kind, conflict.stable_id, conflict.ours, conflict.theirs); }
+        for conflict in conflicts {
+            eprintln!(
+                "conflict: {} ({})\n stable id: {}\n ours: {}\n theirs: {}",
+                conflict.human_identity,
+                conflict.kind,
+                conflict.stable_id,
+                conflict.ours,
+                conflict.theirs
+            );
+        }
         eprintln!("merge stopped: resolve conflicts manually; no output was written");
     } else {
         let payload = format!(
             "{{\"conflicts\":[{}]}}",
-            conflicts.iter().map(conflict_json).collect::<Vec<_>>().join(",")
+            conflicts
+                .iter()
+                .map(conflict_json)
+                .collect::<Vec<_>>()
+                .join(",")
         );
         eprintln!(
             "{}",
-            render_status_json("conflict", false, "merge.structural", &format!(",\"structural_merge\":{payload}"))
+            render_status_json(
+                "conflict",
+                false,
+                "merge.structural",
+                &format!(",\"structural_merge\":{payload}")
+            )
         );
     }
 }
 
 fn install_driver(args: &[String]) {
-    let repo = flag_value(args, "--repo").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let repo = flag_value(args, "--repo")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let config = git_config_path(&repo);
     git_config_set(&config, "merge.jetstruct.name", "Jet structural merge");
-    git_config_set(&config, "merge.jetstruct.driver", "jet merge --structural %O %A %B --out %A");
+    git_config_set(
+        &config,
+        "merge.jetstruct.driver",
+        "jet merge --structural %O %A %B --out %A",
+    );
     for (key, expected) in [
         ("merge.jetstruct.name", "Jet structural merge"),
-        ("merge.jetstruct.driver", "jet merge --structural %O %A %B --out %A"),
+        (
+            "merge.jetstruct.driver",
+            "jet merge --structural %O %A %B --out %A",
+        ),
     ] {
         let actual = git_config_get(&config, key);
-        if actual.trim() != expected { fail(&format!("Git did not retain `{key}` exactly"), "check repository config permissions and includes"); }
+        if actual.trim() != expected {
+            fail(
+                &format!("Git did not retain `{key}` exactly"),
+                "check repository config permissions and includes",
+            );
+        }
     }
     let attributes = repo.join(".gitattributes");
     let mut attrs = fs::read_to_string(&attributes).unwrap_or_default();
     let line = "*.jet merge=jetstruct";
-    if !attrs.lines().any(|existing| existing.trim() == line) { if !attrs.is_empty() && !attrs.ends_with('\n') { attrs.push('\n'); } attrs.push_str(line); attrs.push('\n'); write_file(&attributes, &attrs); }
+    if !attrs.lines().any(|existing| existing.trim() == line) {
+        if !attrs.is_empty() && !attrs.ends_with('\n') {
+            attrs.push('\n');
+        }
+        attrs.push_str(line);
+        attrs.push('\n');
+        write_file(&attributes, &attrs);
+    }
     println!("installed structural merge driver in {}", repo.display());
 }
 
 fn git_config_path(repo: &Path) -> PathBuf {
-    let output = Command::new("git").arg("-C").arg(repo).args(["rev-parse", "--git-path", "config"]).output()
-        .unwrap_or_else(|err| fail(&format!("could not run Git: {err}"), "install Git before enabling its merge driver"));
-    if !output.status.success() { fail(&format!("`{}` is not a Git worktree", repo.display()), "run inside a Git repository or pass --repo <path>"); }
-    let raw = String::from_utf8(output.stdout).unwrap_or_else(|_| fail("Git returned a non-UTF-8 config path", "repair the Git worktree metadata"));
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--git-path", "config"])
+        .output()
+        .unwrap_or_else(|err| {
+            fail(
+                &format!("could not run Git: {err}"),
+                "install Git before enabling its merge driver",
+            )
+        });
+    if !output.status.success() {
+        fail(
+            &format!("`{}` is not a Git worktree", repo.display()),
+            "run inside a Git repository or pass --repo <path>",
+        );
+    }
+    let raw = String::from_utf8(output.stdout).unwrap_or_else(|_| {
+        fail(
+            "Git returned a non-UTF-8 config path",
+            "repair the Git worktree metadata",
+        )
+    });
     let reported = Path::new(raw.trim());
-    let config = if reported.is_absolute() { normalize_path(reported) } else { normalize_path(&repo.join(reported)) };
-    if !config.is_file() { fail(&format!("`{}` has no Git config", repo.display()), "repair the Git worktree metadata"); }
+    let config = if reported.is_absolute() {
+        normalize_path(reported)
+    } else {
+        normalize_path(&repo.join(reported))
+    };
+    if !config.is_file() {
+        fail(
+            &format!("`{}` has no Git config", repo.display()),
+            "repair the Git worktree metadata",
+        );
+    }
     config
 }
 
 fn git_config_set(config: &Path, key: &str, value: &str) {
-    let output = Command::new("git").args(["config", "--file"]).arg(config).args(["--replace-all", key, value]).output()
-        .unwrap_or_else(|err| fail(&format!("could not run Git: {err}"), "install Git before enabling its merge driver"));
-    if !output.status.success() { fail(&format!("could not update Git config `{key}`"), "fix repository config permissions"); }
+    let output = Command::new("git")
+        .args(["config", "--file"])
+        .arg(config)
+        .args(["--replace-all", key, value])
+        .output()
+        .unwrap_or_else(|err| {
+            fail(
+                &format!("could not run Git: {err}"),
+                "install Git before enabling its merge driver",
+            )
+        });
+    if !output.status.success() {
+        fail(
+            &format!("could not update Git config `{key}`"),
+            "fix repository config permissions",
+        );
+    }
 }
 
 fn git_config_get(config: &Path, key: &str) -> String {
-    let output = Command::new("git").args(["config", "--file"]).arg(config).args(["--get", key]).output()
-        .unwrap_or_else(|err| fail(&format!("could not run Git: {err}"), "install Git before enabling its merge driver"));
-    if !output.status.success() { fail(&format!("could not read back Git config `{key}`"), "repair the repository config"); }
-    String::from_utf8(output.stdout).unwrap_or_else(|_| fail("Git config contained non-UTF-8 data", "repair the repository config"))
+    let output = Command::new("git")
+        .args(["config", "--file"])
+        .arg(config)
+        .args(["--get", key])
+        .output()
+        .unwrap_or_else(|err| {
+            fail(
+                &format!("could not run Git: {err}"),
+                "install Git before enabling its merge driver",
+            )
+        });
+    if !output.status.success() {
+        fail(
+            &format!("could not read back Git config `{key}`"),
+            "repair the repository config",
+        );
+    }
+    String::from_utf8(output.stdout).unwrap_or_else(|_| {
+        fail(
+            "Git config contained non-UTF-8 data",
+            "repair the repository config",
+        )
+    })
 }
 
-fn write_file(path: &Path, content: &str) { if let Err(err) = fs::write(path, content) { fail(&format!("could not write `{}`: {err}", path.display()), "fix repository permissions"); } }
+fn write_file(path: &Path, content: &str) {
+    if let Err(err) = fs::write(path, content) {
+        fail(
+            &format!("could not write `{}`: {err}", path.display()),
+            "fix repository permissions",
+        );
+    }
+}
 fn positional(args: &[String], command: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_value = false;
-    for arg in args.iter().skip_while(|arg| arg.as_str() != command).skip(1) {
-        if skip_value { skip_value = false; continue; }
-        if matches!(arg.as_str(), "--out" | "--report" | "--repo") { skip_value = true; continue; }
-        if !arg.starts_with('-') && !matches!(arg.as_str(), "install-driver" | "text" | "json" | "editor") { out.push(arg.clone()); }
+    for arg in args
+        .iter()
+        .skip_while(|arg| arg.as_str() != command)
+        .skip(1)
+    {
+        if skip_value {
+            skip_value = false;
+            continue;
+        }
+        if matches!(arg.as_str(), "--out" | "--repo") {
+            skip_value = true;
+            continue;
+        }
+        if !arg.starts_with('-')
+            && arg.as_str() != "install-driver"
+        {
+            out.push(arg.clone());
+        }
     }
     out
 }
-fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> { args.windows(2).find(|pair| pair[0] == name).map(|pair| pair[1].as_str()) }
-fn report_mode(args: &[String]) -> &str { flag_value(args, "--report").unwrap_or("text") }
-fn wants_help(args: &[String]) -> bool { args.iter().any(|arg| jet::CLI::is_help_flag(arg)) || args.get(1).is_some_and(|arg| arg == "help") }
-fn diff_help() -> &'static str { "usage: jet diff --structural <before.jet> <after.jet> [--report text|json|editor]\n\nCompares checked Jet definitions by semantic identity.\n" }
-fn merge_help() -> &'static str { "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--report text|json|editor]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n" }
-fn same_module(path: &Path, module: &str) -> bool { absolute_normalized(path) == absolute_normalized(Path::new(module)) }
+fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|pair| pair[0] == name)
+        .map(|pair| pair[1].as_str())
+}
+fn report_mode(args: &[String]) -> &str {
+    if args.iter().any(|arg| arg == "--json") {
+        "json"
+    } else {
+        "text"
+    }
+}
+fn wants_help(args: &[String]) -> bool {
+    args.iter().any(|arg| jet::CLI::is_help_flag(arg))
+        || args.get(1).is_some_and(|arg| arg == "help")
+}
+fn diff_help() -> &'static str {
+    "usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n"
+}
+fn merge_help() -> &'static str {
+    "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--json]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n"
+}
+fn same_module(path: &Path, module: &str) -> bool {
+    absolute_normalized(path) == absolute_normalized(Path::new(module))
+}
 fn absolute_normalized(path: &Path) -> PathBuf {
-    if path.is_absolute() { normalize_path(path) }
-    else { normalize_path(&std::env::current_dir().unwrap_or_else(|err| fail(&format!("could not read current directory: {err}"), "run from a readable directory")).join(path)) }
+    if path.is_absolute() {
+        normalize_path(path)
+    } else {
+        normalize_path(
+            &std::env::current_dir()
+                .unwrap_or_else(|err| {
+                    fail(
+                        &format!("could not read current directory: {err}"),
+                        "run from a readable directory",
+                    )
+                })
+                .join(path),
+        )
+    }
 }
 fn normalize_path(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => { out.pop(); }
+            Component::ParentDir => {
+                out.pop();
+            }
             other => out.push(other.as_os_str()),
         }
     }
@@ -612,8 +985,16 @@ fn change_json(change: &Change) -> String {
         "{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{},\"semantic_op\":{}}}",
         json_string(change.kind.name()),
         json_string(&change.stable_id),
-        change.before.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()),
-        change.after.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()),
+        change
+            .before
+            .as_ref()
+            .map(|v| json_string(v))
+            .unwrap_or_else(|| "null".into()),
+        change
+            .after
+            .as_ref()
+            .map(|v| json_string(v))
+            .unwrap_or_else(|| "null".into()),
         semantic_op,
     )
 }
@@ -635,6 +1016,25 @@ fn semantic_op_json(op: &SemanticOp) -> String {
         optional(&op.replace_template),
     )
 }
-fn conflict_json(conflict: &Conflict) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}", json_string(conflict.kind), json_string(&conflict.stable_id), json_string(&conflict.human_identity), json_string(&conflict.ours), json_string(&conflict.theirs)) }
-fn render_index_error(context: &str, error: SemIndexError) -> ! { crate::cli_error!(@fix "E2105", context, "correct source errors; structural tools never merge unchecked code"); let SemIndexError::Load(diags) = error; for diagnostic in diags { eprintln!("  {}: {}", diagnostic.code, diagnostic.what); } exit(ExitCodes::USER_ERROR) }
-fn fail(message: &str, fix: &str) -> ! { crate::cli_error!(@fix "E2104", message, fix); exit(ExitCodes::USAGE) }
+fn conflict_json(conflict: &Conflict) -> String {
+    format!(
+        "{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}",
+        json_string(conflict.kind),
+        json_string(&conflict.stable_id),
+        json_string(&conflict.human_identity),
+        json_string(&conflict.ours),
+        json_string(&conflict.theirs)
+    )
+}
+fn render_index_error(context: &str, error: SemIndexError) -> ! {
+    crate::cli_error!(@fix "E2105", context, "correct source errors; structural tools never merge unchecked code");
+    let SemIndexError::Load(diags) = error;
+    for diagnostic in diags {
+        eprintln!("  {}: {}", diagnostic.code, diagnostic.what);
+    }
+    exit(ExitCodes::USER_ERROR)
+}
+fn fail(message: &str, fix: &str) -> ! {
+    crate::cli_error!(@fix "E2104", message, fix);
+    exit(ExitCodes::USAGE)
+}

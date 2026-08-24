@@ -45,6 +45,8 @@ impl StreamingSha256 {
             if self.block_len == 64 {
                 compress(&mut self.state, &self.block);
                 self.block_len = 0;
+            } else {
+                return;
             }
         }
         let mut chunks = data.chunks_exact(64);
@@ -263,5 +265,14 @@ mod tests {
             streaming.update(chunk);
         }
         assert_eq!(hex(streaming.finalize()), sha256_hex(&data));
+    }
+
+    #[test]
+    fn streaming_preserves_partial_blocks_across_small_updates() {
+        let mut streaming = StreamingSha256::new();
+        for byte in b"abc" {
+            streaming.update(std::slice::from_ref(byte));
+        }
+        assert_eq!(hex(streaming.finalize()), sha256_hex(b"abc"));
     }
 }

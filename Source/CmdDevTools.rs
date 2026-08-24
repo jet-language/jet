@@ -36,7 +36,12 @@ fn dev_session_action(byte: u8) -> Option<DevSessionAction> {
         c if c == jet::Syntax::SESSION_KEY_TESTS.chars().next().unwrap() => {
             Some(DevSessionAction::Tests)
         }
-        c if c == jet::Syntax::SESSION_KEY_FAILED_CLAIMS.chars().next().unwrap() => {
+        c if c
+            == jet::Syntax::SESSION_KEY_FAILED_CLAIMS
+                .chars()
+                .next()
+                .unwrap() =>
+        {
             Some(DevSessionAction::FailedClaimsOnly)
         }
         c if c == jet::Syntax::SESSION_KEY_QUIT.chars().next().unwrap() => {
@@ -107,13 +112,17 @@ fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
         };
         print!("{}", String::from_utf8_lossy(&output.stdout));
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
-        for name in output.stdout.split(|byte| *byte == b'\n').filter_map(|line| {
-            let line = String::from_utf8_lossy(line);
-            let line = line.trim();
-            line.strip_suffix(": FAIL")
-                .or_else(|| line.strip_prefix("FAIL "))
-                .map(str::to_string)
-        }) {
+        for name in output
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| {
+                let line = String::from_utf8_lossy(line);
+                let line = line.trim();
+                line.strip_suffix(": FAIL")
+                    .or_else(|| line.strip_prefix("FAIL "))
+                    .map(str::to_string)
+            })
+        {
             if !failed.contains(&name) {
                 failed.push(name);
             }
@@ -134,10 +143,7 @@ fn emit_run_output(stdout: &str, stderr: &str) {
 fn emit_internal_fault(stdout: &str, what: &str) -> ! {
     emit_run_output(stdout, "");
     let _ = std::io::stdout().flush();
-    eprintln!(
-        "{}",
-        jet::Diagnostics::render_ice_report(what, "", false)
-    );
+    eprintln!("{}", jet::Diagnostics::render_ice_report(what, "", false));
     exit(ExitCodes::ICE);
 }
 fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
@@ -148,8 +154,6 @@ fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
         emit_internal_fault(stdout, what);
     }
 }
-
-
 
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
@@ -472,7 +476,11 @@ impl JobClock {
     /// The testable core of `due`: `unix_secs` is injected so the day/window
     /// arithmetic can be checked without racing real wall-clock time.
     #[allow(dead_code)]
-    fn due_at(&mut self, jobs: &[(String, jet::AST::EverySchedule)], unix_secs: u64) -> Vec<String> {
+    fn due_at(
+        &mut self,
+        jobs: &[(String, jet::AST::EverySchedule)],
+        unix_secs: u64,
+    ) -> Vec<String> {
         let schedules = jobs
             .iter()
             .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
@@ -509,12 +517,9 @@ fn render_dev_change(
     // Load+check the new bundle so we can both diff its type surface and run it.
     let new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
-            if let Err(diags) = jet::Driver::seed_build_facts(
-                &mut b,
-                profile,
-                false,
-                setting_overrides,
-            ) {
+            if let Err(diags) =
+                jet::Driver::seed_build_facts(&mut b, profile, false, setting_overrides)
+            {
                 let src = fs::read_to_string(file).unwrap_or_default();
                 println!("\n— {} changed —", file);
                 report_problems(mode, file, &src, &diags);
@@ -590,8 +595,13 @@ fn render_dev_change(
                         if !mode.quiet {
                             println!("\n[restart] {} — {}", module_name, what);
                         }
-                        if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter)
-                        {
+                        if !run_resident_restart(
+                            &new_bundle,
+                            try_anyway,
+                            file,
+                            mode,
+                            use_interpreter,
+                        ) {
                             return None;
                         }
                     }
@@ -741,12 +751,9 @@ fn render_dev_iteration(
     let bundle = if ran_ok {
         match jet::Loader::load_entry(file) {
             Ok(mut bundle) => {
-                if let Err(diags) = jet::Driver::seed_build_facts(
-                    &mut bundle,
-                    profile,
-                    false,
-                    setting_overrides,
-                ) {
+                if let Err(diags) =
+                    jet::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides)
+                {
                     let source = fs::read_to_string(file).unwrap_or_default();
                     report_problems(mode, file, &source, &diags);
                     None
@@ -768,11 +775,7 @@ fn render_dev_iteration(
     }
 }
 
-fn render_dev_outcome(
-    outcome: &jet::Interpreter::RunOutcome,
-    file: &str,
-    mode: OutputMode,
-) {
+fn render_dev_outcome(outcome: &jet::Interpreter::RunOutcome, file: &str, mode: OutputMode) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
             emit_run_output(stdout, stderr);
@@ -819,10 +822,20 @@ fn run_dev_budget_refresh(file: &str, bundle: &jet::AST::ProgramBundle, mode: Ou
         Err(_) => return,
     };
     let has_service = specs.iter().any(|s| {
-        s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider) == "ServiceProbe"
+        s.spec
+            .provider
+            .split_once('(')
+            .map(|(k, _)| k)
+            .unwrap_or(&s.spec.provider)
+            == "ServiceProbe"
     });
     let has_scene = specs.iter().any(|s| {
-        s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider) == "SceneProbe"
+        s.spec
+            .provider
+            .split_once('(')
+            .map(|(k, _)| k)
+            .unwrap_or(&s.spec.provider)
+            == "SceneProbe"
     });
     if !has_service && !has_scene {
         return;
@@ -909,20 +922,43 @@ pub(crate) fn run_completions(args: &[String]) {
         let program = &args[2];
         let command_name = jet::CLI::completion_command_name(program)
             .unwrap_or_else(|error| completion_metadata_error(program, error));
-        let mut file = open_completion_program(program).unwrap_or_else(|error| completion_metadata_error(program, &format!("the program could not be opened ({error})")));
-        let metadata = file.metadata().unwrap_or_else(|error| completion_metadata_error(program, &format!("the opened program could not be inspected ({error})")));
+        let mut file = open_completion_program(program).unwrap_or_else(|error| {
+            completion_metadata_error(
+                program,
+                &format!("the program could not be opened ({error})"),
+            )
+        });
+        let metadata = file.metadata().unwrap_or_else(|error| {
+            completion_metadata_error(
+                program,
+                &format!("the opened program could not be inspected ({error})"),
+            )
+        });
         if !metadata.file_type().is_file() {
             completion_metadata_error(program, "the program is not a regular file");
         }
         const MAX_PROGRAM_BYTES: u64 = 512 * 1024 * 1024;
         if metadata.len() > MAX_PROGRAM_BYTES {
-            completion_metadata_error(program, "the program is larger than the 512 MiB metadata-reader limit");
+            completion_metadata_error(
+                program,
+                "the program is larger than the 512 MiB metadata-reader limit",
+            );
         }
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        Read::by_ref(&mut file).take(MAX_PROGRAM_BYTES + 1).read_to_end(&mut bytes)
-            .unwrap_or_else(|error| completion_metadata_error(program, &format!("the opened program could not be read ({error})")));
+        Read::by_ref(&mut file)
+            .take(MAX_PROGRAM_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .unwrap_or_else(|error| {
+                completion_metadata_error(
+                    program,
+                    &format!("the opened program could not be read ({error})"),
+                )
+            });
         if bytes.len() as u64 > MAX_PROGRAM_BYTES {
-            completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read");
+            completion_metadata_error(
+                program,
+                "the program grew beyond the 512 MiB metadata-reader limit while being read",
+            );
         }
         let schema = jet_foundation::CLISchema::read_executable(&bytes)
             .unwrap_or_else(|error| completion_metadata_error(program, &error.to_string()));
@@ -938,7 +974,10 @@ fn open_completion_program(path: &str) -> std::io::Result<File> {
     const NONBLOCK: i32 = 0o4000;
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     const NONBLOCK: i32 = 0x0004;
-    OpenOptions::new().read(true).custom_flags(NONBLOCK).open(path)
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(NONBLOCK)
+        .open(path)
 }
 
 #[cfg(not(unix))]
@@ -947,7 +986,10 @@ fn open_completion_program(path: &str) -> std::io::Result<File> {
 }
 
 fn completion_metadata_error(program: &str, why: &str) -> ! {
-    let program = program.chars().flat_map(char::escape_default).collect::<String>();
+    let program = program
+        .chars()
+        .flat_map(char::escape_default)
+        .collect::<String>();
     eprintln!("Error [E2103]: couldn't read command metadata from `{program}`.");
     eprintln!(" Why: {why}.");
     eprintln!(" Fix: rebuild the program with this Jet toolchain, then try again.");
@@ -999,11 +1041,19 @@ pub(crate) fn run_devtools(args: &[&String], mode: OutputMode) {
         Some("probe") => run_devtools_probe(&args[1..]),
         Some(other) => {
             crate::cli_error!("E2101", "unknown `devtools` subcommand `{}`", other);
-            eprintln!("usage: {} devtools <{}>", jet::Syntax::BINARY_NAME, DEVTOOLS_SUBCOMMANDS);
+            eprintln!(
+                "usage: {} devtools <{}>",
+                jet::Syntax::BINARY_NAME,
+                DEVTOOLS_SUBCOMMANDS
+            );
             exit(ExitCodes::USAGE);
         }
         None => {
-            eprintln!("usage: {} devtools <{}>", jet::Syntax::BINARY_NAME, DEVTOOLS_SUBCOMMANDS);
+            eprintln!(
+                "usage: {} devtools <{}>",
+                jet::Syntax::BINARY_NAME,
+                DEVTOOLS_SUBCOMMANDS
+            );
             exit(ExitCodes::USAGE);
         }
     }
@@ -1064,13 +1114,19 @@ pub(crate) fn run_devtools_reduce(args: &[&String]) {
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or(jet::Syntax::FILE_EXT);
-    let scratch =
-        std::env::temp_dir().join(format!("jet_devtools_reduce_{}.{}", std::process::id(), ext));
+    let scratch = std::env::temp_dir().join(format!(
+        "jet_devtools_reduce_{}.{}",
+        std::process::id(),
+        ext
+    ));
     let interesting = |text: &str| reduce_oracle(&scratch, text, code_filter.as_deref());
 
     if !interesting(&src) {
         let why = code_filter.as_ref().map_or_else(
-            || "either the front end already rejects it, or rustc accepts the generated Rust".to_string(),
+            || {
+                "either the front end already rejects it, or rustc accepts the generated Rust"
+                    .to_string()
+            },
             |code| format!("the front end never emits `{code}` for this file"),
         );
         crate::cli_error!(@full "E2104", format!("`{}` doesn't reproduce the target oracle as given", file), why, "confirm the case fails the way you expect, then reduce it");
@@ -1165,10 +1221,7 @@ fn ddmin(lines: Vec<String>, interesting: &dyn Fn(&str) -> bool) -> Vec<String> 
 /// `<file>.reduced.<ext>` sibling path for the reducer's output.
 fn reduced_path(file: &str) -> PathBuf {
     let p = Path::new(file);
-    let stem_name = p
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("reduced");
+    let stem_name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("reduced");
     let ext = p
         .extension()
         .and_then(|s| s.to_str())
@@ -1272,9 +1325,10 @@ pub(crate) fn run_devtools_ice_report(args: &[&String]) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let bundle_dir = PathBuf::from(".jet")
-        .join("ice-report")
-        .join(format!("{}-{}", stem(file), ts));
+    let bundle_dir =
+        PathBuf::from(".jet")
+            .join("ice-report")
+            .join(format!("{}-{}", stem(file), ts));
     fs::create_dir_all(&bundle_dir).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't create `{}`: {}", bundle_dir.display(), e);
         exit(ExitCodes::USER_ERROR);
@@ -1335,11 +1389,21 @@ pub(crate) fn run_devtools_new_example(args: &[&String]) {
     }
 
     fs::create_dir_all(&example_dir).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't create `{}`: {}", example_dir.display(), e);
+        crate::cli_error!(
+            "E2105",
+            "couldn't create `{}`: {}",
+            example_dir.display(),
+            e
+        );
         exit(ExitCodes::USER_ERROR);
     });
     fs::create_dir_all(&expected_dir).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't create `{}`: {}", expected_dir.display(), e);
+        crate::cli_error!(
+            "E2105",
+            "couldn't create `{}`: {}",
+            expected_dir.display(),
+            e
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -1349,11 +1413,21 @@ pub(crate) fn run_devtools_new_example(args: &[&String]) {
         topic, name, ext, greeting
     );
     fs::write(&example_path, &src).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't write `{}`: {}", example_path.display(), e);
+        crate::cli_error!(
+            "E2105",
+            "couldn't write `{}`: {}",
+            example_path.display(),
+            e
+        );
         exit(ExitCodes::USER_ERROR);
     });
     fs::write(&expected_path, format!("{}\n", greeting)).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't write `{}`: {}", expected_path.display(), e);
+        crate::cli_error!(
+            "E2105",
+            "couldn't write `{}`: {}",
+            expected_path.display(),
+            e
+        );
         exit(ExitCodes::USER_ERROR);
     });
 
@@ -1374,7 +1448,11 @@ pub(crate) fn run_devtools_new_ui(args: &[&String]) {
     }
     let name = args[0].as_str();
     if name.is_empty() || name.contains('/') || name.contains('.') {
-        crate::cli_error!("E2104", "`new-ui` takes a bare fixture name, no path or extension: got `{}`", name);
+        crate::cli_error!(
+            "E2104",
+            "`new-ui` takes a bare fixture name, no path or extension: got `{}`",
+            name
+        );
         exit(ExitCodes::USER_ERROR);
     }
 
@@ -1689,7 +1767,12 @@ fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
     let start = text
         .find(jet::Syntax::HIGHLIGHT_GENERATED_START)
         .unwrap_or_else(|| {
-            crate::cli_error!("E2105", "`{}` has no `{}` marker", path, jet::Syntax::HIGHLIGHT_GENERATED_START);
+            crate::cli_error!(
+                "E2105",
+                "`{}` has no `{}` marker",
+                path,
+                jet::Syntax::HIGHLIGHT_GENERATED_START
+            );
             exit(ExitCodes::USER_ERROR);
         });
     let prefix_start = text[..start].rfind('\n').map_or(0, |idx| idx + 1);
@@ -1697,7 +1780,12 @@ fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
     let end_rel = after_start
         .find(jet::Syntax::HIGHLIGHT_GENERATED_END)
         .unwrap_or_else(|| {
-            crate::cli_error!("E2105", "`{}` has no `{}` marker", path, jet::Syntax::HIGHLIGHT_GENERATED_END);
+            crate::cli_error!(
+                "E2105",
+                "`{}` has no `{}` marker",
+                path,
+                jet::Syntax::HIGHLIGHT_GENERATED_END
+            );
             exit(ExitCodes::USER_ERROR);
         });
     let end_marker = start + end_rel + jet::Syntax::HIGHLIGHT_GENERATED_END.len();
@@ -1833,8 +1921,7 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
             .join(path)
     };
     let entry = abs.display().to_string();
-    let (diags, _bundle, facts) =
-        jet::Driver::check_file_with_effect_facts(&entry, None, false);
+    let (diags, _bundle, facts) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
     let Some(graph) = facts.web_app.as_ref() else {
         if diags
             .iter()
@@ -1890,7 +1977,12 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
         let payload = graph.to_json();
         println!(
             "{}",
-            render_status_json("ok", true, "inspect.web", &format!(",\"web_app\":{payload}"))
+            render_status_json(
+                "ok",
+                true,
+                "inspect.web",
+                &format!(",\"web_app\":{payload}")
+            )
         );
     } else {
         for line in graph.explain_lines() {
@@ -1957,7 +2049,10 @@ fn explain_source_file(fact_file: Option<&str>) -> PathBuf {
             crate::resolve_bare_entry("run", &cwd, None)
         })
         .unwrap_or_else(|| {
-            crate::cli_error!("E2104", "a source file is required to explain this build fact");
+            crate::cli_error!(
+                "E2104",
+                "a source file is required to explain this build fact"
+            );
             exit(ExitCodes::USAGE);
         })
 }
@@ -1968,17 +2063,13 @@ fn explain_bundle(
     setting_overrides: &BTreeMap<String, String>,
 ) -> jet_foundation::Facts::BuildFactSnapshot {
     let file = explain_source_file(fact_file);
-    jet::Driver::query_build_facts(
-        file.to_string_lossy().as_ref(),
-        profile,
-        setting_overrides,
-    )
-    .unwrap_or_else(|diags| {
-        for diagnostic in diags {
-            eprintln!("{}", diagnostic.what);
-        }
-        exit(ExitCodes::USER_ERROR);
-    })
+    jet::Driver::query_build_facts(file.to_string_lossy().as_ref(), profile, setting_overrides)
+        .unwrap_or_else(|diags| {
+            for diagnostic in diags {
+                eprintln!("{}", diagnostic.what);
+            }
+            exit(ExitCodes::USER_ERROR);
+        })
 }
 
 fn explain_policy_bundle(fact_file: Option<&str>) -> jet::AST::ProgramBundle {
@@ -2041,7 +2132,8 @@ fn run_explain_fact(
         }
         exit(ExitCodes::USER_ERROR);
     };
-    let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone()) else {
+    let Some(explanation) = jet::Explain::lookup_fact(fact.key.clone(), fact.provenance.clone())
+    else {
         crate::cli_error!(
             @full "E3521",
             "the build fact contribution chain could not be resolved",
@@ -2053,11 +2145,7 @@ fn run_explain_fact(
     print_explanation(&explanation, mode);
 }
 
-fn run_explain_policy(
-    key: jet::Policy::PolicyKey,
-    fact_file: Option<&str>,
-    mode: OutputMode,
-) {
+fn run_explain_policy(key: jet::Policy::PolicyKey, fact_file: Option<&str>, mode: OutputMode) {
     let bundle = explain_policy_bundle(fact_file);
     let declarations = bundle
         .modules
@@ -2083,22 +2171,62 @@ fn run_explain_policy(
 /// D-MARK-SCOPE1: `jet explain marker <file>:<line> <policy-key>`.
 pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: OutputMode) {
     let (Some(site), Some(key)) = (site, key) else {
-        eprintln!("usage: {} explain marker <file>:<line> <policy-key>", jet::Syntax::BINARY_NAME);
+        eprintln!(
+            "usage: {} explain marker <file>:<line> <policy-key>",
+            jet::Syntax::BINARY_NAME
+        );
         exit(ExitCodes::USAGE);
     };
     let Some((file, line_text)) = site.rsplit_once(':') else {
-        crate::cli_error!("E2104", "marker site must be `<file>:<line>`"); exit(ExitCodes::USAGE);
+        crate::cli_error!("E2104", "marker site must be `<file>:<line>`");
+        exit(ExitCodes::USAGE);
     };
-    let line = line_text.parse::<usize>().ok().filter(|line| *line > 0).unwrap_or_else(|| { crate::cli_error!("E2104", "marker line must be a positive number"); exit(ExitCodes::USAGE) });
-    let Some(policy_key) = jet::Policy::PolicyKey::parse(key) else { crate::cli_error!("E2104", "`{key}` is not a registered scoped policy"); exit(ExitCodes::USER_ERROR) };
-    let bundle = jet::Loader::load_entry(file).unwrap_or_else(|diags| { for diag in diags { eprintln!("{}", diag.what); } exit(ExitCodes::USER_ERROR) });
+    let line = line_text
+        .parse::<usize>()
+        .ok()
+        .filter(|line| *line > 0)
+        .unwrap_or_else(|| {
+            crate::cli_error!("E2104", "marker line must be a positive number");
+            exit(ExitCodes::USAGE)
+        });
+    let Some(policy_key) = jet::Policy::PolicyKey::parse(key) else {
+        crate::cli_error!("E2104", "`{key}` is not a registered scoped policy");
+        exit(ExitCodes::USER_ERROR)
+    };
+    let bundle = jet::Loader::load_entry(file).unwrap_or_else(|diags| {
+        for diag in diags {
+            eprintln!("{}", diag.what);
+        }
+        exit(ExitCodes::USER_ERROR)
+    });
     let module = &bundle.modules[0];
-    let offset = if line == 1 { 0 } else { module.source.match_indices('\n').nth(line - 2).map(|(at, _)| at + 1).unwrap_or(module.source.len()) };
-    let declarations = module.policy_declarations.iter().filter(|declaration| match declaration.scope {
-        jet::Policy::PolicyScope::Organization | jet::Policy::PolicyScope::Package | jet::Policy::PolicyScope::Module => true,
-        jet::Policy::PolicyScope::Function | jet::Policy::PolicyScope::Block => declaration.target.is_some_and(|target| target.start <= offset && offset <= target.end),
-    }).cloned().collect::<Vec<_>>();
-    let Some(explanation) = jet::Explain::lookup_policy(policy_key, declarations) else { crate::cli_error!("E2104", "`{key}` has no effective declaration at {site}"); exit(ExitCodes::USER_ERROR) };
+    let offset = if line == 1 {
+        0
+    } else {
+        module
+            .source
+            .match_indices('\n')
+            .nth(line - 2)
+            .map(|(at, _)| at + 1)
+            .unwrap_or(module.source.len())
+    };
+    let declarations = module
+        .policy_declarations
+        .iter()
+        .filter(|declaration| match declaration.scope {
+            jet::Policy::PolicyScope::Organization
+            | jet::Policy::PolicyScope::Package
+            | jet::Policy::PolicyScope::Module => true,
+            jet::Policy::PolicyScope::Function | jet::Policy::PolicyScope::Block => declaration
+                .target
+                .is_some_and(|target| target.start <= offset && offset <= target.end),
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let Some(explanation) = jet::Explain::lookup_policy(policy_key, declarations) else {
+        crate::cli_error!("E2104", "`{key}` has no effective declaration at {site}");
+        exit(ExitCodes::USER_ERROR)
+    };
     print_explanation(&explanation, mode);
 }
 
@@ -2119,30 +2247,129 @@ pub(crate) fn run_bind(args: &[&String]) {
         run_data_bind(format, &args[1..]);
         return;
     }
-    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT) {
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT)
+    {
         run_cpp_bind(&args[1..]);
         return;
     }
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COM_MODULE_ROOT){run_com_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::COBOL_MODULE_ROOT){run_cobol_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PERL_MODULE_ROOT){run_perl_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::RUBY_MODULE_ROOT){run_ruby_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PHP_MODULE_ROOT){run_php_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::R_MODULE_ROOT){run_r_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PY_MODULE_ROOT){run_python_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::JS_MODULE_ROOT){run_javascript_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::OCTAVE_MODULE_ROOT){run_octave_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PWSH_MODULE_ROOT){run_powershell_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::DART_MODULE_ROOT){run_dart_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::PASCAL_MODULE_ROOT){run_pascal_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::ADA_MODULE_ROOT){run_ada_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::TCL_MODULE_ROOT){run_tcl_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg|arg.as_str()==jet::Syntax::LUA_MODULE_ROOT){run_lua_bind(&args[1..]);return;}
-    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::JAVA_MODULE_ROOT) {
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::COM_MODULE_ROOT)
+    {
+        run_com_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::COBOL_MODULE_ROOT)
+    {
+        run_cobol_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::PERL_MODULE_ROOT)
+    {
+        run_perl_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::RUBY_MODULE_ROOT)
+    {
+        run_ruby_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::PHP_MODULE_ROOT)
+    {
+        run_php_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::R_MODULE_ROOT)
+    {
+        run_r_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::PY_MODULE_ROOT)
+    {
+        run_python_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::JS_MODULE_ROOT)
+    {
+        run_javascript_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::OCTAVE_MODULE_ROOT)
+    {
+        run_octave_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::PWSH_MODULE_ROOT)
+    {
+        run_powershell_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::DART_MODULE_ROOT)
+    {
+        run_dart_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::PASCAL_MODULE_ROOT)
+    {
+        run_pascal_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::ADA_MODULE_ROOT)
+    {
+        run_ada_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::TCL_MODULE_ROOT)
+    {
+        run_tcl_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::LUA_MODULE_ROOT)
+    {
+        run_lua_bind(&args[1..]);
+        return;
+    }
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::JAVA_MODULE_ROOT)
+    {
         run_java_bind(&args[1..]);
         return;
     }
-    if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CS_MODULE_ROOT) {
+    if args
+        .first()
+        .is_some_and(|arg| arg.as_str() == jet::Syntax::CS_MODULE_ROOT)
+    {
         run_dotnet_bind(&args[1..]);
         return;
     }
@@ -2174,7 +2401,11 @@ pub(crate) fn run_bind(args: &[&String]) {
         eprintln!("a `#Bindgen module c.<lib>.__bindgen__` file, by default written");
         eprintln!("to .jet/bindings/c/<lib>.jet. The compiler also runs this");
         eprintln!("automatically on a cache miss; `jet inspect bind` is the manual refresh.");
-        exit(if args.is_empty() { ExitCodes::USAGE } else { ExitCodes::OK });
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
     }
 
     let header = args[0].as_str();
@@ -2194,7 +2425,11 @@ pub(crate) fn run_bind(args: &[&String]) {
             }
             "-o" | "--out" => {
                 let Some(value) = args.get(i + 1) else {
-                    crate::cli_error!("E2102", "`inspect bind` requires a value after `{}`", args[i]);
+                    crate::cli_error!(
+                        "E2102",
+                        "`inspect bind` requires a value after `{}`",
+                        args[i]
+                    );
                     exit(ExitCodes::USAGE);
                 };
                 out = Some(value.to_string());
@@ -2222,11 +2457,8 @@ pub(crate) fn run_bind(args: &[&String]) {
         let base = header.rsplit('/').next().unwrap_or(header);
         base.strip_suffix(".h").unwrap_or(base).to_string()
     });
-    let lib = jet::Syntax::sanitize_generated_name(
-        &raw_lib,
-        jet::Syntax::NameCase::Snake,
-        "library",
-    );
+    let lib =
+        jet::Syntax::sanitize_generated_name(&raw_lib, jet::Syntax::NameCase::Snake, "library");
 
     let header_src = match std::fs::read_to_string(header) {
         Ok(s) => s,
@@ -2316,7 +2548,10 @@ fn run_data_bind(format: &str, args: &[&String]) {
         match args[index].as_str() {
             "--type" => {
                 let Some(value) = args.get(index + 1) else {
-                    crate::cli_error!("E2102", "inspect bind {format} requires a value after --type");
+                    crate::cli_error!(
+                        "E2102",
+                        "inspect bind {format} requires a value after --type"
+                    );
                     usage();
                     exit(ExitCodes::USAGE);
                 };
@@ -2364,15 +2599,9 @@ fn run_data_bind(format: &str, args: &[&String]) {
             .rsplit(|ch| ch == '/' || ch == '\\')
             .next()
             .unwrap_or(input_path);
-        let stem = base
-            .rsplit_once('.')
-            .map(|(stem, _)| stem)
-            .unwrap_or(base);
-        let safe = jet::Syntax::sanitize_generated_name(
-            stem,
-            jet::Syntax::NameCase::Snake,
-            "schema",
-        );
+        let stem = base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base);
+        let safe =
+            jet::Syntax::sanitize_generated_name(stem, jet::Syntax::NameCase::Snake, "schema");
         format!("bindings/{safe}.{}", jet::Syntax::FILE_EXT)
     });
     let mut command = vec![
@@ -2391,16 +2620,12 @@ fn run_data_bind(format: &str, args: &[&String]) {
         command.push(output.clone());
     }
     let command = command.join(" ");
-    let result = match jet::CBind::generate_data(
-        format,
-        input_path,
-        &input,
-        root_type.as_deref(),
-        &command,
-    ) {
-        Ok(result) => result,
-        Err(error) => data_bind_error(format, input_path, &error),
-    };
+    let result =
+        match jet::CBind::generate_data(format, input_path, &input, root_type.as_deref(), &command)
+        {
+            Ok(result) => result,
+            Err(error) => data_bind_error(format, input_path, &error),
+        };
     if default_output {
         match fs::read_to_string(&output_path) {
             Ok(existing) => {
@@ -2431,7 +2656,10 @@ fn run_data_bind(format: &str, args: &[&String]) {
                     format,
                     &output_path,
                     "create",
-                    &format!("could not create output directory {} ({error})", parent.display()),
+                    &format!(
+                        "could not create output directory {} ({error})",
+                        parent.display()
+                    ),
                 );
             }
         }
@@ -2483,10 +2711,16 @@ fn data_bind_output_collision(format: &str, input_path: &str, output_path: &str)
 }
 
 fn run_cpp_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || {
+        eprintln!("usage: {} inspect bind cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME)
+    };
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         usage();
-        exit(if args.is_empty() { ExitCodes::USAGE } else { ExitCodes::OK });
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
     }
     let header = args[0].as_str();
     let mut pkg = None;
@@ -2502,19 +2736,91 @@ fn run_cpp_bind(args: &[&String]) {
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
-            "--pkg" => { pkg = args.get(index + 1).map(|v| v.to_string()); if pkg.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
-            "-o" | "--out" => { out = args.get(index + 1).map(|v| v.to_string()); if out.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
-            "--target" => { target = args.get(index + 1).map(|v| v.to_string()); if target.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
-            "--clang" => { clang = args.get(index + 1).map(|v| v.to_string()); if clang.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
-            "--ar" => { archiver = args.get(index + 1).map(|v| v.to_string()); if archiver.is_none() { usage(); exit(ExitCodes::USAGE); } index += 2; }
-            "-I" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; include_dirs.push(std::path::PathBuf::from(value.as_str())); index += 2; }
-            "-L" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; library_dirs.push(std::path::PathBuf::from(value.as_str())); index += 2; }
-            "-l" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; libraries.push(value.to_string()); index += 2; }
-            "--namespace" => { let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); }; namespaces.push(value.to_string()); index += 2; }
+            "--pkg" => {
+                pkg = args.get(index + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                index += 2;
+            }
+            "-o" | "--out" => {
+                out = args.get(index + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                index += 2;
+            }
+            "--target" => {
+                target = args.get(index + 1).map(|v| v.to_string());
+                if target.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                index += 2;
+            }
+            "--clang" => {
+                clang = args.get(index + 1).map(|v| v.to_string());
+                if clang.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                index += 2;
+            }
+            "--ar" => {
+                archiver = args.get(index + 1).map(|v| v.to_string());
+                if archiver.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                index += 2;
+            }
+            "-I" => {
+                let Some(value) = args.get(index + 1) else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                include_dirs.push(std::path::PathBuf::from(value.as_str()));
+                index += 2;
+            }
+            "-L" => {
+                let Some(value) = args.get(index + 1) else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                library_dirs.push(std::path::PathBuf::from(value.as_str()));
+                index += 2;
+            }
+            "-l" => {
+                let Some(value) = args.get(index + 1) else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                libraries.push(value.to_string());
+                index += 2;
+            }
+            "--namespace" => {
+                let Some(value) = args.get(index + 1) else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                namespaces.push(value.to_string());
+                index += 2;
+            }
             "--instantiate" => {
-                let Some(value) = args.get(index + 1) else { usage(); exit(ExitCodes::USAGE); };
-                let Some((qualified_name, rest)) = value.split_once('=') else { usage(); exit(ExitCodes::USAGE); };
-                let Some((cpp_types, jet_name)) = rest.rsplit_once(':') else { usage(); exit(ExitCodes::USAGE); };
+                let Some(value) = args.get(index + 1) else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                let Some((qualified_name, rest)) = value.split_once('=') else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
+                let Some((cpp_types, jet_name)) = rest.rsplit_once(':') else {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                };
                 templates.push(jet::CppBind::TemplateInstantiation {
                     qualified_name: qualified_name.to_string(),
                     cpp_args: cpp_types.split(',').map(str::to_string).collect(),
@@ -2522,14 +2828,46 @@ fn run_cpp_bind(args: &[&String]) {
                 });
                 index += 2;
             }
-            flag => { crate::cli_error!("E2102", "unknown `inspect bind cpp` flag `{flag}`"); usage(); exit(ExitCodes::USAGE); }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind cpp` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE);
+            }
         }
     }
-    let (Some(target), Some(clang), Some(archiver)) = (target, clang, archiver) else { usage(); exit(ExitCodes::USAGE); };
-    let lib = pkg.unwrap_or_else(|| { let base = header.rsplit('/').next().unwrap_or(header); base.rsplit_once('.').map(|v| v.0).unwrap_or(base).to_ascii_lowercase() });
-    let out_path = out.unwrap_or_else(|| format!(".jet/bindings/{}/{}.{}", jet::Syntax::CPP_MODULE_ROOT, lib, jet::Syntax::FILE_EXT));
-    let cache = std::path::Path::new(&out_path).parent().unwrap_or_else(|| std::path::Path::new("."));
-    let canonicalize = |path: std::path::PathBuf| std::fs::canonicalize(&path).unwrap_or_else(|error| cpp_bind_error(header, &format!("could not resolve selected native path `{}` ({error})", path.display())));
+    let (Some(target), Some(clang), Some(archiver)) = (target, clang, archiver) else {
+        usage();
+        exit(ExitCodes::USAGE);
+    };
+    let lib = pkg.unwrap_or_else(|| {
+        let base = header.rsplit('/').next().unwrap_or(header);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::CPP_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let canonicalize = |path: std::path::PathBuf| {
+        std::fs::canonicalize(&path).unwrap_or_else(|error| {
+            cpp_bind_error(
+                header,
+                &format!(
+                    "could not resolve selected native path `{}` ({error})",
+                    path.display()
+                ),
+            )
+        })
+    };
     let options = jet::CppBind::BindOptions {
         lib: lib.clone(),
         target,
@@ -2541,10 +2879,26 @@ fn run_cpp_bind(args: &[&String]) {
         namespaces,
         templates,
     };
-    let result = jet::CppBind::bind(std::path::Path::new(header), cache, &options).unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
-    if let Err(error) = std::fs::write(&out_path, &result.source) { cpp_bind_error(header, &format!("the generated cache could not be written ({error})")); }
-    if let Err(error) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) { cpp_bind_error(header, &format!("the provenance could not be written ({error})")); }
-    println!("bound {} C++ member{} from `{header}` → {out_path}", result.bound.len(), if result.bound.len() == 1 { "" } else { "s" });
+    let result = jet::CppBind::bind(std::path::Path::new(header), cache, &options)
+        .unwrap_or_else(|error| cpp_bind_error(header, &error.to_string()));
+    if let Err(error) = std::fs::write(&out_path, &result.source) {
+        cpp_bind_error(
+            header,
+            &format!("the generated cache could not be written ({error})"),
+        );
+    }
+    if let Err(error) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance)
+    {
+        cpp_bind_error(
+            header,
+            &format!("the provenance could not be written ({error})"),
+        );
+    }
+    println!(
+        "bound {} C++ member{} from `{header}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
 
 fn cpp_bind_error(path: &str, why: &str) -> ! {
@@ -2555,182 +2909,1198 @@ fn cpp_bind_error(path: &str, why: &str) -> ! {
     )
 }
 
-fn run_tcl_bind(args:&[&String]){let usage=||eprintln!("usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind tcl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|tcl_bind_error(path,&format!("the script could not be read ({e})")));let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::TCL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::TclBind::bind(&source,&lib,cache).unwrap_or_else(|e|tcl_bind_error(path,&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){tcl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.tcl-path")),format!("{}\n",result.lib_dir.display())){tcl_bind_error(path,&format!("the Tcl runtime identity could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){tcl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}println!("bound in-process Tcl session from `{path}` → {out_path}")}
-fn tcl_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment.".to_string())}
-
-fn run_lua_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;
-    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind lua` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let b=path.rsplit('/').next().unwrap_or(path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_string()});
-    let source=std::fs::read_to_string(path).unwrap_or_else(|e|lua_bind_error(path,&format!("the script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::LUA_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));
-    let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let result=jet::LuaBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|lua_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){lua_bind_error(path,&format!("the generated cache could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.lua-path")),format!("{}\n",result.lib_dir.display())){lua_bind_error(path,&format!("the Lua runtime identity could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){lua_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} in-process Lua function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_tcl_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind tcl <script.tcl> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind tcl` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let b = path.rsplit('/').next().unwrap_or(path);
+        b.rsplit_once('.').map(|v| v.0).unwrap_or(b).to_string()
+    });
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| tcl_bind_error(path, &format!("the script could not be read ({e})")));
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::TCL_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::TclBind::bind(&source, &lib, cache)
+        .unwrap_or_else(|e| tcl_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        tcl_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.tcl-path")),
+        format!("{}\n", result.lib_dir.display()),
+    ) {
+        tcl_bind_error(
+            path,
+            &format!("the Tcl runtime identity could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+        tcl_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!("bound in-process Tcl session from `{path}` → {out_path}")
 }
-fn lua_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment.".to_string())}
+fn tcl_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment.".to_string())
+}
+
+fn run_lua_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind lua <script.lua> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind lua` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let b = path.rsplit('/').next().unwrap_or(path);
+        b.rsplit_once('.').map(|v| v.0).unwrap_or(b).to_string()
+    });
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| lua_bind_error(path, &format!("the script could not be read ({e})")));
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::LUA_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::LuaBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| lua_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        lua_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.lua-path")),
+        format!("{}\n", result.lib_dir.display()),
+    ) {
+        lua_bind_error(
+            path,
+            &format!("the Lua runtime identity could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+        lua_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} in-process Lua function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
+}
+fn lua_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-ADA1=A: compile exported GNAT functions and preserve scalar subtype
 /// ranges as checked Jet wrapper boundaries.
-fn run_ada_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;
-    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind ada` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});
-    let spec=std::fs::read_to_string(path).unwrap_or_else(|e|ada_bind_error(path,&format!("the package spec could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::ADA_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let result=jet::AdaBind::bind(std::path::Path::new(path),&spec,&lib,cache).unwrap_or_else(|e|ada_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){ada_bind_error(path,&format!("the generated cache could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.ada-path")),format!("{}\n",result.runtime_dir.display())){ada_bind_error(path,&format!("the GNAT runtime identity could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){ada_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} GNAT export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_ada_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind ada <package.ads> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind ada` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let spec = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        ada_bind_error(path, &format!("the package spec could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::ADA_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::AdaBind::bind(std::path::Path::new(path), &spec, &lib, cache)
+        .unwrap_or_else(|e| ada_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        ada_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.ada-path")),
+        format!("{}\n", result.runtime_dir.display()),
+    ) {
+        ada_bind_error(
+            path,
+            &format!("the GNAT runtime identity could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+        ada_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} GNAT export{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn ada_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`.".to_string())}
+fn ada_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`.".to_string())
+}
 
 /// D-FFI-PASCAL1=A: compile FreePascal cdecl exports and generate bounded,
 /// consuming opaque-handle wrappers for one Object Pascal class estate.
-fn run_pascal_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind pascal` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|pascal_bind_error(path,&format!("the Pascal source could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PASCAL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PascalBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|pascal_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){pascal_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),result.provenance){pascal_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} FreePascal export{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_pascal_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind pascal <library.pas> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind pascal` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        pascal_bind_error(path, &format!("the Pascal source could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::PASCAL_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::PascalBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| pascal_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        pascal_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), result.provenance) {
+        pascal_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} FreePascal export{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn pascal_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`.".to_string())}
+fn pascal_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`.".to_string())
+}
 
 /// D-FFI-DART1=A: Dart/Flutter owns the isolate. Generate and compile the
 /// dart_api_dl callback bridge plus a native Jet plugin loaded by `dart:ffi`.
-fn run_dart_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut compute=None;let mut i=1;
-    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--jet"=>{compute=args.get(i+1).map(|v|v.to_string());if compute.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind dart` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let Some(compute)=compute else{crate::cli_error!("E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");usage();exit(ExitCodes::USAGE)};
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});
-    let source=std::fs::read_to_string(path).unwrap_or_else(|e|dart_bind_error(path,&format!("the Dart contract could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::DART_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let host=cache.join(format!("{lib}_host.dart"));let archive=cache.join(format!("libjet_dart_{lib}.a"));let provenance=cache.join(format!("{lib}.provenance"));let compute_artifact=cache.join(format!("{lib}_compute.rs"));
-    let clear_outputs=||{let _=std::fs::remove_file(&out_path);let _=std::fs::remove_file(&host);let _=std::fs::remove_file(&provenance);let _=std::fs::remove_file(&compute_artifact);for ext in ["so","dylib","dll"]{let _=std::fs::remove_file(cache.join(format!("libjet_dart_{lib}_compute.{ext}")));}};
-    clear_outputs();let _=std::fs::remove_file(&archive);
-    let cleanup=||{clear_outputs();let _=std::fs::remove_file(&archive);};
-    let mut result=jet::DartBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
-    if let Err(e)=std::fs::write(&out_path,&result.source){cleanup();dart_bind_error(path,&format!("the generated cache could not be written ({e})"))}
-    if let Err(e)=std::fs::write(&host,&result.host_source){cleanup();dart_bind_error(path,&format!("the Dart host wrapper could not be written ({e})"))}
-    let compute_source=std::fs::read_to_string(&compute).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&format!("the Jet compute source could not be read ({e})"))});result.provenance=jet::DartBind::bind_compute_provenance(&result.provenance,std::path::Path::new(&compute),&compute_source).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
-    let compiled=jet::Driver::compile_bundle_path_opts_plugin(&compute,jet::Sema::CompileMode::Check,None).unwrap_or_else(|_|{cleanup();dart_bind_error(path,"the Jet compute source did not pass Jet front-end checks")});let plugin=compiled.plugin.as_ref().unwrap_or_else(||{cleanup();dart_bind_error(path,"the Jet compute source produced no native plugin export artifact")});
-    let native=jet::DartBind::build_compute(&plugin.guest_rust,&result.host_rust,compiled.ffi.as_ref(),&compiled.clinks,&lib,cache).unwrap_or_else(|e|{cleanup();dart_bind_error(path,&e.to_string())});
-    if let Err(e)=std::fs::write(&provenance,&result.provenance){cleanup();dart_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},native.display(),path,out_path);
+fn run_dart_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!("usage: {} inspect bind dart <contract.dart> --jet <compute.jet> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME)
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut compute = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "--jet" => {
+                compute = args.get(i + 1).map(|v| v.to_string());
+                if compute.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind dart` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let Some(compute) = compute else {
+        crate::cli_error!("E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load");
+        usage();
+        exit(ExitCodes::USAGE)
+    };
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        dart_bind_error(path, &format!("the Dart contract could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::DART_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let host = cache.join(format!("{lib}_host.dart"));
+    let archive = cache.join(format!("libjet_dart_{lib}.a"));
+    let provenance = cache.join(format!("{lib}.provenance"));
+    let compute_artifact = cache.join(format!("{lib}_compute.rs"));
+    let clear_outputs = || {
+        let _ = std::fs::remove_file(&out_path);
+        let _ = std::fs::remove_file(&host);
+        let _ = std::fs::remove_file(&provenance);
+        let _ = std::fs::remove_file(&compute_artifact);
+        for ext in ["so", "dylib", "dll"] {
+            let _ = std::fs::remove_file(cache.join(format!("libjet_dart_{lib}_compute.{ext}")));
+        }
+    };
+    clear_outputs();
+    let _ = std::fs::remove_file(&archive);
+    let cleanup = || {
+        clear_outputs();
+        let _ = std::fs::remove_file(&archive);
+    };
+    let mut result = jet::DartBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| {
+            cleanup();
+            dart_bind_error(path, &e.to_string())
+        });
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        cleanup();
+        dart_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(&host, &result.host_source) {
+        cleanup();
+        dart_bind_error(
+            path,
+            &format!("the Dart host wrapper could not be written ({e})"),
+        )
+    }
+    let compute_source = std::fs::read_to_string(&compute).unwrap_or_else(|e| {
+        cleanup();
+        dart_bind_error(
+            path,
+            &format!("the Jet compute source could not be read ({e})"),
+        )
+    });
+    result.provenance = jet::DartBind::bind_compute_provenance(
+        &result.provenance,
+        std::path::Path::new(&compute),
+        &compute_source,
+    )
+    .unwrap_or_else(|e| {
+        cleanup();
+        dart_bind_error(path, &e.to_string())
+    });
+    let compiled =
+        jet::Driver::compile_bundle_path_opts_plugin(&compute, jet::Sema::CompileMode::Check, None)
+            .unwrap_or_else(|_| {
+                cleanup();
+                dart_bind_error(
+                    path,
+                    "the Jet compute source did not pass Jet front-end checks",
+                )
+            });
+    let plugin = compiled.plugin.as_ref().unwrap_or_else(|| {
+        cleanup();
+        dart_bind_error(
+            path,
+            "the Jet compute source produced no native plugin export artifact",
+        )
+    });
+    let native = jet::DartBind::build_compute(
+        &plugin.guest_rust,
+        &result.host_rust,
+        compiled.ffi.as_ref(),
+        &compiled.clinks,
+        &lib,
+        cache,
+    )
+    .unwrap_or_else(|e| {
+        cleanup();
+        dart_bind_error(path, &e.to_string())
+    });
+    if let Err(e) = std::fs::write(&provenance, &result.provenance) {
+        cleanup();
+        dart_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} Dart callback{} and native Jet compute `{}` from `{}` → {}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" },
+        native.display(),
+        path,
+        out_path
+    );
 }
-fn dart_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.".to_string())}
+fn dart_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-PWSH1=A: validate named script functions, then generate a persistent
 /// PowerShell worker whose object pipeline crosses as canonical DataTree.
-fn run_powershell_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind pwsh` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|powershell_bind_error(path,&format!("the PowerShell script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PWSH_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PowerShellBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|powershell_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){powershell_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){powershell_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} persistent PowerShell function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_powershell_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind pwsh <script.ps1> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind pwsh` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        powershell_bind_error(
+            path,
+            &format!("the PowerShell script could not be read ({e})"),
+        )
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::PWSH_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::PowerShellBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| powershell_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        powershell_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        powershell_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} persistent PowerShell function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn powershell_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment.".to_string())}
+fn powershell_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-PERL1=A: compile named Perl subs into a supervised persistent worker.
-fn run_perl_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind perl` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|perl_bind_error(path,&format!("the Perl script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PERL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PerlBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|perl_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){perl_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){perl_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} persistent Perl function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_perl_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind perl <script.pl> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind perl` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        perl_bind_error(path, &format!("the Perl script could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::PERL_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::PerlBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| perl_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        perl_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        perl_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} persistent Perl function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn perl_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment.".to_string())}
+fn perl_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-RUBY1=A: statically discover top-level methods and generate a
 /// persistent supervised Ruby worker. Ruby source never runs during discovery.
-fn run_ruby_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind ruby` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|ruby_bind_error(path,&format!("the Ruby script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::RUBY_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::RubyBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|ruby_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){ruby_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){ruby_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} persistent Ruby method{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_ruby_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind ruby <script.rb> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind ruby` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        ruby_bind_error(path, &format!("the Ruby script could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::RUBY_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::RubyBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| ruby_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        ruby_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        ruby_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} persistent Ruby method{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn ruby_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby`.".to_string())}
+fn ruby_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby`.".to_string())
+}
 
 /// D-FFI-PHP1=A: statically discover top-level functions and generate a
 /// persistent supervised PHP worker pool. PHP source never runs during discovery.
-fn run_php_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind php <script.php> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind php` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|php_bind_error(path,&format!("the PHP script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PHP_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PhpBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|php_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){php_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){php_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} PHP function{} into a four-worker pool from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_php_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind php <script.php> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind php` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        php_bind_error(path, &format!("the PHP script could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::PHP_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::PhpBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| php_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        php_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        php_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} PHP function{} into a four-worker pool from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn php_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment.".to_string())}
+fn php_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-R1=A: parse top-level function metadata without evaluating source,
 /// then generate a persistent supervised R worker.
-fn run_r_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind r` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|r_bind_error(path,&format!("the R script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::R_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::RBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|r_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){r_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){r_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} R function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_r_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind r <script.R> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind r` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| r_bind_error(path, &format!("the R script could not be read ({e})")));
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::R_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::RBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| r_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        r_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        r_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} R function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn r_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`.".to_string())}
+fn r_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`.".to_string())
+}
 
 /// D-FFI-PY1=A: statically discover top-level Python functions and generate a
 /// persistent supervised CPython sidecar with the common checked boundary.
-fn run_python_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind py <script.py> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind py` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|python_bind_error(path,&format!("the Python script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::PY_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::PythonBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|python_bind_error(path,&e.to_string()));
+fn run_python_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind py <script.py> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind py` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        python_bind_error(path, &format!("the Python script could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::PY_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::PythonBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| python_bind_error(path, &e.to_string()));
     if let Err(e) = std::fs::write(&out_path, &result.source) {
         python_bind_error(
             path,
             &format!("the generated cache could not be written ({e})"),
         );
     }
-    if let Err(e) = std::fs::write(
-        cache.join(format!("{lib}.provenance")),
-        &result.provenance,
-    ) {
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
         python_bind_error(
             path,
             &format!("the binding provenance could not be written ({e})"),
         );
     }
-    println!("bound {} persistent Python function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+    println!(
+        "bound {} persistent Python function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn python_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment.".to_string())}
+fn python_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-JS1=A: bind a typed TypeScript declaration file to a target-selected
 /// native JavaScript module through the common checked scalar sidecar.
-fn run_javascript_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind js <module.d.ts> --runtime <module.js> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let declaration=args[0].as_str();let mut runtime=None;let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--runtime"=>{runtime=args.get(i+1).map(|v|v.to_string());if runtime.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind js` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=declaration.rsplit('/').next().unwrap_or(declaration);base.strip_suffix(".d.ts").or_else(||base.rsplit_once('.').map(|v|v.0)).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(declaration).unwrap_or_else(|e|javascript_bind_error(declaration,&format!("the TypeScript declaration file could not be read ({e})")));
-    let Some(runtime)=runtime else {javascript_bind_error(declaration,"the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`")};let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::JS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::JavaScriptBind::bind(std::path::Path::new(declaration),&source,std::path::Path::new(&runtime),&lib,cache).unwrap_or_else(|e|javascript_bind_error(declaration,&e.to_string()));
+fn run_javascript_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!("usage: {} inspect bind js <module.d.ts> --runtime <module.js> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME)
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let declaration = args[0].as_str();
+    let mut runtime = None;
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--runtime" => {
+                runtime = args.get(i + 1).map(|v| v.to_string());
+                if runtime.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind js` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = declaration.rsplit('/').next().unwrap_or(declaration);
+        base.strip_suffix(".d.ts")
+            .or_else(|| base.rsplit_once('.').map(|v| v.0))
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(declaration).unwrap_or_else(|e| {
+        javascript_bind_error(
+            declaration,
+            &format!("the TypeScript declaration file could not be read ({e})"),
+        )
+    });
+    let Some(runtime) = runtime else {
+        javascript_bind_error(
+            declaration,
+            "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`",
+        )
+    };
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::JS_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::JavaScriptBind::bind(
+        std::path::Path::new(declaration),
+        &source,
+        std::path::Path::new(&runtime),
+        &lib,
+        cache,
+    )
+    .unwrap_or_else(|e| javascript_bind_error(declaration, &e.to_string()));
     if let Err(e) = std::fs::write(&out_path, &result.source) {
         javascript_bind_error(
             declaration,
@@ -2743,85 +4113,251 @@ fn run_javascript_bind(args:&[&String]){
             &format!("the typed declaration cache could not be written ({e})"),
         );
     }
-    if let Err(e) = std::fs::write(
-        cache.join(format!("{lib}.provenance")),
-        &result.provenance,
-    ) {
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
         javascript_bind_error(
             declaration,
             &format!("the binding provenance could not be written ({e})"),
         );
     }
-    println!("bound {} JavaScript export{} from `{declaration}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+    println!(
+        "bound {} JavaScript export{} from `{declaration}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn javascript_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.".to_string())}
+fn javascript_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-OCTAVE1=A: parse one-input/one-output matrix functions without
 /// evaluating source, then generate a persistent checked Octave sidecar.
-fn run_octave_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind octave` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|octave_bind_error(path,&format!("the Octave script could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::OCTAVE_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::OctaveBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|octave_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){octave_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){octave_bind_error(path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} Octave matrix function{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
+fn run_octave_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind octave <script.m> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind octave` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        octave_bind_error(path, &format!("the Octave script could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::OCTAVE_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::OctaveBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| octave_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        octave_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        octave_bind_error(
+            path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} Octave matrix function{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
 }
-fn octave_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment.".to_string())}
+fn octave_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment.".to_string())
+}
 
 /// D-FFI-COM1=A: inspect a Windows type library and generate typed IDispatch
 /// automation stubs. Non-Windows hosts reject before touching the input.
-fn run_com_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind com <library.tlb> --pkg <lib>\n       {} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME);
-    if !cfg!(target_os="windows"){eprintln!("Error [E3260]: `com.*` needs a Windows host.");eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");exit(ExitCodes::USER_ERROR)}
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let mut file=None;let mut guid=None;let mut major=None;let mut minor=None;let mut lcid=0u32;let mut pkg=None;let mut out=None;let mut i=0;while i<args.len(){match args[i].as_str(){"--registered"=>{guid=args.get(i+1).map(|v|v.to_string());i+=2},"--major"=>{major=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--minor"=>{minor=args.get(i+1).and_then(|v|v.parse::<u16>().ok());i+=2},"--lcid"=>{lcid=args.get(i+1).and_then(|v|v.parse::<u32>().ok()).unwrap_or(u32::MAX);i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());i+=2},value if !value.starts_with('-')&&file.is_none()=>{file=Some(value.to_string());i+=1},_=>{usage();exit(ExitCodes::USAGE)}}}
-    let Some(lib)=pkg else{usage();exit(ExitCodes::USAGE)};let input=if let Some(path)=file{if guid.is_some(){usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::File(path.into())}else{let(Some(guid),Some(major),Some(minor))=(guid,major,minor)else{usage();exit(ExitCodes::USAGE)};if lcid==u32::MAX{usage();exit(ExitCodes::USAGE)}jet::ComBind::TypeLibraryInput::Registered{guid,major,minor,lcid}};
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::COM_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::ComBind::bind(&input,&lib,cache).unwrap_or_else(|e|com_bind_error(&e.to_string()));if let Err(e)=std::fs::write(&out_path,&result.source){com_bind_error(&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){com_bind_error(&format!("the provenance could not be written ({e})"))}println!("bound {} typed COM member{} → {out_path}",result.methods.len(),if result.methods.len()==1{""}else{"s"});
+fn run_com_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!("usage: {} inspect bind com <library.tlb> --pkg <lib>\n       {} inspect bind com --registered <guid> --major <n> --minor <n> [--lcid <n>] --pkg <lib>",jet::Syntax::BINARY_NAME,jet::Syntax::BINARY_NAME)
+    };
+    if !cfg!(target_os = "windows") {
+        eprintln!("Error [E3260]: `com.*` needs a Windows host.");
+        eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");
+        eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");
+        exit(ExitCodes::USER_ERROR)
+    }
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let mut file = None;
+    let mut guid = None;
+    let mut major = None;
+    let mut minor = None;
+    let mut lcid = 0u32;
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--registered" => {
+                guid = args.get(i + 1).map(|v| v.to_string());
+                i += 2
+            }
+            "--major" => {
+                major = args.get(i + 1).and_then(|v| v.parse::<u16>().ok());
+                i += 2
+            }
+            "--minor" => {
+                minor = args.get(i + 1).and_then(|v| v.parse::<u16>().ok());
+                i += 2
+            }
+            "--lcid" => {
+                lcid = args
+                    .get(i + 1)
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(u32::MAX);
+                i += 2
+            }
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                i += 2
+            }
+            value if !value.starts_with('-') && file.is_none() => {
+                file = Some(value.to_string());
+                i += 1
+            }
+            _ => {
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let Some(lib) = pkg else {
+        usage();
+        exit(ExitCodes::USAGE)
+    };
+    let input = if let Some(path) = file {
+        if guid.is_some() {
+            usage();
+            exit(ExitCodes::USAGE)
+        }
+        jet::ComBind::TypeLibraryInput::File(path.into())
+    } else {
+        let (Some(guid), Some(major), Some(minor)) = (guid, major, minor) else {
+            usage();
+            exit(ExitCodes::USAGE)
+        };
+        if lcid == u32::MAX {
+            usage();
+            exit(ExitCodes::USAGE)
+        }
+        jet::ComBind::TypeLibraryInput::Registered {
+            guid,
+            major,
+            minor,
+            lcid,
+        }
+    };
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::COM_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result =
+        jet::ComBind::bind(&input, &lib, cache).unwrap_or_else(|e| com_bind_error(&e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        com_bind_error(&format!("the generated cache could not be written ({e})"))
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        com_bind_error(&format!("the provenance could not be written ({e})"))
+    }
+    println!(
+        "bound {} typed COM member{} → {out_path}",
+        result.methods.len(),
+        if result.methods.len() == 1 { "" } else { "s" }
+    );
 }
-fn com_bind_error(why:&str)->!{bind_e3208("Could not generate COM bindings.".to_string(),format!("{why}."),"select a registered or file-backed type library with IDispatch metadata and rerun on Windows.".to_string())}
+fn com_bind_error(why: &str) -> ! {
+    bind_e3208("Could not generate COM bindings.".to_string(),format!("{why}."),"select a registered or file-backed type library with IDispatch metadata and rerun on Windows.".to_string())
+}
 
 /// D-FFI-JVM1=A: compile Java bytecode, discover its public ABI with javap,
 /// then build an in-process JNI invocation bridge.
 fn run_java_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
-    if args.is_empty() || jet::CLI::is_help_flag(args[0]) { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK}); }
-    let source_path=args[0].as_str(); let mut pkg=None; let mut out=None; let mut i=1;
-    while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind java` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=source_path.rsplit('/').next().unwrap_or(source_path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_string()});
-    let source=std::fs::read_to_string(source_path).unwrap_or_else(|e|java_bind_error(source_path,&format!("the source file could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::JAVA_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));
-    let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let result=jet::JavaBind::bind(std::path::Path::new(source_path),&source,&lib,cache).unwrap_or_else(|e|java_bind_error(source_path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){java_bind_error(source_path,&format!("the generated cache could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.jvm-path")),format!("{}\n",result.jvm_dir.display())){java_bind_error(source_path,&format!("the JVM runtime identity could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){java_bind_error(source_path,&format!("the binding provenance could not be written ({e})"))}
-    println!("bound {} JVM member{} from `{}` → {}",result.bound.len(),if result.bound.len()==1{""}else{"s"},source_path,out_path);
-}
-
-fn java_bind_error(source:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{source}`."),format!("{why}."),"use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.".to_string())}
-
-/// D-FFI-DOTNET1=A: reflect a C# assembly surface, then generate an in-process
-/// hostfxr bridge. Managed state remains behind consuming GCHandle ownership.
-fn run_dotnet_bind(args:&[&String]){
-    let usage=||eprintln!("usage: {} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",jet::Syntax::BINARY_NAME);
-    if args.is_empty()||jet::CLI::is_help_flag(args[0]){usage();exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK})}
-    let path=args[0].as_str();let mut pkg=None;let mut out=None;let mut i=1;while i<args.len(){match args[i].as_str(){"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind cs` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let lib=pkg.unwrap_or_else(||{let base=path.rsplit('/').next().unwrap_or(path);base.rsplit_once('.').map(|v|v.0).unwrap_or(base).to_ascii_lowercase()});let source=std::fs::read_to_string(path).unwrap_or_else(|e|dotnet_bind_error(path,&format!("the C# source could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::CS_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));let result=jet::DotNetBind::bind(std::path::Path::new(path),&source,&lib,cache).unwrap_or_else(|e|dotnet_bind_error(path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){dotnet_bind_error(path,&format!("the generated cache could not be written ({e})"))}if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){dotnet_bind_error(path,&format!("the provenance could not be written ({e})"))}println!("bound {} .NET member{} from `{path}` → {out_path}",result.bound.len(),if result.bound.len()==1{""}else{"s"});
-}
-fn dotnet_bind_error(path:&str,why:&str)->!{bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.".to_string())}
-
-/// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
-/// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
-fn run_go_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind java <source.java> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         usage();
-        eprintln!();
-        eprintln!("Generate typed Jet bindings for scalar and uintptr //export Go functions.");
-        exit(if args.is_empty() { ExitCodes::USAGE } else { ExitCodes::OK });
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
     }
     let source_path = args[0].as_str();
     let mut pkg = None;
@@ -2829,22 +4365,264 @@ fn run_go_bind(args: &[&String]) {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--pkg" => { pkg = args.get(i + 1).map(|value| value.to_string()); if pkg.is_none() { usage(); exit(ExitCodes::USAGE); } i += 2; }
-            "-o" | "--out" => { out = args.get(i + 1).map(|value| value.to_string()); if out.is_none() { usage(); exit(ExitCodes::USAGE); } i += 2; }
-            flag => { crate::cli_error!("E2102", "unknown `inspect bind go` flag `{flag}`"); usage(); exit(ExitCodes::USAGE); }
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind java` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
         }
     }
     let lib = pkg.unwrap_or_else(|| {
         let base = source_path.rsplit('/').next().unwrap_or(source_path);
-        base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base).to_string()
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_string()
     });
-    let source = std::fs::read_to_string(source_path).unwrap_or_else(|error| go_bind_error(source_path, &format!("the source file could not be read ({error})")));
-    let out_path = out.unwrap_or_else(|| format!(".jet/bindings/{}/{}.{}", jet::Syntax::GO_MODULE_ROOT, lib, jet::Syntax::FILE_EXT));
-    let cache_dir = std::path::Path::new(&out_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+    let source = std::fs::read_to_string(source_path).unwrap_or_else(|e| {
+        java_bind_error(
+            source_path,
+            &format!("the source file could not be read ({e})"),
+        )
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::JAVA_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::JavaBind::bind(std::path::Path::new(source_path), &source, &lib, cache)
+        .unwrap_or_else(|e| java_bind_error(source_path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        java_bind_error(
+            source_path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.jvm-path")),
+        format!("{}\n", result.jvm_dir.display()),
+    ) {
+        java_bind_error(
+            source_path,
+            &format!("the JVM runtime identity could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        java_bind_error(
+            source_path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound {} JVM member{} from `{}` → {}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" },
+        source_path,
+        out_path
+    );
+}
+
+fn java_bind_error(source: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{source}`."),format!("{why}."),"use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`.".to_string())
+}
+
+/// D-FFI-DOTNET1=A: reflect a C# assembly surface, then generate an in-process
+/// hostfxr bridge. Managed state remains behind consuming GCHandle ownership.
+fn run_dotnet_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind cs <source.cs> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind cs` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        base.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(base)
+            .to_ascii_lowercase()
+    });
+    let source = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        dotnet_bind_error(path, &format!("the C# source could not be read ({e})"))
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::CS_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::DotNetBind::bind(std::path::Path::new(path), &source, &lib, cache)
+        .unwrap_or_else(|e| dotnet_bind_error(path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        dotnet_bind_error(
+            path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        dotnet_bind_error(path, &format!("the provenance could not be written ({e})"))
+    }
+    println!(
+        "bound {} .NET member{} from `{path}` → {out_path}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" }
+    );
+}
+fn dotnet_bind_error(path: &str, why: &str) -> ! {
+    bind_e3208(format!("Could not generate bindings from `{path}`."),format!("{why}."),"use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`.".to_string())
+}
+
+/// D-FFI-GO1=A: compile exported scalar Go functions and move-only `uintptr`
+/// handles into an in-process c-archive and emit a typed `go.<lib>` Jet module.
+fn run_go_bind(args: &[&String]) {
+    let usage = || {
+        eprintln!(
+            "usage: {} inspect bind go <source.go> [--pkg <lib>] [-o <out.jet>]",
+            jet::Syntax::BINARY_NAME
+        )
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        eprintln!();
+        eprintln!("Generate typed Jet bindings for scalar and uintptr //export Go functions.");
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
+    }
+    let source_path = args[0].as_str();
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|value| value.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                i += 2;
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|value| value.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE);
+                }
+                i += 2;
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind go` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+    let lib = pkg.unwrap_or_else(|| {
+        let base = source_path.rsplit('/').next().unwrap_or(source_path);
+        base.rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(base)
+            .to_string()
+    });
+    let source = std::fs::read_to_string(source_path).unwrap_or_else(|error| {
+        go_bind_error(
+            source_path,
+            &format!("the source file could not be read ({error})"),
+        )
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::GO_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache_dir = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let result = jet::GoBind::bind(std::path::Path::new(source_path), &source, &lib, cache_dir)
         .unwrap_or_else(|error| go_bind_error(source_path, &error.to_string()));
-    if let Err(error) = std::fs::write(&out_path, &result.source) { go_bind_error(source_path, &format!("the generated cache could not be written ({error})")); }
-    println!("bound {} Go export{} from `{}` → {}", result.bound.len(), if result.bound.len() == 1 { "" } else { "s" }, source_path, out_path);
+    if let Err(error) = std::fs::write(&out_path, &result.source) {
+        go_bind_error(
+            source_path,
+            &format!("the generated cache could not be written ({error})"),
+        );
+    }
+    println!(
+        "bound {} Go export{} from `{}` → {}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" },
+        source_path,
+        out_path
+    );
 }
 
 fn go_bind_error(source: &str, why: &str) -> ! {
@@ -2868,8 +4646,14 @@ fn run_fortran_bind(args: &[&String]) {
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         usage();
         eprintln!();
-        eprintln!("Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions.");
-        exit(if args.is_empty() { ExitCodes::USAGE } else { ExitCodes::OK });
+        eprintln!(
+            "Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions."
+        );
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        });
     }
 
     let source_path = args[0].as_str();
@@ -2915,24 +4699,22 @@ fn run_fortran_bind(args: &[&String]) {
             &format!("the source file could not be read ({error})"),
         ),
     };
-    let out_path = out.unwrap_or_else(|| format!(
-        ".jet/bindings/{}/{}.{}",
-        jet::Syntax::FORTRAN_MODULE_ROOT,
-        lib,
-        jet::Syntax::FILE_EXT
-    ));
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::FORTRAN_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
     let cache_dir = std::path::Path::new(&out_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    let result = match jet::FortranBind::bind(
-        std::path::Path::new(source_path),
-        &source,
-        &lib,
-        cache_dir,
-    ) {
-        Ok(result) => result,
-        Err(error) => fortran_bind_error(source_path, &error.to_string()),
-    };
+    let result =
+        match jet::FortranBind::bind(std::path::Path::new(source_path), &source, &lib, cache_dir) {
+            Ok(result) => result,
+            Err(error) => fortran_bind_error(source_path, &error.to_string()),
+        };
     if let Err(error) = std::fs::write(&out_path, &result.source) {
         fortran_bind_error(
             source_path,
@@ -2971,25 +4753,133 @@ fn fortran_bind_error(source: &str, why: &str) -> ! {
 }
 
 fn run_cobol_bind(args: &[&String]) {
-    let usage = || eprintln!("usage: {} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
-    if args.is_empty() || jet::CLI::is_help_flag(args[0]) { usage(); exit(if args.is_empty(){ExitCodes::USAGE}else{ExitCodes::OK}) }
-    let source_path=args[0].as_str(); let mut copybook=None; let mut pkg=None; let mut out=None; let mut i=1;
-    while i<args.len(){match args[i].as_str(){"--copybook"=>{copybook=args.get(i+1).map(|v|v.to_string());if copybook.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"--pkg"=>{pkg=args.get(i+1).map(|v|v.to_string());if pkg.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},"-o"|"--out"=>{out=args.get(i+1).map(|v|v.to_string());if out.is_none(){usage();exit(ExitCodes::USAGE)}i+=2},flag=>{crate::cli_error!("E2102", "unknown `inspect bind cobol` flag `{flag}`");usage();exit(ExitCodes::USAGE)}}}
-    let Some(copybook_path)=copybook else{usage();exit(ExitCodes::USAGE)};
-    let lib=pkg.unwrap_or_else(||{let b=source_path.rsplit('/').next().unwrap_or(source_path);b.rsplit_once('.').map(|v|v.0).unwrap_or(b).to_ascii_lowercase().replace('-',"_")});
-    let source=std::fs::read_to_string(source_path).unwrap_or_else(|e|cobol_bind_error(source_path,&format!("the program could not be read ({e})")));
-    let copybook=std::fs::read_to_string(&copybook_path).unwrap_or_else(|e|cobol_bind_error(&copybook_path,&format!("the copybook could not be read ({e})")));
-    let out_path=out.unwrap_or_else(||format!(".jet/bindings/{}/{}.{}",jet::Syntax::COBOL_MODULE_ROOT,lib,jet::Syntax::FILE_EXT));
-    let cache=std::path::Path::new(&out_path).parent().unwrap_or_else(||std::path::Path::new("."));
-    let result=jet::CobolBind::bind(std::path::Path::new(source_path),&source,std::path::Path::new(&copybook_path),&copybook,&lib,cache).unwrap_or_else(|e|cobol_bind_error(source_path,&e.to_string()));
-    if let Err(e)=std::fs::write(&out_path,&result.source){cobol_bind_error(source_path,&format!("the generated cache could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.provenance")),&result.provenance){cobol_bind_error(source_path,&format!("the binding provenance could not be written ({e})"))}
-    if let Err(e)=std::fs::write(cache.join(format!("{lib}.cobol-path")),format!("{}\n",result.runtime_dir.display())){cobol_bind_error(source_path,&format!("the libcob runtime identity could not be written ({e})"))}
-    println!("bound GnuCOBOL program `{}` and {}-byte copybook `{}` → {out_path}",result.program,result.layout.width,result.layout.name);
-    for field in &result.layout.fields{println!("  layout: {} offset={} width={} type={}",field.name,field.offset,field.width,field.kind.jet_type())}
+    let usage = || {
+        eprintln!("usage: {} inspect bind cobol <program.cob> --copybook <record.cpy> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME)
+    };
+    if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
+        usage();
+        exit(if args.is_empty() {
+            ExitCodes::USAGE
+        } else {
+            ExitCodes::OK
+        })
+    }
+    let source_path = args[0].as_str();
+    let mut copybook = None;
+    let mut pkg = None;
+    let mut out = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--copybook" => {
+                copybook = args.get(i + 1).map(|v| v.to_string());
+                if copybook.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|v| v.to_string());
+                if pkg.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|v| v.to_string());
+                if out.is_none() {
+                    usage();
+                    exit(ExitCodes::USAGE)
+                }
+                i += 2
+            }
+            flag => {
+                crate::cli_error!("E2102", "unknown `inspect bind cobol` flag `{flag}`");
+                usage();
+                exit(ExitCodes::USAGE)
+            }
+        }
+    }
+    let Some(copybook_path) = copybook else {
+        usage();
+        exit(ExitCodes::USAGE)
+    };
+    let lib = pkg.unwrap_or_else(|| {
+        let b = source_path.rsplit('/').next().unwrap_or(source_path);
+        b.rsplit_once('.')
+            .map(|v| v.0)
+            .unwrap_or(b)
+            .to_ascii_lowercase()
+            .replace('-', "_")
+    });
+    let source = std::fs::read_to_string(source_path).unwrap_or_else(|e| {
+        cobol_bind_error(source_path, &format!("the program could not be read ({e})"))
+    });
+    let copybook = std::fs::read_to_string(&copybook_path).unwrap_or_else(|e| {
+        cobol_bind_error(
+            &copybook_path,
+            &format!("the copybook could not be read ({e})"),
+        )
+    });
+    let out_path = out.unwrap_or_else(|| {
+        format!(
+            ".jet/bindings/{}/{}.{}",
+            jet::Syntax::COBOL_MODULE_ROOT,
+            lib,
+            jet::Syntax::FILE_EXT
+        )
+    });
+    let cache = std::path::Path::new(&out_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let result = jet::CobolBind::bind(
+        std::path::Path::new(source_path),
+        &source,
+        std::path::Path::new(&copybook_path),
+        &copybook,
+        &lib,
+        cache,
+    )
+    .unwrap_or_else(|e| cobol_bind_error(source_path, &e.to_string()));
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        cobol_bind_error(
+            source_path,
+            &format!("the generated cache could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(cache.join(format!("{lib}.provenance")), &result.provenance) {
+        cobol_bind_error(
+            source_path,
+            &format!("the binding provenance could not be written ({e})"),
+        )
+    }
+    if let Err(e) = std::fs::write(
+        cache.join(format!("{lib}.cobol-path")),
+        format!("{}\n", result.runtime_dir.display()),
+    ) {
+        cobol_bind_error(
+            source_path,
+            &format!("the libcob runtime identity could not be written ({e})"),
+        )
+    }
+    println!(
+        "bound GnuCOBOL program `{}` and {}-byte copybook `{}` → {out_path}",
+        result.program, result.layout.width, result.layout.name
+    );
+    for field in &result.layout.fields {
+        println!(
+            "  layout: {} offset={} width={} type={}",
+            field.name,
+            field.offset,
+            field.width,
+            field.kind.jet_type()
+        )
+    }
 }
 
-fn cobol_bind_error(path:&str,why:&str)->!{
+fn cobol_bind_error(path: &str, why: &str) -> ! {
     bind_e3208(
         format!("Could not generate bindings from `{path}`."),
         format!("{why}."),
@@ -3201,12 +5091,7 @@ pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
         Err(diags) => {
             eprint!(
                 "{}",
-                jet::render_all_colored(
-                    EVAL_EXPRESSION_LABEL,
-                    source,
-                    &diags,
-                    mode.color_stderr()
-                )
+                jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &diags, mode.color_stderr())
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -3350,7 +5235,11 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
     let rows: Vec<_> = reports
         .iter()
         .map(|report| {
-            let line = src[..report.span.start].bytes().filter(|byte| *byte == b'\n').count() + 1;
+            let line = src[..report.span.start]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1;
             let over = max_budget.is_some_and(|budget| report.score > budget);
             (line, over)
         })
@@ -3360,7 +5249,8 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
             .iter()
             .zip(&rows)
             .map(|(report, (line, over))| {
-                let budget = max_budget.map_or_else(|| "null".to_string(), |value| value.to_string());
+                let budget =
+                    max_budget.map_or_else(|| "null".to_string(), |value| value.to_string());
                 format!(
                     "{{\"file\":{},\"fn\":{},\"line\":{},\"score\":{},\"budget\":{},\"over\":{}}}",
                     json_string(file),
@@ -3380,7 +5270,10 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
                     "{}:{} fn {} — score {} (budget {})",
                     file, line, report.name, report.score, budget
                 ),
-                None => println!("{}:{} fn {} — score {}", file, line, report.name, report.score),
+                None => println!(
+                    "{}:{} fn {} — score {}",
+                    file, line, report.name, report.score
+                ),
             }
         }
     }
@@ -3483,20 +5376,28 @@ pub(crate) fn collect_measure_evidence(
                 eprintln!("measure: harness emitted malformed allocation identity");
                 exit(ExitCodes::USER_ERROR);
             });
-            let tier = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
-                eprintln!("measure: harness emitted no execution tier for allocation evidence");
-                exit(ExitCodes::USER_ERROR);
-            });
-            let profile = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
-                eprintln!("measure: harness emitted no build profile for allocation evidence");
-                exit(ExitCodes::USER_ERROR);
-            });
+            let tier = fields
+                .next()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| {
+                    eprintln!("measure: harness emitted no execution tier for allocation evidence");
+                    exit(ExitCodes::USER_ERROR);
+                });
+            let profile = fields
+                .next()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| {
+                    eprintln!("measure: harness emitted no build profile for allocation evidence");
+                    exit(ExitCodes::USER_ERROR);
+                });
             let warmups = fields
                 .next()
                 .and_then(|value| value.parse::<u64>().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or_else(|| {
-                    eprintln!("measure: harness emitted invalid warmup count for allocation evidence");
+                    eprintln!(
+                        "measure: harness emitted invalid warmup count for allocation evidence"
+                    );
                     exit(ExitCodes::USER_ERROR);
                 });
             let iters = fields
@@ -3507,10 +5408,13 @@ pub(crate) fn collect_measure_evidence(
                     eprintln!("measure: harness emitted invalid allocation iteration count");
                     exit(ExitCodes::USER_ERROR);
                 });
-            let serial = fields.next().and_then(|value| value.parse::<bool>().ok()).unwrap_or_else(|| {
-                eprintln!("measure: harness emitted non-serial allocation evidence");
-                exit(ExitCodes::USER_ERROR);
-            });
+            let serial = fields
+                .next()
+                .and_then(|value| value.parse::<bool>().ok())
+                .unwrap_or_else(|| {
+                    eprintln!("measure: harness emitted non-serial allocation evidence");
+                    exit(ExitCodes::USER_ERROR);
+                });
             if tier != "aot" || profile != "release" || warmups != 5 || !serial {
                 eprintln!("measure: harness emitted allocation evidence without the optimized serial AOT profile");
                 exit(ExitCodes::USER_ERROR);
@@ -3530,30 +5434,44 @@ pub(crate) fn collect_measure_evidence(
                     exit(ExitCodes::USER_ERROR);
                 });
             if samples.len() != 20 {
-                eprintln!("measure: harness emitted {} allocation samples; policy requires 20", samples.len());
+                eprintln!(
+                    "measure: harness emitted {} allocation samples; policy requires 20",
+                    samples.len()
+                );
                 exit(ExitCodes::USER_ERROR);
             }
-            let entry = evidence.iter_mut().find(|entry: &&mut BenchEvidence| entry.name == name).unwrap_or_else(|| {
-                eprintln!("measure: allocation evidence preceded its named claim");
-                exit(ExitCodes::USER_ERROR);
-            });
+            let entry = evidence
+                .iter_mut()
+                .find(|entry: &&mut BenchEvidence| entry.name == name)
+                .unwrap_or_else(|| {
+                    eprintln!("measure: allocation evidence preceded its named claim");
+                    exit(ExitCodes::USER_ERROR);
+                });
             entry.allocation_samples = samples;
             continue;
         }
-        let Some(wire) = line.strip_prefix("JETTESTMEASURE1\t") else { continue };
+        let Some(wire) = line.strip_prefix("JETTESTMEASURE1\t") else {
+            continue;
+        };
         let mut fields = wire.split('\t');
         let name = fields.next().and_then(decode_hex).unwrap_or_else(|| {
             eprintln!("measure: harness emitted malformed claim identity");
             exit(ExitCodes::USER_ERROR);
         });
-        let tier = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
-            eprintln!("measure: harness emitted no execution tier");
-            exit(ExitCodes::USER_ERROR);
-        });
-        let profile = fields.next().filter(|value| !value.is_empty()).unwrap_or_else(|| {
-            eprintln!("measure: harness emitted no build profile");
-            exit(ExitCodes::USER_ERROR);
-        });
+        let tier = fields
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| {
+                eprintln!("measure: harness emitted no execution tier");
+                exit(ExitCodes::USER_ERROR);
+            });
+        let profile = fields
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| {
+                eprintln!("measure: harness emitted no build profile");
+                exit(ExitCodes::USER_ERROR);
+            });
         let warmups = fields
             .next()
             .and_then(|value| value.parse::<u64>().ok())
@@ -3570,12 +5488,17 @@ pub(crate) fn collect_measure_evidence(
                 eprintln!("measure: harness emitted invalid iteration count");
                 exit(ExitCodes::USER_ERROR);
             });
-        let serial = fields.next().and_then(|value| value.parse::<bool>().ok()).unwrap_or_else(|| {
-            eprintln!("measure: harness emitted non-serial timing evidence");
-            exit(ExitCodes::USER_ERROR);
-        });
+        let serial = fields
+            .next()
+            .and_then(|value| value.parse::<bool>().ok())
+            .unwrap_or_else(|| {
+                eprintln!("measure: harness emitted non-serial timing evidence");
+                exit(ExitCodes::USER_ERROR);
+            });
         if tier != "aot" || profile != "release" || warmups != 5 || !serial {
-            eprintln!("measure: harness emitted timing evidence without the optimized serial AOT profile");
+            eprintln!(
+                "measure: harness emitted timing evidence without the optimized serial AOT profile"
+            );
             exit(ExitCodes::USER_ERROR);
         }
         let samples = fields
@@ -3586,14 +5509,20 @@ pub(crate) fn collect_measure_evidence(
                 exit(ExitCodes::USER_ERROR);
             });
         if samples.len() != 20 {
-            eprintln!("measure: harness emitted {} samples; policy requires 20", samples.len());
+            eprintln!(
+                "measure: harness emitted {} samples; policy requires 20",
+                samples.len()
+            );
             exit(ExitCodes::USER_ERROR);
         }
-        evidence.push(BenchEvidence { name, samples, allocation_samples: Vec::new() });
+        evidence.push(BenchEvidence {
+            name,
+            samples,
+            allocation_samples: Vec::new(),
+        });
     }
     evidence
 }
-
 
 /// Collect `ServiceProbe` evidence by cycling each named service down→up→ready
 /// 20 times. Reads `env.jet` from the project root to resolve `DevServicePlan`.
@@ -3606,11 +5535,17 @@ pub(crate) fn collect_service_evidence(
     let service_names: std::collections::BTreeSet<String> = specs
         .iter()
         .filter(|s| {
-            let kind = s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider);
+            let kind = s
+                .spec
+                .provider
+                .split_once('(')
+                .map(|(k, _)| k)
+                .unwrap_or(&s.spec.provider);
             kind == "ServiceProbe"
         })
         .map(|s| {
-            s.spec.provider
+            s.spec
+                .provider
                 .split_once('(')
                 .and_then(|(_, rest)| rest.strip_suffix(')'))
                 .unwrap_or("")
@@ -3640,7 +5575,10 @@ pub(crate) fn collect_service_evidence(
         };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("budget: ServiceProbe `{name}` measurement failed: {}", stderr.trim());
+            eprintln!(
+                "budget: ServiceProbe `{name}` measurement failed: {}",
+                stderr.trim()
+            );
             continue;
         }
         let stdout = match String::from_utf8(output.stdout) {
@@ -3691,11 +5629,17 @@ pub(crate) fn collect_scene_evidence(
     let scene_names: std::collections::BTreeSet<String> = specs
         .iter()
         .filter(|s| {
-            let kind = s.spec.provider.split_once('(').map(|(k, _)| k).unwrap_or(&s.spec.provider);
+            let kind = s
+                .spec
+                .provider
+                .split_once('(')
+                .map(|(k, _)| k)
+                .unwrap_or(&s.spec.provider);
             kind == "SceneProbe"
         })
         .map(|s| {
-            s.spec.provider
+            s.spec
+                .provider
                 .split_once('(')
                 .and_then(|(_, rest)| rest.strip_suffix(')'))
                 .unwrap_or("")
@@ -3754,15 +5698,22 @@ pub(crate) fn collect_scene_evidence(
         let mut rss_hwm = Vec::new();
         let expected_hex: String = scene_name.bytes().map(|b| format!("{:02x}", b)).collect();
         for line in stdout.lines() {
-            let Some(wire) = line.strip_prefix("JETSCENE1\t") else { continue };
+            let Some(wire) = line.strip_prefix("JETSCENE1\t") else {
+                continue;
+            };
             let mut fields = wire.splitn(4, '\t');
             let hex = fields.next().unwrap_or("");
             let metric = fields.next().unwrap_or("");
             let value_str = fields.next().unwrap_or("");
-            if hex != expected_hex { continue; }
+            if hex != expected_hex {
+                continue;
+            }
             let value: u64 = match value_str.parse() {
                 Ok(v) => v,
-                Err(_) => { eprintln!("budget: SceneProbe `{scene_name}` malformed value `{value_str}`"); continue; }
+                Err(_) => {
+                    eprintln!("budget: SceneProbe `{scene_name}` malformed value `{value_str}`");
+                    continue;
+                }
             };
             match metric {
                 "FrameTime" => frame_ns.push(value),
@@ -3773,7 +5724,11 @@ pub(crate) fn collect_scene_evidence(
             }
         }
         // Require exactly 600 measured samples per metric (120 warmup omitted).
-        if frame_ns.len() != 600 || draw_calls.len() != 600 || asset_bytes.len() != 600 || rss_hwm.len() != 600 {
+        if frame_ns.len() != 600
+            || draw_calls.len() != 600
+            || asset_bytes.len() != 600
+            || rss_hwm.len() != 600
+        {
             eprintln!(
                 "budget: SceneProbe `{scene_name}` emitted {}/{}/{}/{} samples; need 600 for each metric",
                 frame_ns.len(), draw_calls.len(), asset_bytes.len(), rss_hwm.len()
@@ -3811,7 +5766,11 @@ pub(crate) fn run_devtools_probe(args: &[&String]) {
             exit(jet::ExitCodes::USER_ERROR);
         }
     };
-    let mode = OutputMode { json: false, color: jet::Diagnostics::ColorChoice::Never, quiet: false };
+    let mode = OutputMode {
+        json: false,
+        color: jet::Diagnostics::ColorChoice::Never,
+        quiet: false,
+    };
     let bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
@@ -3841,9 +5800,19 @@ pub(crate) fn run_devtools_probe(args: &[&String]) {
 }
 
 fn decode_hex(value: &str) -> Option<String> {
-    if value.len() % 2 != 0 { return None; }
-    let nibble = |byte: u8| match byte { b'0'..=b'9' => Some(byte - b'0'), b'a'..=b'f' => Some(byte - b'a' + 10), _ => None };
-    let bytes = value.as_bytes().chunks_exact(2).map(|pair| Some((nibble(pair[0])? << 4) | nibble(pair[1])?)).collect::<Option<Vec<_>>>()?;
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    let nibble = |byte: u8| match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    };
+    let bytes = value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| Some((nibble(pair[0])? << 4) | nibble(pair[1])?))
+        .collect::<Option<Vec<_>>>()?;
     String::from_utf8(bytes).ok()
 }
 

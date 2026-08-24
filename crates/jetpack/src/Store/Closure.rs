@@ -18,19 +18,38 @@ const MAX_CLOSURE_RECORDS: usize = 1_000_000;
 const MAX_CLOSURE_DELETIONS: usize = 1_000_000;
 const MAX_CLOSURE_TRANSACTIONS: usize = 100_000;
 static RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DuEntry {
     pub id: String,
-    pub name: String,
-    pub bytes: u64,
+    pub unique_bytes: Option<u64>,
+    pub shared_bytes: Option<u64>,
     /// True when the A4 provenance shows a first-party source build.
     pub source_built: bool,
 }
 
-/// D-JPK-GC1 / U22: honest per-object disk usage. Sizes each realized object's
-/// output tree; Nix compatibility outputs are counted after their native
-/// Hangar projection, so Jetpack reports bytes it owns rather than a host-store
-/// estimate.
-pub fn du(roots: &Roots) -> std::io::Result<Vec<DuEntry>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuReport {
+    pub objects: usize,
+    pub packages: usize,
+    pub built: usize,
+    pub unique_bytes: Option<u64>,
+    pub shared_bytes: Option<u64>,
+    pub closure_physical_bytes: Option<u64>,
+    pub entries: Vec<DuEntry>,
+}
+
+#[derive(Debug, Default)]
+struct PhysicalMeasurement {
+    unique_bytes: u64,
+    shared_bytes: u64,
+    per_object: BTreeMap<String, u64>,
+}
+
+/// D-JPK-GC1 / U22: honest root-inclusive closure disk usage. Every live
+/// package owns the union of its named-output closures. Physical allocation is
+/// counted once per `(device, inode)` and never inferred from logical length.
+pub fn du(roots: &Roots) -> std::io::Result<DuReport> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         // Do not migrate here: a damaged metadata path must be compared with
         // the committed journal, not promoted into a new projection.
@@ -53,75 +72,276 @@ pub fn du(roots: &Roots) -> std::io::Result<Vec<DuEntry>> {
                 ),
             ));
         }
-        entries
-            .into_iter()
-            .map(|entry| {
-                let object = graph
-                    .objects
-                    .get(&entry.envelope.output_hash)
-                    .ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "closure graph has no output object `{}` for `{}`",
-                                entry.envelope.output_hash, entry.id
-                            ),
-                        )
-                    })?;
-                let metadata_path = std::path::Path::new(&entry.out);
-                if metadata_path != std::path::Path::new(&object.path) {
+        let mut package_closures = BTreeMap::<String, BTreeSet<String>>::new();
+        let mut object_paths = BTreeMap::<String, PathBuf>::new();
+        let mut object_owners = BTreeMap::<String, BTreeSet<String>>::new();
+
+        for entry in &entries {
+            let record = graph.records.get(&entry.id).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("closure graph has no package record for `{}`", entry.id),
+                )
+            })?;
+            let mut expected_outputs = entry.named_outputs.clone();
+            expected_outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+            if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "closure graph outputs for `{}` disagree with its metadata projection",
+                        entry.id
+                    ),
+                ));
+            }
+
+            let mut closure = BTreeSet::new();
+            for digest in record.outputs.values() {
+                closure.extend(graph.closure(digest));
+            }
+            for digest in &closure {
+                let object = graph.objects.get(digest).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("closure graph has no object `{digest}` for `{}`", entry.id),
+                    )
+                })?;
+                if object.external {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         format!(
-                            "Hangar metadata output for `{}` disagrees with its closure path",
+                            "closure object `{digest}` for `{}` is external to Hangar",
                             entry.id
                         ),
                     ));
                 }
-                let bytes = checked_dir_size(metadata_path)?;
-                let source_built = entry.envelope.provenance.contains("core-");
+                let path = PathBuf::from(&object.path);
+                if !path.starts_with(roots.hangar_dir()) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("closure object `{digest}` is outside Hangar"),
+                    ));
+                }
+                let metadata = fs::symlink_metadata(&path)?;
+                if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("closure object `{digest}` is not a supported filesystem node"),
+                    ));
+                }
+                if let Some(existing) = object_paths.insert(digest.clone(), path.clone()) {
+                    if existing != path {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("closure object `{digest}` has conflicting Hangar paths"),
+                        ));
+                    }
+                }
+                object_owners
+                    .entry(digest.clone())
+                    .or_default()
+                    .insert(entry.id.clone());
+            }
+            package_closures.insert(entry.id.clone(), closure);
+        }
+
+        let physical = measure_physical(&object_paths, &object_owners)?;
+        let built = entries
+            .iter()
+            .filter(|entry| entry.envelope.provenance.contains("core-"))
+            .count();
+        let entries = entries
+            .into_iter()
+            .map(|entry| {
+                let (unique_bytes, shared_bytes) = match &physical {
+                    Some(measurement) => {
+                        let mut unique = 0u64;
+                        let mut shared = 0u64;
+                        for digest in package_closures.get(&entry.id).into_iter().flatten() {
+                            let bytes = measurement.per_object.get(digest).copied().unwrap_or(0);
+                            if object_owners
+                                .get(digest)
+                                .is_some_and(|owners| owners.len() > 1)
+                            {
+                                shared = shared.checked_add(bytes).ok_or_else(|| {
+                                    std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        "Hangar shared disk usage overflowed",
+                                    )
+                                })?;
+                            } else {
+                                unique = unique.checked_add(bytes).ok_or_else(|| {
+                                    std::io::Error::new(
+                                        std::io::ErrorKind::InvalidData,
+                                        "Hangar unique disk usage overflowed",
+                                    )
+                                })?;
+                            }
+                        }
+                        (Some(unique), Some(shared))
+                    }
+                    None => (None, None),
+                };
                 Ok(DuEntry {
                     id: entry.id,
-                    name: entry.name,
-                    bytes,
-                    source_built,
+                    unique_bytes,
+                    shared_bytes,
+                    source_built: entry.envelope.provenance.contains("core-"),
                 })
             })
-            .collect()
+            .collect::<std::io::Result<Vec<_>>>()?;
+
+        let closure_physical_bytes = physical
+            .as_ref()
+            .map(|measurement| {
+                measurement
+                    .unique_bytes
+                    .checked_add(measurement.shared_bytes)
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Hangar physical disk usage overflowed",
+                        )
+                    })
+            })
+            .transpose()?;
+        Ok(DuReport {
+            objects: object_paths.len(),
+            packages: entries.len(),
+            built,
+            unique_bytes: physical
+                .as_ref()
+                .map(|measurement| measurement.unique_bytes),
+            shared_bytes: physical
+                .as_ref()
+                .map(|measurement| measurement.shared_bytes),
+            closure_physical_bytes,
+            entries,
+        })
     })
 }
 
-fn checked_dir_size(path: &std::path::Path) -> std::io::Result<u64> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Hangar output `{}` is not a real directory", path.display()),
-        ));
-    }
-    let mut total = 0u64;
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let child = entry.path();
-        let metadata = fs::symlink_metadata(&child)?;
-        if metadata.file_type().is_symlink() {
-            continue;
+#[cfg(unix)]
+fn measure_physical(
+    object_paths: &BTreeMap<String, PathBuf>,
+    object_owners: &BTreeMap<String, BTreeSet<String>>,
+) -> std::io::Result<Option<PhysicalMeasurement>> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    type NodeKey = (u64, u64);
+    let mut nodes = BTreeMap::<NodeKey, (u64, BTreeSet<String>)>::new();
+    let mut object_nodes = BTreeMap::<String, BTreeSet<NodeKey>>::new();
+    let mut expanded = BTreeSet::new();
+
+    fn walk(
+        digest: &str,
+        path: &Path,
+        owners: &BTreeSet<String>,
+        nodes: &mut BTreeMap<(u64, u64), (u64, BTreeSet<String>)>,
+        object_nodes: &mut BTreeMap<String, BTreeSet<(u64, u64)>>,
+        expanded: &mut BTreeSet<(u64, u64)>,
+    ) -> std::io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        let file_type = metadata.file_type();
+        if !file_type.is_symlink() && !metadata.is_dir() && !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "closure node `{}` is not a supported filesystem node",
+                    path.display()
+                ),
+            ));
         }
-        let bytes = if metadata.is_dir() {
-            checked_dir_size(&child)?
-        } else if metadata.is_file() {
-            metadata.len()
-        } else {
-            0
-        };
-        total = total.checked_add(bytes).ok_or_else(|| {
+        let key = (metadata.dev(), metadata.ino());
+        let bytes = metadata.blocks().checked_mul(512).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar output `{}` is too large to measure", path.display()),
+                format!("physical allocation for `{}` overflowed", path.display()),
+            )
+        })?;
+        let node = nodes.entry(key).or_insert_with(|| (bytes, BTreeSet::new()));
+        if node.0 != bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "filesystem allocation changed while measuring `{}`",
+                    path.display()
+                ),
+            ));
+        }
+        node.1.extend(owners.iter().cloned());
+        object_nodes
+            .entry(digest.to_string())
+            .or_default()
+            .insert(key);
+        if metadata.is_dir() && expanded.insert(key) {
+            for child in fs::read_dir(path)? {
+                walk(
+                    digest,
+                    &child?.path(),
+                    owners,
+                    nodes,
+                    object_nodes,
+                    expanded,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    for (digest, path) in object_paths {
+        let owners = object_owners.get(digest).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("closure object `{digest}` has no package owner"),
+            )
+        })?;
+        walk(
+            digest,
+            path,
+            owners,
+            &mut nodes,
+            &mut object_nodes,
+            &mut expanded,
+        )?;
+    }
+
+    let mut measurement = PhysicalMeasurement::default();
+    for (digest, node_keys) in object_nodes {
+        let bytes = node_keys.iter().try_fold(0u64, |total, key| {
+            total
+                .checked_add(nodes.get(key).map(|node| node.0).unwrap_or(0))
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("physical allocation for `{digest}` overflowed"),
+                    )
+                })
+        })?;
+        measurement.per_object.insert(digest, bytes);
+    }
+    for (bytes, owners) in nodes.values() {
+        let target = if owners.len() > 1 {
+            &mut measurement.shared_bytes
+        } else {
+            &mut measurement.unique_bytes
+        };
+        *target = target.checked_add(*bytes).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Hangar physical disk usage overflowed",
             )
         })?;
     }
-    Ok(total)
+    Ok(Some(measurement))
+}
+
+#[cfg(not(unix))]
+fn measure_physical(
+    _object_paths: &BTreeMap<String, PathBuf>,
+    _object_owners: &BTreeMap<String, BTreeSet<String>>,
+) -> std::io::Result<Option<PhysicalMeasurement>> {
+    Ok(None)
 }
 
 /// Total bytes on disk of a directory tree (0 if it isn't a local directory).
@@ -250,6 +470,112 @@ mod registration_tests {
             },
         )
         .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn ingest_with_reference(roots: &Roots, name: &str, reference: &str) -> IngestedObject {
+        let source = roots.root.join(format!("fixture-{name}"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("payload"), name.as_bytes()).unwrap();
+        ingest_tree(
+            roots,
+            &IngestRequest {
+                name: name.into(),
+                version: "1".into(),
+                reference: format!("path:{name}"),
+                cache_identity: identity(),
+                references: vec![reference.to_string()],
+                outputs: BTreeMap::from([("out".into(), source)]),
+                signature: String::new(),
+                provenance: "du-test".into(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn independent_physical_bytes(paths: impl IntoIterator<Item = PathBuf>) -> u64 {
+        use std::os::unix::fs::MetadataExt as _;
+
+        fn walk(path: &Path, seen: &mut BTreeSet<(u64, u64)>) -> u64 {
+            let metadata = fs::symlink_metadata(path).unwrap();
+            let key = (metadata.dev(), metadata.ino());
+            if !seen.insert(key) {
+                return 0;
+            }
+            let mut bytes = metadata.blocks() * 512;
+            if metadata.is_dir() {
+                for child in fs::read_dir(path).unwrap() {
+                    bytes += walk(&child.unwrap().path(), seen);
+                }
+            }
+            bytes
+        }
+
+        let mut seen = BTreeSet::new();
+        paths.into_iter().map(|path| walk(&path, &mut seen)).sum()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hangar_du_counts_each_closure_object_once_and_splits_shared_bytes() {
+        use std::os::unix::fs::symlink;
+
+        let (roots, _guard) = roots();
+        let shared = ingest(&roots, "du-shared");
+        let first = ingest_with_reference(&roots, "du-first", &shared.entry.envelope.output_hash);
+        let second = ingest_with_reference(&roots, "du-second", &shared.entry.envelope.output_hash);
+
+        let first_path = PathBuf::from(&first.entry.out);
+        make_tree_writable_for_removal(&first_path).unwrap();
+        fs::hard_link(first_path.join("payload"), first_path.join("payload-hard")).unwrap();
+        symlink("payload", first_path.join("payload-link")).unwrap();
+
+        let report = du(&roots).unwrap();
+        assert_eq!(report.objects, 3);
+        assert_eq!(report.packages, 3);
+        assert!(report.shared_bytes.unwrap() > 0);
+        assert_eq!(
+            report.unique_bytes.unwrap() + report.shared_bytes.unwrap(),
+            report.closure_physical_bytes.unwrap()
+        );
+        assert!(report
+            .entries
+            .iter()
+            .find(|entry| entry.id == first.entry.id)
+            .is_some_and(|entry| entry.shared_bytes.unwrap() > 0));
+
+        let graph = closure_graph_structure(&roots).unwrap();
+        let mut paths = BTreeSet::new();
+        for record in graph.records.values() {
+            for output in record.outputs.values() {
+                for digest in graph.closure(output) {
+                    paths.insert(PathBuf::from(&graph.objects[&digest].path));
+                }
+            }
+        }
+        assert_eq!(
+            report.closure_physical_bytes.unwrap(),
+            independent_physical_bytes(paths)
+        );
+        assert!(second.entry.id != first.entry.id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hangar_du_never_substitutes_logical_length_for_physical_use() {
+        let (roots, _guard) = roots();
+        let ingested = ingest(&roots, "du-physical");
+        let report = du(&roots).unwrap();
+        let logical = fs::read_dir(&ingested.entry.out)
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum::<u64>();
+        assert!(
+            report.closure_physical_bytes.unwrap() > logical,
+            "physical allocation must include allocated blocks and directories"
+        );
     }
 
     #[test]

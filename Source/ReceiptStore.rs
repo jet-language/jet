@@ -540,6 +540,11 @@ fn receipt_root(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
     base.join(".jet").join("receipts")
 }
 
+/// Locate the project receipt store without running the act it stores.
+pub fn receipt_root_for(verb: &str, argv: &[String], cwd: &Path) -> PathBuf {
+    receipt_root(verb, argv, cwd)
+}
+
 fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
     let mut skip_next = false;
     let mut positionals = Vec::new();

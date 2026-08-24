@@ -8,18 +8,18 @@
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
 
+use jet_foundation::ExitCodes;
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
     TraceBrowser, TraceHardware, TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton,
-    TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS, TRACE_SCHEMA,
-    TRACE_IO_ROW_LIMIT, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS, TRACE_IO_ROW_LIMIT,
+    TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
-use jet_foundation::ExitCodes;
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::Report::render_status_json;
-use jet_foundation::SHA256;
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
+use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
@@ -425,10 +425,12 @@ fn attach(args: &[String]) -> i32 {
         }
     };
     let capture = if let Some(browser_capture) = browser_capture {
-        if source
-            .as_deref()
-            .is_some_and(|path| !browser_capture.sources.iter().any(|source| source.path == path))
-        {
+        if source.as_deref().is_some_and(|path| {
+            !browser_capture
+                .sources
+                .iter()
+                .any(|source| source.path == path)
+        }) {
             eprintln!("Error [E2102]: `--source` does not match the devserver browser session");
             return ExitCodes::USAGE;
         }
@@ -500,13 +502,7 @@ fn attach(args: &[String]) -> i32 {
         argv.push("--capture".into());
         argv.push(capture_allowlist.join(","));
     }
-    match write_session_trace(
-        "attach",
-        &argv,
-        out.as_deref(),
-        capture,
-        &capture_allowlist,
-    ) {
+    match write_session_trace("attach", &argv, out.as_deref(), capture, &capture_allowlist) {
         Ok(path) => {
             eprintln!("trace: {}", path.display());
             ExitCodes::OK
@@ -518,10 +514,15 @@ fn attach(args: &[String]) -> i32 {
     }
 }
 
-fn read_browser_capture(pid: u32, activate: bool) -> Result<jet::DevServer::BrowserTrace::Capture, String> {
+fn read_browser_capture(
+    pid: u32,
+    activate: bool,
+) -> Result<jet::DevServer::BrowserTrace::Capture, String> {
     match jet::DevServer::BrowserTrace::read(pid) {
         Ok(capture) => return Ok(capture),
-        Err(error) if jet::DevServer::BrowserTrace::relay_path(pid).exists() || !activate => return Err(error),
+        Err(error) if jet::DevServer::BrowserTrace::relay_path(pid).exists() || !activate => {
+            return Err(error)
+        }
         Err(_) => {}
     }
     jet::DevServer::BrowserTrace::request(pid)?;
@@ -537,7 +538,9 @@ fn read_browser_capture(pid: u32, activate: bool) -> Result<jet::DevServer::Brow
     Err(format!("process {pid} has no browser trace relay"))
 }
 
-fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
+fn capture_browser(
+    capture: jet::DevServer::BrowserTrace::Capture,
+) -> Result<CaptureBundle, String> {
     let mut bundle = CaptureBundle::empty();
     bundle.source_identity = capture
         .sources
@@ -549,7 +552,9 @@ fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<Cap
         })
         .collect();
     if let Some(map) = &capture.source_map {
-        bundle.source_maps.push(TraceSourceMap::from_map_bytes("js", "app.js", map));
+        bundle
+            .source_maps
+            .push(TraceSourceMap::from_map_bytes("js", "app.js", map));
     }
     let symbols = capture
         .sources
@@ -563,7 +568,10 @@ fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<Cap
         .collect::<BTreeMap<_, _>>();
     for row in capture.rows {
         let path = symbols.get(row.symbol.as_str()).ok_or_else(|| {
-            format!("browser trace named unknown compiler symbol `{}`", row.symbol)
+            format!(
+                "browser trace named unknown compiler symbol `{}`",
+                row.symbol
+            )
         })?;
         bundle.browser.push(TraceBrowser {
             class: row.class,
@@ -719,7 +727,13 @@ fn merge_host_onto_browser(
             target: env!("JET_BUILD_TARGET").into(),
             task_id: None,
         },
-        (NativeTimingInput::Unavailable { observed_at_ns, reason }, _) => TraceNative {
+        (
+            NativeTimingInput::Unavailable {
+                observed_at_ns,
+                reason,
+            },
+            _,
+        ) => TraceNative {
             clock: "process_cpu".into(),
             duration_ns: None,
             observed_at_ns: *observed_at_ns,
@@ -763,7 +777,9 @@ fn capture_from_source(
 ) -> Result<CaptureBundle, String> {
     let path = PathBuf::from(source_path);
     if path.extension().and_then(|e| e.to_str()) != Some("jet") {
-        return Err(format!("source path must be a `.jet` file, got `{source_path}`"));
+        return Err(format!(
+            "source path must be a `.jet` file, got `{source_path}`"
+        ));
     }
     let bytes = fs::read(&path).map_err(|e| format!("cannot read source {source_path}: {e}"))?;
     let src = String::from_utf8_lossy(&bytes);
@@ -926,7 +942,13 @@ fn capture_from_source(
                 target: env!("JET_BUILD_TARGET").into(),
                 task_id: None,
             },
-            (NativeTimingInput::Unavailable { observed_at_ns, reason }, _) => TraceNative {
+            (
+                NativeTimingInput::Unavailable {
+                    observed_at_ns,
+                    reason,
+                },
+                _,
+            ) => TraceNative {
                 clock: "process_cpu".into(),
                 duration_ns: None,
                 observed_at_ns: *observed_at_ns,
@@ -1035,7 +1057,10 @@ enum NativeTimingInput {
         observed_at_ns: u64,
         process_id: u32,
     },
-    Unavailable { observed_at_ns: u64, reason: String },
+    Unavailable {
+        observed_at_ns: u64,
+        reason: String,
+    },
 }
 
 impl NativeTimingInput {
@@ -1272,9 +1297,7 @@ impl IOTimeline {
         }
         for task in &observed_tasks.rows {
             let key = task.key();
-            if self.tasks.contains_key(&key)
-                || self.tasks.len() < TRACE_TASK_ROW_LIMIT as usize
-            {
+            if self.tasks.contains_key(&key) || self.tasks.len() < TRACE_TASK_ROW_LIMIT as usize {
                 self.tasks.insert(key, task.clone());
             } else {
                 self.task_rows_truncated = true;
@@ -1305,7 +1328,7 @@ impl IOTimeline {
         let ended = self
             .active
             .keys()
-            .filter(|key| key.0.0 == observed_tasks.process_id && !current.contains(*key))
+            .filter(|key| key.0 .0 == observed_tasks.process_id && !current.contains(*key))
             .cloned()
             .collect::<Vec<_>>();
         for (task, wait) in ended {
@@ -1604,10 +1627,7 @@ fn process_children(pid: u32) -> Vec<u32> {
 
 fn json_u64(object: &str, key: &str) -> Option<u64> {
     let tail = object.split_once(&format!("\"{key}\":"))?.1;
-    let digits: String = tail
-        .chars()
-        .take_while(|ch| ch.is_ascii_digit())
-        .collect();
+    let digits: String = tail.chars().take_while(|ch| ch.is_ascii_digit()).collect();
     digits.parse().ok()
 }
 
@@ -1768,7 +1788,10 @@ fn view(args: &[String]) -> i32 {
             ExitCodes::OK
         }
         ViewMode::JSON => {
-            print!("{}", render_perf_json("perf.view", view_json(&trace, frames)));
+            print!(
+                "{}",
+                render_perf_json("perf.view", view_json(&trace, frames))
+            );
             ExitCodes::OK
         }
         ViewMode::HTML => {
@@ -1944,7 +1967,10 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
                 .into(),
             ),
         ),
-        ("kind".into(), CanonicalJson::String("jet.trace.view".into())),
+        (
+            "kind".into(),
+            CanonicalJson::String("jet.trace.view".into()),
+        ),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         (
             "timeline".into(),
@@ -1956,7 +1982,10 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
             ),
         ),
         ("trace".into(), trace.clone()),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
+        (
+            "version".into(),
+            CanonicalJson::Integer(TRACE_VERSION.to_string()),
+        ),
     ])
     .expect("view json keys are unique")
 }
@@ -2129,12 +2158,16 @@ fn require_pinned_baseline(name: &str) -> Result<(), String> {
         || name.contains('.')
         || name.contains('\\')
         || name.starts_with('/')
-        || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
         || !name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'/')
     {
-        return Err(format!("baseline name `{name}` is not a pinned BaselineName"));
+        return Err(format!(
+            "baseline name `{name}` is not a pinned BaselineName"
+        ));
     }
     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
     let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
@@ -2211,7 +2244,11 @@ fn allocation_bytes(trace: &CanonicalJson) -> Option<u64> {
     }
 }
 
-fn budget_compare_line(base: &CanonicalJson, head: &CanonicalJson, baseline: Option<&str>) -> String {
+fn budget_compare_line(
+    base: &CanonicalJson,
+    head: &CanonicalJson,
+    baseline: Option<&str>,
+) -> String {
     // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
     match (sample_duration(base, "wall"), sample_duration(head, "wall")) {
         (Some(base_ns), Some(head_ns)) if base_ns > 0 => {
@@ -2324,11 +2361,17 @@ fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
         "json-envelope-only; standard Trace Event payload available with --chrome; pprof/OTel remain JSON projections"
     };
     CanonicalJson::object([
-        ("kind".into(), CanonicalJson::String("jet.trace.projection".into())),
+        (
+            "kind".into(),
+            CanonicalJson::String("jet.trace.projection".into()),
+        ),
         ("loss".into(), CanonicalJson::String(loss.into())),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("trace".into(), trace.clone()),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
+        (
+            "version".into(),
+            CanonicalJson::Integer(TRACE_VERSION.to_string()),
+        ),
     ])
     .expect("projection keys are unique")
 }
@@ -2336,16 +2379,22 @@ fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
 fn export_pprof_projection(trace: &CanonicalJson) -> CanonicalJson {
     let mut samples = Vec::new();
     if let Some(wall) = sample_duration(trace, "wall") {
-        samples.push(CanonicalJson::object([
-            ("location".into(), CanonicalJson::String("wall".into())),
-            ("value".into(), CanonicalJson::Integer(wall.to_string())),
-        ]).unwrap());
+        samples.push(
+            CanonicalJson::object([
+                ("location".into(), CanonicalJson::String("wall".into())),
+                ("value".into(), CanonicalJson::Integer(wall.to_string())),
+            ])
+            .unwrap(),
+        );
     }
     if let Some(cpu) = sample_duration(trace, "cpu") {
-        samples.push(CanonicalJson::object([
-            ("location".into(), CanonicalJson::String("cpu".into())),
-            ("value".into(), CanonicalJson::Integer(cpu.to_string())),
-        ]).unwrap());
+        samples.push(
+            CanonicalJson::object([
+                ("location".into(), CanonicalJson::String("cpu".into())),
+                ("value".into(), CanonicalJson::Integer(cpu.to_string())),
+            ])
+            .unwrap(),
+        );
     }
     CanonicalJson::object([
         ("kind".into(), CanonicalJson::String("jet.trace.pprof-projection".into())),
@@ -2444,7 +2493,11 @@ fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
                 let Some(task_id) = chrome_integer(fields, "id") else {
                     continue;
                 };
-                chrome_thread_name(&mut events, chrome_task_tid(task_id), &format!("task {task_id}"));
+                chrome_thread_name(
+                    &mut events,
+                    chrome_task_tid(task_id),
+                    &format!("task {task_id}"),
+                );
             }
         }
         if let Some(CanonicalJson::Array(items)) = content.get("browser") {
@@ -2568,11 +2621,8 @@ fn chrome_process_name(events: &mut Vec<CanonicalJson>) {
         CanonicalJson::object([
             (
                 "args".into(),
-                CanonicalJson::object([(
-                    "name".into(),
-                    CanonicalJson::String("Jet perf".into()),
-                )])
-                .unwrap(),
+                CanonicalJson::object([("name".into(), CanonicalJson::String("Jet perf".into()))])
+                    .unwrap(),
             ),
             ("name".into(), CanonicalJson::String("process_name".into())),
             ("ph".into(), CanonicalJson::String("M".into())),
@@ -2587,11 +2637,8 @@ fn chrome_thread_name(events: &mut Vec<CanonicalJson>, tid: u64, name: &str) {
         CanonicalJson::object([
             (
                 "args".into(),
-                CanonicalJson::object([(
-                    "name".into(),
-                    CanonicalJson::String(name.into()),
-                )])
-                .unwrap(),
+                CanonicalJson::object([("name".into(), CanonicalJson::String(name.into()))])
+                    .unwrap(),
             ),
             ("name".into(), CanonicalJson::String("thread_name".into())),
             ("ph".into(), CanonicalJson::String("M".into())),
@@ -2781,7 +2828,8 @@ fn write_session_trace(
     };
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
     }
     write_trace_file(&path, &bytes)?;
@@ -2797,7 +2845,10 @@ fn default_trace_path(bytes: &[u8]) -> Result<PathBuf, String> {
     let short = &id[..8];
     let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
     let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
-    Ok(root.join(".jet").join("perf").join(format!("{stamp}-{short}{}", artifact_extension())))
+    Ok(root
+        .join(".jet")
+        .join("perf")
+        .join(format!("{stamp}-{short}{}", artifact_extension())))
 }
 
 fn write_trace_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -2816,8 +2867,10 @@ fn write_trace_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
             perms.set_mode(0o600);
             fs::set_permissions(&tmp, perms).map_err(|e| e.to_string())?;
         }
-        file.write_all(bytes).map_err(|e| format!("cannot write temp trace: {e}"))?;
-        file.sync_all().map_err(|e| format!("cannot durable-write temp trace: {e}"))?;
+        file.write_all(bytes)
+            .map_err(|e| format!("cannot write temp trace: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("cannot durable-write temp trace: {e}"))?;
     }
     fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -2867,8 +2920,12 @@ fn process_exists(pid: u32) -> bool {
 }
 
 fn content_command(trace: &CanonicalJson) -> Option<&str> {
-    let CanonicalJson::Object(fields) = trace else { return None };
-    let CanonicalJson::Object(content) = fields.get("content")? else { return None };
+    let CanonicalJson::Object(fields) = trace else {
+        return None;
+    };
+    let CanonicalJson::Object(content) = fields.get("content")? else {
+        return None;
+    };
     match content.get("command")? {
         CanonicalJson::String(command) => Some(command.as_str()),
         _ => None,
@@ -2876,9 +2933,15 @@ fn content_command(trace: &CanonicalJson) -> Option<&str> {
 }
 
 fn toolchain_digest(trace: &CanonicalJson) -> Option<&str> {
-    let CanonicalJson::Object(fields) = trace else { return None };
-    let CanonicalJson::Object(content) = fields.get("content")? else { return None };
-    let CanonicalJson::Object(toolchain) = content.get("toolchain")? else { return None };
+    let CanonicalJson::Object(fields) = trace else {
+        return None;
+    };
+    let CanonicalJson::Object(content) = fields.get("content")? else {
+        return None;
+    };
+    let CanonicalJson::Object(toolchain) = content.get("toolchain")? else {
+        return None;
+    };
     match toolchain.get("digest")? {
         CanonicalJson::String(digest) => Some(digest.as_str()),
         _ => None,
@@ -2904,7 +2967,9 @@ fn content_array<'a>(trace: &'a CanonicalJson, key: &str) -> Option<&'a [Canonic
 
 fn first_sample(trace: &CanonicalJson) -> Option<(String, String, String)> {
     let sample = content_array(trace, "samples")?.first()?;
-    let CanonicalJson::Object(fields) = sample else { return None };
+    let CanonicalJson::Object(fields) = sample else {
+        return None;
+    };
     let domain = match fields.get("domain")? {
         CanonicalJson::String(domain) => domain.clone(),
         _ => return None,
@@ -2919,7 +2984,9 @@ fn first_sample(trace: &CanonicalJson) -> Option<(String, String, String)> {
 
 fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
     let alloc = content_array(trace, "allocations")?.first()?;
-    let CanonicalJson::Object(fields) = alloc else { return None };
+    let CanonicalJson::Object(fields) = alloc else {
+        return None;
+    };
     let count = match fields.get("count")? {
         CanonicalJson::Integer(count) => count.clone(),
         _ => return None,
@@ -2934,7 +3001,9 @@ fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
 
 fn browser_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
     let items = content_array(trace, "browser")?;
-    let CanonicalJson::Object(first) = items.first()? else { return None };
+    let CanonicalJson::Object(first) = items.first()? else {
+        return None;
+    };
     Some((items.len(), symbol_label(first.get("symbol")?)?))
 }
 
@@ -3048,7 +3117,9 @@ fn native_summary(trace: &CanonicalJson) -> Option<String> {
                 CanonicalJson::String(value) => value.as_str(),
                 _ => return None,
             };
-            Some(format!("native unavailable target={target} reason={reason} · {symbol}"))
+            Some(format!(
+                "native unavailable target={target} reason={reason} · {symbol}"
+            ))
         }
         _ => None,
     }
@@ -3103,7 +3174,9 @@ fn span_summary(trace: &CanonicalJson) -> Option<String> {
 }
 
 fn symbol_label(value: &CanonicalJson) -> Option<String> {
-    let CanonicalJson::Object(fields) = value else { return None };
+    let CanonicalJson::Object(fields) = value else {
+        return None;
+    };
     let path = match fields.get("path")? {
         CanonicalJson::String(path) => path.as_str(),
         _ => return None,
@@ -3122,7 +3195,10 @@ mod tests {
     fn chrome_projection_trace() -> CanonicalJson {
         let symbol = CanonicalJson::object([
             ("name".into(), CanonicalJson::String("run".into())),
-            ("path".into(), CanonicalJson::String("examples/app.jet".into())),
+            (
+                "path".into(),
+                CanonicalJson::String("examples/app.jet".into()),
+            ),
         ])
         .unwrap();
         let task = |id: &str| {
@@ -3135,79 +3211,84 @@ mod tests {
         let content = CanonicalJson::object([
             (
                 "allocations".into(),
-                CanonicalJson::Array(vec![
-                    CanonicalJson::object([
-                        ("bytes".into(), CanonicalJson::Integer("64".into())),
-                        ("count".into(), CanonicalJson::Integer("2".into())),
-                        ("symbol".into(), symbol.clone()),
-                    ])
-                    .unwrap(),
-                ]),
+                CanonicalJson::Array(vec![CanonicalJson::object([
+                    ("bytes".into(), CanonicalJson::Integer("64".into())),
+                    ("count".into(), CanonicalJson::Integer("2".into())),
+                    ("symbol".into(), symbol.clone()),
+                ])
+                .unwrap()]),
             ),
             (
                 "browser".into(),
-                CanonicalJson::Array(vec![
-                    CanonicalJson::object([
-                        ("class".into(), CanonicalJson::String("dom".into())),
-                        ("duration_ns".into(), CanonicalJson::Integer("3000000".into())),
-                        ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
-                        ("symbol".into(), symbol.clone()),
-                    ])
-                    .unwrap(),
-                ]),
+                CanonicalJson::Array(vec![CanonicalJson::object([
+                    ("class".into(), CanonicalJson::String("dom".into())),
+                    (
+                        "duration_ns".into(),
+                        CanonicalJson::Integer("3000000".into()),
+                    ),
+                    ("start_ns".into(), CanonicalJson::Integer("2000000".into())),
+                    ("symbol".into(), symbol.clone()),
+                ])
+                .unwrap()]),
             ),
             (
                 "io".into(),
-                CanonicalJson::Array(vec![
-                    CanonicalJson::object([
-                        ("end_ns".into(), CanonicalJson::Integer("9000000".into())),
-                        ("kind".into(), CanonicalJson::String("tcp".into())),
-                        ("start_ns".into(), CanonicalJson::Integer("4000000".into())),
-                        ("symbol".into(), symbol.clone()),
-                        ("task_id".into(), CanonicalJson::Integer("1".into())),
-                        ("wait".into(), CanonicalJson::String("tcp accept".into())),
-                    ])
-                    .unwrap(),
-                ]),
+                CanonicalJson::Array(vec![CanonicalJson::object([
+                    ("end_ns".into(), CanonicalJson::Integer("9000000".into())),
+                    ("kind".into(), CanonicalJson::String("tcp".into())),
+                    ("start_ns".into(), CanonicalJson::Integer("4000000".into())),
+                    ("symbol".into(), symbol.clone()),
+                    ("task_id".into(), CanonicalJson::Integer("1".into())),
+                    ("wait".into(), CanonicalJson::String("tcp accept".into())),
+                ])
+                .unwrap()]),
             ),
             (
                 "locks".into(),
-                CanonicalJson::Array(vec![
-                    CanonicalJson::object([
-                        ("depth".into(), CanonicalJson::Integer("1".into())),
-                        ("kind".into(), CanonicalJson::String("channel".into())),
-                        ("recv_waiters".into(), CanonicalJson::Integer("1".into())),
-                        ("send_waiters".into(), CanonicalJson::Integer("0".into())),
-                        ("symbol".into(), symbol.clone()),
-                    ])
-                    .unwrap(),
-                ]),
+                CanonicalJson::Array(vec![CanonicalJson::object([
+                    ("depth".into(), CanonicalJson::Integer("1".into())),
+                    ("kind".into(), CanonicalJson::String("channel".into())),
+                    ("recv_waiters".into(), CanonicalJson::Integer("1".into())),
+                    ("send_waiters".into(), CanonicalJson::Integer("0".into())),
+                    ("symbol".into(), symbol.clone()),
+                ])
+                .unwrap()]),
             ),
             (
                 "native".into(),
-                CanonicalJson::Array(vec![
-                    CanonicalJson::object([
-                        ("duration_ns".into(), CanonicalJson::Integer("5000000".into())),
-                        ("observed_at_ns".into(), CanonicalJson::Integer("1000000".into())),
-                        ("status".into(), CanonicalJson::String("captured".into())),
-                        ("symbol".into(), symbol.clone()),
-                        ("task_id".into(), CanonicalJson::Integer("1".into())),
-                    ])
-                    .unwrap(),
-                ]),
+                CanonicalJson::Array(vec![CanonicalJson::object([
+                    (
+                        "duration_ns".into(),
+                        CanonicalJson::Integer("5000000".into()),
+                    ),
+                    (
+                        "observed_at_ns".into(),
+                        CanonicalJson::Integer("1000000".into()),
+                    ),
+                    ("status".into(), CanonicalJson::String("captured".into())),
+                    ("symbol".into(), symbol.clone()),
+                    ("task_id".into(), CanonicalJson::Integer("1".into())),
+                ])
+                .unwrap()]),
             ),
             (
                 "samples".into(),
                 CanonicalJson::Array(vec![
                     CanonicalJson::object([
                         ("domain".into(), CanonicalJson::String("wall".into())),
-                        ("duration_ns".into(), CanonicalJson::Integer("1500000".into())),
+                        (
+                            "duration_ns".into(),
+                            CanonicalJson::Integer("1500000".into()),
+                        ),
                         ("symbol".into(), symbol.clone()),
                     ])
                     .unwrap(),
                     CanonicalJson::object([
                         ("domain".into(), CanonicalJson::String("cpu".into())),
-                        ("duration_ns".into(), CanonicalJson::Integer("2500000".into())),
+                        (
+                            "duration_ns".into(),
+                            CanonicalJson::Integer("2500000".into()),
+                        ),
                         ("symbol".into(), symbol.clone()),
                     ])
                     .unwrap(),
@@ -3242,7 +3323,10 @@ mod tests {
         .unwrap();
         CanonicalJson::object([
             ("content".into(), content),
-            ("trace_id".into(), CanonicalJson::String("trace-test".into())),
+            (
+                "trace_id".into(),
+                CanonicalJson::String("trace-test".into()),
+            ),
         ])
         .unwrap()
     }

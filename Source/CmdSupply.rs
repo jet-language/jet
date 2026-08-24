@@ -100,7 +100,11 @@ fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
     } else {
         eprint!(
             "{}",
-            jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", std::slice::from_ref(diagnostic))
+            jet::render_diagnostics(
+                jet::Syntax::PACKAGE_FILE,
+                "",
+                std::slice::from_ref(diagnostic)
+            )
         );
     }
 }
@@ -173,11 +177,9 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     let version = &mf.package.version;
     let name = &mf.package.name;
 
-    if let Err(error) = jet::Publish::validate_published_license(
-        name,
-        version,
-        mf.package.license.as_deref(),
-    ) {
+    if let Err(error) =
+        jet::Publish::validate_published_license(name, version, mf.package.license.as_deref())
+    {
         eprint!(
             "{}",
             jet::render_diagnostics(
@@ -251,7 +253,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // exists (either pre-existing or just generated above); `--no-sign` with
     // no pre-existing key has nothing to pin.
     if let Some(registry_public) = jet::Publish::Sign::read_public_key(&registry.name) {
-        if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public) {
+        if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public)
+        {
             crate::cli_error!("E2105", "registry root-key pin failed: {error}");
             exit(ExitCodes::USER_ERROR);
         }
@@ -411,7 +414,8 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     match jet::Publish::ApiFreeze::write_api_snapshot_for_entry(&root, &entry_str, name, version) {
         Some(n) => status!(
             "  api: {} public fn signature(s) snapshotted in .jet/cache/api/{}.api",
-            n, name
+            n,
+            name
         ),
         None => eprintln!("warning: could not snapshot public API (entry didn't load); skipping"),
     }
@@ -609,10 +613,11 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         }
     };
 
-    let artifact = jet::Publish::artifact_path(repo, name, version)
-        .unwrap_or_else(|error| fail_publish_checkout(&checkout, || {
+    let artifact = jet::Publish::artifact_path(repo, name, version).unwrap_or_else(|error| {
+        fail_publish_checkout(&checkout, || {
             crate::cli_error!("E2105", "invalid registry artifact path: {error}");
-        }));
+        })
+    });
     let index = jet::Publish::Index::index_entry_path(repo, name).unwrap_or_else(|error| {
         fail_publish_checkout(&checkout, || {
             crate::cli_error!("E2105", "invalid registry index path: {error}");
@@ -622,13 +627,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 
     // Complete source validation before moving content_hash into the entry.
     // All post-checkout fatal paths remove the checkout before process exit.
-    if let Err(error) = jet::Publish::publish_artifact(
-        repo,
-        &root,
-        name,
-        version,
-        &content_hash,
-    ) {
+    if let Err(error) = jet::Publish::publish_artifact(repo, &root, name, version, &content_hash) {
         fail_publish_checkout(&checkout, || {
             let diagnostic = jet::Publish::e2607("registry source artifact", &error.to_string());
             eprint!(
@@ -649,8 +648,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         public_key,
         signature,
     };
-    if let Err(diagnostic) =
-        jet::Publish::Index::validate_takeover(repo, &existing_entries, &entry)
+    if let Err(diagnostic) = jet::Publish::Index::validate_takeover(repo, &existing_entries, &entry)
     {
         fail_publish_checkout(&checkout, || {
             eprint!(
@@ -745,8 +743,8 @@ fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) 
             }
         }
     }
-    let content_hash = jet::Publish::registry_artifact_hash(root)
-        .unwrap_or_else(|_| jet::SHA256::tree_hash(root));
+    let content_hash =
+        jet::Publish::registry_artifact_hash(root).unwrap_or_else(|_| jet::SHA256::tree_hash(root));
     let fingerprint = jet::Lock::compute_fingerprint(&content_hash, &[], "");
     (content_hash, fingerprint)
 }
@@ -782,7 +780,11 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
     let reg = registry.unwrap_or(jet::Publish::Sign::DEFAULT_REGISTRY);
     let (seed_path, _pub_path) = jet::Publish::Sign::key_paths(reg);
     if !seed_path.is_file() {
-        crate::cli_error!("E2105", "no signing key for registry `{}` — run `jet registry keygen` first", reg);
+        crate::cli_error!(
+            "E2105",
+            "no signing key for registry `{}` — run `jet registry keygen` first",
+            reg
+        );
         exit(ExitCodes::USER_ERROR);
     }
     let dest = dest
@@ -796,7 +798,12 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
             );
         }
         Err(e) => {
-            crate::cli_error!("E2105", "couldn't copy the signing key to {}: {}", dest.display(), e);
+            crate::cli_error!(
+                "E2105",
+                "couldn't copy the signing key to {}: {}",
+                dest.display(),
+                e
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -1014,9 +1021,7 @@ pub(crate) fn run_audit(db_path: Option<&str>) {
     };
     println!(
         "audit: feed sequence {} verified (key {}, digest {}, offline local feed).",
-        report.receipt.sequence,
-        report.receipt.key_id,
-        report.receipt.digest
+        report.receipt.sequence, report.receipt.key_id, report.receipt.digest
     );
     println!(
         "audit: policy maturity {}s; exact exceptions use package#version; {} dependencies checked.",
@@ -1133,11 +1138,7 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
             rows.push((module.display.clone(), line, column, span));
         }
     }
-    rows.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then(left.3.start.cmp(&right.3.start))
-    });
+    rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.3.start.cmp(&right.3.start)));
     if json {
         let entries = rows
             .iter()
@@ -1286,7 +1287,10 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
     let entry = match jet::Publish::Index::find_entry(repo, name, version) {
         Ok(Some(entry)) => entry,
         Ok(None) => fail_publish_checkout(&checkout, || {
-            crate::cli_error!("E2105", "yanked registry entry disappeared during publication");
+            crate::cli_error!(
+                "E2105",
+                "yanked registry entry disappeared during publication"
+            );
         }),
         Err(error) => fail_publish_checkout(&checkout, || {
             crate::cli_error!("E2105", "couldn't read the yanked registry entry: {error}");

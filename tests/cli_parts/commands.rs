@@ -12,10 +12,50 @@ fn status_renders_missing_receipts_as_unproven_with_a_proving_act() {
         .unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let json = String::from_utf8(output.stdout).unwrap();
-    assert!(json.contains("\"schema\":\"jet.status\""), "{json}");
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_output(&json).unwrap(),
+        vec![jet_foundation::MachineOutput::MachineRecord::Status]
+    );
+    assert!(json.starts_with("{\"schema\":\"jet.report/v1\""), "{json}");
+    assert!(json.contains("\"status_report\""), "{json}");
     assert!(json.contains("\"state\":\"unproven\""), "{json}");
     assert!(json.contains("\"action\":\"jet prove run.jet\""), "{json}");
     assert!(!json.contains("\"state\":\"proven\""), "{json}");
+}
+
+#[test]
+fn status_never_promotes_stale_receipt_to_proven() {
+    let dir = isolated_cwd("status_stale_receipt");
+    let source = dir.join("run.jet");
+    fs::write(&source, "fn run() { print(\"status\") }\n").unwrap();
+    let receipt_dir = dir.join(".jet/receipts");
+    let store = jet::ReceiptStore::ReceiptStore::new(&receipt_dir);
+    let argv = vec!["prove".into(), "run.jet".into()];
+    store
+        .record("prove", &argv, std::slice::from_ref(&source), 0, b"proof", b"")
+        .unwrap();
+
+    let current = Command::new(jet())
+        .args(["status", "run.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(current.status.code(), Some(0), "{}", String::from_utf8_lossy(&current.stderr));
+    assert!(String::from_utf8_lossy(&current.stdout).contains("\"state\":\"proven\""));
+
+    fs::write(&source, "fn run() { print(\"changed\") }\n").unwrap();
+    let stale = Command::new(jet())
+        .args(["status", "run.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(stale.status.code(), Some(0), "{}", String::from_utf8_lossy(&stale.stderr));
+    let json = String::from_utf8(stale.stdout).unwrap();
+    assert!(json.contains("\"state\":\"stale\""), "{json}");
+    assert!(!json.contains("\"state\":\"proven\""), "{json}");
+    assert!(json.contains("\"action\":\"jet prove run.jet\""), "{json}");
 }
 
 #[test]
@@ -411,7 +451,7 @@ fn completions_generate_for_every_shell() {
             shell
         );
         let s = String::from_utf8_lossy(&out.stdout);
-        for flag in ["structural", "out", "report", "repo"] {
+        for flag in ["structural", "out", "repo"] {
             let spelling = if shell == "fish" {
                 format!("-l {flag}")
             } else {
@@ -432,7 +472,7 @@ fn man_page_golden() {
     let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
     // Scrub the version so the snapshot is stable across releases.
     s = s.replace(env!("CARGO_PKG_VERSION"), "VERSION");
-    for flag in ["--structural", "--out", "--report", "--repo"] {
+    for flag in ["--structural", "--out", "--repo"] {
         assert!(s.contains(flag), "man page missing {flag}");
     }
     check_snapshot("man.txt", &s);

@@ -202,10 +202,19 @@ fn auxiliary_projections(
     let command = entry_command_schema(bundle);
     let root = jet::Loader::find_manifest_root(entry.parent().unwrap_or(Path::new(".")))
         .unwrap_or_else(|| entry.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let sources = bundle.modules.iter().map(|module| {
-        let path = module.path.strip_prefix(&root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
-        (path, jet::SHA256::sha256_hex(module.source.as_bytes()))
-    }).collect::<Vec<_>>();
+    let sources = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            let path = module
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&module.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path, jet::SHA256::sha256_hex(module.source.as_bytes()))
+        })
+        .collect::<Vec<_>>();
     (
         jet::BudgetView::read_compatible(&root, &sources),
         command,
@@ -217,7 +226,10 @@ fn allocator_text(allocator: &jet::TargetMachine::AllocatorPolicy) -> String {
     use jet::TargetMachine::AllocatorPolicy;
     match allocator {
         AllocatorPolicy::Counting { cap: Some(cap) } => {
-            format!("program allocator: counting(system), cap={} bytes\n", cap.bytes)
+            format!(
+                "program allocator: counting(system), cap={} bytes\n",
+                cap.bytes
+            )
         }
         AllocatorPolicy::Counting { cap: None } => {
             "program allocator: counting(system), uncapped\n".to_string()
@@ -231,9 +243,7 @@ fn entry_command_schema(
 ) -> Option<jet_foundation::CLISchema::CLICommandSchema> {
     let items = &bundle.modules.get(bundle.entry)?.items;
     items.iter().find_map(|item| match item {
-        jet::AST::Item::Func(function)
-            if function.name == "run" && !function.params.is_empty() =>
-        {
+        jet::AST::Item::Func(function) if function.name == "run" && !function.params.is_empty() => {
             Some(())
         }
         _ => None,
@@ -246,35 +256,35 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         return "null".to_string();
     };
     let input_json = |input: &jet_foundation::CLISchema::CLIInputSchema| {
-            let shape = match (&input.shape, input.positional) {
-                (jet_foundation::CLISchema::CLIInputShape::Flag, _) => "flag",
-                (jet_foundation::CLISchema::CLIInputShape::Value { .. }, Some(_)) => "positional",
-                (jet_foundation::CLISchema::CLIInputShape::Value { .. }, None) => "option",
-            };
-            let default = input
-                .default_display()
-                .map(|value| json_string(&value))
-                .unwrap_or_else(|| "null".to_string());
-            let metavar = input
-                .metavar
-                .as_deref()
-                .map(json_string)
-                .unwrap_or_else(|| "null".to_string());
-            let positional = input
-                .positional
-                .map(|order| order.to_string())
-                .unwrap_or_else(|| "null".to_string());
-            let short = input
-                .short
-                .as_deref()
-                .map(|short| json_string(&format!("-{short}")))
-                .unwrap_or_else(|| "null".to_string());
-            let env = input
-                .env
-                .as_deref()
-                .map(json_string)
-                .unwrap_or_else(|| "null".to_string());
-            format!(
+        let shape = match (&input.shape, input.positional) {
+            (jet_foundation::CLISchema::CLIInputShape::Flag, _) => "flag",
+            (jet_foundation::CLISchema::CLIInputShape::Value { .. }, Some(_)) => "positional",
+            (jet_foundation::CLISchema::CLIInputShape::Value { .. }, None) => "option",
+        };
+        let default = input
+            .default_display()
+            .map(|value| json_string(&value))
+            .unwrap_or_else(|| "null".to_string());
+        let metavar = input
+            .metavar
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string());
+        let positional = input
+            .positional
+            .map(|order| order.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        let short = input
+            .short
+            .as_deref()
+            .map(|short| json_string(&format!("-{short}")))
+            .unwrap_or_else(|| "null".to_string());
+        let env = input
+            .env
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".to_string());
+        format!(
                 "{{\"field\":{},\"flag\":{},\"short\":{},\"env\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"positional\":{},\"help\":{}}}",
                 json_string(&input.field),
                 json_string(&format!("--{}", input.flag)),
@@ -289,18 +299,36 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
                 json_string(&input.help),
             )
     };
-    let inputs = command.inputs.iter().map(&input_json)
+    let inputs = command
+        .inputs
+        .iter()
+        .map(&input_json)
         .collect::<Vec<_>>()
         .join(",");
-    let commands = command.commands.iter().map(|subcommand| {
-        let inputs = subcommand.inputs.iter().map(&input_json).collect::<Vec<_>>().join(",");
-        let description = subcommand
-            .description
-            .as_deref()
-            .map(json_string)
-            .unwrap_or_else(|| "null".to_string());
-        format!("{{\"name\":{},\"description\":{},\"inputs\":[{}]}}", json_string(&subcommand.name), description, inputs)
-    }).collect::<Vec<_>>().join(",");
+    let commands = command
+        .commands
+        .iter()
+        .map(|subcommand| {
+            let inputs = subcommand
+                .inputs
+                .iter()
+                .map(&input_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            let description = subcommand
+                .description
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"name\":{},\"description\":{},\"inputs\":[{}]}}",
+                json_string(&subcommand.name),
+                description,
+                inputs
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let description = command
         .description
         .as_deref()
@@ -334,7 +362,10 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
     let Some(command) = command else {
         return "command schema\n  none (plain fn run() or non-command target)\n".to_string();
     };
-    let mut out = format!("command schema\n  entry: fn run(args: {})\n", command.entry_type);
+    let mut out = format!(
+        "command schema\n  entry: fn run(args: {})\n",
+        command.entry_type
+    );
     if let Some(description) = &command.description {
         out.push_str(&format!("  description: {description}\n"));
     }
@@ -368,7 +399,11 @@ fn write_command_input(
     input: &jet_foundation::CLISchema::CLIInputSchema,
     indent: &str,
 ) {
-    let status = if input.required() { "required" } else { "optional" };
+    let status = if input.required() {
+        "required"
+    } else {
+        "optional"
+    };
     let default = input
         .default_display()
         .map(|value| format!(", default {value}"))
@@ -427,12 +462,7 @@ fn render_data_status_dossier(json: bool) {
         let payload = format!("{{\"rows\":[{body}]}}");
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.data",
-                &format!(",\"data\":{payload}"),
-            )
+            render_status_json("ok", true, "inspect.data", &format!(",\"data\":{payload}"),)
         );
         return;
     }

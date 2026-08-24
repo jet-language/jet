@@ -8,10 +8,10 @@ use std::process::exit;
 
 use jet::Diagnostics::Diagnostic;
 use jet::Sema::GateLedger::{GateKind, GateLedger};
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Policy::{AppliedRule, PolicyScope, RuleResolution, RuleStatus};
 use jet_foundation::Registry;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 
 /// One checked source projection shared by inspect and compile handlers.
 ///
@@ -84,9 +84,8 @@ fn check_projection_with_options_and_preflight(
         "not-selected"
     };
     let (diagnostics, bundle, facts, front_end) = if setting_overrides.is_empty() {
-        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_profile(
-            &entry, None, false, profile,
-        );
+        let (diagnostics, bundle, facts) =
+            jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, profile);
         (
             diagnostics,
             bundle,
@@ -94,13 +93,12 @@ fn check_projection_with_options_and_preflight(
             "Driver::check_file_with_effect_facts_profile",
         )
     } else {
-        let (diagnostics, bundle, facts) =
-            jet::Driver::check_file_with_effect_facts_and_settings(
-                &entry,
-                None,
-                false,
-                setting_overrides,
-            );
+        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_and_settings(
+            &entry,
+            None,
+            false,
+            setting_overrides,
+        );
         (
             diagnostics,
             bundle,
@@ -243,7 +241,12 @@ pub(crate) fn run_digest(args: &[String], json: bool) {
             None => {
                 let closest = slices
                     .iter()
-                    .min_by_key(|slice| (jet::Syntax::edit_distance(&topic, &slice.topic), &slice.topic))
+                    .min_by_key(|slice| {
+                        (
+                            jet::Syntax::edit_distance(&topic, &slice.topic),
+                            &slice.topic,
+                        )
+                    })
                     .map(|slice| slice.topic.as_str())
                     .unwrap_or("first-program");
                 crate::cli_error!(
@@ -315,12 +318,7 @@ pub(crate) fn run_env(args: &[String], json: bool) {
         );
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.env",
-                &format!(",\"env\":{payload}"),
-            )
+            render_status_json("ok", true, "inspect.env", &format!(",\"env\":{payload}"),)
         );
     } else {
         println!("environment");
@@ -621,10 +619,7 @@ fn digest_marker_declaration(rule: &AppliedRule) -> String {
         ));
     }
     if let RuleStatus::Retired { replacement } = rule.status {
-        fields.push(format!(
-            "@retired: \"{}\"",
-            digest_quote(replacement)
-        ));
+        fields.push(format!("@retired: \"{}\"", digest_quote(replacement)));
     }
     format!("marker {}({})", rule.name, fields.join(", "))
 }
@@ -723,15 +718,10 @@ pub(crate) fn run_guarantees(
         crate::cli_error!(@fix "E2104", "`jet inspect guarantees` needs an entry file", "jet inspect guarantees run.jet");
         exit(jet::ExitCodes::USAGE);
     };
-    let checked = check_projection_with_options(
-        Path::new(&file),
-        gates,
-        profile,
-        &BTreeMap::new(),
-    )
-    .unwrap_or_else(|diagnostics| {
-        render_check_failure(Path::new(&file), &diagnostics, json, color);
-    });
+    let checked = check_projection_with_options(Path::new(&file), gates, profile, &BTreeMap::new())
+        .unwrap_or_else(|diagnostics| {
+            render_check_failure(Path::new(&file), &diagnostics, json, color);
+        });
     let bundle = &checked.bundle;
     let package = checked.index.package_facts();
 
@@ -745,13 +735,8 @@ pub(crate) fn run_guarantees(
         .filter(|entry| entry.kind == GateKind::Unsafe)
         .count();
     let dependencies = bundle.dep_roots.keys().cloned().collect::<Vec<_>>();
-    let report = jet::Driver::guarantee_report(
-        package,
-        dependencies,
-        unsafe_gates,
-        profile,
-        freestanding,
-    );
+    let report =
+        jet::Driver::guarantee_report(package, dependencies, unsafe_gates, profile, freestanding);
     if json {
         render_json(&report, &checked.check);
     } else {
@@ -775,17 +760,14 @@ pub(crate) fn run_provenance(args: &[String], json: bool) {
             exit(jet::ExitCodes::USER_ERROR);
         }
     };
-    let manifest_path = jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
+    let manifest_path =
+        jet::Loader::manifest_path(&root).expect("manifest root has a Package file");
     let manifest = match jet::Manifest::load(&root) {
         Some(Ok(manifest)) => manifest,
         Some(Err(diagnostic)) => {
             eprint!(
                 "{}",
-                jet::render_diagnostics(
-                    &manifest_path.display().to_string(),
-                    "",
-                    &[diagnostic],
-                )
+                jet::render_diagnostics(&manifest_path.display().to_string(), "", &[diagnostic],)
             );
             exit(jet::ExitCodes::USER_ERROR);
         }
@@ -805,7 +787,11 @@ pub(crate) fn run_provenance(args: &[String], json: bool) {
         .filter(|package| target.is_none() || target.as_deref() == Some(package.name.as_str()))
         .map(jet::Lock::LockedPackage::provenance_report)
         .collect::<Vec<_>>();
-    reports.sort_by(|left, right| left.name.cmp(&right.name).then(left.version.cmp(&right.version)));
+    reports.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.version.cmp(&right.version))
+    });
     if let Some(target) = target {
         if reports.is_empty() {
             crate::cli_error!(
@@ -859,11 +845,7 @@ fn render_provenance_text(
 }
 
 fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
-    println!(
-        "  {label:<12} {} ({})",
-        field.value,
-        field.status.label()
-    );
+    println!("  {label:<12} {} ({})", field.value, field.status.label());
 }
 
 fn render_provenance_json(
@@ -931,7 +913,10 @@ fn entry_file(args: &[String]) -> Option<String> {
             skip_value = false;
             continue;
         }
-        if matches!(argument.as_str(), "--profile" | "--target" | "--scope" | "--kind") {
+        if matches!(
+            argument.as_str(),
+            "--profile" | "--target" | "--scope" | "--kind"
+        ) {
             skip_value = true;
             continue;
         }
@@ -996,7 +981,11 @@ fn render_human(report: &jet::Driver::GuaranteeReport) {
     println!("profile: {}", report.profile);
     println!(
         "scope: {}",
-        if report.package { "package" } else { "single-file" }
+        if report.package {
+            "package"
+        } else {
+            "single-file"
+        }
     );
     if report.freestanding {
         println!("target: freestanding");

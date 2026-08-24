@@ -5,8 +5,8 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 use crate::OutputMode;
 
@@ -89,7 +89,10 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
                 options.push(row);
                 continue;
             };
-            let expected = row.expected.as_deref().expect("candidate has expected text");
+            let expected = row
+                .expected
+                .as_deref()
+                .expect("candidate has expected text");
             let replacement = &row.repairs[0];
             if row.span_end > last_start {
                 options.push(row);
@@ -124,7 +127,13 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
         }
         if changed && !dry_run {
             write_atomic(&path, &source).unwrap_or_else(|error| {
-                fail(format!("cannot apply memory repair to `{}`: {error}", path.display()), mode)
+                fail(
+                    format!(
+                        "cannot apply memory repair to `{}`: {error}",
+                        path.display()
+                    ),
+                    mode,
+                )
             });
         }
     }
@@ -177,7 +186,10 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
         }
     }
     for row in options {
-        println!("options: {}:{}..{} {}", row.source, row.span_start, row.span_end, row.detail);
+        println!(
+            "options: {}:{}..{} {}",
+            row.source, row.span_start, row.span_end, row.detail
+        );
         if row.repairs.is_empty() {
             println!("  - no safe automatic repair is known");
         } else {
@@ -197,10 +209,7 @@ fn load(mode: OutputMode) -> Vec<Row> {
 }
 
 fn reject_arguments(args: &[String], command: &str, mode: OutputMode) {
-    if let Some(argument) = args
-        .iter()
-        .find(|argument| !argument.starts_with('-'))
-    {
+    if let Some(argument) = args.iter().find(|argument| !argument.starts_with('-')) {
         fail(format!("unexpected {command} argument `{argument}`"), mode);
     }
 }
@@ -231,7 +240,6 @@ fn repair_path(root: &Path, source: &str) -> Option<PathBuf> {
         .then_some(canonical_source)
 }
 
-
 fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
     let metadata = std::fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -241,7 +249,10 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
         }
     })?;
     if !metadata.file_type().is_file() {
-        return Err(format!("memory ledger `{}` is not a regular file", path.display()));
+        return Err(format!(
+            "memory ledger `{}` is not a regular file",
+            path.display()
+        ));
     }
     if metadata.len() > MAX_LEDGER_BYTES {
         return Err("memory ledger exceeds its 4 MiB safety limit".to_string());
@@ -249,9 +260,15 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
     let raw = std::fs::read_to_string(path)
         .map_err(|error| format!("cannot read memory ledger `{}`: {error}", path.display()))?;
     let mut rows = Vec::new();
-    for (index, line) in raw.lines().filter(|line| !line.trim().is_empty()).enumerate() {
+    for (index, line) in raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .enumerate()
+    {
         if rows.len() >= MAX_LEDGER_ROWS {
-            return Err(format!("memory ledger has more than {MAX_LEDGER_ROWS} rows"));
+            return Err(format!(
+                "memory ledger has more than {MAX_LEDGER_ROWS} rows"
+            ));
         }
         let value = parse_json(line)
             .map_err(|_| format!("memory ledger row {} is malformed", index + 1))?;
@@ -287,8 +304,12 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
         JSONValue::Object(object) => object,
         _ => return Err(format!("memory ledger row {line} is not an object")),
     };
-    if string(object, "schema", line)? != LEDGER_SCHEMA || uint(object, "version", line)? != LEDGER_VERSION {
-        return Err(format!("memory ledger row {line} has an incompatible schema"));
+    if string(object, "schema", line)? != LEDGER_SCHEMA
+        || uint(object, "version", line)? != LEDGER_VERSION
+    {
+        return Err(format!(
+            "memory ledger row {line} has an incompatible schema"
+        ));
     }
     let span_start = uint(object, "span_start", line)?;
     let span_end = uint(object, "span_end", line)?;
@@ -298,7 +319,11 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
     let expected = match object.get("expected") {
         Some(JSONValue::Null) | None => None,
         Some(JSONValue::String(value)) if value.len() <= MAX_FIELD_BYTES => Some(value.clone()),
-        _ => return Err(format!("memory ledger row {line} has invalid expected text")),
+        _ => {
+            return Err(format!(
+                "memory ledger row {line} has invalid expected text"
+            ))
+        }
     };
     let repairs = match object.get("repairs") {
         Some(JSONValue::Array(values)) if values.len() <= 16 => values
@@ -327,35 +352,59 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
     })
 }
 
-fn field<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a JSONValue, String> {
+fn field<'a>(
+    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+    line: usize,
+) -> Result<&'a JSONValue, String> {
     object
         .get(name)
         .ok_or_else(|| format!("memory ledger row {line} is missing `{name}`"))
 }
 
-fn string<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<&'a str, String> {
+fn string<'a>(
+    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+    line: usize,
+) -> Result<&'a str, String> {
     match field(object, name, line)? {
         JSONValue::String(value) => Ok(value),
         _ => Err(format!("memory ledger row {line} `{name}` is not text")),
     }
 }
 
-fn safe_string(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<String, String> {
+fn safe_string(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+    line: usize,
+) -> Result<String, String> {
     let value = string(object, name, line)?;
     if value.is_empty() || value.len() > MAX_FIELD_BYTES || value.chars().any(char::is_control) {
-        return Err(format!("memory ledger row {line} `{name}` is empty, unsafe, or too long"));
+        return Err(format!(
+            "memory ledger row {line} `{name}` is empty, unsafe, or too long"
+        ));
     }
     Ok(value.to_string())
 }
 
-fn uint(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<u64, String> {
+fn uint(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+    line: usize,
+) -> Result<u64, String> {
     match field(object, name, line)? {
         JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
-        _ => Err(format!("memory ledger row {line} `{name}` is not a non-negative integer")),
+        _ => Err(format!(
+            "memory ledger row {line} `{name}` is not a non-negative integer"
+        )),
     }
 }
 
-fn boolean(object: &std::collections::BTreeMap<String, JSONValue>, name: &str, line: usize) -> Result<bool, String> {
+fn boolean(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+    line: usize,
+) -> Result<bool, String> {
     match field(object, name, line)? {
         JSONValue::Bool(value) => Ok(*value),
         _ => Err(format!("memory ledger row {line} `{name}` is not Bool")),
@@ -368,7 +417,10 @@ fn render_audit_text(rows: &[Row], color: bool) -> String {
     } else {
         "jet audit memory"
     };
-    let mut out = format!("{title}\ncoverage: exercised runs only\nwitnesses: {}\n", rows.len());
+    let mut out = format!(
+        "{title}\ncoverage: exercised runs only\nwitnesses: {}\n",
+        rows.len()
+    );
     if rows.is_empty() {
         out.push_str("\nNo runtime memory witnesses recorded.\n");
         return out;
@@ -428,8 +480,7 @@ fn render_audit_json(rows: &[Row]) -> String {
         .join(",");
     let payload = format!(
         "{{\"coverage\":\"exercised runs only\",\"witnesses\":{},\"rows\":[{}]}}",
-        count,
-        rows,
+        count, rows,
     );
     render_status_json(
         "ok",
@@ -441,7 +492,10 @@ fn render_audit_json(rows: &[Row]) -> String {
 
 fn write_atomic(path: &Path, source: &str) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("source");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("source");
     let temporary = parent.join(format!(".{name}.memory-fix-{}", std::process::id()));
     let metadata = std::fs::metadata(path)
         .map_err(|error| format!("cannot inspect source permissions: {error}"))?;
@@ -454,11 +508,8 @@ fn write_atomic(path: &Path, source: &str) -> Result<(), String> {
 }
 
 fn fail(detail: String, mode: OutputMode) -> ! {
-    let diagnostic = jet::Diagnostics::Diagnostic::from_row(
-        "E2112",
-        &[("detail", detail.as_str())],
-        None,
-    );
+    let diagnostic =
+        jet::Diagnostics::Diagnostic::from_row("E2112", &[("detail", detail.as_str())], None);
     if mode.json {
         print!(
             "{}",

@@ -104,16 +104,48 @@ impl RootWorkspace {
                 Err(error) => return Err(error),
             }
         };
-        let roots = Roots::at(path.clone());
-        if let Err(error) =
-            Ingest::ensure_real_directory(&roots.hangar_dir(), "independent Hangar root")
+        let independent_roots = Roots::at(path.clone());
+        if let Err(error) = Ingest::ensure_real_directory(
+            &independent_roots.hangar_dir(),
+            "independent Hangar root",
+        )
         {
             let _ = super::make_tree_writable_for_removal(&path);
             let _ = fs::remove_dir_all(&path);
             return Err(error);
         }
-        Ok(Self { path, roots })
+        copy_nix_cache_configuration(&independent_roots, roots)?;
+        Ok(Self {
+            path,
+            roots: independent_roots,
+        })
     }
+}
+
+fn copy_nix_cache_configuration(target: &Roots, source: &Roots) -> io::Result<()> {
+    for relative in [
+        Path::new("config/nix-cache-v1.endpoint"),
+        Path::new("trust/nix-cache-v1.ed25519.pub"),
+    ] {
+        let source_path = source.root.join(relative);
+        let metadata = match fs::symlink_metadata(&source_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(invalid(&format!(
+                "Nix cache configuration `{}` is not a regular file",
+                source_path.display()
+            )));
+        }
+        let destination = target.root.join(relative);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(destination, fs::read(source_path)?)?;
+    }
+    Ok(())
 }
 
 impl Drop for RootWorkspace {
@@ -174,6 +206,8 @@ pub(crate) fn build_for_cache(
             store_dir: &left_store,
             offline: ctx.offline,
             project_dir: ctx.project_dir,
+            nix_index: ctx.nix_index,
+            nix_roots: Some(&left_workspace.roots),
         };
         let left = match realize_uncached(&left_workspace.roots, &left_ctx, request) {
             Ok(realized) => realized,
@@ -212,6 +246,8 @@ pub(crate) fn build_for_cache(
             store_dir: &right_store,
             offline: ctx.offline,
             project_dir: ctx.project_dir,
+            nix_index: ctx.nix_index,
+            nix_roots: Some(&right_workspace.roots),
         };
         let right = match realize_uncached(&right_workspace.roots, &right_ctx, request) {
             Ok(realized) => realized,

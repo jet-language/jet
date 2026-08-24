@@ -16,8 +16,7 @@ mod Store {
     pub use jetpack::Store::Roots;
 }
 
-// This producer uses only part of the module; the client half is consumed by
-// card #2158. Remove this allow with that card.
+// Only the producer half is used here; the client half is card #2158.
 #[allow(dead_code)]
 #[path = "../NixIndex.rs"]
 mod NixIndex;

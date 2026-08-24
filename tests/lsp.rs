@@ -2783,7 +2783,12 @@ fn lsp_rename_produces_workspace_edit() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"hello"}}}}"#,
                     uri
                 ),
-                expect_contains: Some(vec!["changes".to_string(), "hello".to_string()]),
+                expect_contains: Some(vec![
+                    "changes".to_string(),
+                    "hello".to_string(),
+                    "semantic_ops".to_string(),
+                    "\"kind\":\"rename\"".to_string(),
+                ]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),

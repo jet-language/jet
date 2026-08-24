@@ -198,14 +198,6 @@ impl NixNarInfo {
         if nar_size == 0 {
             return Err(invalid("narinfo NarSize must be nonzero"));
         }
-        if let Some(size) = file_size {
-            if size > MAX_NAR_BYTES as u64 {
-                return Err(invalid("narinfo FileSize exceeds the NAR limit"));
-            }
-        }
-        if nar_size > MAX_NAR_BYTES as u64 {
-            return Err(invalid("narinfo NarSize exceeds the NAR limit"));
-        }
         if let Some(deriver) = &deriver {
             if deriver != "unknown-deriver" {
                 validate_nix_store_basename(deriver)?;
@@ -238,6 +230,13 @@ impl NixNarInfo {
     pub fn fingerprint(&self, store_dir: &str) -> io::Result<Vec<u8>> {
         validate_nix_store_dir(store_dir)?;
         validate_nix_store_path(&self.store_path)?;
+        if !self
+            .store_path
+            .strip_prefix(store_dir)
+            .is_some_and(|rest| rest.starts_with('/'))
+        {
+            return Err(invalid("Nix StorePath is outside the configured StoreDir"));
+        }
         let nar_hash = decode_sha256(&self.nar_hash)
             .ok_or_else(|| invalid("Nix NarHash is not a SHA-256 digest"))?;
         let mut references = BTreeSet::new();
@@ -373,8 +372,8 @@ pub fn read_nar_stream<R: Read>(
     destination: &Path,
     expected_nar_size: u64,
 ) -> io::Result<NarStats> {
-    if expected_nar_size == 0 || expected_nar_size > MAX_NAR_BYTES as u64 {
-        return Err(invalid("NAR stream size is outside its bound"));
+    if expected_nar_size == 0 {
+        return Err(invalid("NAR stream size must be nonzero"));
     }
     if fs::symlink_metadata(destination).is_ok() {
         return Err(invalid("NAR stream destination already exists"));
@@ -1561,11 +1560,25 @@ fn validate_nix_store_basename(value: &str) -> io::Result<()> {
 }
 
 fn validate_nix_store_path(value: &str) -> io::Result<()> {
-    let basename = value
-        .strip_prefix("/nix/store/")
-        .ok_or_else(|| invalid("Nix StorePath is not under /nix/store"))?;
-    if basename.contains('/') {
-        return Err(invalid("Nix StorePath is not one direct store child"));
+    if !value.starts_with('/')
+        || value.ends_with('/')
+        || value.contains("//")
+        || value.contains('\\')
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
+    {
+        return Err(invalid("Nix StorePath is not an absolute path"));
+    }
+    let mut components = value.split('/').filter(|component| !component.is_empty());
+    let basename = components
+        .next_back()
+        .ok_or_else(|| invalid("Nix StorePath has no basename"))?;
+    if components.any(|component| component == "." || component == "..") {
+        return Err(invalid("Nix StorePath contains a traversal component"));
+    }
+    for component in value.split('/').filter(|component| !component.is_empty()) {
+        validate_name(component.as_bytes())?;
     }
     validate_nix_store_basename(basename)
 }

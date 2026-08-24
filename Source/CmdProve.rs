@@ -3,18 +3,18 @@
 //! This owns target discovery, front-end evidence, runtime producers, and the
 //! canonical ProofReport/artifact boundary.
 
-use std::fs;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use jet::AST::{Expr, Func, Item, Stmt};
 use jet::Codegen::test_report::{JetTestFailure as TestFailure, JetTestReport as TestReport};
 use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
 use jet::ExitCodes;
+use jet::AST::{Expr, Func, Item, Stmt};
 
 #[derive(Clone)]
 struct Member {
@@ -97,16 +97,24 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
             if capture.is_some() || replay.is_some() {
-                crate::cli_error!("E2104", "`jet prove` accepts at most one of `--capture` / `--replay`");
+                crate::cli_error!(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--capture` / `--replay`"
+                );
                 exit(ExitCodes::USAGE);
             }
             capture = Some(opts);
             i += 1;
             continue;
         }
-        if let Some(parsed) = crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str)) {
+        if let Some(parsed) =
+            crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str))
+        {
             if capture.is_some() || replay.is_some() {
-                crate::cli_error!("E2104", "`jet prove` accepts at most one of `--capture` / `--replay`");
+                crate::cli_error!(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--capture` / `--replay`"
+                );
                 exit(ExitCodes::USAGE);
             }
             match parsed {
@@ -185,7 +193,11 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 "the selected {} resolved {} runnable targets: {}",
                 target.kind,
                 target.members.len(),
-                if paths.is_empty() { "none" } else { paths.as_str() }
+                if paths.is_empty() {
+                    "none"
+                } else {
+                    paths.as_str()
+                }
             ),
             "select one runnable file or package target before capture or replay",
             json,
@@ -248,7 +260,10 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         std::env::set_var("JET_PROVE_REPLAY_TIME_MS", authority.time_ms.to_string());
         if !json {
-            eprintln!("ambient authority opened: Time; {} exact", identity.execution_adapter);
+            eprintln!(
+                "ambient authority opened: Time; {} exact",
+                identity.execution_adapter
+            );
         }
         Some(authority)
     } else {
@@ -264,7 +279,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let mut declarations = Vec::new();
     for member in &target.members {
         let source = String::from_utf8_lossy(&member.bytes).into_owned();
-        let (semantic_items, member_declarations) = semantic_front_end_items(&target, &member.path, &source);
+        let (semantic_items, member_declarations) =
+            semantic_front_end_items(&target, &member.path, &source);
         declarations.extend(member_declarations);
         let diagnostics = jet::check_with_path(&member.path);
         if diagnostics.is_empty() {
@@ -275,7 +291,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         } else {
             for diagnostic in diagnostics {
                 let span = diagnostic_span(&source, &diagnostic);
-                let (line, column) = diagnostic.span
+                let (line, column) = diagnostic
+                    .span
                     .map(|span| span_line_col(&source, span.start))
                     .unwrap_or((1, 1));
                 let claim = format!("{}:{}", diagnostic.code, diagnostic.what);
@@ -292,14 +309,20 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
     }
 
-    let failed = items.iter().filter(|item| item.diagnostic.is_some()).count();
+    let failed = items
+        .iter()
+        .filter(|item| item.diagnostic.is_some())
+        .count();
     let proved = items.len() - failed;
     let (tests, producer_exit) = if failed == 0 {
         run_test_producers(&target)
     } else {
         (Vec::new(), ExitCodes::OK)
     };
-    let test_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1).count();
+    let test_failed = tests
+        .iter()
+        .filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1)
+        .count();
     let budgets = budget_projection(&target);
     let budget_failed = budgets.facts.iter().any(|fact| fact.outcome == "fail");
     let enable_solver = lenses.iter().any(|lens| lens == "solver");
@@ -331,9 +354,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     } else {
         Vec::new()
     };
-    let solver_disproved = solver
-        .iter()
-        .any(|item| matches!(item.outcome, crate::ProveSolver::SolverOutcome::Disproved { .. }));
+    let solver_disproved = solver.iter().any(|item| {
+        matches!(
+            item.outcome,
+            crate::ProveSolver::SolverOutcome::Disproved { .. }
+        )
+    });
     let exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
@@ -415,11 +441,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     if failed == 0 && producer_exit != ExitCodes::ICE {
         if let Some(authority) = capture_authority.as_ref() {
             if let Err(status) = crate::ProveReplay::finalize_safe_capture(
-                &identity,
-                authority,
-                exit_code,
-                json,
-                None,
+                &identity, authority, exit_code, json, None,
             ) {
                 exit(status);
             }
@@ -432,7 +454,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         if !lenses.is_empty() {
             println!("LENSES   {}", canonical_lens_names(&lenses).join(", "));
         }
-        if show("refinements") || show("all") || show("effects") || show("taint") || lenses.is_empty() {
+        if show("refinements")
+            || show("all")
+            || show("effects")
+            || show("taint")
+            || lenses.is_empty()
+        {
             println!("CHECKED  front end: {proved} proved, {failed} failed");
         }
         for item in &items {
@@ -458,8 +485,16 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if show("budgets") || lenses.is_empty() {
             if !budgets.facts.is_empty() || !budgets.rejected.is_empty() {
-                let met = budgets.facts.iter().filter(|fact| fact.outcome == "pass").count();
-                let failed = budgets.facts.iter().filter(|fact| fact.outcome == "fail").count();
+                let met = budgets
+                    .facts
+                    .iter()
+                    .filter(|fact| fact.outcome == "pass")
+                    .count();
+                let failed = budgets
+                    .facts
+                    .iter()
+                    .filter(|fact| fact.outcome == "fail")
+                    .count();
                 let warned = budgets.facts.len() - met - failed;
                 println!("BUDGETS  {met} met, {failed} failed, {warned} warned, {} unavailable · verified canonical reports", budgets.rejected.len());
                 for reason in &budgets.rejected {
@@ -468,7 +503,9 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
         }
         if replay_time_ms.is_some() && (show("replay") || lenses.is_empty()) {
-            println!("REPLAY   exact Time authority; execution adapter matched; parity not available");
+            println!(
+                "REPLAY   exact Time authority; execution adapter matched; parity not available"
+            );
         }
         if enable_solver {
             let (selected, proved_s, disproved_s, unknown_s, _) =
@@ -477,7 +514,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 "SOLVER   {selected} selected, {proved_s} proved, {disproved_s} disproved, {unknown_s} unknown"
             );
             for item in &solver {
-                if let crate::ProveSolver::SolverOutcome::Disproved { assignment, .. } = &item.outcome
+                if let crate::ProveSolver::SolverOutcome::Disproved { assignment, .. } =
+                    &item.outcome
                 {
                     let values = assignment
                         .iter()
@@ -498,7 +536,10 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         let unavailable = tests.iter().filter(|item| item.state == 3).count();
         let budget_incomplete = !budgets.rejected.is_empty()
-            || budgets.facts.iter().any(|fact| fact.evidence == "unavailable");
+            || budgets
+                .facts
+                .iter()
+                .any(|fact| fact.evidence == "unavailable");
         println!(
             "RESULT   {}",
             if failed > 0 || test_failed > 0 || budget_failed || solver_disproved {
@@ -506,7 +547,10 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             } else if unavailable > 0
                 || budget_incomplete
                 || solver.iter().any(|item| {
-                    matches!(item.outcome, crate::ProveSolver::SolverOutcome::Unknown { .. })
+                    matches!(
+                        item.outcome,
+                        crate::ProveSolver::SolverOutcome::Unknown { .. }
+                    )
                 })
             {
                 "pass_incomplete"
@@ -936,9 +980,7 @@ fn collect_capture_statements(
 ) {
     for statement in statements {
         match statement {
-            Stmt::Expr(expr)
-            | Stmt::Yield(expr, _)
-            | Stmt::DeferClose { close: expr, .. } => {
+            Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => {
                 collect_capture_expr(expr, aliases, local_functions, sites)
             }
             Stmt::Val(binding) => {
@@ -959,7 +1001,9 @@ fn collect_capture_statements(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    jet::AST::ForKind::Range { start, end, step, .. } => {
+                    jet::AST::ForKind::Range {
+                        start, end, step, ..
+                    } => {
                         collect_capture_expr(start, aliases, local_functions, sites);
                         collect_capture_expr(end, aliases, local_functions, sites);
                         if let Some(step) = step {
@@ -975,8 +1019,18 @@ fn collect_capture_statements(
                 }
                 collect_capture_statements(body, aliases, local_functions, sites);
             }
-            Stmt::Switch { subject, arms, else_body, .. }
-            | Stmt::ComptimeSwitch { subject, arms, else_body, .. } => {
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            }
+            | Stmt::ComptimeSwitch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
                 collect_capture_expr(subject, aliases, local_functions, sites);
                 for arm in arms {
                     collect_capture_expr(&arm.cond, aliases, local_functions, sites);
@@ -986,7 +1040,13 @@ fn collect_capture_statements(
                     collect_capture_statements(body, aliases, local_functions, sites);
                 }
             }
-            Stmt::CountedLoop { init, cond, step, body, .. } => {
+            Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
                 collect_capture_expr(&init.init, aliases, local_functions, sites);
                 collect_capture_expr(cond, aliases, local_functions, sites);
                 if let Some(step) = step {
@@ -1140,7 +1200,12 @@ fn collect_capture_expr(
                 collect_capture_expr(&arg.expr, aliases, local_functions, sites);
             }
         }
-        Expr::MethodCall { receiver, method, args, .. } => {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
             let mut recognized = false;
             if let Some(path) = capture_receiver_path(receiver) {
                 let mut parts = path.split('.');
@@ -1229,7 +1294,13 @@ fn collect_capture_expr(
             collect_capture_expr(base, aliases, local_functions, sites);
             collect_capture_expr(index, aliases, local_functions, sites);
         }
-        Expr::Slice { base, start, end, range, .. } => {
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
             collect_capture_expr(base, aliases, local_functions, sites);
             if let Some(range) = range {
                 collect_capture_expr(range, aliases, local_functions, sites);
@@ -1254,18 +1325,14 @@ fn collect_capture_expr(
                 collect_capture_expr(operand, aliases, local_functions, sites);
             }
         }
-        Expr::OptField { base, .. } => {
-            collect_capture_expr(base, aliases, local_functions, sites)
-        }
+        Expr::OptField { base, .. } => collect_capture_expr(base, aliases, local_functions, sites),
         Expr::StructLit { fields, .. } => {
             for (_, _, value) in fields {
                 collect_capture_expr(value, aliases, local_functions, sites);
             }
         }
         Expr::TypedLit { body, .. } => {
-            body.for_each_expr(|value| {
-                collect_capture_expr(value, aliases, local_functions, sites)
-            })
+            body.for_each_expr(|value| collect_capture_expr(value, aliases, local_functions, sites))
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {
@@ -1277,14 +1344,21 @@ fn collect_capture_expr(
                 }
             }
         }
-        Expr::Tainted(inner, _, _) => {
-            collect_capture_expr(inner, aliases, local_functions, sites)
-        }
-        Expr::PatternTest { subject, pattern, .. } => {
+        Expr::Tainted(inner, _, _) => collect_capture_expr(inner, aliases, local_functions, sites),
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => {
             collect_capture_expr(subject, aliases, local_functions, sites);
             collect_capture_pattern(pattern, aliases, local_functions, sites);
         }
-        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
             collect_capture_expr(cond, aliases, local_functions, sites);
             collect_capture_statements(then_body, aliases, local_functions, sites);
             collect_capture_expr(then_value, aliases, local_functions, sites);
@@ -1299,7 +1373,9 @@ fn collect_capture_expr(
                 collect_capture_statements(body, aliases, local_functions, sites)
             }
         },
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             collect_capture_expr(value, aliases, local_functions, sites);
             match fallback {
                 jet::AST::OrFallback::Value(value)
@@ -1434,7 +1510,9 @@ fn collect_semantic_items(
 ) {
     for item in items {
         match item {
-            Item::Func(func) => collect_func_semantics(target, path, source, func, facts, declarations),
+            Item::Func(func) => {
+                collect_func_semantics(target, path, source, func, facts, declarations)
+            }
             Item::Impl(implementation) => {
                 for func in &implementation.methods {
                     collect_func_semantics(target, path, source, func, facts, declarations);
@@ -1499,7 +1577,11 @@ fn collect_func_semantics(
     }
     if let Some(effects) = &func.declared_effects {
         let span = effects.first().map(|(_, span)| *span).unwrap_or(func.span);
-        let names = effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(",");
+        let names = effects
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
         push_front_end_fact(
             target,
             path,
@@ -1592,7 +1674,14 @@ fn host_target_triple() -> String {
 }
 
 const PROOF_LENSES: &[&str] = &[
-    "all", "refinements", "effects", "taint", "contracts", "tests", "budgets", "replay",
+    "all",
+    "refinements",
+    "effects",
+    "taint",
+    "contracts",
+    "tests",
+    "budgets",
+    "replay",
     "solver",
 ];
 
@@ -1611,7 +1700,9 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
     let mut items = Vec::new();
     let mut highest_exit = ExitCodes::OK;
     for member in &target.members {
-        if !jet::has_test_blocks(&member.path) && jet::Doctest::discover(&String::from_utf8_lossy(&member.bytes)).is_empty() {
+        if !jet::has_test_blocks(&member.path)
+            && jet::Doctest::discover(&String::from_utf8_lossy(&member.bytes)).is_empty()
+        {
             continue;
         }
         let report_path = std::env::temp_dir().join(format!(
@@ -1620,7 +1711,8 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
             &member.sha256[..16]
         ));
         let _ = fs::remove_file(&report_path);
-        let mut command = Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jet")));
+        let mut command =
+            Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jet")));
         command
             .args(["test", &member.path, "--serial", "--show-default"])
             .env("JET_TEST_PROOF_REPORT", &report_path)
@@ -1631,38 +1723,52 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                     highest_exit = ExitCodes::ICE;
                 } else if code == ExitCodes::RUNTIME_PANIC && highest_exit != ExitCodes::ICE {
                     highest_exit = ExitCodes::RUNTIME_PANIC;
-                } else if code == ExitCodes::USER_ERROR
-                    && highest_exit == ExitCodes::OK
-                {
+                } else if code == ExitCodes::USER_ERROR && highest_exit == ExitCodes::OK {
                     highest_exit = ExitCodes::USER_ERROR;
                 }
                 match read_test_report(&report_path) {
                     Ok(records) => {
                         let invalid_records = records.is_empty()
                             || records.iter().any(|record| {
-                            record.kind != 3
-                                && !record.file.is_empty()
-                                && !producer_path_is_member(target, &record.file)
+                                record.kind != 3
+                                    && !record.file.is_empty()
+                                    && !producer_path_is_member(target, &record.file)
                             });
                         if invalid_records {
                             highest_exit = ExitCodes::ICE;
                         } else {
-                            if records.iter().any(|record| record.kind == 2 || (record.kind == 1 && record.state == 1))
-                                && highest_exit != ExitCodes::ICE
+                            if records.iter().any(|record| {
+                                record.kind == 2 || (record.kind == 1 && record.state == 1)
+                            }) && highest_exit != ExitCodes::ICE
                             {
                                 highest_exit = ExitCodes::RUNTIME_PANIC;
                             }
                             for record in records {
-                                let claim = format!("{}:{}:{}", record.kind, record.name, record.message);
+                                let claim =
+                                    format!("{}:{}:{}", record.kind, record.name, record.message);
                                 items.push(TestItem {
-                                    id: evidence_id(target, if record.kind == 1 { "contract" } else { "unit" }, &member.path, "0:0-0:0", &claim),
-                                    path: if record.kind == 3 || record.file.is_empty() { member.path.clone() } else { record.file.clone() },
+                                    id: evidence_id(
+                                        target,
+                                        if record.kind == 1 { "contract" } else { "unit" },
+                                        &member.path,
+                                        "0:0-0:0",
+                                        &claim,
+                                    ),
+                                    path: if record.kind == 3 || record.file.is_empty() {
+                                        member.path.clone()
+                                    } else {
+                                        record.file.clone()
+                                    },
                                     state: record.state,
                                     kind: record.kind,
                                     message: record.message,
                                     line: record.line,
                                     name: record.name,
-                                    seed: if record.kind == 3 { record.file } else { String::new() },
+                                    seed: if record.kind == 3 {
+                                        record.file
+                                    } else {
+                                        String::new()
+                                    },
                                 });
                             }
                         }
@@ -1680,7 +1786,13 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
             }
             ChildOutcome::TimedOut | ChildOutcome::LaunchFailed => {
                 items.push(TestItem {
-                    id: evidence_id(target, "unit", &member.path, "0:0-0:0", "producer unavailable"),
+                    id: evidence_id(
+                        target,
+                        "unit",
+                        &member.path,
+                        "0:0-0:0",
+                        "producer unavailable",
+                    ),
                     path: member.path.clone(),
                     state: 3,
                     kind: 0,
@@ -1698,9 +1810,10 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
 
 fn producer_path_is_member(target: &Target, path: &str) -> bool {
     let normalized = path.trim_start_matches("./").replace('\\', "/");
-    target.members.iter().any(|member| {
-        member.path.trim_start_matches("./").replace('\\', "/") == normalized
-    })
+    target
+        .members
+        .iter()
+        .any(|member| member.path.trim_start_matches("./").replace('\\', "/") == normalized)
 }
 
 fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
@@ -1715,12 +1828,14 @@ fn supervise_child(command: &mut Command, deadline: Duration) -> ChildOutcome {
         Ok(child) => child,
         Err(_) => return ChildOutcome::LaunchFailed,
     };
-    let stdout = child.stdout.take().map(|mut stream| {
-        std::thread::spawn(move || capture_child_stream(&mut stream))
-    });
-    let stderr = child.stderr.take().map(|mut stream| {
-        std::thread::spawn(move || capture_child_stream(&mut stream))
-    });
+    let stdout = child
+        .stdout
+        .take()
+        .map(|mut stream| std::thread::spawn(move || capture_child_stream(&mut stream)));
+    let stderr = child
+        .stderr
+        .take()
+        .map(|mut stream| std::thread::spawn(move || capture_child_stream(&mut stream)));
     let finish = |outcome| {
         if let Some(thread) = stdout {
             let _ = thread.join();
@@ -1818,7 +1933,9 @@ fn read_test_report_bytes(bytes: &[u8]) -> Result<Vec<ProducerRecord>, String> {
     let mut at = 8usize;
     let mut records = Vec::new();
     while at < bytes.len() {
-        if records.len() == 10_000 { return Err("too many test producer records".into()); }
+        if records.len() == 10_000 {
+            return Err("too many test producer records".into());
+        }
         let kind = *bytes.get(at).ok_or("truncated test producer report")?;
         let state = *bytes.get(at + 1).ok_or("truncated test producer report")?;
         if kind > 4 {
@@ -1833,7 +1950,14 @@ fn read_test_report_bytes(bytes: &[u8]) -> Result<Vec<ProducerRecord>, String> {
         let name = read_string(&bytes, &mut at)?;
         let message = read_string(&bytes, &mut at)?;
         let file = read_string(&bytes, &mut at)?;
-        records.push(ProducerRecord { kind, state, name, message, file, line });
+        records.push(ProducerRecord {
+            kind,
+            state,
+            name,
+            message,
+            file,
+            line,
+        });
     }
     Ok(records)
 }
@@ -2011,7 +2135,8 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     paths.sort_by(|a, b| normalized(a).as_bytes().cmp(normalized(b).as_bytes()));
     let mut members = Vec::with_capacity(paths.len());
     for path in paths {
-        let bytes = fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
+        let bytes =
+            fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
         members.push(Member {
             path: normalized(&path),
             sha256: jet::SHA256::sha256_hex(&bytes),
@@ -2029,7 +2154,10 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             let bytes = fs::read(&closure_path)
                 .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
             let closure_path = normalized(&closure_path);
-            if !identity_members.iter().any(|(member_path, _)| member_path == &closure_path) {
+            if !identity_members
+                .iter()
+                .any(|(member_path, _)| member_path == &closure_path)
+            {
                 identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
             }
         }
@@ -2051,7 +2179,10 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
                 let bytes = fs::read(&closure_path)
                     .map_err(|e| format!("couldn't read `{}`: {e}", closure_path.display()))?;
                 let closure_path = normalized(&closure_path);
-                if !identity_members.iter().any(|(member_path, _)| member_path == &closure_path) {
+                if !identity_members
+                    .iter()
+                    .any(|(member_path, _)| member_path == &closure_path)
+                {
                     identity_members.push((closure_path, jet::SHA256::sha256_hex(&bytes)));
                 }
             }
@@ -2059,11 +2190,8 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         // A file target can still import source outside the entry file. Ask
         // the production loader for its resolved dependency closure so replay
         // identity cannot be reused after an imported module changes.
-        let (_, dependencies) = jet::Loader::load_entry_with_overlays_and_dependencies(
-            raw,
-            &[],
-            true,
-        );
+        let (_, dependencies) =
+            jet::Loader::load_entry_with_overlays_and_dependencies(raw, &[], true);
         for dependency in dependencies {
             let dependency_metadata = match fs::symlink_metadata(&dependency) {
                 Ok(metadata) => metadata,
@@ -2076,15 +2204,25 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
                 }
             };
             if dependency_metadata.file_type().is_symlink() {
-                return Err(format!("proof target contains symlink `{}`", dependency.display()));
+                return Err(format!(
+                    "proof target contains symlink `{}`",
+                    dependency.display()
+                ));
             }
             if !dependency_metadata.is_file() {
                 continue;
             }
-            let bytes = fs::read(&dependency)
-                .map_err(|e| format!("couldn't read proof dependency `{}`: {e}", dependency.display()))?;
+            let bytes = fs::read(&dependency).map_err(|e| {
+                format!(
+                    "couldn't read proof dependency `{}`: {e}",
+                    dependency.display()
+                )
+            })?;
             let dependency_path = normalized(&dependency);
-            if !identity_members.iter().any(|(member_path, _)| member_path == &dependency_path) {
+            if !identity_members
+                .iter()
+                .any(|(member_path, _)| member_path == &dependency_path)
+            {
                 identity_members.push((dependency_path, jet::SHA256::sha256_hex(&bytes)));
             }
         }
@@ -2140,7 +2278,6 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         members,
     })
 }
-
 
 fn reject_symlink_ancestors(path: &Path) -> Result<(), String> {
     let mut current = if path.is_absolute() {
@@ -2214,10 +2351,7 @@ fn is_lock_identity_path(path: &str) -> bool {
 }
 
 fn is_build_identity_path(path: &str) -> bool {
-    matches!(
-        path.rsplit('/').next(),
-        Some("package.jet" | "build.jet")
-    )
+    matches!(path.rsplit('/').next(), Some("package.jet" | "build.jet"))
 }
 
 fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, String> {
@@ -2235,13 +2369,10 @@ fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, S
     if !rustc.status.success() {
         return Err("cannot identify rustc: `rustc -vV` failed".to_string());
     }
-    let rustc_identity = String::from_utf8(rustc.stdout)
-        .map_err(|_| "rustc identity is not UTF-8".to_string())?;
+    let rustc_identity =
+        String::from_utf8(rustc.stdout).map_err(|_| "rustc identity is not UTF-8".to_string())?;
     let fields = vec![
-        (
-            "compiler".to_string(),
-            compiler_digest.as_bytes().to_vec(),
-        ),
+        ("compiler".to_string(), compiler_digest.as_bytes().to_vec()),
         (
             "jet_version".to_string(),
             env!("CARGO_PKG_VERSION").as_bytes().to_vec(),
@@ -2365,21 +2496,33 @@ fn has_proof_manifest(dir: &Path, name: &str) -> Result<bool, String> {
         }
         Ok(metadata) => Ok(metadata.is_file()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("couldn't inspect proof manifest `{}`: {error}", path.display())),
+        Err(error) => Err(format!(
+            "couldn't inspect proof manifest `{}`: {error}",
+            path.display()
+        )),
     }
 }
 
 fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
     for entry in entries {
-        let path = entry.map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?.path();
+        let path = entry
+            .map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?
+            .path();
         let metadata = fs::symlink_metadata(&path)
             .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("proof target contains symlink `{}`", path.display()));
+            return Err(format!(
+                "proof target contains symlink `{}`",
+                path.display()
+            ));
         }
         if path.file_name().and_then(|name| name.to_str()).is_none() {
-            return Err(format!("proof target contains a non-UTF-8 path `{}`", path.display()));
+            return Err(format!(
+                "proof target contains a non-UTF-8 path `{}`",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -2390,7 +2533,10 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         } else if metadata.is_file()
             && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
         {
-            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
             if name != jet::Syntax::PACKAGE_FILE
                 && name != jet::Syntax::PAYLOAD_FILE
                 && name != "build.jet"
@@ -2403,7 +2549,8 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
 }
 
 fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
+    let entries =
+        fs::read_dir(dir).map_err(|e| format!("couldn't read `{}`: {e}", dir.display()))?;
     for entry in entries {
         let path = entry
             .map_err(|e| format!("couldn't inspect `{}`: {e}", dir.display()))?
@@ -2411,13 +2558,22 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
         let metadata = fs::symlink_metadata(&path)
             .map_err(|e| format!("couldn't inspect `{}`: {e}", path.display()))?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("proof target contains symlink `{}`", path.display()));
+            return Err(format!(
+                "proof target contains symlink `{}`",
+                path.display()
+            ));
         }
         if path.file_name().and_then(|name| name.to_str()).is_none() {
-            return Err(format!("proof target contains a non-UTF-8 path `{}`", path.display()));
+            return Err(format!(
+                "proof target contains a non-UTF-8 path `{}`",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
-            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
             let parent_is_jet = path
                 .parent()
                 .and_then(|parent| parent.file_name())
@@ -2432,14 +2588,19 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
         if !metadata.is_file() {
             continue;
         }
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         let parent_is_jet = path
             .parent()
             .and_then(|parent| parent.file_name())
             .and_then(|name| name.to_str())
             == Some(".jet");
-        if matches!(name, "package.jet" | "jet.lock" | "jet.lock.json" | "build.jet")
-            || (parent_is_jet && name == "lock")
+        if matches!(
+            name,
+            "package.jet" | "jet.lock" | "jet.lock.json" | "build.jet"
+        ) || (parent_is_jet && name == "lock")
         {
             out.push(path);
         }
@@ -2462,18 +2623,35 @@ fn normalized(path: &Path) -> String {
 
 fn budget_projection(target: &Target) -> jet::BudgetView::BudgetProjection {
     let target_path = Path::new(&target.root);
-    let search = if target_path.is_file() { target_path.parent().unwrap_or(Path::new(".")) } else { target_path };
+    let search = if target_path.is_file() {
+        target_path.parent().unwrap_or(Path::new("."))
+    } else {
+        target_path
+    };
     let root = jet::Loader::find_manifest_root(search).unwrap_or_else(|| search.to_path_buf());
-    let sources = target.members.iter().map(|member| {
-        let path = Path::new(&member.path);
-        let path = path.strip_prefix(&root).unwrap_or(path).to_string_lossy().replace('\\', "/");
-        (path.trim_start_matches("./").to_string(), member.sha256.clone())
-    }).collect::<Vec<_>>();
+    let sources = target
+        .members
+        .iter()
+        .map(|member| {
+            let path = Path::new(&member.path);
+            let path = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (
+                path.trim_start_matches("./").to_string(),
+                member.sha256.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
     jet::BudgetView::read_compatible(&root, &sources)
 }
 
 fn diagnostic_span(source: &str, diagnostic: &Diagnostic) -> String {
-    let Some(span) = diagnostic.span else { return "0:0-0:0".into() };
+    let Some(span) = diagnostic.span else {
+        return "0:0-0:0".into();
+    };
     let (sl, sc) = span_line_col(source, span.start);
     let (el, ec) = span_line_col(source, span.end);
     format!("{sl}:{sc}-{el}:{ec}")
@@ -2508,7 +2686,14 @@ fn render_report(
         .map(|(path, sha256)| format!("{{\"path\":{},\"sha256\":{}}}", json(path), json(sha256)))
         .collect::<Vec<_>>()
         .join(",");
-    let mut diagnostics = items.iter().filter_map(|item| item.diagnostic.as_ref().map(|d| diagnostic_json(&item.path, &item.source, d))).collect::<Vec<_>>();
+    let mut diagnostics = items
+        .iter()
+        .filter_map(|item| {
+            item.diagnostic
+                .as_ref()
+                .map(|d| diagnostic_json(&item.path, &item.source, d))
+        })
+        .collect::<Vec<_>>();
     let mut diagnostic_index = 0usize;
     let mut evidence_rows = items.iter().map(|item| {
         let (outcome, indexes) = if item.diagnostic.is_some() { let i = diagnostic_index; diagnostic_index += 1; ("failed", format!("[{i}]")) } else { ("proved", "[]".into()) };
@@ -2531,7 +2716,12 @@ fn render_report(
                     0 => ("executed", "passed", "null", "reached_pass"),
                     1 => ("executed", "failed", "null", "reached_fail"),
                     2 => ("skipped", "not_run", "\"fail_fast_policy\"", "not_reached"),
-                    _ => ("unavailable", "unavailable", "\"producer_start_failed\"", "not_reached"),
+                    _ => (
+                        "unavailable",
+                        "unavailable",
+                        "\"producer_start_failed\"",
+                        "not_reached",
+                    ),
                 };
                 let diagnostic_indexes = if item.state == 1 {
                     let index = diagnostics.len();
@@ -2602,25 +2792,50 @@ fn render_report(
             4 => ("doctest", "tests", "jet-doctest"),
             _ => ("unit", "tests", "jet-test"),
         };
-        let (state, outcome, reason) = match item.state { 0 => ("executed", "passed", "null"), 1 => ("executed", "failed", "null"), 2 => ("skipped", "not_run", "\"fail_fast_policy\""), _ => ("unavailable", "unavailable", "\"producer_start_failed\"") };
+        let (state, outcome, reason) = match item.state {
+            0 => ("executed", "passed", "null"),
+            1 => ("executed", "failed", "null"),
+            2 => ("skipped", "not_run", "\"fail_fast_policy\""),
+            _ => ("unavailable", "unavailable", "\"producer_start_failed\""),
+        };
         let diagnostic_indexes = if item.state == 1 {
             let index = diagnostics.len();
             diagnostics.push(runtime_item_diagnostic(item));
             format!("[{index}]")
-        } else { "[]".into() };
-        let property = if item.kind == 3 { format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple())) } else { "null".into() };
+        } else {
+            "[]".into()
+        };
+        let property = if item.kind == 3 {
+            format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+        } else {
+            "null".into()
+        };
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
     }
     for fact in &budgets.facts {
-        let kind = if fact.statistical { "statistical_budget" } else { "deterministic_budget" };
+        let kind = if fact.statistical {
+            "statistical_budget"
+        } else {
+            "deterministic_budget"
+        };
         let facet = "budgets";
-        let outcome = match fact.outcome.as_str() { "pass" => "met", "warn" => "warning", _ => "failed" };
+        let outcome = match fact.outcome.as_str() {
+            "pass" => "met",
+            "warn" => "warning",
+            _ => "failed",
+        };
         let budget = format!("{{\"budgetId\":{},\"enforcement\":{},\"evidenceId\":{},\"reportId\":{},\"statistical\":{}}}", json(&fact.budget_id), json(&fact.enforcement), json(&fact.evidence_id), json(&fact.report_id), fact.statistical);
         evidence_rows.push(format!("{{\"attachment\":null,\"budget\":{budget},\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"checked\"}}", json(&fact.evidence_id), json(&target.root)));
     }
     for (index, reason) in budgets.rejected.iter().enumerate() {
         let claim = format!("canonical budget report unavailable: {reason}");
-        let id = evidence_id(target, "budget", &target.root, &format!("0:0-0:{index}"), &claim);
+        let id = evidence_id(
+            target,
+            "budget",
+            &target.root,
+            &format!("0:0-0:{index}"),
+            &claim,
+        );
         evidence_rows.push(format!(
             "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{},\"kind\":\"deterministic_budget\",\"outcome\":\"unavailable\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":{},\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"unavailable\"}}",
             json(&id),
@@ -2675,34 +2890,87 @@ fn render_report(
         crate::ProveSolver::summarize(solver);
     let unit_report = unit_test_report(tests);
     let unit_summary = unit_report.json_summary();
-    let unit_unavailable = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3).count();
+    let unit_unavailable = tests
+        .iter()
+        .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3)
+        .count();
     let contract_selected = declarations.len();
     let (contract_passed, contract_failed, contract_not_observed, contract_skipped) =
         contract_summary(declarations, tests);
     let contract_observed = contract_passed + contract_failed;
-    let property_passed = tests.iter().filter(|item| item.kind == 3 && item.state == 0).count();
-    let property_failed = tests.iter().filter(|item| item.kind == 3 && item.state == 1).count();
-    let property_cases: u32 = tests.iter().filter(|item| item.kind == 3).map(|item| item.line).sum();
+    let property_passed = tests
+        .iter()
+        .filter(|item| item.kind == 3 && item.state == 0)
+        .count();
+    let property_failed = tests
+        .iter()
+        .filter(|item| item.kind == 3 && item.state == 1)
+        .count();
+    let property_cases: u32 = tests
+        .iter()
+        .filter(|item| item.kind == 3)
+        .map(|item| item.line)
+        .sum();
     let property_shrunk_failures = tests
         .iter()
         .filter(|item| item.kind == 3 && item.state == 1 && !item.message.is_empty())
         .count();
-    let doctest_passed = tests.iter().filter(|item| item.kind == 4 && item.state == 0).count();
-    let doctest_failed = tests.iter().filter(|item| item.kind == 4 && item.state == 1).count();
-    let doctest_skipped = tests.iter().filter(|item| item.kind == 4 && item.state >= 2).count();
+    let doctest_passed = tests
+        .iter()
+        .filter(|item| item.kind == 4 && item.state == 0)
+        .count();
+    let doctest_failed = tests
+        .iter()
+        .filter(|item| item.kind == 4 && item.state == 1)
+        .count();
+    let doctest_skipped = tests
+        .iter()
+        .filter(|item| item.kind == 4 && item.state >= 2)
+        .count();
     let doctest_selected = doctest_passed + doctest_failed + doctest_skipped;
-    let deterministic_selected = budgets.facts.iter().filter(|fact| !fact.statistical).count()
+    let deterministic_selected = budgets
+        .facts
+        .iter()
+        .filter(|fact| !fact.statistical)
+        .count()
         + budgets.rejected.len();
-    let deterministic_failed = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "fail").count();
-    let deterministic_met = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "pass").count();
-    let deterministic_unavailable = budgets.facts.iter().filter(|fact| !fact.statistical && fact.evidence == "unavailable").count()
+    let deterministic_failed = budgets
+        .facts
+        .iter()
+        .filter(|fact| !fact.statistical && fact.outcome == "fail")
+        .count();
+    let deterministic_met = budgets
+        .facts
+        .iter()
+        .filter(|fact| !fact.statistical && fact.outcome == "pass")
+        .count();
+    let deterministic_unavailable = budgets
+        .facts
+        .iter()
+        .filter(|fact| !fact.statistical && fact.evidence == "unavailable")
+        .count()
         + budgets.rejected.len();
     let statistical_selected = budgets.facts.iter().filter(|fact| fact.statistical).count();
-    let statistical_failed = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "fail").count();
-    let statistical_met = budgets.facts.iter().filter(|fact| fact.statistical && fact.outcome == "pass").count();
-    let statistical_unavailable = budgets.facts.iter().filter(|fact| fact.statistical && fact.evidence == "unavailable").count();
+    let statistical_failed = budgets
+        .facts
+        .iter()
+        .filter(|fact| fact.statistical && fact.outcome == "fail")
+        .count();
+    let statistical_met = budgets
+        .facts
+        .iter()
+        .filter(|fact| fact.statistical && fact.outcome == "pass")
+        .count();
+    let statistical_unavailable = budgets
+        .facts
+        .iter()
+        .filter(|fact| fact.statistical && fact.evidence == "unavailable")
+        .count();
     let front_end_selected = proved + failed;
-    let property_skipped = tests.iter().filter(|item| item.kind == 3 && item.state >= 2).count();
+    let property_skipped = tests
+        .iter()
+        .filter(|item| item.kind == 3 && item.state >= 2)
+        .count();
     let property_selected = property_passed + property_failed + property_skipped;
     let result = if exit_code != ExitCodes::OK {
         "fail"
@@ -2750,7 +3018,11 @@ fn contract_summary(
 }
 
 fn diagnostic_json(path: &str, source: &str, d: &Diagnostic) -> String {
-    let severity = if matches!(d.severity, Severity::Error) { "error" } else { "warning" };
+    let severity = if matches!(d.severity, Severity::Error) {
+        "error"
+    } else {
+        "warning"
+    };
     let span = d.span.map(|s| { let (sl, sc) = span_line_col(source, s.start); let (el, ec) = span_line_col(source, s.end); format!("{{\"endColumn\":{ec},\"endLine\":{el},\"path\":{},\"sourceLine\":null,\"startColumn\":{sc},\"startLine\":{sl}}}", json(path)) }).unwrap_or_else(|| "null".into());
     format!("{{\"caret\":null,\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-sema\",\"stage\":\"front_end\"}},\"safeLocals\":[],\"severity\":\"{severity}\",\"span\":{span},\"type\":\"front_end\"}}", json(&d.code), json(&d.what), json(&format!("Why: {}", d.why)), json(&format!("Fix: {}", d.fix)))
 }
@@ -2770,8 +3042,13 @@ fn runtime_contract_diagnostic(path: &str, item: &TestItem) -> String {
     let why = format!("Why: {}", report.why);
     let fix = format!("Fix: {}", report.fix);
     let source_line = source_line_for(path, item.line);
-    let source_line_json = source_line.as_deref().map(json).unwrap_or_else(|| "null".to_string());
-    let width = source_line.as_deref().map_or(1, |line| line.chars().count().max(1));
+    let source_line_json = source_line
+        .as_deref()
+        .map(json)
+        .unwrap_or_else(|| "null".to_string());
+    let width = source_line
+        .as_deref()
+        .map_or(1, |line| line.chars().count().max(1));
     format!(
         "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
         json(&message),
@@ -2796,9 +3073,18 @@ fn source_line_for(path: &str, line: u32) -> Option<String> {
 fn unit_test_report(tests: &[TestItem]) -> TestReport {
     let is_unit = |item: &&TestItem| item.kind == 0 || item.kind == 2;
     TestReport::new(
-        tests.iter().filter(|item| is_unit(item) && item.state == 0).count(),
-        tests.iter().filter(|item| is_unit(item) && item.state == 1).count(),
-        tests.iter().filter(|item| is_unit(item) && item.state >= 2).count(),
+        tests
+            .iter()
+            .filter(|item| is_unit(item) && item.state == 0)
+            .count(),
+        tests
+            .iter()
+            .filter(|item| is_unit(item) && item.state == 1)
+            .count(),
+        tests
+            .iter()
+            .filter(|item| is_unit(item) && item.state >= 2)
+            .count(),
     )
 }
 
@@ -2824,7 +3110,15 @@ fn runtime_item_diagnostic(item: &TestItem) -> String {
 fn json(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
-        match ch { '\\' => out.push_str("\\\\"), '"' => out.push_str("\\\""), '\n' => out.push_str("\\n"), '\r' => out.push_str("\\r"), '\t' => out.push_str("\\t"), c if c < ' ' => out.push_str(&format!("\\u{:04x}", c as u32)), c => out.push(c) }
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < ' ' => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
     }
     out.push('"');
     out
@@ -2843,7 +3137,11 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
             .and_then(|s| s.to_str())
             .unwrap_or(kind)
             .replace('.', "_");
-        if stem.is_empty() { kind.to_string() } else { stem }
+        if stem.is_empty() {
+            kind.to_string()
+        } else {
+            stem
+        }
     };
     let rel = format!(
         ".jet/proofs/{kind}/{name}/{}.jetproof",
@@ -2886,7 +3184,8 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         }
         use std::io::Write;
-        file.write_all(envelope.as_bytes()).map_err(|e| e.to_string())?;
+        file.write_all(envelope.as_bytes())
+            .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         fs::hard_link(&tmp, &path).map_err(|e| e.to_string())?;
         fs::remove_file(&tmp).map_err(|e| e.to_string())?;
@@ -2916,10 +3215,16 @@ fn ensure_jetproof_parent(path: &Path) -> Result<(), String> {
         current.push(name);
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(".jetproof parent is a symlink: {}", current.display()));
+                return Err(format!(
+                    ".jetproof parent is a symlink: {}",
+                    current.display()
+                ));
             }
             Ok(metadata) if !metadata.is_dir() => {
-                return Err(format!(".jetproof parent is not a directory: {}", current.display()));
+                return Err(format!(
+                    ".jetproof parent is not a directory: {}",
+                    current.display()
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

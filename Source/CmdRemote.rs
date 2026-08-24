@@ -27,20 +27,25 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
     let root = value_flag(args, "--root");
     let credential_file = value_flag(args, "--credential-file");
     let trust_domain = value_flag(args, "--trust-domain");
-    let Some(root) = root else { fail("jet remote bind needs `--root <absolute-path>`") };
+    let Some(root) = root else {
+        fail("jet remote bind needs `--root <absolute-path>`")
+    };
     let Some(credential_file) = credential_file else {
         fail("jet remote bind needs `--credential-file <path>`")
     };
     let Some(trust_domain) = trust_domain else {
         fail("jet remote bind needs `--trust-domain <name>`")
     };
-    let worker_id = value_flag(args, "--worker-id")
-        .unwrap_or_else(|| "worker".to_string());
+    let worker_id = value_flag(args, "--worker-id").unwrap_or_else(|| "worker".to_string());
     let platform = value_flag(args, "--platform")
         .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
     let abi = value_flag(args, "--abi").unwrap_or_else(|| "native".to_string());
     let timeout_ms = value_flag(args, "--timeout-ms")
-        .map(|value| value.parse::<u64>().unwrap_or_else(|_| fail("`--timeout-ms` must be a positive integer")))
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .unwrap_or_else(|_| fail("`--timeout-ms` must be a positive integer"))
+        })
         .unwrap_or(30_000);
     if timeout_ms == 0 {
         fail("`--timeout-ms` must be a positive integer");
@@ -64,7 +69,10 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
         "--json",
     ];
     for argument in args.iter().skip(3) {
-        let head = argument.split_once('=').map(|(head, _)| head).unwrap_or(argument);
+        let head = argument
+            .split_once('=')
+            .map(|(head, _)| head)
+            .unwrap_or(argument);
         if argument.starts_with('-') && !known.contains(&head) {
             fail(&format!("unknown remote bind flag `{argument}`"));
         }
@@ -185,12 +193,17 @@ fn value_flag(args: &[String], name: &str) -> Option<String> {
         argument
             .strip_prefix(&format!("{name}="))
             .map(str::to_string)
-            .or_else(|| (argument == name).then(|| args.get(index + 1).cloned()).flatten())
+            .or_else(|| {
+                (argument == name)
+                    .then(|| args.get(index + 1).cloned())
+                    .flatten()
+            })
     })
 }
 
 fn has_flag(args: &[String], name: &str) -> bool {
-    args.iter().any(|argument| argument == name || argument == &format!("{name}=true"))
+    args.iter()
+        .any(|argument| argument == name || argument == &format!("{name}=true"))
 }
 
 fn escape(value: &str) -> String {

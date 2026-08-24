@@ -394,6 +394,13 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     let out = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stderr.is_empty());
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_output(
+            std::str::from_utf8(&out.stdout).unwrap()
+        )
+        .unwrap(),
+        vec![jet_foundation::MachineOutput::MachineRecord::Status]
+    );
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
     assert_eq!(command.keys().map(String::as_str).collect::<Vec<_>>(), ["action","budget","moment","ok","schema","status"]);
     let CanonicalJson::Object(budget) = &command["budget"] else { panic!("budget") };

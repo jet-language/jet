@@ -6,8 +6,8 @@ use std::process::exit;
 
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 
 const LARGE_KIND_THRESHOLD: usize = 16;
 
@@ -92,7 +92,10 @@ fn entry_file(args: &[String]) -> Option<String> {
             skip_value = true;
             continue;
         }
-        if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") {
+        if argument.starts_with("--scope=")
+            || argument.starts_with("--kind=")
+            || argument.starts_with("--gate=")
+        {
             continue;
         }
         if !argument.starts_with('-') {
@@ -269,11 +272,7 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
 
     if let Some(lock) = jet::Lock::load(root) {
         if let Some(authority) = &lock.authority {
-            append_authority_entries(
-                ledger,
-                authority,
-                jet::Syntax::UNIFIED_LOCK_FILE,
-            );
+            append_authority_entries(ledger, authority, jet::Syntax::UNIFIED_LOCK_FILE);
         } else {
             for package in &lock.packages {
                 if !package.effect_grants.is_empty() {
@@ -284,7 +283,10 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
                         jet::Syntax::UNIFIED_LOCK_FILE,
                         &package.name,
                         &format!("effects: {}", package.effect_grants.join(",")),
-                        vec![format!("{}:dependency.effect-grants", jet::Syntax::UNIFIED_LOCK_FILE)],
+                        vec![format!(
+                            "{}:dependency.effect-grants",
+                            jet::Syntax::UNIFIED_LOCK_FILE
+                        )],
                     ));
                 }
             }
@@ -297,13 +299,19 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
                 jet::Syntax::UNIFIED_LOCK_FILE,
                 &format!("build:{subject}"),
                 &format!("workspace authority: {}", effects.join(",")),
-                vec![format!("{}:workspace.build-grants", jet::Syntax::UNIFIED_LOCK_FILE)],
+                vec![format!(
+                    "{}:workspace.build-grants",
+                    jet::Syntax::UNIFIED_LOCK_FILE
+                )],
             ));
         }
         for overlay in &lock.workspace_overlay_policy.overlays {
             for package in &overlay.packages {
                 let forced = package.priority >= 100
-                    || package.field_priorities.values().any(|priority| *priority >= 100);
+                    || package
+                        .field_priorities
+                        .values()
+                        .any(|priority| *priority >= 100);
                 if !forced {
                     continue;
                 }
@@ -353,11 +361,9 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
                 grant.scope,
                 "trusted authority grant".to_string(),
             ),
-            jetpack::Trust::TrustRecord::Raw { line } => (
-                line,
-                "trust".to_string(),
-                "raw trust record".to_string(),
-            ),
+            jetpack::Trust::TrustRecord::Raw { line } => {
+                (line, "trust".to_string(), "raw trust record".to_string())
+            }
         };
         ledger.push(external_entry(
             GateKind::TrustGrant,
@@ -411,7 +417,10 @@ fn append_invocation_flags(ledger: &mut GateLedger, args: &[String]) {
                 vec!["command line".to_string()],
             ));
         } else if argument.starts_with("--deny-")
-            || matches!(argument.as_str(), "--trust" | "--online" | "--try-anyway" | "--interpret" | "--offline" | "--locked")
+            || matches!(
+                argument.as_str(),
+                "--trust" | "--online" | "--try-anyway" | "--interpret" | "--offline" | "--locked"
+            )
         {
             ledger.push(external_entry(
                 GateKind::SessionFlag,
@@ -560,7 +569,11 @@ fn print_entry_human(entry: &GateEntry, bundle: &jet::AST::ProgramBundle) {
             "      {}  {}  {}  required=[{}] asserted=[{}]",
             location(&entry.source, &source, operation.span),
             operation.kind,
-            if operation.discharged { "discharged" } else { "missing" },
+            if operation.discharged {
+                "discharged"
+            } else {
+                "missing"
+            },
             operation.required.join(","),
             operation.asserted.join(",")
         );

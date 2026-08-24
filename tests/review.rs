@@ -66,6 +66,11 @@ fn review_joins_meaning_authority_and_receipt_changes() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_output(&stdout).unwrap(),
+        vec![jet_foundation::MachineOutput::MachineRecord::Status]
+    );
+    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""));
     assert!(stdout.contains("\"kind\":\"review\""));
     assert!(stdout.contains("body_changed"));
     assert!(stdout.contains("\"status\":\"widened\""));

@@ -706,6 +706,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         let realized = Store::realize_verified(
             &roots,
@@ -742,6 +744,8 @@ mod tests {
             store_dir: &store,
             offline: true,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         let replay = Store::realize_verified(
             &roots,
@@ -768,6 +772,8 @@ mod tests {
             store_dir: &hostile_store,
             offline: false,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         assert!(matches!(
             super::CranProvider.realize(&spec, &table, &hostile),

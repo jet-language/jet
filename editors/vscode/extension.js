@@ -63,15 +63,21 @@ function debugSourceForConfiguration(configuration) {
     throw new Error("Jet attach needs the existing `map` sidecar to identify its .jet source.");
   }
   let map;
+  const mapPath = canonicalProgram(configuration.map);
   try {
-    map = JSON.parse(fs.readFileSync(canonicalProgram(configuration.map), "utf8"));
+    map = JSON.parse(fs.readFileSync(mapPath, "utf8"));
   } catch (error) {
     throw new Error(`Jet attach cannot read its verified map sidecar: ${error.message}`);
   }
   if (typeof map.jet_file !== "string" || !map.jet_file) {
     throw new Error("Jet attach map sidecar does not identify a Jet source file.");
   }
-  return canonicalProgram(map.jet_file);
+  // The sidecar records the source path used by the build. Relative paths are
+  // relative to the sidecar, not to the editor process's current directory.
+  const source = path.isAbsolute(map.jet_file)
+    ? map.jet_file
+    : path.resolve(path.dirname(mapPath), map.jet_file);
+  return canonicalProgram(source);
 }
 
 function shellQuote(value) {

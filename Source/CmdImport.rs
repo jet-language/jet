@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use jet::Diagnostics::Diagnostic;
 use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::{render_status_json, ReportEnvelope};
 
 const TODO_CODE: &str = "JT0101";
 
@@ -811,17 +812,30 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
         let diagnostic =
             Diagnostic::from_row("JT0199", &[("paths", &conflict_paths.join(", "))], None);
         if json {
+            let report = ReportEnvelope::new(
+                "tool",
+                "error",
+                diagnostic.code.clone(),
+                diagnostic.what.clone(),
+                diagnostic.why.clone(),
+                diagnostic.fix.clone(),
+            )
+            .json();
             println!(
-                "{{\"code\":\"{}\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"{}\",\"paths\":[{}]}}",
-                diagnostic.code,
-                json_escape(&diagnostic.what),
-                json_escape(&diagnostic.why),
-                json_escape(&diagnostic.fix),
-                conflicts
-                    .iter()
-                    .map(|path| format!("\"{}\"", json_escape(&path.display().to_string())))
-                    .collect::<Vec<_>>()
-                    .join(",")
+                "{}",
+                render_status_json(
+                    "conflict",
+                    false,
+                    "import",
+                    &format!(
+                        ",\"diagnostics\":[{report}],\"paths\":[{}]",
+                        conflicts
+                            .iter()
+                            .map(|path| format!("\"{}\"", json_escape(&path.display().to_string())))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ),
+                )
             );
         } else {
             eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);
@@ -844,7 +858,15 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
         }
     }
     if json {
-        print!("{report}");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "import",
+                &format!(",\"import\":{}", report.trim_end()),
+            )
+        );
     } else {
         let verb = if mode == Mode::DryRun {
             "would import"
@@ -981,9 +1003,16 @@ fn shorten(value: &str) -> String {
 fn usage_error(what: &str, fix: &str, json: bool) -> i32 {
     if json {
         println!(
-            "{{\"code\":\"E2102\",\"what\":\"{}\",\"why\":\"D-MIGRATE-SRC1 keeps source import arguments explicit\",\"fix\":\"{}\"}}",
-            json_escape(what),
-            json_escape(fix)
+            "{}",
+            ReportEnvelope::new(
+                "tool",
+                "error",
+                "E2102",
+                what,
+                "D-MIGRATE-SRC1 keeps source import arguments explicit",
+                fix,
+            )
+            .json()
         );
     } else {
         eprintln!("error[E2102]: {what}");
@@ -997,11 +1026,16 @@ fn operation_error(what: &str, why: &str, json: bool) -> i32 {
     let diagnostic = Diagnostic::from_row("JT0198", &[("operation", what), ("reason", why)], None);
     if json {
         println!(
-            "{{\"code\":\"{}\",\"what\":\"{}\",\"why\":\"{}\",\"fix\":\"{}\"}}",
-            diagnostic.code,
-            json_escape(&diagnostic.what),
-            json_escape(&diagnostic.why),
-            json_escape(&diagnostic.fix)
+            "{}",
+            ReportEnvelope::new(
+                "tool",
+                "error",
+                diagnostic.code,
+                diagnostic.what,
+                diagnostic.why,
+                diagnostic.fix,
+            )
+            .json()
         );
     } else {
         eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);

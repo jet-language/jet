@@ -342,7 +342,7 @@ fn cache_usage(theme: &Theme, parsed: &Parsed, what: &str, fix: &str) -> i32 {
     )
 }
 
-/// `jetpack hangar du` — honest per-object disk usage (U22 / D-JPK-GC1).
+/// `jetpack hangar du` — honest root-inclusive closure disk usage (U22 / D-JPK-GC1).
 /// Source-built objects are counted like any other, so `du` never hides them.
 ///
 /// Hangar Store v2 also exposes:
@@ -371,8 +371,8 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         Some("du") | None => {
             let roots = Store::resolve();
-            let entries = match Store::du(&roots) {
-                Ok(entries) => entries,
+            let report = match Store::du(&roots) {
+                Ok(report) => report,
                 Err(error) => {
                     return hangar_report_error(
                         theme,
@@ -384,60 +384,69 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                     )
                 }
             };
-            if entries.is_empty() {
-                if parsed.flags.json {
-                    hangar_status_json(
-                        "du",
-                        ",\"objects\":0,\"built\":0,\"bytes\":0,\"entries\":[]",
-                    );
-                } else {
-                    theme.status("hangar is empty.");
-                }
-                return 0;
-            }
-            let mut total = 0u64;
-            let mut built = 0usize;
-            let mut machine_entries = Vec::with_capacity(entries.len());
-            for e in &entries {
-                total += e.bytes;
-                if e.source_built {
-                    built += 1;
-                }
-                machine_entries.push(format!(
-                    "{{\"id\":{},\"bytes\":{},\"source_built\":{}}}",
-                    crate::JSON::quote(&e.id),
-                    e.bytes,
-                    e.source_built,
-                ));
-                let tag = if e.source_built { " (built)" } else { "" };
-                if !parsed.flags.json {
-                    theme.detail(&format!(
-                        "{:>10}  {}{}",
-                        human_bytes(e.bytes),
-                        theme.bold(&e.id),
-                        theme.gray(tag)
-                    ));
-                }
-            }
             if parsed.flags.json {
+                let machine_entries = report
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{{\"id\":{},\"unique_bytes\":{},\"shared_bytes\":{},\"source_built\":{}}}",
+                            crate::JSON::quote(&entry.id),
+                            json_u64(entry.unique_bytes),
+                            json_u64(entry.shared_bytes),
+                            entry.source_built,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 hangar_status_json(
                     "du",
                     &format!(
-                        ",\"objects\":{},\"built\":{},\"bytes\":{},\"entries\":[{}]",
-                        entries.len(),
-                        built,
-                        total,
-                        machine_entries.join(",")
+                        ",\"objects\":{},\"packages\":{},\"built\":{},\"unique_bytes\":{},\"shared_bytes\":{},\"closure_physical_bytes\":{},\"entries\":[{}]",
+                        report.objects,
+                        report.packages,
+                        report.built,
+                        json_u64(report.unique_bytes),
+                        json_u64(report.shared_bytes),
+                        json_u64(report.closure_physical_bytes),
+                        machine_entries,
                     ),
                 );
                 return 0;
             }
+            for entry in &report.entries {
+                let tag = if entry.source_built { " (built)" } else { "" };
+                match (entry.unique_bytes, entry.shared_bytes) {
+                    (Some(unique), Some(shared)) => theme.detail(&format!(
+                        "{}  unique {}, shared {}{}",
+                        theme.bold(&entry.id),
+                        human_bytes(unique),
+                        human_bytes(shared),
+                        theme.gray(tag)
+                    )),
+                    _ => theme.detail(&format!(
+                        "{}  physical closure use unavailable{}",
+                        theme.bold(&entry.id),
+                        theme.gray(tag)
+                    )),
+                }
+            }
             theme.status(&format!(
-                "{} object(s), {} built from source, {} total",
-                entries.len(),
-                built,
-                human_bytes(total)
+                "{} object(s), {} package(s), {} built from source",
+                report.objects, report.packages, report.built
             ));
+            match report.closure_physical_bytes {
+                Some(bytes) => theme.status(&format!(
+                    "closure physical use: {} (unique {}, shared {})",
+                    human_bytes(bytes),
+                    human_bytes(report.unique_bytes.unwrap_or(0)),
+                    human_bytes(report.shared_bytes.unwrap_or(0)),
+                )),
+                None => theme.status("closure physical use unavailable on this host."),
+            }
+            theme.detail(
+                "closure boundary: root-inclusive Hangar objects only; metadata, receipts, index, snapshots, and scratch excluded.",
+            );
             0
         }
         Some("ingest") => cmd_hangar_ingest(theme, parsed),
@@ -843,6 +852,10 @@ fn hangar_status_json(action: &str, fields: &str) {
         "{}",
         jet_foundation::Report::render_status_json("ok", true, action, fields)
     );
+}
+
+fn json_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
 }
 
 fn hangar_plan_json(action: &str, fields: &str) {

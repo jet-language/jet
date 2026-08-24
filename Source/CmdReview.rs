@@ -12,12 +12,14 @@ use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
 use jet::Sema::GateLedger::GateLedger;
 use jet_foundation::JSON::{json_get, json_str, parse, JSONValue};
+use jet_foundation::Report::render_status_json;
 use jet_semindex::{
     review_semantic_ops_with_receipts, semantic_ops_for_file, ReviewSemanticOp, SemIndex,
     SemanticOp,
 };
 
 struct ReviewSide {
+    path: std::path::PathBuf,
     index: SemIndex,
     authority: BTreeMap<String, String>,
     source_hash: String,
@@ -104,7 +106,13 @@ pub(crate) fn run_review(args: &[String], json: bool) {
         .semantic_ops
         .iter()
         .chain(head.semantic_ops.iter())
-        .filter(|operation| operation.matches_transition(&base.source_hash, &head.source_hash))
+        .filter(|operation| {
+            operation.matches_file_transition(
+                &[base.path.as_path(), head.path.as_path()],
+                &base.source_hash,
+                &head.source_hash,
+            )
+        })
         .cloned()
         .collect::<Vec<_>>();
     let meaning = review_semantic_ops_with_receipts(&base.index, &head.index, &recorded);
@@ -142,6 +150,7 @@ fn load_side(path: &Path) -> Result<ReviewSide, String> {
     ledger.sort();
     let authority = authority_facts(&ledger, &projection.index);
     Ok(ReviewSide {
+        path: path.to_path_buf(),
         index: projection.index,
         authority,
         source_hash,
@@ -486,8 +495,8 @@ fn render_json(
         })
         .collect::<Vec<_>>()
         .join(",");
-    println!(
-        "{{\"schema_version\":1,\"kind\":\"review\",\"meaning\":{{\"semantic_ops\":[{meaning}]}},\"authority\":{{\"changes\":[{authority}]}},\"receipts\":{{\"base_recorded\":{},\"head_recorded\":{},\"gained\":{},\"lost\":{},\"changed\":{},\"retained\":{},\"changes\":[{receipt_changes}]}},\"verdict\":{}}}",
+    let payload = format!(
+        "{{\"kind\":\"review\",\"meaning\":{{\"semantic_ops\":[{meaning}]}},\"authority\":{{\"changes\":[{authority}]}},\"receipts\":{{\"base_recorded\":{},\"head_recorded\":{},\"gained\":{},\"lost\":{},\"changed\":{},\"retained\":{},\"changes\":[{receipt_changes}]}},\"verdict\":{}}}",
         receipts.base_recorded,
         receipts.head_recorded,
         receipts.gained,
@@ -495,6 +504,15 @@ fn render_json(
         receipts.changed,
         receipts.retained,
         json_string(verdict),
+    );
+    println!(
+        "{}",
+        render_status_json(
+            "ok",
+            true,
+            "review",
+            &format!(",\"review\":{payload}"),
+        )
     );
 }
 

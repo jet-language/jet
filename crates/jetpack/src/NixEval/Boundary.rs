@@ -20,17 +20,47 @@ pub(in crate::NixEval) struct NativeBoundary {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeDerivationEvaluation {
+    name: String,
     drv_path: String,
     outputs: BTreeMap<String, String>,
+    output_specs: BTreeMap<String, (String, String)>,
+    builder: String,
+    args: Vec<String>,
+    env: BTreeMap<String, String>,
+    input_sources: BTreeSet<String>,
 }
 
 impl NativeDerivationEvaluation {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
     pub(crate) fn drv_path(&self) -> &str {
         &self.drv_path
     }
 
     pub(crate) fn outputs(&self) -> &BTreeMap<String, String> {
         &self.outputs
+    }
+
+    pub(crate) fn output_specs(&self) -> &BTreeMap<String, (String, String)> {
+        &self.output_specs
+    }
+
+    pub(crate) fn builder(&self) -> &str {
+        &self.builder
+    }
+
+    pub(crate) fn args(&self) -> &[String] {
+        &self.args
+    }
+
+    pub(crate) fn env(&self) -> &BTreeMap<String, String> {
+        &self.env
+    }
+
+    pub(crate) fn input_sources(&self) -> &BTreeSet<String> {
+        &self.input_sources
     }
 }
 
@@ -49,9 +79,7 @@ impl NativeBoundary {
         self.manifest.product_ready()
     }
 
-    pub(in crate::NixEval) fn pinned_inventory(
-        &self,
-    ) -> &'static [jet_nix_eval::InventoryEntry] {
+    pub(in crate::NixEval) fn pinned_inventory(&self) -> &'static [jet_nix_eval::InventoryEntry] {
         jet_nix_eval::pinned_inventory()
     }
 
@@ -189,7 +217,7 @@ fn materialize_derivation(
     let mut drv = crate::NixDrv::Derivation {
         outputs,
         input_drvs: Vec::new(),
-        input_srcs,
+        input_srcs: input_srcs.clone(),
         platform: evaluation.system().to_string(),
         builder: evaluation.builder().to_string(),
         args: evaluation.args().to_vec(),
@@ -238,10 +266,29 @@ fn materialize_derivation(
     );
     crate::NixDrv::verify_drv_path(store_dir, &drv_path, aterm.as_bytes(), &drv)?;
     crate::NixDrv::verify_output_paths(&mut store, store_dir, &drv_path, &drv)?;
+    let output_specs = drv
+        .outputs
+        .iter()
+        .map(|(name, output)| {
+            (
+                name.clone(),
+                (output.method_algo.clone(), output.hash_hex.clone()),
+            )
+        })
+        .collect();
     let outputs = drv
         .outputs
-        .into_iter()
-        .map(|(name, output)| (name, output.path))
+        .iter()
+        .map(|(name, output)| (name.clone(), output.path.clone()))
         .collect();
-    Ok(NativeDerivationEvaluation { drv_path, outputs })
+    Ok(NativeDerivationEvaluation {
+        name: evaluation.name().to_string(),
+        drv_path,
+        outputs,
+        output_specs,
+        builder: evaluation.builder().to_string(),
+        args: evaluation.args().to_vec(),
+        env: drv.env,
+        input_sources: input_srcs,
+    })
 }

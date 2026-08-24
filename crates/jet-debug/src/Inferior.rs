@@ -40,9 +40,12 @@
 
 use jet_foundation::Names::mangle;
 use jet_foundation::{Syntax, SHA256};
+use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Receiver;
@@ -128,6 +131,7 @@ pub(crate) struct Inferior {
     stderr_pos: u64,
     attached: Option<TargetIdentity>,
     detached: bool,
+    debuggee_exited: bool,
     closed: bool,
 }
 
@@ -207,27 +211,13 @@ impl Inferior {
         static SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = std::env::temp_dir();
-        let stdout_path = tmp.join(format!(
-            "jet_debug_native_{}_{}.stdout",
-            std::process::id(),
-            n
-        ));
-        let stderr_path = tmp.join(format!(
-            "jet_debug_native_{}_{}.stderr",
-            std::process::id(),
-            n
-        ));
-        if let Err(error) = std::fs::write(&stdout_path, b"") {
-            cleanup_failed_start(
-                child,
-                stdin,
-                rx,
-                reader,
-                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
-            );
+        let stdout_path = capture_path(&tmp, n, "stdout");
+        if let Err(error) = create_capture_file(&stdout_path) {
+            cleanup_failed_start(child, stdin, rx, reader, [stdout_path.as_path()].as_slice());
             return Err(error);
         }
-        if let Err(error) = std::fs::write(&stderr_path, b"") {
+        let stderr_path = capture_path(&tmp, n, "stderr");
+        if let Err(error) = create_capture_file(&stderr_path) {
             cleanup_failed_start(
                 child,
                 stdin,
@@ -249,6 +239,7 @@ impl Inferior {
             stderr_pos: 0,
             attached: None,
             detached: false,
+            debuggee_exited: false,
             closed: false,
         };
         inf.write_lines(&[])?;
@@ -313,27 +304,13 @@ impl Inferior {
         static SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = std::env::temp_dir();
-        let stdout_path = tmp.join(format!(
-            "jet_debug_native_{}_{}.stdout",
-            std::process::id(),
-            n
-        ));
-        let stderr_path = tmp.join(format!(
-            "jet_debug_native_{}_{}.stderr",
-            std::process::id(),
-            n
-        ));
-        if let Err(error) = std::fs::write(&stdout_path, b"") {
-            cleanup_failed_start(
-                child,
-                stdin,
-                rx,
-                reader,
-                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
-            );
+        let stdout_path = capture_path(&tmp, n, "stdout");
+        if let Err(error) = create_capture_file(&stdout_path) {
+            cleanup_failed_start(child, stdin, rx, reader, [stdout_path.as_path()].as_slice());
             return Err(error);
         }
-        if let Err(error) = std::fs::write(&stderr_path, b"") {
+        let stderr_path = capture_path(&tmp, n, "stderr");
+        if let Err(error) = create_capture_file(&stderr_path) {
             cleanup_failed_start(
                 child,
                 stdin,
@@ -354,6 +331,7 @@ impl Inferior {
             stderr_pos: 0,
             attached: Some(identity),
             detached: false,
+            debuggee_exited: false,
             closed: false,
         };
         if let Err(error) = inf.write_lines(&[]) {
@@ -434,7 +412,6 @@ impl Inferior {
         }
         writeln!(self.stdin, "{}", SENTINEL)?;
         self.stdin.flush()?;
-        let marker = SENTINEL.as_bytes();
         let mut buf: Vec<u8> = Vec::new();
         let deadline = Instant::now() + READ_TIMEOUT;
         loop {
@@ -461,7 +438,7 @@ impl Inferior {
                 }
             };
             buf.push(byte);
-            if buf.len() >= marker.len() && &buf[buf.len() - marker.len()..] == marker {
+            if sentinel_echo_at_end(&buf) {
                 break; // The sentinel's echo is on stdout; its rejection went
                        // to stderr, which is null — nothing more to consume.
             }
@@ -511,6 +488,7 @@ impl Inferior {
         let mut full = self.write_lines(&[resume_cmd, "bt"])?;
         full.push_str(&self.drain_grace_window());
         if full.contains("exited with") {
+            self.debuggee_exited = true;
             return Ok(ResumeResult::Exited {
                 status: parse_exit_status(&full),
                 signal: parse_exit_signal(&full),
@@ -652,6 +630,11 @@ impl Inferior {
     }
 
     pub(crate) fn detach(&mut self) -> std::io::Result<()> {
+        if self.debuggee_exited {
+            self.attached = None;
+            self.detached = true;
+            return Ok(());
+        }
         if self.child.try_wait()?.is_some() {
             if let Some(identity) = &self.attached {
                 match identity.verify() {
@@ -672,7 +655,15 @@ impl Inferior {
             ));
         }
         if let Some(identity) = &self.attached {
-            identity.verify()?;
+            match identity.verify() {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    self.attached = None;
+                    self.detached = true;
+                    return Ok(());
+                }
+                Err(error) => return Err(error),
+            }
         }
         let output = self.cmd("process detach")?;
         if lldb_reported_error(&output) && !output.contains("no process") {
@@ -698,6 +689,11 @@ impl Inferior {
     /// Explicit DAP termination. `shutdown` otherwise detaches an attached
     /// process by default, so this path must kill the debuggee first.
     pub(crate) fn terminate_debuggee(&mut self) -> std::io::Result<()> {
+        if self.debuggee_exited {
+            self.attached = None;
+            self.detached = true;
+            return Ok(());
+        }
         if self.child.try_wait()?.is_some() {
             if let Some(identity) = &self.attached {
                 match identity.verify() {
@@ -758,6 +754,8 @@ impl Inferior {
         if running {
             let command = if self.attached.is_some() {
                 "process detach"
+            } else if self.debuggee_exited {
+                "quit"
             } else if !self.detached {
                 "process kill"
             } else {
@@ -915,14 +913,16 @@ impl Inferior {
         {
             return Some(name.to_string());
         }
-        Self::rust_local_to_jet(name)
+        Self::rust_local_is_jet_visible(name)
+            .then(|| Self::rust_local_to_jet(name))
+            .flatten()
     }
 
     /// Generated locals use the reserved dunder suffix. They remain available
     /// to an explicit raw scope, but never cross the default Jet projection.
     pub(crate) fn rust_local_is_jet_visible(name: &str) -> bool {
         name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
-            .is_some_and(|rest| !rest.starts_with("__"))
+            .is_some_and(|rest| !rest.is_empty() && !rest.starts_with("__"))
     }
 
     /// Keep native summaries from exposing Rust layout, addresses, paths, or
@@ -1025,12 +1025,32 @@ impl Inferior {
 
     pub(crate) fn safe_jet_func(func: &str) -> String {
         let name = Self::rust_func_to_jet(func);
-        if name.starts_with("__") || name == "?" || name.contains("::") {
+        let generated = func
+            .split("::")
+            .any(|segment| segment.starts_with(Syntax::GENERATED_NAME_PREFIX));
+        if name.starts_with("__")
+            || name == "?"
+            || name.contains("::")
+            || (!generated && name != "main")
+        {
             "<native frame>".to_string()
         } else {
             name
         }
     }
+}
+
+/// LLDB echoes commands as a prompt-prefixed line. Match that complete echo,
+/// rather than a bare token: a user value or backend diagnostic can contain
+/// the unique token without completing the command reply.
+fn sentinel_echo_at_end(buf: &[u8]) -> bool {
+    let marker = format!("(lldb) {}", SENTINEL);
+    let marker = marker.as_bytes();
+    if buf.len() < marker.len() || &buf[buf.len() - marker.len()..] != marker {
+        return false;
+    }
+    let start = buf.len() - marker.len();
+    start == 0 || buf[start - 1] == b'\n'
 }
 
 impl Drop for Inferior {
@@ -1433,6 +1453,23 @@ fn cleanup_failed_start(
     }
 }
 
+fn capture_path(tmp: &Path, counter: u64, stream: &str) -> PathBuf {
+    tmp.join(format!(
+        "jet_debug_native_{}_{}.{}",
+        std::process::id(),
+        counter,
+        stream
+    ))
+}
+
+fn create_capture_file(path: &Path) -> io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path).map(|_| ())
+}
+
 fn parse_frame_line(line: &str) -> Option<RawFrame> {
     // lldb marks the selected frame with a leading `* ` (e.g. `  * frame #0: …`);
     // every other frame just has leading whitespace before `frame #N:`.
@@ -1483,6 +1520,7 @@ mod tests {
             stderr_pos: 0,
             attached: None,
             detached: false,
+            debuggee_exited: false,
             closed: false,
         };
         let error = inferior
@@ -1587,6 +1625,19 @@ mod tests {
     }
 
     #[test]
+    fn sentinel_requires_the_lldb_prompt_echo() {
+        let token = SENTINEL.as_bytes();
+        assert!(!sentinel_echo_at_end(token));
+        assert!(!sentinel_echo_at_end(
+            b"(lldb) frame variable text = __jet_dbg_sentinel_9f3c__"
+        ));
+        assert!(sentinel_echo_at_end(b"(lldb) __jet_dbg_sentinel_9f3c__"));
+        assert!(sentinel_echo_at_end(
+            b"output\n(lldb) __jet_dbg_sentinel_9f3c__"
+        ));
+    }
+
+    #[test]
     fn parses_multiple_frames_for_backtrace() {
         let out = "  * frame #0: 0x1 bin`__jet_helper at a.rs:3:1\n    frame #1: 0x2 bin`__jet_main + 10 at a.rs:9:1\n";
         let frames = Inferior::parse_frames(out);
@@ -1683,6 +1734,7 @@ mod tests {
     #[test]
     fn default_local_projection_hides_internal_names_and_unknown_values() {
         assert!(Inferior::rust_local_is_jet_visible("__jet_total"));
+        assert!(!Inferior::rust_local_is_jet_visible("__jet_"));
         assert!(!Inferior::rust_local_is_jet_visible("__jet___temporary"));
         assert!(!Inferior::rust_local_is_jet_visible("allocator_temp"));
         assert_eq!(Inferior::safe_value("int", "7"), "7");
@@ -1716,6 +1768,8 @@ mod tests {
             Inferior::rust_member_to_jet("__jet_x"),
             Some("x".to_string())
         );
+        assert_eq!(Inferior::rust_member_to_jet("allocator_temp"), None);
+        assert_eq!(Inferior::rust_member_to_jet("__jet___temporary"), None);
         assert_eq!(Inferior::rust_member_to_jet("[2]"), Some("[2]".to_string()));
     }
 
@@ -1749,6 +1803,10 @@ mod tests {
         );
         assert_eq!(
             Inferior::safe_jet_func("__libc_start_main"),
+            "<native frame>"
+        );
+        assert_eq!(
+            Inferior::safe_jet_func("prog::helper::h4002"),
             "<native frame>"
         );
         assert_eq!(Inferior::safe_jet_func("prog::__jet_run::h4002"), "run");

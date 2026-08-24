@@ -114,6 +114,8 @@ fn realize_into_hangar(
         store_dir: &store_dir,
         offline: true,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     Store::realize_verified(
         roots,

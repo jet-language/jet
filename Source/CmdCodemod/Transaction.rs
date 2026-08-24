@@ -1,5 +1,5 @@
-use std::fs::{self, File, OpenOptions};
 use std::collections::BTreeSet;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -59,14 +59,25 @@ fn validate_destinations_with(project: &Path, paths: &[PathBuf], allow_any_path:
         } else {
             validate_destination(&project, path, true)
         }
-            .unwrap_or_else(|e| fail(&format!("unsafe codemod destination `{}`: {e}", path.display())));
+        .unwrap_or_else(|e| {
+            fail(&format!(
+                "unsafe codemod destination `{}`: {e}",
+                path.display()
+            ))
+        });
         if !names.insert(canonical.clone()) {
-            fail(&format!("duplicate codemod destination `{}`", path.display()))
+            fail(&format!(
+                "duplicate codemod destination `{}`",
+                path.display()
+            ))
         }
         let identity = path_identity(&canonical)
             .unwrap_or_else(|e| fail(&format!("could not inspect `{}`: {e}", canonical.display())));
         if !identities.insert(identity) {
-            fail(&format!("codemod destinations alias the same file at `{}`", path.display()))
+            fail(&format!(
+                "codemod destinations alias the same file at `{}`",
+                path.display()
+            ))
         }
     }
 }
@@ -79,18 +90,33 @@ pub fn validate_fix_replay_aliases(project: &Path, log: &Path, paths: &[PathBuf]
     validate_replay_aliases_with(project, log, paths, true);
 }
 
-fn validate_replay_aliases_with(project: &Path, log: &Path, paths: &[PathBuf], allow_any_path: bool) {
+fn validate_replay_aliases_with(
+    project: &Path,
+    log: &Path,
+    paths: &[PathBuf],
+    allow_any_path: bool,
+) {
     let project = canonical_project(project);
     let mut identities = BTreeSet::new();
-    identities.insert(path_identity(log).unwrap_or_else(|e| fail(&format!("could not inspect replay log: {e}"))));
+    identities.insert(
+        path_identity(log).unwrap_or_else(|e| fail(&format!("could not inspect replay log: {e}"))),
+    );
     for path in paths {
         let path = if allow_any_path {
             validate_fix_destination(&project, path, true)
         } else {
             validate_destination(&project, path, true)
         }
-            .unwrap_or_else(|e| fail(&format!("unsafe replay destination `{}`: {e}", path.display())));
-        if !identities.insert(path_identity(&path).unwrap_or_else(|e| fail(&format!("could not inspect replay destination: {e}")))) {
+        .unwrap_or_else(|e| {
+            fail(&format!(
+                "unsafe replay destination `{}`: {e}",
+                path.display()
+            ))
+        });
+        if !identities.insert(
+            path_identity(&path)
+                .unwrap_or_else(|e| fail(&format!("could not inspect replay destination: {e}"))),
+        ) {
             fail("replay log and destinations contain a file-ID alias")
         }
     }
@@ -100,7 +126,10 @@ fn validate_replay_aliases_with(project: &Path, log: &Path, paths: &[PathBuf], a
 fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
     let metadata = fs::metadata(path)?;
     if !metadata.is_file() || metadata.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file is not regular or has multiple hard links"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "file is not regular or has multiple hard links",
+        ));
     }
     Ok((metadata.dev(), metadata.ino()))
 }
@@ -112,16 +141,56 @@ fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
     use std::os::windows::io::AsRawHandle;
     #[repr(C)]
     struct ByHandleFileInformation {
-        attributes: u32, creation_low: u32, creation_high: u32, access_low: u32,
-        access_high: u32, write_low: u32, write_high: u32, volume: u32,
-        size_high: u32, size_low: u32, links: u32, index_high: u32, index_low: u32,
+        attributes: u32,
+        creation_low: u32,
+        creation_high: u32,
+        access_low: u32,
+        access_high: u32,
+        write_low: u32,
+        write_high: u32,
+        volume: u32,
+        size_high: u32,
+        size_low: u32,
+        links: u32,
+        index_high: u32,
+        index_low: u32,
     }
-    extern "system" { fn GetFileInformationByHandle(file: *mut c_void, info: *mut ByHandleFileInformation) -> i32; }
-    let file = OpenOptions::new().read(true).custom_flags(0x0020_0000).open(path)?;
-    let mut info = ByHandleFileInformation { attributes: 0, creation_low: 0, creation_high: 0, access_low: 0, access_high: 0, write_low: 0, write_high: 0, volume: 0, size_high: 0, size_low: 0, links: 0, index_high: 0, index_low: 0 };
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 { return Err(std::io::Error::last_os_error()); }
-    if info.links != 1 { return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file has multiple hard links")); }
-    Ok((info.volume as u64, ((info.index_high as u64) << 32) | info.index_low as u64))
+    extern "system" {
+        fn GetFileInformationByHandle(file: *mut c_void, info: *mut ByHandleFileInformation)
+            -> i32;
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(0x0020_0000)
+        .open(path)?;
+    let mut info = ByHandleFileInformation {
+        attributes: 0,
+        creation_low: 0,
+        creation_high: 0,
+        access_low: 0,
+        access_high: 0,
+        write_low: 0,
+        write_high: 0,
+        volume: 0,
+        size_high: 0,
+        size_low: 0,
+        links: 0,
+        index_high: 0,
+        index_low: 0,
+    };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if info.links != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "file has multiple hard links",
+        ));
+    }
+    Ok((
+        info.volume as u64,
+        ((info.index_high as u64) << 32) | info.index_low as u64,
+    ))
 }
 
 #[cfg(all(not(unix), not(windows)))]
@@ -141,7 +210,11 @@ pub fn read_fix_destination(project: &Path, path: &Path) -> std::io::Result<Vec<
     read_destination_with(project, path, true)
 }
 
-fn read_destination_with(project: &Path, path: &Path, allow_any_path: bool) -> std::io::Result<Vec<u8>> {
+fn read_destination_with(
+    project: &Path,
+    path: &Path,
+    allow_any_path: bool,
+) -> std::io::Result<Vec<u8>> {
     let project = canonical_project_io(project)?;
     let path = if allow_any_path {
         validate_fix_destination(&project, path, true)?
@@ -149,7 +222,10 @@ fn read_destination_with(project: &Path, path: &Path, allow_any_path: bool) -> s
         validate_destination(&project, path, true)?
     };
     let relative = path.strip_prefix(&project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     read_beneath(&project, relative)
 }
@@ -171,16 +247,24 @@ pub fn read_replay_log(project: &Path, path: &Path) -> std::io::Result<String> {
         ));
     }
     let name = path.file_name().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "replay log has no file name")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "replay log has no file name",
+        )
     })?;
     let bytes = read_beneath(&codemods, Path::new(name))?;
-    String::from_utf8(bytes)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "replay log is not UTF-8"))
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "replay log is not UTF-8")
+    })
 }
 
 fn canonical_project(project: &Path) -> PathBuf {
-    canonical_project_io(project)
-        .unwrap_or_else(|e| fail(&format!("could not open codemod project `{}`: {e}", project.display())))
+    canonical_project_io(project).unwrap_or_else(|e| {
+        fail(&format!(
+            "could not open codemod project `{}`: {e}",
+            project.display()
+        ))
+    })
 }
 
 fn canonical_project_io(project: &Path) -> std::io::Result<PathBuf> {
@@ -196,14 +280,23 @@ fn canonical_project_io(project: &Path) -> std::io::Result<PathBuf> {
 
 fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::io::Result<PathBuf> {
     let relative = path.strip_prefix(project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     let components = relative.components().collect::<Vec<_>>();
-    if components.iter().any(|component| !matches!(component, std::path::Component::Normal(_))) {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal destination path"));
+    if components
+        .iter()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "non-normal destination path",
+        ));
     }
-    let allowed = relative.starts_with("examples")
-        || relative.starts_with(Path::new("tests").join("ui"));
+    let allowed =
+        relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui"));
     if !allowed || components.len() < 2 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -211,7 +304,9 @@ fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::i
         ));
     }
     let extension = path.extension().and_then(|value| value.to_str());
-    if extension != Some("jet") && !(relative.starts_with(Path::new("tests").join("ui")) && extension == Some("stderr")) {
+    if extension != Some("jet")
+        && !(relative.starts_with(Path::new("tests").join("ui")) && extension == Some("stderr"))
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "destination must be a .jet source or paired tests/ui .stderr snapshot",
@@ -219,7 +314,9 @@ fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::i
     }
     let mut current = project.to_path_buf();
     for component in relative.parent().into_iter().flat_map(Path::components) {
-        let std::path::Component::Normal(name) = component else { unreachable!() };
+        let std::path::Component::Normal(name) = component else {
+            unreachable!()
+        };
         current.push(name);
         let metadata = fs::symlink_metadata(&current)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -250,17 +347,33 @@ fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::i
     }
 }
 
-fn validate_fix_destination(project: &Path, path: &Path, must_exist: bool) -> std::io::Result<PathBuf> {
+fn validate_fix_destination(
+    project: &Path,
+    path: &Path,
+    must_exist: bool,
+) -> std::io::Result<PathBuf> {
     let relative = path.strip_prefix(project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     let components = relative.components().collect::<Vec<_>>();
-    if components.is_empty() || components.iter().any(|component| !matches!(component, std::path::Component::Normal(_))) {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal destination path"));
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "non-normal destination path",
+        ));
     }
     let mut current = project.to_path_buf();
     for component in relative.parent().into_iter().flat_map(Path::components) {
-        let std::path::Component::Normal(name) = component else { unreachable!() };
+        let std::path::Component::Normal(name) = component else {
+            unreachable!()
+        };
         current.push(name);
         let metadata = fs::symlink_metadata(&current)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -298,7 +411,10 @@ fn validate_codemods_dir(project: &Path, create: bool) -> std::io::Result<PathBu
     }
     let jet_metadata = fs::symlink_metadata(&jet)?;
     if jet_metadata.file_type().is_symlink() || !jet_metadata.is_dir() {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, ".jet is not a real directory"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            ".jet is not a real directory",
+        ));
     }
     let codemods = jet.join("codemods");
     if !codemods.exists() && create {
@@ -306,7 +422,10 @@ fn validate_codemods_dir(project: &Path, create: bool) -> std::io::Result<PathBu
     }
     let metadata = fs::symlink_metadata(&codemods)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemods is not a real directory"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "codemods is not a real directory",
+        ));
     }
     Ok(codemods)
 }
@@ -317,7 +436,10 @@ fn read_nofollow(path: &Path) -> std::io::Result<Vec<u8>> {
     options.read(true);
     let mut file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened object is not a regular file",
+        ));
     }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
@@ -338,8 +460,9 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
     }
     fn c_name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path")
+        })
     }
     let root = OpenOptions::new()
         .read(true)
@@ -347,16 +470,29 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
         .open(root)?;
     let components = relative.components().collect::<Vec<_>>();
     if components.is_empty() {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty relative path"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "empty relative path",
+        ));
     }
     let mut held = Vec::<OwnedFd>::new();
     let mut dirfd = root.as_raw_fd();
     for component in &components[..components.len() - 1] {
         let std::path::Component::Normal(name) = component else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal relative path"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-normal relative path",
+            ));
         };
         let name = c_name(name)?;
-        let fd = unsafe { openat(dirfd, name.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        let fd = unsafe {
+            openat(
+                dirfd,
+                name.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
         if fd < 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -364,16 +500,29 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
         dirfd = held.last().unwrap().as_raw_fd();
     }
     let std::path::Component::Normal(file_name) = components.last().unwrap() else {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal file name"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "non-normal file name",
+        ));
     };
     let file_name = c_name(file_name)?;
-    let fd = unsafe { openat(dirfd, file_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    let fd = unsafe {
+        openat(
+            dirfd,
+            file_name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
     let mut file = unsafe { File::from_raw_fd(fd) };
     if !file.metadata()?.is_file() {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened object is not a regular file",
+        ));
     }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
@@ -389,7 +538,12 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
     type Handle = *mut c_void;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     extern "system" {
-        fn GetFinalPathNameByHandleW(file: Handle, path: *mut u16, path_len: u32, flags: u32) -> u32;
+        fn GetFinalPathNameByHandleW(
+            file: Handle,
+            path: *mut u16,
+            path_len: u32,
+            flags: u32,
+        ) -> u32;
     }
     fn final_path(handle: Handle) -> std::io::Result<String> {
         let needed = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, 0) };
@@ -397,7 +551,9 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
             return Err(std::io::Error::last_os_error());
         }
         let mut buffer = vec![0u16; needed as usize];
-        let written = unsafe { GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0) };
+        let written = unsafe {
+            GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0)
+        };
         if written == 0 || written as usize >= buffer.len() {
             return Err(std::io::Error::last_os_error());
         }
@@ -410,15 +566,23 @@ fn read_beneath(root: &Path, relative: &Path) -> std::io::Result<Vec<u8>> {
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(&path)?;
     if !file.metadata()?.is_file() {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened object is not a regular file"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened object is not a regular file",
+        ));
     }
     let root_final = fs::canonicalize(root)?.to_string_lossy().to_lowercase();
     let file_final = final_path(file.as_raw_handle())?;
-    let root_tail = root_final.trim_start_matches(r"\\?\").trim_end_matches(['\\', '/']);
+    let root_tail = root_final
+        .trim_start_matches(r"\\?\")
+        .trim_end_matches(['\\', '/']);
     let file_tail = file_final.trim_start_matches(r"\\?\");
     let prefix = format!("{root_tail}\\");
     if !file_tail.starts_with(&prefix) {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened file escapes root handle"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened file escapes root handle",
+        ));
     }
     let mut file = file;
     let mut bytes = Vec::new();
@@ -468,8 +632,11 @@ pub fn lock(project: &Path) -> Lock {
         const O_CLOEXEC: i32 = 0o2000000;
         const O_DIRECTORY: i32 = 0o200000;
         const O_NOFOLLOW: i32 = 0o400000;
-        OpenOptions::new().read(true).custom_flags(O_CLOEXEC | O_NOFOLLOW | O_DIRECTORY)
-            .open(&project).unwrap_or_else(|e| fail(&format!("could not retain codemod project directory: {e}")))
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(O_CLOEXEC | O_NOFOLLOW | O_DIRECTORY)
+            .open(&project)
+            .unwrap_or_else(|e| fail(&format!("could not retain codemod project directory: {e}")))
     };
     #[cfg(windows)]
     let mut file = {
@@ -515,7 +682,10 @@ pub fn lock(project: &Path) -> Lock {
 }
 
 #[cfg(unix)]
-fn read_at_checked(dir: &File, file_name: &std::ffi::OsStr) -> std::io::Result<(File, (u64, u64), Vec<u8>)> {
+fn read_at_checked(
+    dir: &File,
+    file_name: &std::ffi::OsStr,
+) -> std::io::Result<(File, (u64, u64), Vec<u8>)> {
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
@@ -523,21 +693,47 @@ fn read_at_checked(dir: &File, file_name: &std::ffi::OsStr) -> std::io::Result<(
     const O_RDONLY: i32 = 0;
     const O_CLOEXEC: i32 = 0o2000000;
     const O_NOFOLLOW: i32 = 0o400000;
-    extern "C" { fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32; }
-    let name = CString::new(file_name.as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name"))?;
-    let fd = unsafe { openat(dir.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-    if fd < 0 { return Err(std::io::Error::last_os_error()); }
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+    }
+    let name = CString::new(file_name.as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name")
+    })?;
+    let fd = unsafe {
+        openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let file = unsafe { File::from_raw_fd(fd) };
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "opened codemod file is linked or not regular"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened codemod file is linked or not regular",
+        ));
     }
-    let mut bytes = vec![0u8; usize::try_from(metadata.len()).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "file too large"))?];
+    let mut bytes = vec![
+        0u8;
+        usize::try_from(metadata.len()).map_err(|_| std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file too large"
+        ))?
+    ];
     let mut offset = 0;
     while offset < bytes.len() {
         let read = file.read_at(&mut bytes[offset..], offset as u64)?;
-        if read == 0 { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "codemod file changed while reading")); }
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "codemod file changed while reading",
+            ));
+        }
         offset += read;
     }
     Ok((file, (metadata.dev(), metadata.ino()), bytes))
@@ -547,11 +743,22 @@ fn read_at_checked(dir: &File, file_name: &std::ffi::OsStr) -> std::io::Result<(
 fn read_held(file: &File) -> std::io::Result<Vec<u8>> {
     use std::os::unix::fs::FileExt;
     let metadata = file.metadata()?;
-    let mut bytes = vec![0u8; usize::try_from(metadata.len()).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "file too large"))?];
+    let mut bytes = vec![
+        0u8;
+        usize::try_from(metadata.len()).map_err(|_| std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file too large"
+        ))?
+    ];
     let mut offset = 0;
     while offset < bytes.len() {
         let read = file.read_at(&mut bytes[offset..], offset as u64)?;
-        if read == 0 { return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "held file changed while reading")); }
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "held file changed while reading",
+            ));
+        }
         offset += read;
     }
     Ok(bytes)
@@ -572,8 +779,8 @@ fn recover_unix(lock: &Lock) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
         Err(error) => fail(&format!("could not read recovery journal: {error}")),
     };
-    let raw = String::from_utf8(journal_bytes)
-        .unwrap_or_else(|_| fail("recovery journal is not UTF-8"));
+    let raw =
+        String::from_utf8(journal_bytes).unwrap_or_else(|_| fail("recovery journal is not UTF-8"));
     let parsed = parse_journal(&raw);
     let handles = prepare_recovery_handles(lock, &parsed);
     let records = &parsed.records;
@@ -588,8 +795,9 @@ fn recover_unix(lock: &Lock) {
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                write_new_at(&lock._file, log_name, &parsed.log)
-                    .unwrap_or_else(|e| fail(&format!("could not publish recovered replay log: {e}")));
+                write_new_at(&lock._file, log_name, &parsed.log).unwrap_or_else(|e| {
+                    fail(&format!("could not publish recovered replay log: {e}"))
+                });
             }
             Err(error) => fail(&format!("could not inspect recovered replay log: {error}")),
         }
@@ -608,8 +816,12 @@ fn recover_unix(lock: &Lock) {
             continue;
         }
         if current == record.after {
-            atomic_restore_held(record, held, &record.before)
-                .unwrap_or_else(|e| fail(&format!("could not recover `{}`: {e}", record.path.display())));
+            atomic_restore_held(record, held, &record.before).unwrap_or_else(|e| {
+                fail(&format!(
+                    "could not recover `{}`: {e}",
+                    record.path.display()
+                ))
+            });
         } else {
             conflict.push(format!(
                 "{} (current {}, before {}, after {})",
@@ -644,12 +856,20 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
     const O_CLOEXEC: i32 = 0o2000000;
     const O_DIRECTORY: i32 = 0o200000;
     const O_NOFOLLOW: i32 = 0o400000;
-    extern "C" { fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32; }
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+    }
     fn name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes()).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in recovery path"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in recovery path")
+        })
     }
     if parsed.log_path.parent() != Some(lock.dir.as_path())
-        || !parsed.log_path.file_name().and_then(|value| value.to_str()).is_some_and(|value| value.ends_with(".log.json"))
+        || !parsed
+            .log_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.ends_with(".log.json"))
     {
         fail("recovery journal log path escapes retained codemod directory; journal preserved")
     }
@@ -659,10 +879,12 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
         if record.temp.parent() != record.path.parent() {
             fail("recovery temp is not beside destination; journal preserved")
         }
-        let relative = record.path.strip_prefix(&lock.project)
-            .unwrap_or_else(|_| fail("recovery destination escapes retained project; journal preserved"));
+        let relative = record.path.strip_prefix(&lock.project).unwrap_or_else(|_| {
+            fail("recovery destination escapes retained project; journal preserved")
+        });
         let components = relative.components().collect::<Vec<_>>();
-        let allowed = relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui"));
+        let allowed =
+            relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui"));
         let extension = record.path.extension().and_then(|value| value.to_str());
         let allowed_extension = extension == Some("jet")
             || (relative.starts_with(Path::new("tests").join("ui")) && extension == Some("stderr"));
@@ -672,10 +894,24 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
         let mut held = Vec::<OwnedFd>::new();
         let mut dirfd = lock.project_file.as_raw_fd();
         for component in relative.parent().into_iter().flat_map(Path::components) {
-            let std::path::Component::Normal(part) = component else { fail("recovery path is not normal; journal preserved") };
+            let std::path::Component::Normal(part) = component else {
+                fail("recovery path is not normal; journal preserved")
+            };
             let part = name(part).unwrap_or_else(|e| fail(&format!("invalid recovery path: {e}")));
-            let fd = unsafe { openat(dirfd, part.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
-            if fd < 0 { fail(&format!("could not retain recovery parent: {}", std::io::Error::last_os_error())); }
+            let fd = unsafe {
+                openat(
+                    dirfd,
+                    part.as_ptr(),
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                    0,
+                )
+            };
+            if fd < 0 {
+                fail(&format!(
+                    "could not retain recovery parent: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
             held.push(unsafe { OwnedFd::from_raw_fd(fd) });
             dirfd = held.last().unwrap().as_raw_fd();
         }
@@ -683,42 +919,90 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
             last
         } else {
             let dot = CString::new(".").unwrap();
-            let fd = unsafe { openat(lock.project_file.as_raw_fd(), dot.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
-            if fd < 0 { fail(&format!("could not clone retained project handle: {}", std::io::Error::last_os_error())); }
+            let fd = unsafe {
+                openat(
+                    lock.project_file.as_raw_fd(),
+                    dot.as_ptr(),
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                    0,
+                )
+            };
+            if fd < 0 {
+                fail(&format!(
+                    "could not clone retained project handle: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
             unsafe { OwnedFd::from_raw_fd(fd) }
         };
         let parent = File::from(parent_fd);
         let destination_name = name(record.path.file_name().unwrap()).unwrap();
-        let destination_fd = unsafe { openat(parent.as_raw_fd(), destination_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-        if destination_fd < 0 { fail(&format!("could not retain recovery destination: {}", std::io::Error::last_os_error())); }
+        let destination_fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                destination_name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if destination_fd < 0 {
+            fail(&format!(
+                "could not retain recovery destination: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
         let destination = unsafe { File::from_raw_fd(destination_fd) };
-        let destination_meta = destination.metadata().unwrap_or_else(|e| fail(&format!("could not identify recovery destination: {e}")));
+        let destination_meta = destination
+            .metadata()
+            .unwrap_or_else(|e| fail(&format!("could not identify recovery destination: {e}")));
         let destination_id = (destination_meta.dev(), destination_meta.ino());
-        if !destination_meta.is_file() || destination_meta.nlink() != 1
+        if !destination_meta.is_file()
+            || destination_meta.nlink() != 1
             || (destination_id != record.destination_id && destination_id != record.temp_id)
             || !identities.insert(destination_id)
         {
             fail("recovery destination identity changed or aliases another row; journal preserved")
         }
         let temp_name = name(record.temp.file_name().unwrap()).unwrap();
-        let temp_fd = unsafe { openat(parent.as_raw_fd(), temp_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+        let temp_fd = unsafe {
+            openat(
+                parent.as_raw_fd(),
+                temp_name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
         let temp = if temp_fd < 0 {
             let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::NotFound { None }
-            else { fail(&format!("could not retain recovery temp: {error}")) }
+            if error.kind() == std::io::ErrorKind::NotFound {
+                None
+            } else {
+                fail(&format!("could not retain recovery temp: {error}"))
+            }
         } else {
             let file = unsafe { File::from_raw_fd(temp_fd) };
-            let metadata = file.metadata().unwrap_or_else(|e| fail(&format!("could not identify recovery temp: {e}")));
+            let metadata = file
+                .metadata()
+                .unwrap_or_else(|e| fail(&format!("could not identify recovery temp: {e}")));
             let identity = (metadata.dev(), metadata.ino());
             let content_matches = read_held(&file).is_ok_and(|content| content == record.after);
-            if !metadata.is_file() || metadata.nlink() != 1 || identity != record.temp_id
-                || !content_matches || !identities.insert(identity)
+            if !metadata.is_file()
+                || metadata.nlink() != 1
+                || identity != record.temp_id
+                || !content_matches
+                || !identities.insert(identity)
             {
                 fail("recovery temp identity changed, contents differ, or aliases another row; journal preserved")
             }
             Some(file)
         };
-        result.push(UnixRecoveryHandles { parent, destination, destination_id, temp, temp_id: record.temp_id });
+        result.push(UnixRecoveryHandles {
+            parent,
+            destination,
+            destination_id,
+            temp,
+            temp_id: record.temp_id,
+        });
     }
     result
 }
@@ -743,7 +1027,10 @@ fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8], all
         fail("codemod has no file edits");
     }
     let project = lock.project.clone();
-    let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
+    let paths = changes
+        .iter()
+        .map(|change| change.path.clone())
+        .collect::<Vec<_>>();
     if allow_any_path {
         validate_fix_destinations(&project, &paths);
     } else {
@@ -777,13 +1064,32 @@ fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8], all
         };
         #[cfg(unix)]
         {
-            record.handles = Some(prepare_unix_record(&lock.project_file, &project, &record.path, &record.temp, &record.after)
-                .unwrap_or_else(|e| fail(&format!("could not securely stage `{}`: {e}", record.path.display()))));
+            record.handles = Some(
+                prepare_unix_record(
+                    &lock.project_file,
+                    &project,
+                    &record.path,
+                    &record.temp,
+                    &record.after,
+                )
+                .unwrap_or_else(|e| {
+                    fail(&format!(
+                        "could not securely stage `{}`: {e}",
+                        record.path.display()
+                    ))
+                }),
+            );
             let handles = record.handles.as_ref().unwrap();
             record.destination_id = handles.destination_id;
             record.temp_id = handles.temp_id;
-            if read_held(&handles.destination).unwrap_or_else(|e| fail(&format!("could not read held destination: {e}"))) != record.before {
-                fail(&format!("observed drift for `{}` before commit; no files written", record.path.display()));
+            if read_held(&handles.destination)
+                .unwrap_or_else(|e| fail(&format!("could not read held destination: {e}")))
+                != record.before
+            {
+                fail(&format!(
+                    "observed drift for `{}` before commit; no files written",
+                    record.path.display()
+                ));
             }
         }
         #[cfg(not(unix))]
@@ -796,7 +1102,11 @@ fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8], all
     }
     let journal_text = render_journal(&tx, 0, &records, log_path, log);
     let mut journal_id = replace_journal_generation(lock, &tx, 0, journal_text.as_bytes(), None);
-    if std::env::var("JET_CODEMOD_CRASH_AFTER_JOURNAL").ok().as_deref() == Some("1") {
+    if std::env::var("JET_CODEMOD_CRASH_AFTER_JOURNAL")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
         std::process::exit(87);
     }
     for (i, record) in records.iter().enumerate() {
@@ -824,8 +1134,12 @@ fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8], all
     }
     write_new_at(&lock._file, log_path.file_name().unwrap(), log)
         .unwrap_or_else(|e| fail(&format!("could not publish replay log: {e}")));
-    unlink_at_checked(&lock._file, std::ffi::OsStr::new("transaction.journal"), journal_id)
-        .unwrap_or_else(|e| fail(&format!("could not remove transaction journal: {e}")));
+    unlink_at_checked(
+        &lock._file,
+        std::ffi::OsStr::new("transaction.journal"),
+        journal_id,
+    )
+    .unwrap_or_else(|e| fail(&format!("could not remove transaction journal: {e}")));
 }
 
 #[cfg(unix)]
@@ -852,25 +1166,45 @@ fn prepare_unix_record(
         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
     }
     fn name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path")
+        })
     }
 
     if temp.parent() != path.parent() {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp is not beside destination"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "temp is not beside destination",
+        ));
     }
-    let relative = path.strip_prefix(project)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project"))?;
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
+    })?;
     let project_file = project_file.try_clone()?;
     let mut held = Vec::<OwnedFd>::new();
     let mut dirfd = project_file.as_raw_fd();
     for component in relative.parent().into_iter().flat_map(Path::components) {
         let std::path::Component::Normal(part) = component else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-normal codemod path",
+            ));
         };
         let part = name(part)?;
-        let fd = unsafe { openat(dirfd, part.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
-        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        let fd = unsafe {
+            openat(
+                dirfd,
+                part.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         held.push(unsafe { OwnedFd::from_raw_fd(fd) });
         dirfd = held.last().unwrap().as_raw_fd();
     }
@@ -878,28 +1212,65 @@ fn prepare_unix_record(
         last
     } else {
         let dot = CString::new(".").unwrap();
-        let fd = unsafe { openat(project_file.as_raw_fd(), dot.as_ptr(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC, 0) };
-        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        let fd = unsafe {
+            openat(
+                project_file.as_raw_fd(),
+                dot.as_ptr(),
+                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         unsafe { OwnedFd::from_raw_fd(fd) }
     };
     let parent = File::from(parent_owned);
-    let destination_name = name(path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?)?;
-    let destination_fd = unsafe { openat(parent.as_raw_fd(), destination_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-    if destination_fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let destination_name = name(path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
+    })?)?;
+    let destination_fd = unsafe {
+        openat(
+            parent.as_raw_fd(),
+            destination_name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    if destination_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let destination = unsafe { File::from_raw_fd(destination_fd) };
     let destination_meta = destination.metadata()?;
     if !destination_meta.is_file() || destination_meta.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination is linked or not regular"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination is linked or not regular",
+        ));
     }
-    let temp_name = name(temp.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name"))?)?;
-    let temp_fd = unsafe { openat(parent.as_raw_fd(), temp_name.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600) };
-    if temp_fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let temp_name = name(temp.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
+    })?)?;
+    let temp_fd = unsafe {
+        openat(
+            parent.as_raw_fd(),
+            temp_name.as_ptr(),
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            0o600,
+        )
+    };
+    if temp_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let mut temp_file = unsafe { File::from_raw_fd(temp_fd) };
     temp_file.write_all(bytes)?;
     temp_file.sync_all()?;
     let temp_meta = temp_file.metadata()?;
     if !temp_meta.is_file() || temp_meta.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp is linked or not regular"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "temp is linked or not regular",
+        ));
     }
     Ok(UnixRecordHandles {
         _project: project_file,
@@ -939,14 +1310,28 @@ fn secure_replace_held(
         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
     }
     fn name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path")
+        })
     }
-    let dest_name = name(path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?)?;
-    let temp_name = name(temp.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name"))?)?;
+    let dest_name = name(path.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
+    })?)?;
+    let temp_name = name(temp.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
+    })?)?;
     let reopen = |name: &CString| -> std::io::Result<File> {
-        let fd = unsafe { openat(handles.parent.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        let fd = unsafe {
+            openat(
+                handles.parent.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         Ok(unsafe { File::from_raw_fd(fd) })
     };
     let mut current = reopen(&dest_name)?;
@@ -954,32 +1339,57 @@ fn secure_replace_held(
     if (current_meta.dev(), current_meta.ino()) != handles.destination_id
         || current_meta.nlink() != 1
     {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination name identity changed before rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination name identity changed before rename",
+        ));
     }
     let temp_current = reopen(&temp_name)?;
     let temp_meta = temp_current.metadata()?;
     if (temp_meta.dev(), temp_meta.ino()) != handles.temp_id || temp_meta.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp name identity changed before rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "temp name identity changed before rename",
+        ));
     }
     let held_dest = handles.destination.metadata()?;
     let held_temp = handles.temp.metadata()?;
     if (held_dest.dev(), held_dest.ino()) != handles.destination_id
         || (held_temp.dev(), held_temp.ino()) != handles.temp_id
     {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "held codemod file identity changed"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "held codemod file identity changed",
+        ));
     }
     let mut bytes = Vec::new();
     current.read_to_end(&mut bytes)?;
     if bytes != expected {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before handle-relative rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "destination drifted before handle-relative rename",
+        ));
     }
-    if unsafe { renameat(handles.parent.as_raw_fd(), temp_name.as_ptr(), handles.parent.as_raw_fd(), dest_name.as_ptr()) } != 0 {
+    if unsafe {
+        renameat(
+            handles.parent.as_raw_fd(),
+            temp_name.as_ptr(),
+            handles.parent.as_raw_fd(),
+            dest_name.as_ptr(),
+        )
+    } != 0
+    {
         return Err(std::io::Error::last_os_error());
     }
     let published = reopen(&dest_name)?;
     let published_meta = published.metadata()?;
-    if (published_meta.dev(), published_meta.ino()) != handles.temp_id || published_meta.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "published destination identity differs from retained temp"));
+    if (published_meta.dev(), published_meta.ino()) != handles.temp_id
+        || published_meta.nlink() != 1
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "published destination identity differs from retained temp",
+        ));
     }
     handles.parent.sync_all()?;
     Ok(())
@@ -987,20 +1397,35 @@ fn secure_replace_held(
 
 #[cfg(unix)]
 fn cleanup_recovery_temp(record: &Record, handles: &UnixRecoveryHandles) -> std::io::Result<()> {
-    let Some(temp) = &handles.temp else { return Ok(()) };
+    let Some(temp) = &handles.temp else {
+        return Ok(());
+    };
     use std::os::unix::fs::MetadataExt;
     let metadata = temp.metadata()?;
     if (metadata.dev(), metadata.ino()) != handles.temp_id || metadata.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "held recovery temp identity changed"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "held recovery temp identity changed",
+        ));
     }
-    unlink_at_checked(&handles.parent, record.temp.file_name().unwrap(), handles.temp_id)
+    unlink_at_checked(
+        &handles.parent,
+        record.temp.file_name().unwrap(),
+        handles.temp_id,
+    )
 }
 
 #[cfg(unix)]
-fn atomic_restore_held(record: &Record, handles: &UnixRecoveryHandles, bytes: &[u8]) -> std::io::Result<()> {
+fn atomic_restore_held(
+    record: &Record,
+    handles: &UnixRecoveryHandles,
+    bytes: &[u8],
+) -> std::io::Result<()> {
     replace_bytes_at(
         &handles.parent,
-        record.path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?,
+        record.path.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
+        })?,
         handles.destination_id,
         &record.after,
         bytes,
@@ -1008,28 +1433,60 @@ fn atomic_restore_held(record: &Record, handles: &UnixRecoveryHandles, bytes: &[
 }
 
 #[cfg(unix)]
-fn replace_bytes_at(parent: &File, destination_name: &std::ffi::OsStr, expected_id: (u64, u64), expected: &[u8], bytes: &[u8]) -> std::io::Result<()> {
+fn replace_bytes_at(
+    parent: &File,
+    destination_name: &std::ffi::OsStr,
+    expected_id: (u64, u64),
+    expected: &[u8],
+    bytes: &[u8],
+) -> std::io::Result<()> {
     use std::ffi::CString;
     use std::os::fd::AsRawFd;
     use std::os::unix::ffi::OsStrExt;
-    extern "C" { fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32; }
-    let staged_name = format!(".jet-codemod-recover-{}-{}.tmp", std::process::id(), now_nanos());
+    extern "C" {
+        fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
+    }
+    let staged_name = format!(
+        ".jet-codemod-recover-{}-{}.tmp",
+        std::process::id(),
+        now_nanos()
+    );
     let staged_id = write_new_at(parent, std::ffi::OsStr::new(&staged_name), bytes)?;
     let (_, current_id, current) = read_at_checked(parent, destination_name)?;
     if current_id != expected_id || current != expected {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination changed before recovery rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination changed before recovery rename",
+        ));
     }
-    let staged_name = CString::new(std::ffi::OsStr::new(&staged_name).as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in recovery temp"))?;
-    let destination_name = CString::new(destination_name.as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in recovery destination"))?;
-    if unsafe { renameat(parent.as_raw_fd(), staged_name.as_ptr(), parent.as_raw_fd(), destination_name.as_ptr()) } != 0 {
+    let staged_name =
+        CString::new(std::ffi::OsStr::new(&staged_name).as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in recovery temp")
+        })?;
+    let destination_name = CString::new(destination_name.as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "NUL in recovery destination",
+        )
+    })?;
+    if unsafe {
+        renameat(
+            parent.as_raw_fd(),
+            staged_name.as_ptr(),
+            parent.as_raw_fd(),
+            destination_name.as_ptr(),
+        )
+    } != 0
+    {
         return Err(std::io::Error::last_os_error());
     }
     let destination_os = std::ffi::OsStr::from_bytes(destination_name.as_bytes());
     let (_, published_id, _) = read_at_checked(parent, destination_os)?;
     if published_id != staged_id {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "recovered destination identity differs from staged file"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "recovered destination identity differs from staged file",
+        ));
     }
     parent.sync_all()
 }
@@ -1038,11 +1495,16 @@ fn replace_bytes_at(parent: &File, destination_name: &std::ffi::OsStr, expected_
 fn rollback(_project: &Path, records: &[Record], lock: &Lock, journal_id: (u64, u64)) {
     let mut conflict = false;
     for r in records {
-        let Some(handles) = &r.handles else { conflict = true; continue };
+        let Some(handles) = &r.handles else {
+            conflict = true;
+            continue;
+        };
         let destination_name = r.path.file_name().unwrap();
         match read_at_checked(&handles.parent, destination_name) {
             Ok((_, id, current)) if id == handles.temp_id && current == r.after => {
-                if replace_bytes_at(&handles.parent, destination_name, id, &r.after, &r.before).is_err() {
+                if replace_bytes_at(&handles.parent, destination_name, id, &r.after, &r.before)
+                    .is_err()
+                {
                     conflict = true;
                 }
             }
@@ -1050,13 +1512,19 @@ fn rollback(_project: &Path, records: &[Record], lock: &Lock, journal_id: (u64, 
             _ => conflict = true,
         }
         if let Ok((_, id, _)) = read_at_checked(&handles.parent, r.temp.file_name().unwrap()) {
-            if id != handles.temp_id || unlink_at_checked(&handles.parent, r.temp.file_name().unwrap(), id).is_err() {
+            if id != handles.temp_id
+                || unlink_at_checked(&handles.parent, r.temp.file_name().unwrap(), id).is_err()
+            {
                 conflict = true;
             }
         }
     }
     if !conflict {
-        let _ = unlink_at_checked(&lock._file, std::ffi::OsStr::new("transaction.journal"), journal_id);
+        let _ = unlink_at_checked(
+            &lock._file,
+            std::ffi::OsStr::new("transaction.journal"),
+            journal_id,
+        );
     }
 }
 
@@ -1179,7 +1647,10 @@ fn parse_journal(raw: &str) -> Journal {
 }
 #[cfg(not(unix))]
 fn write_new_sync(path: &Path, bytes: &[u8]) {
-    let mut f = OpenOptions::new().write(true).create_new(true).open(path)
+    let mut f = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
     f.write_all(bytes)
         .unwrap_or_else(|e| fail(&format!("could not write `{}`: {e}", path.display())));
@@ -1188,7 +1659,11 @@ fn write_new_sync(path: &Path, bytes: &[u8]) {
 }
 
 #[cfg(unix)]
-fn write_new_at(dir: &File, file_name: &std::ffi::OsStr, bytes: &[u8]) -> std::io::Result<(u64, u64)> {
+fn write_new_at(
+    dir: &File,
+    file_name: &std::ffi::OsStr,
+    bytes: &[u8],
+) -> std::io::Result<(u64, u64)> {
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
@@ -1198,24 +1673,43 @@ fn write_new_at(dir: &File, file_name: &std::ffi::OsStr, bytes: &[u8]) -> std::i
     const O_EXCL: i32 = 0o200;
     const O_CLOEXEC: i32 = 0o2000000;
     const O_NOFOLLOW: i32 = 0o400000;
-    extern "C" { fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32; }
-    let name = CString::new(file_name.as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name"))?;
-    let fd = unsafe { openat(dir.as_raw_fd(), name.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600) };
-    if fd < 0 { return Err(std::io::Error::last_os_error()); }
+    extern "C" {
+        fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
+    }
+    let name = CString::new(file_name.as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name")
+    })?;
+    let fd = unsafe {
+        openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let mut file = unsafe { File::from_raw_fd(fd) };
     file.write_all(bytes)?;
     file.sync_all()?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "created codemod file is linked or not regular"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "created codemod file is linked or not regular",
+        ));
     }
     dir.sync_all()?;
     Ok((metadata.dev(), metadata.ino()))
 }
 
 #[cfg(unix)]
-fn unlink_at_checked(dir: &File, file_name: &std::ffi::OsStr, expected: (u64, u64)) -> std::io::Result<()> {
+fn unlink_at_checked(
+    dir: &File,
+    file_name: &std::ffi::OsStr,
+    expected: (u64, u64),
+) -> std::io::Result<()> {
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
@@ -1227,14 +1721,27 @@ fn unlink_at_checked(dir: &File, file_name: &std::ffi::OsStr, expected: (u64, u6
         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
         fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
     }
-    let name = CString::new(file_name.as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name"))?;
-    let fd = unsafe { openat(dir.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-    if fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let name = CString::new(file_name.as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod file name")
+    })?;
+    let fd = unsafe {
+        openat(
+            dir.as_raw_fd(),
+            name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let file = unsafe { File::from_raw_fd(fd) };
     let metadata = file.metadata()?;
     if (metadata.dev(), metadata.ino()) != expected || metadata.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file identity changed before handle-relative removal"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "file identity changed before handle-relative removal",
+        ));
     }
     if unsafe { unlinkat(dir.as_raw_fd(), name.as_ptr(), 0) } != 0 {
         return Err(std::io::Error::last_os_error());
@@ -1243,13 +1750,27 @@ fn unlink_at_checked(dir: &File, file_name: &std::ffi::OsStr, expected: (u64, u6
 }
 
 #[cfg(not(unix))]
-fn write_new_at(_dir: &File, _file_name: &std::ffi::OsStr, _bytes: &[u8]) -> std::io::Result<(u64, u64)> {
-    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "handle-relative create unavailable"))
+fn write_new_at(
+    _dir: &File,
+    _file_name: &std::ffi::OsStr,
+    _bytes: &[u8],
+) -> std::io::Result<(u64, u64)> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "handle-relative create unavailable",
+    ))
 }
 
 #[cfg(not(unix))]
-fn unlink_at_checked(_dir: &File, _file_name: &std::ffi::OsStr, _expected: (u64, u64)) -> std::io::Result<()> {
-    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "handle-relative removal unavailable"))
+fn unlink_at_checked(
+    _dir: &File,
+    _file_name: &std::ffi::OsStr,
+    _expected: (u64, u64),
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "handle-relative removal unavailable",
+    ))
 }
 #[cfg(unix)]
 fn replace_journal_generation(
@@ -1271,61 +1792,145 @@ fn replace_journal_generation(
     const O_NOFOLLOW: i32 = 0o400000;
     extern "C" {
         fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32;
-        fn linkat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8, flags: i32) -> i32;
+        fn linkat(
+            olddirfd: i32,
+            oldpath: *const i8,
+            newdirfd: i32,
+            newpath: *const i8,
+            flags: i32,
+        ) -> i32;
         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
         fn unlinkat(dirfd: i32, pathname: *const i8, flags: i32) -> i32;
     }
     fn name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes()).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in journal name"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in journal name")
+        })
     }
     fn open(dir: &File, name: &CString) -> std::io::Result<File> {
-        let fd = unsafe { openat(dir.as_raw_fd(), name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-        if fd < 0 { return Err(std::io::Error::last_os_error()); }
+        let fd = unsafe {
+            openat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+                0,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
         Ok(unsafe { File::from_raw_fd(fd) })
     }
-    let staged_name = name(OsStr::new(&format!(".transaction-{tx}-{generation}.journal.tmp")))
-        .unwrap_or_else(|e| fail(&format!("invalid journal stage name: {e}")));
+    let staged_name = name(OsStr::new(&format!(
+        ".transaction-{tx}-{generation}.journal.tmp"
+    )))
+    .unwrap_or_else(|e| fail(&format!("invalid journal stage name: {e}")));
     let journal_name = name(OsStr::new("transaction.journal")).unwrap();
-    let fd = unsafe { openat(lock._file.as_raw_fd(), staged_name.as_ptr(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600) };
-    if fd < 0 { fail(&format!("could not create journal generation: {}", std::io::Error::last_os_error())); }
+    let fd = unsafe {
+        openat(
+            lock._file.as_raw_fd(),
+            staged_name.as_ptr(),
+            O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        fail(&format!(
+            "could not create journal generation: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
     let mut staged = unsafe { File::from_raw_fd(fd) };
-    staged.write_all(bytes).unwrap_or_else(|e| fail(&format!("could not write journal generation: {e}")));
-    staged.sync_all().unwrap_or_else(|e| fail(&format!("could not sync journal generation: {e}")));
-    let staged_meta = staged.metadata().unwrap_or_else(|e| fail(&format!("could not identify journal generation: {e}")));
-    if !staged_meta.is_file() || staged_meta.nlink() != 1 { fail("journal generation is linked or not regular") }
+    staged
+        .write_all(bytes)
+        .unwrap_or_else(|e| fail(&format!("could not write journal generation: {e}")));
+    staged
+        .sync_all()
+        .unwrap_or_else(|e| fail(&format!("could not sync journal generation: {e}")));
+    let staged_meta = staged
+        .metadata()
+        .unwrap_or_else(|e| fail(&format!("could not identify journal generation: {e}")));
+    if !staged_meta.is_file() || staged_meta.nlink() != 1 {
+        fail("journal generation is linked or not regular")
+    }
     let staged_id = (staged_meta.dev(), staged_meta.ino());
     if let Some(expected) = expected {
-        let current = open(&lock._file, &journal_name).unwrap_or_else(|e| fail(&format!("could not reopen current journal: {e}")));
-        let metadata = current.metadata().unwrap_or_else(|e| fail(&format!("could not identify current journal: {e}")));
+        let current = open(&lock._file, &journal_name)
+            .unwrap_or_else(|e| fail(&format!("could not reopen current journal: {e}")));
+        let metadata = current
+            .metadata()
+            .unwrap_or_else(|e| fail(&format!("could not identify current journal: {e}")));
         if (metadata.dev(), metadata.ino()) != expected || metadata.nlink() != 1 {
             fail("recovery journal identity changed before generation publish")
         }
-        if unsafe { renameat(lock._file.as_raw_fd(), staged_name.as_ptr(), lock._file.as_raw_fd(), journal_name.as_ptr()) } != 0 {
-            fail(&format!("could not publish recovery journal generation: {}", std::io::Error::last_os_error()));
+        if unsafe {
+            renameat(
+                lock._file.as_raw_fd(),
+                staged_name.as_ptr(),
+                lock._file.as_raw_fd(),
+                journal_name.as_ptr(),
+            )
+        } != 0
+        {
+            fail(&format!(
+                "could not publish recovery journal generation: {}",
+                std::io::Error::last_os_error()
+            ));
         }
     } else {
-        if unsafe { linkat(lock._file.as_raw_fd(), staged_name.as_ptr(), lock._file.as_raw_fd(), journal_name.as_ptr(), 0) } != 0 {
-            fail(&format!("could not publish first recovery journal: {}", std::io::Error::last_os_error()));
+        if unsafe {
+            linkat(
+                lock._file.as_raw_fd(),
+                staged_name.as_ptr(),
+                lock._file.as_raw_fd(),
+                journal_name.as_ptr(),
+                0,
+            )
+        } != 0
+        {
+            fail(&format!(
+                "could not publish first recovery journal: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         if unsafe { unlinkat(lock._file.as_raw_fd(), staged_name.as_ptr(), 0) } != 0 {
-            fail(&format!("could not remove linked journal stage: {}", std::io::Error::last_os_error()));
+            fail(&format!(
+                "could not remove linked journal stage: {}",
+                std::io::Error::last_os_error()
+            ));
         }
     }
-    let published = open(&lock._file, &journal_name).unwrap_or_else(|e| fail(&format!("could not reopen published journal: {e}")));
-    let metadata = published.metadata().unwrap_or_else(|e| fail(&format!("could not identify published journal: {e}")));
+    let published = open(&lock._file, &journal_name)
+        .unwrap_or_else(|e| fail(&format!("could not reopen published journal: {e}")));
+    let metadata = published
+        .metadata()
+        .unwrap_or_else(|e| fail(&format!("could not identify published journal: {e}")));
     if (metadata.dev(), metadata.ino()) != staged_id || metadata.nlink() != 1 {
         fail("published recovery journal identity does not match staged generation")
     }
-    lock._file.sync_all().unwrap_or_else(|e| fail(&format!("could not sync codemod directory: {e}")));
+    lock._file
+        .sync_all()
+        .unwrap_or_else(|e| fail(&format!("could not sync codemod directory: {e}")));
     staged_id
 }
 
 #[cfg(not(unix))]
-fn replace_journal_generation(_lock: &Lock, _tx: &str, _generation: usize, _bytes: &[u8], _expected: Option<(u64, u64)>) -> (u64, u64) {
+fn replace_journal_generation(
+    _lock: &Lock,
+    _tx: &str,
+    _generation: usize,
+    _bytes: &[u8],
+    _expected: Option<(u64, u64)>,
+) -> (u64, u64) {
     fail("handle-relative journal publication is unavailable on this platform")
 }
 #[cfg(unix)]
-fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+fn secure_replace(
+    project: &Path,
+    temp: &Path,
+    path: &Path,
+    expected: &[u8],
+) -> std::io::Result<()> {
     use std::ffi::{CString, OsStr};
     use std::io::Read;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -1341,14 +1946,18 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         fn renameat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8) -> i32;
     }
     fn name(value: &OsStr) -> std::io::Result<CString> {
-        CString::new(value.as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path"))
+        CString::new(value.as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "NUL in codemod path")
+        })
     }
 
     let destination_identity = path_identity(path)?;
     let temp_identity = path_identity(temp)?;
     if destination_identity == temp_identity {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp aliases destination"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "temp aliases destination",
+        ));
     }
 
     if temp.parent() != path.parent() {
@@ -1358,7 +1967,10 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         ));
     }
     let relative = path.strip_prefix(project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     let root = OpenOptions::new()
         .read(true)
@@ -1368,7 +1980,10 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     let mut dirfd = root.as_raw_fd();
     for component in relative.parent().into_iter().flat_map(Path::components) {
         let std::path::Component::Normal(part) = component else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-normal codemod path",
+            ));
         };
         let part = name(part)?;
         let fd = unsafe {
@@ -1388,28 +2003,53 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     let final_name = name(relative.file_name().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
     })?)?;
-    let fd = unsafe { openat(dirfd, final_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
+    let fd = unsafe {
+        openat(
+            dirfd,
+            final_name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
     let mut destination = unsafe { File::from_raw_fd(fd) };
     use std::os::unix::fs::MetadataExt;
     if !destination.metadata()?.is_file() || destination.metadata()?.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination is not regular file"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination is not regular file",
+        ));
     }
     let mut current = Vec::new();
     destination.read_to_end(&mut current)?;
     if current != expected {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before handle-relative rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "destination drifted before handle-relative rename",
+        ));
     }
     let temp_name = name(temp.file_name().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "temp has no name")
     })?)?;
-    let temp_check = unsafe { openat(dirfd, temp_name.as_ptr(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC, 0) };
-    if temp_check < 0 { return Err(std::io::Error::last_os_error()); }
+    let temp_check = unsafe {
+        openat(
+            dirfd,
+            temp_name.as_ptr(),
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC,
+            0,
+        )
+    };
+    if temp_check < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     let temp_check = unsafe { File::from_raw_fd(temp_check) };
     if temp_check.metadata()?.nlink() != 1 {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp has multiple links"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "temp has multiple links",
+        ));
     }
     if unsafe { renameat(dirfd, temp_name.as_ptr(), dirfd, final_name.as_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
@@ -1418,7 +2058,12 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
 }
 
 #[cfg(windows)]
-fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+fn secure_replace(
+    project: &Path,
+    temp: &Path,
+    path: &Path,
+    expected: &[u8],
+) -> std::io::Result<()> {
     use std::ffi::c_void;
     use std::io::Read;
     use std::os::windows::ffi::OsStrExt;
@@ -1426,7 +2071,10 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
 
     type Handle = *mut c_void;
     if path_identity(path)? == path_identity(temp)? {
-        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "temp aliases destination"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "temp aliases destination",
+        ));
     }
     const GENERIC_READ: u32 = 0x8000_0000;
     const GENERIC_WRITE: u32 = 0x4000_0000;
@@ -1545,21 +2193,34 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     }
 
     let relative = path.strip_prefix(project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     let mut current_path = project.to_path_buf();
     for component in relative.parent().into_iter().flat_map(Path::components) {
         let std::path::Component::Normal(part) = component else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-normal codemod path",
+            ));
         };
         current_path.push(part);
         let meta = fs::symlink_metadata(&current_path)?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "codemod parent is not a real directory",
+            ));
         }
     }
     let project_handle = open_handle(project, GENERIC_READ | GENERIC_WRITE, true)?;
-    let parent = open_handle(path.parent().unwrap_or(project), GENERIC_READ | GENERIC_WRITE, true)?;
+    let parent = open_handle(
+        path.parent().unwrap_or(project),
+        GENERIC_READ | GENERIC_WRITE,
+        true,
+    )?;
     let destination = open_handle(path, GENERIC_READ, false)?;
     let project_final = final_path(project_handle.as_raw_handle())?;
     let parent_final = final_path(parent.as_raw_handle())?;
@@ -1587,7 +2248,10 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     let mut current = Vec::new();
     destination.read_to_end(&mut current)?;
     if current != expected {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "destination drifted before rename",
+        ));
     }
     let temp = open_handle(temp, GENERIC_READ | DELETE, false)?;
     let temp_final = final_path(temp.as_raw_handle())?;
@@ -1595,8 +2259,7 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         .rsplit_once(['\\', '/'])
         .map(|(parent, _)| parent)
         .unwrap_or("");
-    if temp_parent.trim_end_matches(['\\', '/'])
-        != parent_final.trim_end_matches(['\\', '/'])
+    if temp_parent.trim_end_matches(['\\', '/']) != parent_final.trim_end_matches(['\\', '/'])
         || (temp_parent != project_final && !temp_parent.starts_with(&project_prefix))
     {
         return Err(std::io::Error::new(
@@ -1606,7 +2269,9 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
     }
     let file_name = path
         .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name"))?
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "destination has no name")
+        })?
         .encode_wide()
         .collect::<Vec<_>>();
     let bytes = file_name.len() * std::mem::size_of::<u16>();
@@ -1617,7 +2282,11 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
         (*info).replace_if_exists = 1;
         (*info).root_directory = parent.as_raw_handle();
         (*info).file_name_length = bytes as u32;
-        std::ptr::copy_nonoverlapping(file_name.as_ptr(), (*info).file_name.as_mut_ptr(), file_name.len());
+        std::ptr::copy_nonoverlapping(
+            file_name.as_ptr(),
+            (*info).file_name.as_mut_ptr(),
+            file_name.len(),
+        );
     }
     if unsafe {
         SetFileInformationByHandle(
@@ -1642,23 +2311,40 @@ fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> 
 }
 
 #[cfg(all(not(unix), not(windows)))]
-fn secure_replace(project: &Path, temp: &Path, path: &Path, expected: &[u8]) -> std::io::Result<()> {
+fn secure_replace(
+    project: &Path,
+    temp: &Path,
+    path: &Path,
+    expected: &[u8],
+) -> std::io::Result<()> {
     let relative = path.strip_prefix(project).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "destination escapes project",
+        )
     })?;
     let mut current_path = project.to_path_buf();
     for component in relative.parent().into_iter().flat_map(Path::components) {
         let std::path::Component::Normal(part) = component else {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal codemod path"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "non-normal codemod path",
+            ));
         };
         current_path.push(part);
         let meta = fs::symlink_metadata(&current_path)?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "codemod parent is not a real directory"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "codemod parent is not a real directory",
+            ));
         }
     }
     if fs::read(path)? != expected {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "destination drifted before rename"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "destination drifted before rename",
+        ));
     }
     fs::rename(temp, path)
 }

@@ -152,7 +152,8 @@ fn run_squash(before: Option<&str>) {
     let root = project_root();
 
     // Read the package version (the current published shape's version).
-    let pack_path = jet::Loader::manifest_path(&root).unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
+    let pack_path =
+        jet::Loader::manifest_path(&root).unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
     let version = match std::fs::read_to_string(&pack_path) {
         Ok(raw) => match jet::Manifest::parse(&pack_path, &raw) {
             Ok(mf) => mf.package.version,
@@ -168,7 +169,10 @@ fn run_squash(before: Option<&str>) {
     let bundle = match jet::Loader::load_entry_with_overlay(&entry_str, None, true) {
         Ok(b) => b,
         Err(_) => {
-            crate::cli_error!("E2105", "couldn't load the project to read its current schema shape");
+            crate::cli_error!(
+                "E2105",
+                "couldn't load the project to read its current schema shape"
+            );
             exit(ExitCodes::USER_ERROR);
         }
     };

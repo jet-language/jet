@@ -15,7 +15,16 @@ pub enum JSONValue {
 }
 
 pub fn parse_json(text: &str) -> Result<JSONValue, ()> {
-    if text.len() > MAX_PROTOCOL_MESSAGE_BYTES {
+    parse_json_with_limit(text, MAX_PROTOCOL_MESSAGE_BYTES)
+}
+
+/// Parse bounded protocol JSON with a caller-selected message ceiling.
+///
+/// LSP keeps its historical one-megabyte ceiling. DAP has a separate
+/// ratified sixteen-megabyte frame ceiling, so the adapter must not widen the
+/// shared default for every protocol consumer.
+pub fn parse_json_with_limit(text: &str, limit: usize) -> Result<JSONValue, ()> {
+    if text.len() > limit {
         return Err(());
     }
     parse_json_detailed(text).map_err(|_| ())

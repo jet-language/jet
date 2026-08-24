@@ -40,6 +40,11 @@ fn impact_json_output() {
         .expect("jet inspect impact --json");
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
+        vec![jet_foundation::MachineOutput::MachineRecord::Status]
+    );
+    assert!(text.starts_with("{\"schema\":\"jet.report/v1\""));
     assert!(text.contains("\"symbol\":\"square\""));
     assert!(text.contains("\"found\":true"));
     assert!(text.contains("\"check\":{\"status\":\"passed\""));

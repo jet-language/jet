@@ -17,7 +17,9 @@ const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
 /// Dispatch `jet notebook [PATH] [--protocol] [--bind ADDR] [--token TOKEN]`.
 pub(crate) fn run_notebook(raw: &[String]) {
     let path = notebook_path(raw);
-    let protocol = raw.iter().any(|arg| arg == "--protocol" || arg == "--headless");
+    let protocol = raw
+        .iter()
+        .any(|arg| arg == "--protocol" || arg == "--headless");
     let bind = flag_value(raw, "--bind");
     let explicit_token = flag_value(raw, "--token").map(str::to_string);
     let environment = path
@@ -209,29 +211,47 @@ fn handle_connection(
         );
     }
     if request.method == "GET" && route == "/health" {
-        let kernel = kernel.lock().map_err(|_| "notebook kernel lock poisoned".to_string())?;
+        let kernel = kernel
+            .lock()
+            .map_err(|_| "notebook kernel lock poisoned".to_string())?;
         return write_response(
             &mut stream,
             "200 OK",
             "application/json; charset=utf-8",
-            &format!("{{\"ok\":true,\"cells\":{},\"turns\":{}}}", kernel.notebook.cells.len(), kernel.session.turns.len()),
+            &format!(
+                "{{\"ok\":true,\"cells\":{},\"turns\":{}}}",
+                kernel.notebook.cells.len(),
+                kernel.session.turns.len()
+            ),
         );
     }
     if request.method != "POST" || !route.starts_with("/api/") {
-        return write_response(&mut stream, "404 Not Found", "text/plain; charset=utf-8", "not found");
+        return write_response(
+            &mut stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            "not found",
+        );
     }
-    let interrupt_was_active = route == "/api/interrupt"
-        && jet::Comptime::repl_interruptible_turn_active();
+    let interrupt_was_active =
+        route == "/api/interrupt" && jet::Comptime::repl_interruptible_turn_active();
     if route == "/api/interrupt" {
         jet::Comptime::note_repl_interrupt();
     }
-    let mut kernel = kernel.lock().map_err(|_| "notebook kernel lock poisoned".to_string())?;
+    let mut kernel = kernel
+        .lock()
+        .map_err(|_| "notebook kernel lock poisoned".to_string())?;
     let response = api_message(&mut kernel, route, &request.body, interrupt_was_active);
     let (status, body) = match response {
         ApiResponse::Ok(body) => ("200 OK", body),
         ApiResponse::Error(error) => ("400 Bad Request", json_error(&error)),
     };
-    write_response(&mut stream, status, "application/json; charset=utf-8", &body)
+    write_response(
+        &mut stream,
+        status,
+        "application/json; charset=utf-8",
+        &body,
+    )
 }
 
 enum ApiResponse {
@@ -239,7 +259,12 @@ enum ApiResponse {
     Error(String),
 }
 
-fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_active: bool) -> ApiResponse {
+fn api_message(
+    kernel: &mut Kernel,
+    route: &str,
+    body: &str,
+    interrupt_was_active: bool,
+) -> ApiResponse {
     let value = |name: &str| form_value(body, name).unwrap_or_default();
     let client = || parse_client(&value("client"));
     let selected_client = client().unwrap_or(ClientKind::FirstParty);
@@ -253,12 +278,17 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
             let cell_id = kernel.notebook.add_cell(kind, value("source")).id.clone();
             return state_message_for(kernel, format!("added={cell_id}"), selected_client);
         }
-        "/api/edit" => kernel.edit_cell(&value("cell_id"), value("source")).map(|()| "edited".into()),
+        "/api/edit" => kernel
+            .edit_cell(&value("cell_id"), value("source"))
+            .map(|()| "edited".into()),
         "/api/run" => {
             let id = value("cell_id");
             match client() {
                 Ok(client) => kernel.execute_cell(client, &id).map(|result| {
-                    format!("ran={id};status={:?};elapsed_ms={}", result.eval.status, result.elapsed_ms)
+                    format!(
+                        "ran={id};status={:?};elapsed_ms={}",
+                        result.eval.status, result.elapsed_ms
+                    )
                 }),
                 Err(error) => Err(error),
             }
@@ -267,20 +297,26 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
             kernel.attach_perf();
             let id = value("cell_id");
             match client() {
-                Ok(client) => kernel.execute_cell(client, &id).map(|result| {
-                    format!("profiled={id};elapsed_ms={}", result.elapsed_ms)
-                }),
+                Ok(client) => kernel
+                    .execute_cell(client, &id)
+                    .map(|result| format!("profiled={id};elapsed_ms={}", result.elapsed_ms)),
                 Err(error) => Err(error),
             }
         }
         "/api/debug" => {
             kernel.attach_debug();
-            inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
-                .map(|message| format!("debug_attached;{message}"))
+            inspect_message(
+                kernel,
+                &value("cell_id"),
+                client().unwrap_or(ClientKind::FirstParty),
+            )
+            .map(|message| format!("debug_attached;{message}"))
         }
-        "/api/inspect" => {
-            inspect_message(kernel, &value("cell_id"), client().unwrap_or(ClientKind::FirstParty))
-        }
+        "/api/inspect" => inspect_message(
+            kernel,
+            &value("cell_id"),
+            client().unwrap_or(ClientKind::FirstParty),
+        ),
         "/api/complete" => {
             let prefix = value("prefix");
             let mut names: Vec<_> = kernel
@@ -303,7 +339,9 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
             kernel.push_stdin(value("line"));
             Ok(format!("stdin_queued={}", kernel.stdin_queue.len()))
         }
-        "/api/open" => kernel.open_document(Path::new(&value("path"))).map(|()| "opened".into()),
+        "/api/open" => kernel
+            .open_document(Path::new(&value("path")))
+            .map(|()| "opened".into()),
         "/api/reopen" => kernel.reopen_document().map(|()| "reopened".into()),
         "/api/save" => kernel
             .save_document(nonempty_path(body, "path").as_deref())
@@ -317,7 +355,9 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
             Err(error) => Err(error),
         },
         "/api/export/ipynb" => match Notebook::export_ipynb(&kernel.notebook) {
-            Ok((content, loss)) => return ApiResponse::Ok(export_message("notebook.ipynb", content, loss.render())),
+            Ok((content, loss)) => {
+                return ApiResponse::Ok(export_message("notebook.ipynb", content, loss.render()))
+            }
             Err(error) => Err(error),
         },
         "/api/export/jet" => {
@@ -336,14 +376,14 @@ fn api_message(kernel: &mut Kernel, route: &str, body: &str, interrupt_was_activ
 }
 
 fn state_message_for(kernel: &Kernel, message: String, client: ClientKind) -> ApiResponse {
-    ApiResponse::Ok(format!("{{\"ok\":true,\"message\":{},\"state\":{}}}", json_str(&message), kernel.state_json_for(client)))
+    ApiResponse::Ok(format!(
+        "{{\"ok\":true,\"message\":{},\"state\":{}}}",
+        json_str(&message),
+        kernel.state_json_for(client)
+    ))
 }
 
-fn inspect_message(
-    kernel: &Kernel,
-    cell_id: &str,
-    client: ClientKind,
-) -> Result<String, String> {
+fn inspect_message(kernel: &Kernel, cell_id: &str, client: ClientKind) -> Result<String, String> {
     let cell = kernel
         .notebook
         .cells
@@ -355,9 +395,14 @@ fn inspect_message(
         ClientKind::CanvasLens => kernel.canvas_visible_output(cell_id),
         ClientKind::JupyterAdapter => kernel.jupyter_visible_output(cell_id),
     })
-        .map(|out| out.text_plain.clone())
-        .unwrap_or_else(|| "(no live output)".into());
-    Ok(format!("inspected={};source_len={};output={}", cell.id, cell.source.len(), output))
+    .map(|out| out.text_plain.clone())
+    .unwrap_or_else(|| "(no live output)".into());
+    Ok(format!(
+        "inspected={};source_len={};output={}",
+        cell.id,
+        cell.source.len(),
+        output
+    ))
 }
 
 fn nonempty_path(body: &str, key: &str) -> Option<PathBuf> {
@@ -414,7 +459,10 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     };
     let header = std::str::from_utf8(&bytes[..header_end]).map_err(|_| "headers are not UTF-8")?;
     let mut lines = header.lines();
-    let mut request_line = lines.next().ok_or("missing request line")?.split_whitespace();
+    let mut request_line = lines
+        .next()
+        .ok_or("missing request line")?
+        .split_whitespace();
     let method = request_line.next().unwrap_or_default().to_string();
     let target = request_line.next().unwrap_or_default().to_string();
     let mut headers = HashMap::new();
@@ -464,7 +512,9 @@ fn authorized(request: &Request, query: &str, token: &str) -> bool {
 fn form_value(body: &str, key: &str) -> Option<String> {
     body.split('&').find_map(|part| {
         let (name, value) = part.split_once('=')?;
-        (decode_component(name).ok()? == key).then(|| decode_component(value).ok()).flatten()
+        (decode_component(name).ok()? == key)
+            .then(|| decode_component(value).ok())
+            .flatten()
     })
 }
 
@@ -487,12 +537,19 @@ fn decode_component(value: &str) -> Result<String, String> {
     String::from_utf8(out).map_err(|_| "form value is not UTF-8".into())
 }
 
-fn write_response(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> Result<(), String> {
+fn write_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &str,
+) -> Result<(), String> {
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    stream.write_all(response.as_bytes()).map_err(|error| error.to_string())
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| error.to_string())
 }
 
 fn json_error(message: &str) -> String {

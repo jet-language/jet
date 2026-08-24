@@ -1101,6 +1101,11 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
+        vec![jet_foundation::MachineOutput::MachineRecord::Status]
+    );
+    assert!(text.starts_with("{\"schema\":\"jet.report/v1\""));
     assert!(text.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
 }
 

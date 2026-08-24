@@ -412,6 +412,8 @@ impl<'a> Resolver<'a> {
             store_dir: &store_dir,
             offline: false,
             project_dir: Some(self.project_root),
+            nix_index: None,
+            nix_roots: None,
         };
         let realized = jetpack::Foreign::realize_manifest_dependencies(
             &roots,

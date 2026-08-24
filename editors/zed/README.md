@@ -80,12 +80,16 @@ scope, and variable references; refresh the view after the resulting stop.
 The default view shows Jet threads, stacks, scopes, nested values, and
 read-only evaluation. Use `showRawFrames` only for the clearly marked
 generated-Rust expert view. LLDB must be available to the selected Jet
-executable.
+executable. The adapter accepts strict `Content-Length` frames up to 16 MiB.
+It requires `adapterID: "jet"`, uses canonical local source paths, and follows
+the `linesStartAt1` and `columnsStartAt1` values from DAP `initialize`.
 
 Launch configuration uses the open `.jet` source as `program`. Local attach
 uses the matching native `program`, its `.jetmap` `map`, and a positive
 same-user `processId`; the adapter reads the source identity from that verified
 map before it starts.
+Relative source paths in a `.jetmap` are resolved relative to that sidecar, so
+the editor may start from another working directory.
 
 ```json
 {

@@ -30,6 +30,21 @@ fn uncoded_errors_use_registered_report_snapshot() {
 }
 
 #[test]
+fn unsupported_nix_projection_uses_registered_report_snapshot() {
+    let theme = jetpack::Output::Theme { color: false };
+    let actual = theme.render_error_coded(
+        "E1351",
+        "Nix closure execution is unavailable on this host.",
+        "Jetpack could not create the isolated /nix/store projection: rootless `/nix/store` projection needs `unshare`.",
+        "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.",
+    );
+    assert_eq!(
+        actual,
+        include_str!("fixtures/jetpack-diagnostics/E1351.stderr")
+    );
+}
+
+#[test]
 fn retired_off_compiler_report_renderers_do_not_return() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut sources = Vec::new();

@@ -1959,6 +1959,8 @@ mod tests {
             store_dir: &dir,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2044,6 +2046,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &store,
             offline: true,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         let table = SourceTable::empty();
         let spec = crate::RefSpec::classify_in("demo#version=1.0@ruby", &table).unwrap();
@@ -2461,6 +2465,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &store,
             offline: false,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         let realized = Store::realize_verified(
             &roots,
@@ -2530,6 +2536,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &store,
             offline: true,
             project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
         };
         let replay = Store::realize_verified(
             &roots,
@@ -2572,6 +2580,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &dir,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2600,6 +2610,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &dir,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,
@@ -2625,6 +2637,8 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             store_dir: &dir,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let authority = super::super::fetch::Authority::load(
             &ctx,

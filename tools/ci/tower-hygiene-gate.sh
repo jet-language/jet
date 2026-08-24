@@ -63,12 +63,23 @@ elif [[ "$report_path" != /* ]]; then
   report_path="$ROOT/$report_path"
 fi
 
-case "$report_path" in
-  "$ROOT/plugins/tower"|"$ROOT/plugins/tower"/*|"$tower_dir"|"$tower_dir"/*)
-    errors+=("audit report may not be written under Tower data")
-    report_path="$ROOT/.tmp/tower-hygiene/unsafe-report.txt"
-    ;;
-esac
+canonical_path() {
+  realpath -m -- "$1"
+}
+
+if ! canonical_tower_dir="$(canonical_path "$tower_dir" 2>/dev/null)" ||
+   ! canonical_plugin_dir="$(canonical_path "$ROOT/plugins/tower" 2>/dev/null)" ||
+   ! canonical_report_path="$(canonical_path "$report_path" 2>/dev/null)"; then
+  errors+=("audit path canonicalization is unavailable")
+  report_path="$ROOT/.tmp/tower-hygiene/unsafe-report.txt"
+else
+  case "$canonical_report_path" in
+    "$canonical_plugin_dir"|"$canonical_plugin_dir"/*|"$canonical_tower_dir"|"$canonical_tower_dir"/*)
+      errors+=("audit report may not be written under Tower data")
+      report_path="$ROOT/.tmp/tower-hygiene/unsafe-report.txt"
+      ;;
+  esac
+fi
 
 if ! node_path="$(command -v node 2>/dev/null)"; then
   errors+=("node runner is unavailable")
@@ -270,6 +281,7 @@ fi
   printf 'docs_root=%s\n' "$docs_root"
   printf 'spec_root=%s\n' "$spec_root"
   printf 'tower_store=%s\n' "$tower_file"
+  printf 'report_path=%s\n' "$report_path"
   printf 'tower_store_before_sha256=%s\n' "$tower_before"
   printf 'tower_store_after_sha256=%s\n' "$tower_after"
   printf 'read_only=%s\n' "$read_only"

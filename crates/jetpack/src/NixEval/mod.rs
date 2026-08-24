@@ -4,8 +4,11 @@
 //! imports use a private project-root authority; unsupported evaluator stages
 //! remain private and are recorded as explicit inventory skips.
 
-mod Boundary;
 mod Authority;
+mod Boundary;
+/// E4-JP10 — native execution of an evaluated derivation.
+#[path = "../NixBuilder.rs"]
+pub(crate) mod NixBuilder;
 
 pub(crate) use Authority::ProjectImportAuthority;
 pub(crate) use Boundary::NativeDerivationEvaluation;
@@ -42,9 +45,7 @@ pub(crate) fn evaluate_devshell_output_with_import_authority(
     )
 }
 
-pub(crate) fn evaluator_identity(
-    system: &str,
-) -> Result<String, jet_nix_eval::BoundaryError> {
+pub(crate) fn evaluator_identity(system: &str) -> Result<String, jet_nix_eval::BoundaryError> {
     Boundary::NativeBoundary::embedded()?.evaluator_identity(system)
 }
 
@@ -80,9 +81,7 @@ pub(crate) fn evaluate_derivation_output(
     system: &str,
     attribute: &str,
 ) -> Result<NativeDerivationEvaluation, jet_nix_eval::BoundaryError> {
-    Boundary::NativeBoundary::embedded()?.evaluate_derivation_output(
-        source, system, attribute,
-    )
+    Boundary::NativeBoundary::embedded()?.evaluate_derivation_output(source, system, attribute)
 }
 
 pub(crate) fn evaluate_derivation_output_with_import_authority(

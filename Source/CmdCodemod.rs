@@ -14,11 +14,12 @@ use jet::Diagnostics::{Severity, Span, TextEdit};
 use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
 use jet_semindex::{
-    open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
-    DefinitionAnchor, SemIndexError, SemanticOp, SemanticOpTarget, SymbolKind,
+    open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs,
+    open_structural_with_overlays, DefinitionAnchor, SemIndex, SemIndexError, SemanticOp,
+    SemanticOpTarget, SymbolKind,
 };
-use JSON::Value;
 use Transaction::Change;
+use JSON::Value;
 
 #[derive(Clone)]
 struct V1 {
@@ -344,13 +345,7 @@ fn plan_batch(batch: &Batch) -> BatchPlan {
     let mut counts = Vec::new();
     let mut semantic_ops = Vec::new();
     for rule in &batch.rules {
-        let count = apply_rule(
-            rule,
-            &units,
-            &mut files,
-            &mut inputs,
-            &mut semantic_ops,
-        );
+        let count = apply_rule(rule, &units, &mut files, &mut inputs, &mut semantic_ops);
         let (id, expected, allow) = match rule {
             Rule::Rename {
                 id,
@@ -570,7 +565,10 @@ fn apply_rule(
     }
 }
 
-fn definition_fact<'a>(idx: &'a SemIndex, definition: &jet_semindex::SymbolDef) -> Option<&'a jet_semindex::DefinitionFact> {
+fn definition_fact<'a>(
+    idx: &'a SemIndex,
+    definition: &jet_semindex::SymbolDef,
+) -> Option<&'a jet_semindex::DefinitionFact> {
     idx.definition_facts().iter().find(|fact| {
         fact.module_path == definition.module_path
             && fact.span.start <= definition.def_span.start
@@ -592,7 +590,11 @@ fn template_text(template: &Template) -> String {
         .map(|atom| match atom {
             Atom::Literal(value) => value.clone(),
             Atom::Capture(name, variadic) => {
-                if *variadic { format!("${name}...") } else { format!("${name}") }
+                if *variadic {
+                    format!("${name}...")
+                } else {
+                    format!("${name}")
+                }
             }
         })
         .collect::<Vec<_>>()
@@ -1005,7 +1007,11 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
             node.class == class && node.span.start <= actual_start && node.span.end >= end
         })
         .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
-        .unwrap_or_else(|| fail(&format!("compiler did not produce a typed {class} pattern node")));
+        .unwrap_or_else(|| {
+            fail(&format!(
+                "compiler did not produce a typed {class} pattern node"
+            ))
+        });
     let tree = typed_tree(root, &nodes, &wrapped, Path::new("<codemod-pattern>"));
     pattern_tree(&tree, &wrapped, &captures)
 }
@@ -1019,8 +1025,7 @@ fn typed_tree(
     let mut direct = nodes
         .iter()
         .filter(|node| {
-            same_path(Path::new(&node.module_path), path)
-                && node.parent == Some(root.id)
+            same_path(Path::new(&node.module_path), path) && node.parent == Some(root.id)
         })
         .collect::<Vec<_>>();
     direct.sort_by_key(|node| (node.slot.as_str(), node.ordinal));
@@ -1049,7 +1054,9 @@ fn typed_tree(
     for node in direct {
         let child = typed_tree(node, nodes, source, path);
         match slots.last_mut() {
-            Some(slot) if slot.name == node.slot && slot.kind == node.slot_kind => slot.children.push(child),
+            Some(slot) if slot.name == node.slot && slot.kind == node.slot_kind => {
+                slot.children.push(child)
+            }
             _ => slots.push(TypedSlot {
                 name: node.slot.clone(),
                 kind: node.slot_kind,
@@ -1079,11 +1086,19 @@ fn pattern_tree(
             class: tree.class.clone(),
         };
     }
-    let slots = tree.slots.iter().map(|slot| PatternSlot {
-        name: slot.name.clone(),
-        kind: slot.kind,
-        children: slot.children.iter().map(|child| pattern_tree(child, source, captures)).collect(),
-    }).collect();
+    let slots = tree
+        .slots
+        .iter()
+        .map(|slot| PatternSlot {
+            name: slot.name.clone(),
+            kind: slot.kind,
+            children: slot
+                .children
+                .iter()
+                .map(|child| pattern_tree(child, source, captures))
+                .collect(),
+        })
+        .collect();
     PatternTree::Node {
         class: tree.class.clone(),
         shape: tree.shape.clone(),
@@ -1099,21 +1114,47 @@ fn match_typed_tree(
     captures: &mut BTreeMap<String, CapturedTree>,
 ) -> bool {
     match pattern {
-        PatternTree::Capture { name, variadic: false, class } => {
+        PatternTree::Capture {
+            name,
+            variadic: false,
+            class,
+        } => {
             if class != &candidate.class {
                 return false;
             }
-            bind_capture(name, source[candidate.span.start..candidate.span.end].to_string(), tree_key(candidate), captures)
+            bind_capture(
+                name,
+                source[candidate.span.start..candidate.span.end].to_string(),
+                tree_key(candidate),
+                captures,
+            )
         }
         PatternTree::Capture { variadic: true, .. } => false,
-        PatternTree::Node { class, shape, signature, slots } => {
-            if class != &candidate.class || shape != &candidate.shape || signature != &candidate.signature {
+        PatternTree::Node {
+            class,
+            shape,
+            signature,
+            slots,
+        } => {
+            if class != &candidate.class
+                || shape != &candidate.shape
+                || signature != &candidate.signature
+            {
                 return false;
             }
-            if slots.len() != candidate.slots.len() { return false; }
+            if slots.len() != candidate.slots.len() {
+                return false;
+            }
             for (pattern_slot, candidate_slot) in slots.iter().zip(&candidate.slots) {
-                if pattern_slot.name != candidate_slot.name || pattern_slot.kind != candidate_slot.kind
-                    || !match_children(&pattern_slot.children, &candidate_slot.children, pattern_slot.kind, source, captures)
+                if pattern_slot.name != candidate_slot.name
+                    || pattern_slot.kind != candidate_slot.kind
+                    || !match_children(
+                        &pattern_slot.children,
+                        &candidate_slot.children,
+                        pattern_slot.kind,
+                        source,
+                        captures,
+                    )
                 {
                     return false;
                 }
@@ -1142,12 +1183,20 @@ fn match_children(
         if pi == patterns.len() {
             return ci == candidates.len();
         }
-        if let PatternTree::Capture { name, variadic: true, class } = &patterns[pi] {
+        if let PatternTree::Capture {
+            name,
+            variadic: true,
+            class,
+        } = &patterns[pi]
+        {
             if slot_kind != jet_semindex::StructuralSlotKind::List {
                 return false;
             }
             for end in (ci..=candidates.len()).rev() {
-                if candidates[ci..end].iter().any(|candidate| &candidate.class != class) {
+                if candidates[ci..end]
+                    .iter()
+                    .any(|candidate| &candidate.class != class)
+                {
                     continue;
                 }
                 let text = if end == ci {
@@ -1155,10 +1204,22 @@ fn match_children(
                 } else {
                     source[candidates[ci].span.start..candidates[end - 1].span.end].to_string()
                 };
-                let key = candidates[ci..end].iter().map(tree_key).collect::<Vec<_>>().join("|");
+                let key = candidates[ci..end]
+                    .iter()
+                    .map(tree_key)
+                    .collect::<Vec<_>>()
+                    .join("|");
                 let mut branch = captures.clone();
                 if bind_capture(name, text, key, &mut branch)
-                    && walk(patterns, pi + 1, candidates, end, slot_kind, source, &mut branch)
+                    && walk(
+                        patterns,
+                        pi + 1,
+                        candidates,
+                        end,
+                        slot_kind,
+                        source,
+                        &mut branch,
+                    )
                 {
                     *captures = branch;
                     return true;
@@ -1166,10 +1227,20 @@ fn match_children(
             }
             return false;
         }
-        let Some(candidate) = candidates.get(ci) else { return false };
+        let Some(candidate) = candidates.get(ci) else {
+            return false;
+        };
         let mut branch = captures.clone();
         if match_typed_tree(&patterns[pi], candidate, source, &mut branch)
-            && walk(patterns, pi + 1, candidates, ci + 1, slot_kind, source, &mut branch)
+            && walk(
+                patterns,
+                pi + 1,
+                candidates,
+                ci + 1,
+                slot_kind,
+                source,
+                &mut branch,
+            )
         {
             *captures = branch;
             true
@@ -1194,15 +1265,26 @@ fn bind_capture(
 }
 
 fn tree_key(tree: &TypedTree) -> String {
-    let slots = tree.slots.iter().map(|slot| {
-        format!("{}:{:?}=[{}]", slot.name, slot.kind, slot.children.iter().map(tree_key).collect::<Vec<_>>().join(","))
-    }).collect::<Vec<_>>().join(";");
+    let slots = tree
+        .slots
+        .iter()
+        .map(|slot| {
+            format!(
+                "{}:{:?}=[{}]",
+                slot.name,
+                slot.kind,
+                slot.children
+                    .iter()
+                    .map(tree_key)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
     format!(
         "{}:{}:{:?}:[{}]",
-        tree.class,
-        tree.shape,
-        tree.signature,
-        slots
+        tree.class, tree.shape, tree.signature, slots
     )
 }
 fn semantic_candidate(t: &Template, f: &Found, idx: &SemIndex, path: &Path) -> bool {
@@ -1402,7 +1484,11 @@ fn print_simple_diff(before: &[u8], after: &[u8]) {
 
 fn render_v2_log(batch: &Batch, changes: &[Change], semantic_ops: &[SemanticOp]) -> String {
     let rows=changes.iter().map(|c|format!("{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}}",json_escape(&c.path.display().to_string()),hash_bytes(&c.before),hash_bytes(&c.after),hex(&c.before),hex(&c.after))).collect::<Vec<_>>().join(",\n    ");
-    let ops = semantic_ops.iter().map(|op| semantic_op_json(op, changes)).collect::<Vec<_>>().join(",\n    ");
+    let ops = semantic_ops
+        .iter()
+        .map(|op| semantic_op_json(op, changes))
+        .collect::<Vec<_>>()
+        .join(",\n    ");
     format!("{{\n  \"schema\": 2,\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"semantic_ops\": [\n    {}\n  ],\n  \"files\": [\n    {}\n  ]\n}}\n",json_escape(&batch.name),json_escape(&batch.project.display().to_string()),ops,rows)
 }
 
@@ -1517,7 +1603,10 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
         }
         decoded.push((p, before, after));
     }
-    let paths = decoded.iter().map(|(path, _, _)| path.clone()).collect::<Vec<_>>();
+    let paths = decoded
+        .iter()
+        .map(|(path, _, _)| path.clone())
+        .collect::<Vec<_>>();
     if is_fix {
         Transaction::validate_fix_destinations(project, &paths);
         Transaction::validate_fix_replay_aliases(project, path, &paths);
@@ -1534,14 +1623,18 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
         } else {
             Transaction::read_destination(project, &p)
         }
-            .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", p.display())));
+        .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", p.display())));
         if current != after {
             fail(&format!(
                 "checkpoint mismatch for `{}`; refusing undo; zero files written",
                 p.display()
             ))
         }
-        changes.push(Change { path: p, before: after, after: before });
+        changes.push(Change {
+            path: p,
+            before: after,
+            after: before,
+        });
     }
     let undo_log = path.with_extension("undo.log.json");
     let marker = format!(
@@ -1561,7 +1654,7 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
 }
 
 pub(crate) fn commit_fix(path: &Path, before: Vec<u8>, after: Vec<u8>) -> PathBuf {
-    commit_fix_with_semantic_ops(path, before, after, &[])
+    commit_fix_internal(path, before, after, &[], true)
 }
 
 pub(crate) fn commit_fix_with_semantic_ops(
@@ -1570,27 +1663,65 @@ pub(crate) fn commit_fix_with_semantic_ops(
     after: Vec<u8>,
     semantic_ops: &[SemanticOp],
 ) -> PathBuf {
-    let path = fs::canonicalize(path)
-        .unwrap_or_else(|e| fail(&format!("could not canonicalize fix target `{}`: {e}", path.display())));
+    commit_fix_internal(path, before, after, semantic_ops, false)
+}
+
+fn commit_fix_internal(
+    path: &Path,
+    before: Vec<u8>,
+    after: Vec<u8>,
+    semantic_ops: &[SemanticOp],
+    infer_fix_rename: bool,
+) -> PathBuf {
+    let path = fs::canonicalize(path).unwrap_or_else(|e| {
+        fail(&format!(
+            "could not canonicalize fix target `{}`: {e}",
+            path.display()
+        ))
+    });
     let project = fix_project_for(&path);
     let lock = Transaction::lock(&project);
     Transaction::recover(&lock);
     let (name, log_path) = next_fix_log_path(&project, &path);
+    let inferred_ops = if infer_fix_rename && semantic_ops.is_empty() {
+        semantic_rename_ops_for_fix(&path, &before, &after)
+    } else {
+        Vec::new()
+    };
     let changes = vec![Change {
         path: path.clone(),
         before,
         after,
     }];
     let recorded_ops = if semantic_ops.is_empty() {
-        fix_rewrite_op(&changes[0].before, &changes[0].after)
-            .into_iter()
-            .collect::<Vec<_>>()
+        if inferred_ops.is_empty() {
+            fix_rewrite_op(&changes[0].before, &changes[0].after)
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            inferred_ops
+        }
     } else {
         semantic_ops.to_vec()
     };
     let log = render_fix_log(&project, &name, &changes, &recorded_ops);
     Transaction::commit_fix(&lock, &changes, &log_path, log.as_bytes());
     log_path
+}
+
+fn semantic_rename_ops_for_fix(path: &Path, before: &[u8], after: &[u8]) -> Vec<SemanticOp> {
+    let Ok(before) = std::str::from_utf8(before) else {
+        return Vec::new();
+    };
+    let Ok(after) = std::str::from_utf8(after) else {
+        return Vec::new();
+    };
+    let before_index = open_structural_with_overlays(path, &[(path, before)]).ok();
+    let after_index = open_structural_with_overlays(path, &[(path, after)]).ok();
+    match (before_index, after_index) {
+        (Some(before), Some(after)) => jet_semindex::semantic_rename_ops(&before, &after),
+        _ => Vec::new(),
+    }
 }
 
 /// A fix transaction without a domain-specific operation still needs to say
@@ -1624,9 +1755,7 @@ fn changed_region<'a>(before: &'a str, after: &'a str) -> (&'a str, &'a str) {
     {
         prefix += 1;
     }
-    while prefix > 0
-        && (!before.is_char_boundary(prefix) || !after.is_char_boundary(prefix))
-    {
+    while prefix > 0 && (!before.is_char_boundary(prefix) || !after.is_char_boundary(prefix)) {
         prefix -= 1;
     }
 
@@ -1665,7 +1794,10 @@ fn fix_project_for(path: &Path) -> PathBuf {
 }
 
 fn next_fix_log_path(project: &Path, path: &Path) -> (String, PathBuf) {
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("source");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("source");
     let base = format!("Fix-{}", sanitize_file_name(stem));
     for suffix in 0.. {
         let name = if suffix == 0 {
@@ -1772,7 +1904,10 @@ fn run_v1(cm: V1, apply: bool) {
     );
     if apply {
         let project = managed_project_for_entry(&cm.entry);
-        let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
+        let paths = changes
+            .iter()
+            .map(|change| change.path.clone())
+            .collect::<Vec<_>>();
         Transaction::validate_destinations(&project, &paths);
         let log = render_v1_log(&cm, &changes, &targets);
         let dir = project.join(".jet/codemods");
@@ -1835,7 +1970,10 @@ fn undo_v1(value: Value, path: &Path, project: &Path) {
         let current = Transaction::read_destination(project, &file)
             .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", file.display())));
         if hash_bytes(&current) != after_hash {
-            fail(&format!("checkpoint mismatch for `{}`; refusing undo", file.display()))
+            fail(&format!(
+                "checkpoint mismatch for `{}`; refusing undo",
+                file.display()
+            ))
         }
         let before = if let Some(s) = before_bytes {
             unhex(&s)
@@ -1843,37 +1981,63 @@ fn undo_v1(value: Value, path: &Path, project: &Path) {
             let edits = inverse_edits
                 .into_iter()
                 .map(|v| {
-                    let mut e = v.object().unwrap_or_else(|_| fail("legacy inverse edit must be an object"));
+                    let mut e = v
+                        .object()
+                        .unwrap_or_else(|_| fail("legacy inverse edit must be an object"));
                     TextEdit {
-                        span: Span::new(take_number(&mut e, "start") as usize, take_number(&mut e, "end") as usize),
+                        span: Span::new(
+                            take_number(&mut e, "start") as usize,
+                            take_number(&mut e, "end") as usize,
+                        ),
                         new_text: take_string(&mut e, "new_text"),
                     }
                 })
                 .collect::<Vec<_>>();
             jet::FixEngine::apply_edits(
-                std::str::from_utf8(&current).unwrap_or_else(|_| fail("legacy codemod file is not UTF-8")),
+                std::str::from_utf8(&current)
+                    .unwrap_or_else(|_| fail("legacy codemod file is not UTF-8")),
                 &edits,
-            ).unwrap_or_else(|_| fail("legacy codemod inverse edits overlap")).into_bytes()
+            )
+            .unwrap_or_else(|_| fail("legacy codemod inverse edits overlap"))
+            .into_bytes()
         };
         if hash_bytes(&before) != before_hash {
-            fail(&format!("undo result mismatch for `{}`; refusing undo", file.display()))
+            fail(&format!(
+                "undo result mismatch for `{}`; refusing undo",
+                file.display()
+            ))
         }
-        changes.push(Change { path: file, before: current, after: before });
+        changes.push(Change {
+            path: file,
+            before: current,
+            after: before,
+        });
     }
     let undo_log = path.with_extension("undo.log.json");
-    let marker = format!("{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n", json_escape(&name));
+    let marker = format!(
+        "{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n",
+        json_escape(&name)
+    );
     Transaction::commit(&lock, &changes, &undo_log, marker.as_bytes());
     println!("codemod undo `{name}` applied")
 }
 
 fn replay_log_project(path: &Path) -> PathBuf {
-    let codemods = path.parent().unwrap_or_else(|| fail("replay log has no parent"));
+    let codemods = path
+        .parent()
+        .unwrap_or_else(|| fail("replay log has no parent"));
     if codemods.file_name().and_then(|name| name.to_str()) != Some("codemods")
-        || codemods.parent().and_then(Path::file_name).and_then(|name| name.to_str()) != Some(".jet")
+        || codemods
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            != Some(".jet")
     {
         fail("replay log must be directly beneath <project>/.jet/codemods")
     }
-    let project = codemods.parent().and_then(Path::parent)
+    let project = codemods
+        .parent()
+        .and_then(Path::parent)
         .unwrap_or_else(|| fail("replay log has no project parent"));
     fs::canonicalize(project)
         .unwrap_or_else(|e| fail(&format!("could not canonicalize replay project: {e}")))
@@ -1883,9 +2047,13 @@ fn managed_project_for_entry(entry: &Path) -> PathBuf {
     let canonical = fs::canonicalize(entry)
         .unwrap_or_else(|e| fail(&format!("could not canonicalize codemod entry: {e}")));
     for ancestor in canonical.ancestors().skip(1) {
-        if canonical.strip_prefix(ancestor).ok().is_some_and(|relative| {
-            relative.starts_with("examples") || relative.starts_with("tests/ui")
-        }) {
+        if canonical
+            .strip_prefix(ancestor)
+            .ok()
+            .is_some_and(|relative| {
+                relative.starts_with("examples") || relative.starts_with("tests/ui")
+            })
+        {
             return ancestor.to_path_buf();
         }
     }
@@ -1941,15 +2109,17 @@ fn anchors_match_definition(
     selected: &BTreeSet<DefinitionAnchor>,
     candidate: &DefinitionAnchor,
 ) -> bool {
-    selected.iter().any(|anchor| match (
-        anchor.semantic_identity.as_deref(),
-        candidate.semantic_identity.as_deref(),
-    ) {
-        (Some(selected), Some(candidate)) => selected == candidate,
-        _ => {
-            anchor.module_path == candidate.module_path
-                && anchor.kind == candidate.kind
-                && anchor.def_span == candidate.def_span
+    selected.iter().any(|anchor| {
+        match (
+            anchor.semantic_identity.as_deref(),
+            candidate.semantic_identity.as_deref(),
+        ) {
+            (Some(selected), Some(candidate)) => selected == candidate,
+            _ => {
+                anchor.module_path == candidate.module_path
+                    && anchor.kind == candidate.kind
+                    && anchor.def_span == candidate.def_span
+            }
         }
     })
 }

@@ -221,7 +221,13 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
 }
 
 fn print_json_cli_error(code: &str, what: &str, why: &str, fix: &str) -> ! {
-    crate::emit_cli_report(code, what.to_string(), why.to_string(), fix.to_string(), true);
+    crate::emit_cli_report(
+        code,
+        what.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        true,
+    );
     exit(ExitCodes::USER_ERROR);
 }
 
@@ -265,11 +271,7 @@ fn add_location(fields: &mut Vec<(&str, ExpandValue)>, location: Option<(usize, 
     }
 }
 
-fn source_location(
-    bundle: &ProgramBundle,
-    source: &str,
-    offset: usize,
-) -> Option<(usize, usize)> {
+fn source_location(bundle: &ProgramBundle, source: &str, offset: usize) -> Option<(usize, usize)> {
     bundle
         .modules
         .iter()
@@ -277,7 +279,11 @@ fn source_location(
         .map(|module| jet::Diagnostics::span_line_col(&module.source, offset))
 }
 
-fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
+fn render_memory(
+    _bundle: &ProgramBundle,
+    facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
     let mut lines = facts
         .memory_declarations
         .iter()
@@ -288,7 +294,10 @@ fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &
                     .get(&(root.clone(), declaration.fact))
                 {
                     Some(jet::Sema::MemoryProjection::Proven) => "proven".to_string(),
-                    Some(jet::Sema::MemoryProjection::Violated { call_path, operation }) => {
+                    Some(jet::Sema::MemoryProjection::Violated {
+                        call_path,
+                        operation,
+                    }) => {
                         format!("violated by {operation} through {}", call_path.join(" -> "))
                     }
                     Some(jet::Sema::MemoryProjection::OpenWorld { call_path, reason }) => {
@@ -310,7 +319,11 @@ fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &
     lines
 }
 
-fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
+fn render_memory_json(
+    bundle: &ProgramBundle,
+    facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
     let mut rows = Vec::new();
     for declaration in &facts.memory_declarations {
         for root in &declaration.roots {
@@ -322,13 +335,14 @@ fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _inde
                 Some(jet::Sema::MemoryProjection::Proven) => {
                     expand_object(vec![("kind", expand_string("proven"))])
                 }
-                Some(jet::Sema::MemoryProjection::Violated { call_path, operation }) => {
-                    expand_object(vec![
-                        ("kind", expand_string("violated")),
-                        ("operation", expand_string(operation)),
-                        ("call_path", expand_string_list(call_path)),
-                    ])
-                }
+                Some(jet::Sema::MemoryProjection::Violated {
+                    call_path,
+                    operation,
+                }) => expand_object(vec![
+                    ("kind", expand_string("violated")),
+                    ("operation", expand_string(operation)),
+                    ("call_path", expand_string_list(call_path)),
+                ]),
                 Some(jet::Sema::MemoryProjection::OpenWorld { call_path, reason }) => {
                     expand_object(vec![
                         ("kind", expand_string("open_world")),
@@ -354,7 +368,11 @@ fn render_memory_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _inde
     rows
 }
 
-fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
+fn render_web(
+    _bundle: &ProgramBundle,
+    facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
     let Some(graph) = facts.web_app.as_ref() else {
         return Vec::new();
     };
@@ -369,7 +387,11 @@ fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &Sem
     graph.explain_lines()
 }
 
-fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
+fn render_web_json(
+    bundle: &ProgramBundle,
+    facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
     let Some(graph) = facts.web_app.as_ref() else {
         return Vec::new();
     };
@@ -384,7 +406,13 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: 
                 ("render", expand_string(route.render.as_str())),
                 ("provenance", expand_string(&route.provenance)),
                 ("source", expand_string(&graph.entry_file)),
-                ("span", expand_span(jet::Diagnostics::Span::new(route.span_start, route.span_end), location)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(route.span_start, route.span_end),
+                        location,
+                    ),
+                ),
             ];
             add_location(&mut fields, location);
             expand_object(fields)
@@ -401,7 +429,13 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: 
                 ("kind", expand_string(&action.kind)),
                 ("provenance", expand_string(&action.provenance)),
                 ("source", expand_string(&graph.entry_file)),
-                ("span", expand_span(jet::Diagnostics::Span::new(action.span_start, action.span_end), location)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(action.span_start, action.span_end),
+                        location,
+                    ),
+                ),
             ];
             add_location(&mut fields, location);
             expand_object(fields)
@@ -419,7 +453,13 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: 
                 ("security", expand_string_list(&mount.security)),
                 ("provenance", expand_string(&mount.provenance)),
                 ("source", expand_string(&graph.entry_file)),
-                ("span", expand_span(jet::Diagnostics::Span::new(mount.span_start, mount.span_end), location)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(mount.span_start, mount.span_end),
+                        location,
+                    ),
+                ),
             ];
             add_location(&mut fields, location);
             expand_object(fields)
@@ -433,7 +473,13 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: 
             let mut fields = vec![
                 ("root", expand_string(&root.root)),
                 ("source", expand_string(&graph.entry_file)),
-                ("span", expand_span(jet::Diagnostics::Span::new(root.span_start, root.span_end), location)),
+                (
+                    "span",
+                    expand_span(
+                        jet::Diagnostics::Span::new(root.span_start, root.span_end),
+                        location,
+                    ),
+                ),
             ];
             add_location(&mut fields, location);
             expand_object(fields)
@@ -449,14 +495,17 @@ fn render_web_json(bundle: &ProgramBundle, facts: &SemIndexEffectFacts, _index: 
         ("actions", ExpandValue::Array(actions)),
         ("mounts", ExpandValue::Array(mounts)),
         ("routes_from", ExpandValue::Array(routes_from)),
-        ("policy", expand_object(vec![
-            ("security", expand_string_list(&graph.policy.security)),
-            ("assets", expand_string_list(&graph.policy.assets)),
-            ("split", expand_string_list(&graph.policy.split)),
-            ("cache", expand_string_list(&graph.policy.cache)),
-            ("a11y", expand_string_list(&graph.policy.a11y)),
-            ("adapters", expand_string_list(&graph.policy.adapters)),
-        ])),
+        (
+            "policy",
+            expand_object(vec![
+                ("security", expand_string_list(&graph.policy.security)),
+                ("assets", expand_string_list(&graph.policy.assets)),
+                ("split", expand_string_list(&graph.policy.split)),
+                ("cache", expand_string_list(&graph.policy.cache)),
+                ("a11y", expand_string_list(&graph.policy.a11y)),
+                ("adapters", expand_string_list(&graph.policy.adapters)),
+            ]),
+        ),
     ])]
 }
 
@@ -470,7 +519,11 @@ fn effect_row_text(effect: &jet_semindex::EffectFact) -> String {
     format!("{}: resolved={}{}", effect.function, resolved, maximal)
 }
 
-fn render_effects(_bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, index: &SemIndex) -> Vec<String> {
+fn render_effects(
+    _bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<String> {
     index.effects().iter().map(effect_row_text).collect()
 }
 
@@ -493,7 +546,11 @@ fn effect_provenance_json(provenance: &jet_semindex::EffectProvenance) -> Expand
     ])
 }
 
-fn render_effects_json(_bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, index: &SemIndex) -> Vec<ExpandValue> {
+fn render_effects_json(
+    _bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    index: &SemIndex,
+) -> Vec<ExpandValue> {
     index
         .effects()
         .iter()
@@ -522,7 +579,11 @@ fn render_effects_json(_bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, in
 /// D-METHODMACRO1=A: every `#Inline`/`#Inline(Always)` fn or method in the
 /// bundle, and the Rust attribute codegen emits for it. Functions with
 /// neither marker produce no line (the ballot: don't dump everything).
-fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
+fn render_inline(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
     let mut out = Vec::new();
     for module in &bundle.modules {
         let mut in_module = collect_inline_facts(&module.items, None);
@@ -542,7 +603,10 @@ fn ct_field<'a>(value: &'a jet::CtValue, name: &str) -> Option<&'a jet::CtValue>
     let jet::CtValue::Struct { fields, .. } = value else {
         return None;
     };
-    fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+    fields
+        .iter()
+        .find(|(field, _)| field == name)
+        .map(|(_, value)| value)
 }
 
 fn ct_display(value: Option<&jet::CtValue>) -> String {
@@ -562,9 +626,7 @@ fn ct_to_expand(value: &jet::CtValue) -> ExpandValue {
         jet::CtValue::Str(value) => ExpandValue::String(value.clone()),
         jet::CtValue::Present(value) => ct_to_expand(value),
         jet::CtValue::Failed(jet::CtReport::Clean(_)) => ExpandValue::Null,
-        jet::CtValue::List(values) => {
-            ExpandValue::Array(values.iter().map(ct_to_expand).collect())
-        }
+        jet::CtValue::List(values) => ExpandValue::Array(values.iter().map(ct_to_expand).collect()),
         jet::CtValue::Struct { fields, .. } => ExpandValue::Object(
             fields
                 .iter()
@@ -631,11 +693,19 @@ fn layout_byte_fact_json(layout: &jet::CtValue) -> ExpandValue {
 }
 
 fn layout_text(layout: &jet::CtValue) -> String {
-    let header = ["kind", "size", "alignment", "stride", "target", "guarantee", "source"]
-        .iter()
-        .map(|name| format!("{name}={}", ct_display(ct_field(layout, name))))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let header = [
+        "kind",
+        "size",
+        "alignment",
+        "stride",
+        "target",
+        "guarantee",
+        "source",
+    ]
+    .iter()
+    .map(|name| format!("{name}={}", ct_display(ct_field(layout, name))))
+    .collect::<Vec<_>>()
+    .join(" ");
     let fields = match ct_field(layout, "fields") {
         Some(jet::CtValue::List(values)) => values
             .iter()
@@ -670,10 +740,7 @@ struct LayoutRow {
 
 fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
     let layout_engine = TargetLayoutEngine::new(
-        bundle
-            .modules
-            .iter()
-            .flat_map(|module| module.items.iter()),
+        bundle.modules.iter().flat_map(|module| module.items.iter()),
         TargetLayout::from_triple(&bundle.build_facts.target_triple),
     );
     let mut rows = Vec::new();
@@ -710,7 +777,11 @@ fn collect_layout_rows(bundle: &ProgramBundle) -> Vec<LayoutRow> {
     rows
 }
 
-fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<String> {
+fn render_layout(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
     collect_layout_rows(bundle)
         .into_iter()
         .map(|row| {
@@ -727,7 +798,11 @@ fn render_layout(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &
         .collect()
 }
 
-fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
+fn render_layout_json(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
     collect_layout_rows(bundle)
         .into_iter()
         .map(|row| {
@@ -743,7 +818,11 @@ fn render_layout_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _ind
         .collect()
 }
 
-fn render_inline_json(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts, _index: &SemIndex) -> Vec<ExpandValue> {
+fn render_inline_json(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
     let mut rows = Vec::new();
     for module in &bundle.modules {
         for (qualified, span, contract, attr) in collect_inline_facts(&module.items, None) {
@@ -1064,10 +1143,7 @@ fn render_templates_json(
                 ("text", expand_string(&row.text)),
                 ("source", expand_string(&row.source)),
                 ("span", expand_span(row.span, location)),
-                (
-                    "origin",
-                    expand_string("@loop (closed comptime source)"),
-                ),
+                ("origin", expand_string("@loop (closed comptime source)")),
             ])
         })
         .collect()
@@ -1148,10 +1224,7 @@ fn callable_parameter_json(parameter: &jet_semindex::CallableParameterFact) -> E
 
 fn callable_view_json(view: &jet_semindex::ViewProvenanceFact) -> ExpandValue {
     expand_object(vec![
-        (
-            "output_path",
-            expand_string_list(&view.output_path),
-        ),
+        ("output_path", expand_string_list(&view.output_path)),
         (
             "sources",
             ExpandValue::Array(

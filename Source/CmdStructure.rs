@@ -8,8 +8,8 @@ use std::process::exit;
 use jet::Sema::GateLedger::{GateKind, GateLedger};
 use jet_foundation::Names::StructureFact;
 use jet_foundation::Registry;
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 
 pub(crate) fn run_structure(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
     let Some(path) = entry_file(args) else {
@@ -191,7 +191,12 @@ fn render_json(facts: &[StructureFact], ledger: &GateLedger) {
     );
     println!(
         "{}",
-        render_status_json("ok", true, "inspect.structure", &format!(",\"structure\":{payload}"))
+        render_status_json(
+            "ok",
+            true,
+            "inspect.structure",
+            &format!(",\"structure\":{payload}")
+        )
     );
 }
 

@@ -15,8 +15,10 @@ use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
 use crate::{ProviderFactValue, ProviderFacts};
+use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
+use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots};
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1124,6 +1126,10 @@ pub enum ProviderError {
     Channel(String),
     /// E1276: `--offline` forbids a network fetch or metadata refresh.
     Offline(String),
+    /// E1348/E1349/E1276: signed nixpkgs index resolution failed.
+    NixIndex(NixIndexError),
+    /// E1350: standard Nix binary-cache closure admission failed.
+    NixCache(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1148,6 +1154,12 @@ impl ProviderError {
             ProviderError::LuaRocks(_) => None,
             ProviderError::Registry(_, _) => None,
             ProviderError::Ingest(_) => Some("E1315"),
+            ProviderError::NixIndex(error) => match error {
+                NixIndexError::NotIndexed { .. } => Some("E1349"),
+                NixIndexError::Offline(_) => Some("E1276"),
+                NixIndexError::Invalid(_) | NixIndexError::Transport(_) => Some("E1348"),
+            },
+            ProviderError::NixCache(_) => Some("E1350"),
             _ => None,
         }
     }
@@ -1165,6 +1177,12 @@ pub struct Ctx<'a> {
     /// `None` for callers with no project context (JetOS realize, tests) — a Nix
     /// realize then records no lock and gets no offline reuse.
     pub project_dir: Option<&'a Path>,
+    /// Signed nixpkgs index client. `None` keeps non-Nix and fixture callers
+    /// independent from the production index transport.
+    pub nix_index: Option<&'a NixIndexClient<'a>>,
+    /// Roots used by the native cache admission seam. This is separate from
+    /// `store_dir` because reproducibility probes use private Hangars.
+    pub nix_roots: Option<&'a Roots>,
 }
 
 /// D-JPK-OFFLINE2=B: the stable recipe id for a Nix-provider realization. Hashed
@@ -1208,6 +1226,95 @@ fn nix_package_name(package: &str) -> &str {
     package
         .split_once("#version=")
         .map_or(package, |(name, _)| name)
+}
+
+pub(crate) fn host_nix_system() -> Option<&'static str> {
+    match (std::env::consts::ARCH, std::env::consts::OS) {
+        ("x86_64", "linux") => Some("x86_64-linux"),
+        ("aarch64", "linux") => Some("aarch64-linux"),
+        ("x86_64", "macos") => Some("x86_64-darwin"),
+        ("aarch64", "macos") => Some("aarch64-darwin"),
+        _ => None,
+    }
+}
+
+fn locked_nix_index_key_for_project(
+    spec: &RefSpec,
+    project_dir: Option<&Path>,
+    host_system: &str,
+) -> Result<IndexKey, ProviderError> {
+    let source_name = match &spec.source {
+        Source::Named(name) => name.as_str(),
+        Source::Nixpkgs => "nixpkgs",
+        _ => {
+            return Err(ProviderError::Unsupported(format!(
+                "Nix index lookup does not support `{}` as a Nix source",
+                spec.source.label()
+            )))
+        }
+    };
+    let project = project_dir.ok_or_else(|| {
+        ProviderError::Channel(format!(
+            "Nix source `{source_name}` has no project lock containing an exact channel pin"
+        ))
+    })?;
+    let locked = super::Lock::locked_source_channel(project, source_name).ok_or_else(|| {
+        ProviderError::Channel(format!(
+            "Nix source `{source_name}` has no exact lock entry; run `jetpack update` first"
+        ))
+    })?;
+    let prefix = "github:NixOS/nixpkgs#";
+    let revision = locked.exact.strip_prefix(prefix).ok_or_else(|| {
+        ProviderError::Unsupported(format!(
+            "Nix source `{source_name}` uses unsupported exact input `{}`; the signed index accepts only github:NixOS/nixpkgs#<revision>",
+            locked.exact
+        ))
+    })?;
+    if revision.len() != 40
+        || !revision
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(ProviderError::Channel(format!(
+            "Nix source `{source_name}` has malformed exact revision `{revision}`"
+        )));
+    }
+    if !matches!(locked.channel.as_str(), "nixpkgs-unstable" | "nixos-unstable") {
+        return Err(ProviderError::Unsupported(format!(
+            "Nix channel `{}` is not covered by the signed nixpkgs index",
+            locked.channel
+        )));
+    }
+    if host_system.is_empty() {
+        return Err(ProviderError::Unsupported(
+            "the host system is not supported by the signed nixpkgs index".into(),
+        ));
+    }
+    Ok(IndexKey {
+        channel: locked.channel,
+        revision: revision.to_string(),
+        system: host_system.to_string(),
+        attrpath: vec![nix_package_name(&spec.package).to_string()],
+    })
+}
+
+pub(crate) fn locked_nix_index_key(
+    spec: &RefSpec,
+    _table: &SourceTable,
+    ctx: &Ctx,
+    host_system: &str,
+) -> Result<IndexKey, ProviderError> {
+    locked_nix_index_key_for_project(spec, ctx.project_dir, host_system)
+}
+
+fn has_locked_nix_index_key(
+    spec: &RefSpec,
+    project_dir: Option<&Path>,
+    host_system: Option<&str>,
+) -> bool {
+    host_system
+        .and_then(|system| locked_nix_index_key_for_project(spec, project_dir, system).ok())
+        .is_some()
 }
 
 /// The fixture filename for a ref, e.g. `nixpkgs-fastfetch.json`.
@@ -1271,58 +1378,251 @@ impl Provider for NixProvider {
         table: &SourceTable,
         ctx: &Ctx,
     ) -> Result<Realized, ProviderError> {
-        let stdout = match ctx.fixtures {
-            Some(dir) => {
-                let path = dir.join(fixture_name(spec));
-                std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?
-            }
-            None if ctx.offline => {
-                return Err(ProviderError::Offline(format!(
+        if let Some(dir) = ctx.fixtures {
+            let path = dir.join(fixture_name(spec));
+            let stdout = std::fs::read_to_string(&path)
+                .map_err(|_| ProviderError::FixtureMissing(path))?;
+            let mut realized = parse_realization(spec, &stdout)?;
+            realized
+                .producer
+                .facts
+                .insert(NIX_NATIVE_FORMAT.to_string(), "json".to_string());
+            realized
+                .producer
+                .facts
+                .insert(NIX_NATIVE_DOCUMENT.to_string(), stdout);
+            return finalize_nix_realization(spec, table, ctx, realized);
+        }
+
+        let index = ctx.nix_index.ok_or_else(|| {
+            if ctx.offline {
+                ProviderError::Offline(format!(
                     "`{}` is not in the hangar and --offline forbids fetching provider output",
                     spec.raw
-                )))
-            }
-            None => {
-                return Err(ProviderError::Unsupported(format!(
-                    "native Nix package realization needs a pinned compatibility output for `{}`; Jetpack does not invoke an installed Nix executable",
+                ))
+            } else {
+                ProviderError::Unsupported(format!(
+                    "native Nix package realization needs a locked signed-index record for `{}`; Jetpack does not invoke an installed Nix executable",
                     spec.raw
-                )))
+                ))
             }
-        };
-        let mut realized = parse_realization(spec, &stdout)?;
-        realized
-            .producer
-            .facts
-            .insert(NIX_NATIVE_FORMAT.to_string(), "json".to_string());
-        realized
-            .producer
-            .facts
-            .insert(NIX_NATIVE_DOCUMENT.to_string(), stdout.clone());
-        let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
-        realized.cache_identity = identity.cache_identity.clone();
-        let previous = realized.producer;
-        let prepared_facts = prepared_nix_facts(&identity);
-        let mut facts = previous.facts;
-        facts.extend(prepared_facts.clone());
-        let mut plan_facts = previous.plan.facts().clone();
-        plan_facts.extend(prepared_facts);
-        let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
-            .map_err(ProviderError::BadOutput)?;
-        realized.producer = super::Store::ProducerRecord::new(
-            previous.provider,
-            previous.immutable_source,
-            previous.source_digest,
-            plan,
-            previous.toolchain_facts,
-            format!(
-                "policy={}\nplatform={}",
-                realized.cache_identity.policy_fingerprint, realized.cache_identity.platform
-            ),
-            facts,
-        )
-        .map_err(ProviderError::BadOutput)?;
-        Ok(realized)
+        })?;
+        let host_system = host_nix_system().ok_or_else(|| {
+            ProviderError::Unsupported(
+                "the host system is not supported by the signed nixpkgs index".into(),
+            )
+        })?;
+        let key = locked_nix_index_key(spec, table, ctx, host_system)?;
+        let verified = index.resolve(&key).map_err(ProviderError::NixIndex)?;
+        let roots = ctx.nix_roots.ok_or_else(|| {
+            ProviderError::BadOutput(
+                "index-backed Nix realization has no Hangar roots for closure admission".into(),
+            )
+        })?;
+        let requests = verified
+            .record
+            .outputs
+            .iter()
+            .map(|(name, store_path)| NixOutputRequest {
+                name: name.clone(),
+                store_path: store_path.clone(),
+            })
+            .collect::<Vec<_>>();
+        let admitted = admit_nix_closure(roots, &requests, ctx.offline)
+            .map_err(|error| ProviderError::NixCache(error.to_string()))?;
+        let realized = realization_from_index(spec, &key, verified, admitted)?;
+        finalize_nix_realization(spec, table, ctx, realized)
     }
+}
+
+fn finalize_nix_realization(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+    mut realized: Realized,
+) -> Result<Realized, ProviderError> {
+    let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
+    realized.cache_identity = identity.cache_identity.clone();
+    let previous = realized.producer;
+    let prepared_facts = prepared_nix_facts(&identity);
+    let mut facts = previous.facts;
+    facts.extend(prepared_facts.clone());
+    let mut plan_facts = previous.plan.facts().clone();
+    plan_facts.extend(prepared_facts);
+    let plan = crate::Comptime::Build::BuildPlanReplay::from_facts(plan_facts)
+        .map_err(ProviderError::BadOutput)?;
+    realized.producer = super::Store::ProducerRecord::new(
+        previous.provider,
+        previous.immutable_source,
+        previous.source_digest,
+        plan,
+        previous.toolchain_facts,
+        format!(
+            "policy={}\nplatform={}",
+            realized.cache_identity.policy_fingerprint, realized.cache_identity.platform
+        ),
+        facts,
+    )
+    .map_err(ProviderError::BadOutput)?;
+    Ok(realized)
+}
+
+fn realization_from_index(
+    spec: &RefSpec,
+    key: &IndexKey,
+    verified: crate::NixIndex::VerifiedIndexRecord,
+    admitted: AdmittedNixClosure,
+) -> Result<Realized, ProviderError> {
+    if verified.record.attrpath != key.attrpath {
+        return Err(ProviderError::BadOutput(
+            "signed nixpkgs record attrpath disagrees with the requested key".into(),
+        ));
+    }
+    let expected_names = verified.record.outputs.keys().collect::<BTreeSet<_>>();
+    let admitted_names = admitted.outputs.keys().collect::<BTreeSet<_>>();
+    if expected_names != admitted_names {
+        return Err(ProviderError::BadOutput(
+            "Nix cache admission returned a different named-output set than the signed index"
+                .into(),
+        ));
+    }
+
+    let mut named_outputs = BTreeMap::new();
+    let mut facts = BTreeMap::from([
+        ("nix.drv_path".into(), verified.record.drv_path.clone()),
+        ("nix.reference".into(), spec.raw.clone()),
+        ("build.sandbox".into(), "non-executing".into()),
+        (
+            "build.sandbox_policy".into(),
+            "trusted substitution (signed index + Nix cache)".into(),
+        ),
+        (NIX_NATIVE_FORMAT.into(), "jet-nixpkgs-index-v1".into()),
+        (
+            NIX_NATIVE_DOCUMENT.into(),
+            verified.record.canonical_json(),
+        ),
+        (
+            "nix.index.proof.v1".into(),
+            verified.proof.canonical_json(),
+        ),
+        (
+            "nix.index.record.sha256".into(),
+            verified.proof.record_sha256.clone(),
+        ),
+        (
+            "nix.index.target.sha256".into(),
+            verified.proof.index_sha256.clone(),
+        ),
+        (
+            "nix.index.manifest.sha256".into(),
+            verified.proof.manifest_sha256.clone(),
+        ),
+        (
+            "nix.cache.closure.receipt.sha256".into(),
+            admitted.closure_receipt_sha256.clone(),
+        ),
+    ]);
+    let mut replay_facts = BTreeMap::from([
+        ("nix.drv_path".into(), verified.record.drv_path.clone()),
+        ("nix.reference".into(), spec.raw.clone()),
+        ("build.sandbox".into(), "non-executing".into()),
+        (
+            "build.sandbox_policy".into(),
+            "trusted substitution (signed index + Nix cache)".into(),
+        ),
+    ]);
+    for (name, store_path) in &verified.record.outputs {
+        let object = admitted.outputs.get(name).ok_or_else(|| {
+            ProviderError::BadOutput(format!(
+                "Nix cache admission omitted indexed output `{name}`"
+            ))
+        })?;
+        if object.store_path != *store_path {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache output `{name}` disagrees with the signed index: `{}` vs `{store_path}`",
+                object.store_path
+            )));
+        }
+        let hangar_path = object.hangar_path.to_string_lossy().into_owned();
+        if hangar_path.trim().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache output `{name}` has no Hangar path"
+            )));
+        }
+        named_outputs.insert(name.clone(), hangar_path);
+        facts.insert(format!("nix.output.{name}"), store_path.clone());
+        facts.insert(
+            format!("nix.cache.output.{name}.proof.sha256"),
+            object.upstream_proof_sha256.clone(),
+        );
+        replay_facts.insert(format!("nix.output.{name}"), store_path.clone());
+    }
+    let primary_name = if named_outputs.contains_key("out") {
+        "out"
+    } else {
+        "bin"
+    };
+    let primary = named_outputs
+        .get(primary_name)
+        .cloned()
+        .ok_or_else(|| ProviderError::BadOutput("indexed Nix record has no primary output".into()))?;
+    let bin_root = named_outputs.get("bin").unwrap_or(&primary);
+    let bin = Path::new(bin_root)
+        .join("bin")
+        .to_string_lossy()
+        .into_owned();
+    let name = nix_package_name(&spec.package).to_string();
+    if let Some((_, expected)) = spec.package.split_once("#version=") {
+        if verified.record.version != expected {
+            return Err(ProviderError::BuildFailed(format!(
+                "Nix package `{name}` realized as version `{}`, expected `{expected}`",
+                verified.record.version
+            )));
+        }
+    }
+    let envelope = super::Envelope::Envelope::for_output(&primary, &spec.raw, "nix");
+    let provisional_identity = super::Store::CacheIdentity {
+        source_fingerprint: envelope.output_hash.clone(),
+        recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+        policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(false),
+        platform: super::Envelope::host_platform(),
+    };
+    let derivation_digest = SHA256::sha256_hex(verified.record.drv_path.as_bytes());
+    let producer = producer_record(
+        "nix",
+        &verified.record.drv_path,
+        &derivation_digest,
+        replay_facts,
+        &format!("nix-derivation:{}", verified.record.drv_path),
+        &provisional_identity,
+        facts,
+    )?;
+    let mut references = admitted
+        .outputs
+        .values()
+        .flat_map(|object| object.direct_reference_digests.iter().cloned())
+        .collect::<Vec<_>>();
+    references.sort();
+    references.dedup();
+    if references.iter().any(|digest| digest.is_empty()) {
+        return Err(ProviderError::BadOutput(
+            "Nix cache admission returned an empty closure reference digest".into(),
+        ));
+    }
+    Ok(Realized {
+        version: verified.record.version,
+        name,
+        reference: spec.raw.clone(),
+        out: primary,
+        bin,
+        rlib: String::new(),
+        envelope,
+        cache_identity: super::Store::CacheIdentity::default(),
+        source_state: SourceState::Substituted,
+        named_outputs,
+        references,
+        producer,
+    })
 }
 
 /// The first-party Jet package provider (R2/U10). Realizes a Jet package with
@@ -2021,15 +2321,19 @@ pub fn uses_nix_provider(
 
 /// U23 / D-JPK-NIXSTORE1=D: package refs that resolve through the Nix
 /// compatibility provider need an explicit compatibility output unless a
-/// fixture is standing in for that provider. This fact is computed before
-/// provider dispatch, so no-Nix machines get one package-focused diagnostic.
+/// locked nixpkgs ref is representable by the signed index. This fact is
+/// computed before provider dispatch, so genuine v1 holes get one package-
+/// focused diagnostic without probing Nix.
 pub fn needs_nix_bridge(
     spec: &RefSpec,
     table: &SourceTable,
     offline: bool,
     cache_dir: &Path,
+    project_dir: Option<&Path>,
 ) -> Option<NixBridgeNeed> {
-    if uses_nix_provider(spec, table, offline, cache_dir) {
+    if uses_nix_provider(spec, table, offline, cache_dir)
+        && !has_locked_nix_index_key(spec, project_dir, host_nix_system())
+    {
         Some(NixBridgeNeed {
             reference: spec.raw.clone(),
             package: spec.short_name().to_string(),
@@ -2599,6 +2903,7 @@ fn nix_store_version(out: &str, name: &str) -> String {
 mod tests {
     use super::super::RefSpec::{classify, classify_in};
     use super::*;
+    use crate::Store::AdmittedNixObject;
 
     fn empty() -> SourceTable {
         SourceTable::empty()
@@ -2642,6 +2947,132 @@ mod tests {
         .unwrap();
         let with_receipt = project_lock_digest(Some(&root)).unwrap();
         assert_eq!(without_receipt, with_receipt);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn locked_nix_index_key_uses_exact_channel_and_literal_dot_attr() {
+        let project = unique_dir("locked-nix-index-key");
+        let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
+        std::fs::create_dir_all(&managed).unwrap();
+        let revision = "c8f90650c15282fa8656a041bfbbd2403997a9a7";
+        std::fs::write(
+            managed.join("lock"),
+            format!(
+                "version = 1\n\n[[source_channel]]\nname = \"stable\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{revision}\"\n\n[root]\ndependencies = []\n"
+            ),
+        )
+        .unwrap();
+        let table = SourceTable::from_decls([(
+            "stable".to_string(),
+            format!("github:NixOS/nixpkgs#{revision}"),
+            ProviderKind::Nix,
+        )]);
+        let spec = classify_in("ripgrep.foo@stable", &table).unwrap();
+        let store = project.join("hangar");
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+            project_dir: Some(&project),
+            nix_index: None,
+            nix_roots: None,
+        };
+        let key = locked_nix_index_key(&spec, &table, &ctx, "x86_64-linux").unwrap();
+        assert_eq!(key.channel, "nixpkgs-unstable");
+        assert_eq!(key.revision, revision);
+        assert_eq!(key.system, "x86_64-linux");
+        assert_eq!(key.attrpath, vec!["ripgrep.foo"]);
+        std::fs::remove_dir_all(project).ok();
+    }
+
+    #[test]
+    fn indexed_realization_records_union_and_both_provenance_families() {
+        use crate::NixIndex::{IndexProof, IndexRecord, VerifiedIndexRecord};
+
+        let root = unique_dir("indexed-realization-provenance");
+        let out_path = root.join("objects/out");
+        let bin_path = root.join("objects/bin");
+        std::fs::create_dir_all(&out_path).unwrap();
+        std::fs::create_dir_all(&bin_path).unwrap();
+        let out_store = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0";
+        let bin_store = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-15.2.0-bin";
+        let leaf = "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let bin_leaf = "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        let record = IndexRecord {
+            attrpath: vec!["ripgrep".into()],
+            version: "15.2.0".into(),
+            drv_path: "/nix/store/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-ripgrep.drv".into(),
+            outputs: BTreeMap::from([
+                ("out".into(), out_store.into()),
+                ("bin".into(), bin_store.into()),
+            ]),
+        };
+        let proof = IndexProof {
+            schema: 1,
+            channel: "nixpkgs-unstable".into(),
+            revision: "c8f90650c15282fa8656a041bfbbd2403997a9a7".into(),
+            system: "x86_64-linux".into(),
+            attrpath: vec!["ripgrep".into()],
+            manifest_generation: 7,
+            manifest_sha256: "1".repeat(64),
+            index_sha256: "2".repeat(64),
+            record_sha256: "3".repeat(64),
+            jet_key_id: "test-key".into(),
+            jet_signature: "signature".into(),
+        };
+        let admitted = AdmittedNixClosure {
+            outputs: BTreeMap::from([
+                (
+                    "out".into(),
+                    AdmittedNixObject {
+                        store_path: out_store.into(),
+                        hangar_path: out_path,
+                        hangar_digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                        direct_reference_digests: vec![leaf.into()],
+                        upstream_proof_sha256: "4".repeat(64),
+                    },
+                ),
+                (
+                    "bin".into(),
+                    AdmittedNixObject {
+                        store_path: bin_store.into(),
+                        hangar_path: bin_path,
+                        hangar_digest: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                        direct_reference_digests: vec![bin_leaf.into(), leaf.into()],
+                        upstream_proof_sha256: "5".repeat(64),
+                    },
+                ),
+            ]),
+            objects: BTreeMap::new(),
+            closure_receipt_sha256: "6".repeat(64),
+        };
+        let spec = classify("ripgrep@nixpkgs").unwrap();
+        let realized = realization_from_index(
+            &spec,
+            &IndexKey {
+                channel: "nixpkgs-unstable".into(),
+                revision: "c8f90650c15282fa8656a041bfbbd2403997a9a7".into(),
+                system: "x86_64-linux".into(),
+                attrpath: vec!["ripgrep".into()],
+            },
+            VerifiedIndexRecord { record, proof },
+            admitted,
+        )
+        .unwrap();
+
+        assert_eq!(realized.source_state, SourceState::Substituted);
+        assert_eq!(
+            realized.references,
+            vec![leaf.to_string(), bin_leaf.to_string()]
+        );
+        assert_eq!(realized.named_outputs.len(), 2);
+        let facts = realized.producer.facts;
+        assert!(facts.contains_key("nix.index.proof.v1"));
+        assert_eq!(facts["nix.index.manifest.sha256"], "1".repeat(64));
+        assert_eq!(facts["nix.cache.output.out.proof.sha256"], "4".repeat(64));
+        assert_eq!(facts["nix.cache.output.bin.proof.sha256"], "5".repeat(64));
+        assert_eq!(facts["nix.cache.closure.receipt.sha256"], "6".repeat(64));
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -2718,6 +3149,8 @@ mod tests {
             store_dir: Path::new("."),
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         for (raw, kind, expected_ref) in [
             (
@@ -2785,6 +3218,8 @@ mod tests {
             store_dir: &store,
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let old = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &old_table, &ctx);
         let new = nix_cache_identity("sha256:output", "linux-x86_64", &spec, &new_table, &ctx);
@@ -3013,6 +3448,8 @@ mod tests {
             store_dir: &dir,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         match realize(&spec, &empty(), &ctx) {
             Err(ProviderError::FixtureMissing(_)) => {}
@@ -3043,6 +3480,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         // Dispatch must select the core provider, and it must materialize the
         // tree into the store with a real bin dir — no nix involved.
@@ -3106,6 +3545,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
 
         let exe = realize(&classify_in("hello@mine", &table).unwrap(), &table, &ctx).unwrap();
@@ -3187,6 +3628,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
 
         let r = realize(&spec, &table, &ctx).unwrap();
@@ -3352,6 +3795,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -3400,6 +3845,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -3468,6 +3915,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         realize(&spec, &table, &ctx).unwrap();
 
@@ -3525,6 +3974,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         match realize(&spec, &table, &ctx) {
             Err(e) => assert_eq!(e.code(), Some("E1233"), "expected E1233, got {e:?}"),
@@ -3575,6 +4026,8 @@ mod tests {
             store_dir: &store,
             offline: true,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let realized = realize(&spec, &table, &ctx).unwrap();
         let output = Path::new(&realized.out);
@@ -3627,6 +4080,8 @@ mod tests {
             store_dir: &store,
             offline: false,
             project_dir: None,
+            nix_index: None,
+            nix_roots: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         // The realized output carries a complete envelope.

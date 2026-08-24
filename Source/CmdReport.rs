@@ -143,7 +143,10 @@ fn validate_bundle(bundle: &Path, report: &str) -> Result<(), String> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("could not inspect `{}` ({error})", bundle.display()))?;
     if entries.len() != 2 {
-        return Err(format!("existing report `{}` was changed", bundle.display()));
+        return Err(format!(
+            "existing report `{}` was changed",
+            bundle.display()
+        ));
     }
     for (name, expected) in [("README.txt", README), ("report.txt", report)] {
         let path = bundle.join(name);
@@ -165,9 +168,8 @@ fn validate_bundle(bundle: &Path, report: &str) -> Result<(), String> {
 
 fn create_bundle() -> Result<PathBuf, String> {
     let report = report_text();
-    let identity = jet::SHA256::sha256_hex(
-        format!("README.txt\0{README}\0report.txt\0{report}").as_bytes(),
-    );
+    let identity =
+        jet::SHA256::sha256_hex(format!("README.txt\0{README}\0report.txt\0{report}").as_bytes());
     let jet_dir = PathBuf::from(".jet");
     ensure_directory(&jet_dir)?;
     let reports = jet_dir.join("reports");
@@ -180,7 +182,10 @@ fn create_bundle() -> Result<PathBuf, String> {
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(format!("could not inspect `{}` ({error})", bundle.display()));
+            return Err(format!(
+                "could not inspect `{}` ({error})",
+                bundle.display()
+            ));
         }
     }
 
@@ -218,14 +223,20 @@ fn create_bundle() -> Result<PathBuf, String> {
         }
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
-            return Err(format!("could not inspect `{}` ({error})", bundle.display()));
+            return Err(format!(
+                "could not inspect `{}` ({error})",
+                bundle.display()
+            ));
         }
     }
     Ok(bundle)
 }
 
 pub(crate) fn run_report(args: &[String]) -> i32 {
-    if args.iter().any(|arg| arg == "--send" || arg.starts_with("--send=")) {
+    if args
+        .iter()
+        .any(|arg| arg == "--send" || arg.starts_with("--send="))
+    {
         crate::cli_error!(@full "E2104", "`jet report --send` is not available", "Jet never uploads report bundles", "run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
         return jet::ExitCodes::USAGE;
     }

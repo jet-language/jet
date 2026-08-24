@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
+use jet::Diagnostics::ReportPath;
 use jet::ExitCodes;
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 use jet_semindex::{
     open, EffectFact, SemIndexError, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SCHEMA_VERSION,
@@ -38,15 +39,22 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
             }
         }
         Err(SemIndexError::Load(diags)) => {
-            for d in &diags {
-                eprintln!(
+            if json {
+                print!(
                     "{}",
-                    jet::render_diagnostics(
-                        &abs.display().to_string(),
-                        "",
-                        std::slice::from_ref(d)
-                    )
+                    jet::render_all_json(&ReportPath::from_path(&abs), "", &diags)
                 );
+            } else {
+                for d in &diags {
+                    eprintln!(
+                        "{}",
+                        jet::render_diagnostics(
+                            &abs.display().to_string(),
+                            "",
+                            std::slice::from_ref(d)
+                        )
+                    );
+                }
             }
             exit(ExitCodes::USER_ERROR);
         }
@@ -625,7 +633,11 @@ fn render_find(mode: &FindMode, query: &str, matches: &[FindMatch], json: bool) 
                 "ok",
                 true,
                 "find",
-                &format!(",\"query\":\"{}\",\"matches\":[{}]", json_escape(query), rows),
+                &format!(
+                    ",\"query\":\"{}\",\"matches\":[{}]",
+                    json_escape(query),
+                    rows
+                ),
             )
         );
         return;

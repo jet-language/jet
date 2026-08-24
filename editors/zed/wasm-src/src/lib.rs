@@ -189,7 +189,14 @@ fn map_source(worktree: &Worktree, map_path: &str) -> Result<String> {
     if Path::new(source).is_absolute() {
         Ok(source.to_string())
     } else {
-        Ok(Path::new(&root).join(source).to_string_lossy().into_owned())
+        let map_dir = Path::new(map_path)
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        Ok(Path::new(&root)
+            .join(map_dir)
+            .join(source)
+            .to_string_lossy()
+            .into_owned())
     }
 }
 

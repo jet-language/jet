@@ -132,7 +132,7 @@ pub(crate) fn parse_replay_flag(arg: &str, next: Option<&str>) -> Option<Result<
         return match next {
             Some(path) if !path.starts_with('-') => Some(Ok(path.to_string())),
             _ => Some(Err(
-                "`--replay` needs a `.jetproof-replay` artifact path".to_string(),
+                "`--replay` needs a `.jetproof-replay` artifact path".to_string()
             )),
         };
     }
@@ -223,7 +223,10 @@ pub(crate) fn begin_named_capture(
         Ok(authority) => authority,
         Err(status) => return Err(status),
     };
-    Ok(NamedCapture { identity, authority })
+    Ok(NamedCapture {
+        identity,
+        authority,
+    })
 }
 
 pub(crate) fn finish_named_capture(
@@ -231,7 +234,13 @@ pub(crate) fn finish_named_capture(
     exit_code: i32,
     json_mode: bool,
 ) -> Result<(), i32> {
-    finalize_safe_capture(&capture.identity, &capture.authority, exit_code, json_mode, None)
+    finalize_safe_capture(
+        &capture.identity,
+        &capture.authority,
+        exit_code,
+        json_mode,
+        None,
+    )
 }
 
 pub(crate) fn finish_named_capture_with_run(
@@ -298,7 +307,10 @@ pub(crate) fn open_named_replay(
                     "replay capture exceeded its artifact limit",
                     "recapture a bounded artifact with a recorded Time authority",
                 ),
-                _ => ("replay artifact is corrupt or unavailable", "recapture the target and retry"),
+                _ => (
+                    "replay artifact is corrupt or unavailable",
+                    "recapture the target and retry",
+                ),
             };
             emit_diag(code, what, &why, fix, json_mode);
             return Err(ExitCodes::USER_ERROR);
@@ -350,7 +362,8 @@ fn identity_for_file(file: &str) -> Result<ReplayIdentity, String> {
 
 fn project_relative_entry(file: &str) -> Result<String, String> {
     let path = Path::new(file);
-    let cwd = std::env::current_dir().map_err(|error| format!("could not resolve the project root: {error}"))?;
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("could not resolve the project root: {error}"))?;
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -360,7 +373,12 @@ fn project_relative_entry(file: &str) -> Result<String, String> {
         .strip_prefix(&cwd)
         .map_err(|_| "entry identity must be inside the current project".to_string())?;
     let value = relative.to_string_lossy().replace('\\', "/");
-    if value.is_empty() || value.starts_with('/') || value.split('/').any(|part| part.is_empty() || part == "." || part == "..") {
+    if value.is_empty()
+        || value.starts_with('/')
+        || value
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
         return Err("entry identity must be a clean project-relative path".to_string());
     }
     Ok(value)
@@ -382,7 +400,9 @@ pub(crate) fn prepare_safe_capture(
         return Err(ExitCodes::USER_ERROR);
     }
     if !json_mode {
-        eprintln!("capture preflight: safe Time only; normal producer will run under this authority");
+        eprintln!(
+            "capture preflight: safe Time only; normal producer will run under this authority"
+        );
     }
     let unix_ns = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => match u64::try_from(duration.as_nanos()) {
@@ -559,12 +579,13 @@ pub(crate) fn prepare_replay(
     identity: &ReplayIdentity,
     artifact_path: &str,
 ) -> Result<ReplayAuthority, (&'static str, String)> {
-    let path = validate_replay_path(artifact_path)
-        .map_err(|message| ("E3622", message))?;
-    ensure_read_parent(&path)
-        .map_err(|message| ("E3622", message))?;
+    let path = validate_replay_path(artifact_path).map_err(|message| ("E3622", message))?;
+    ensure_read_parent(&path).map_err(|message| ("E3622", message))?;
     let metadata = fs::symlink_metadata(&path).map_err(|error| {
-        ("E3622", format!("could not inspect `{artifact_path}`: {error}"))
+        (
+            "E3622",
+            format!("could not inspect `{artifact_path}`: {error}"),
+        )
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err((
@@ -578,8 +599,12 @@ pub(crate) fn prepare_replay(
             format!("replay artifact exceeds the {MAX_REPLAY_BYTES}-byte limit"),
         ));
     }
-    let bytes = fs::read(path)
-        .map_err(|error| ("E3622", format!("could not read `{artifact_path}`: {error}")))?;
+    let bytes = fs::read(path).map_err(|error| {
+        (
+            "E3622",
+            format!("could not read `{artifact_path}`: {error}"),
+        )
+    })?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_REPLAY_BYTES {
         return Err((
             "E3622",
@@ -587,14 +612,18 @@ pub(crate) fn prepare_replay(
         ));
     }
     let header = parse_and_verify(&bytes)?;
-    identity_matches(&header, identity)
-        .map_err(|field| ("E3621", format!("identity field `{field}` differs from the current target")))?;
+    identity_matches(&header, identity).map_err(|field| {
+        (
+            "E3621",
+            format!("identity field `{field}` differs from the current target"),
+        )
+    })?;
     let time_values = extract_time_ms(&bytes).map_err(|why| ("E3628", why))?;
     let recorded_run = extract_recorded_run(&bytes).map_err(|why| ("E3622", why))?;
-    let time_ms = time_values
-        .first()
-        .copied()
-        .ok_or(("E3628", "replay artifact contains no Time authority".to_string()))?;
+    let time_ms = time_values.first().copied().ok_or((
+        "E3628",
+        "replay artifact contains no Time authority".to_string(),
+    ))?;
     let expected_outcome = header
         .get("run_outcome")
         .cloned()
@@ -603,7 +632,10 @@ pub(crate) fn prepare_replay(
         .get("run_status")
         .and_then(|value| value.parse::<i32>().ok())
         .filter(|status| (0..=255).contains(status))
-        .ok_or(("E3622", "replay header has an invalid run status".to_string()))?;
+        .ok_or((
+            "E3622",
+            "replay header has an invalid run status".to_string(),
+        ))?;
     Ok(ReplayAuthority {
         time_ms,
         expected_outcome,
@@ -679,7 +711,10 @@ fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String
     {
         return Err("entry identity must be a project-relative path".into());
     }
-    if !matches!(identity.execution_adapter.as_str(), "dev-tir-v1" | "aot-native-v1") {
+    if !matches!(
+        identity.execution_adapter.as_str(),
+        "dev-tir-v1" | "aot-native-v1"
+    ) {
         return Err(format!(
             "unsupported execution adapter `{}`",
             identity.execution_adapter
@@ -730,7 +765,10 @@ fn validate_replay_path(path: &str) -> Result<PathBuf, String> {
     }
     let path = Path::new(path);
     if path.components().any(|component| {
-        matches!(component, Component::CurDir | Component::ParentDir | Component::Prefix(_))
+        matches!(
+            component,
+            Component::CurDir | Component::ParentDir | Component::Prefix(_)
+        )
     }) {
         return Err("replay artifact path contains an unsafe component".into());
     }
@@ -766,7 +804,10 @@ fn finalize_artifact(path: &Path, bytes: &[u8], json_mode: bool) -> Result<(), S
     ensure_safe_parent(path)?;
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if !metadata.file_type().is_file() {
-            return Err(format!("final replay path is not a regular file: {}", path.display()));
+            return Err(format!(
+                "final replay path is not a regular file: {}",
+                path.display()
+            ));
         }
         let existing = fs::read(path).map_err(|e| e.to_string())?;
         if existing == bytes {
@@ -827,14 +868,22 @@ fn ensure_safe_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut current = PathBuf::from(".");
     for component in parent.components() {
-        let Component::Normal(name) = component else { continue };
+        let Component::Normal(name) = component else {
+            continue;
+        };
         current.push(name);
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!("capture parent is a symlink: {}", current.display()));
+                return Err(format!(
+                    "capture parent is a symlink: {}",
+                    current.display()
+                ));
             }
             Ok(metadata) if !metadata.is_dir() => {
-                return Err(format!("capture parent is not a directory: {}", current.display()));
+                return Err(format!(
+                    "capture parent is not a directory: {}",
+                    current.display()
+                ));
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -868,13 +917,22 @@ fn ensure_read_parent(path: &Path) -> Result<(), String> {
             }
         }
         let metadata = fs::symlink_metadata(&current).map_err(|error| {
-            format!("could not inspect replay artifact parent `{}`: {error}", current.display())
+            format!(
+                "could not inspect replay artifact parent `{}`: {error}",
+                current.display()
+            )
         })?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("replay artifact parent is a symlink: {}", current.display()));
+            return Err(format!(
+                "replay artifact parent is a symlink: {}",
+                current.display()
+            ));
         }
         if !metadata.is_dir() {
-            return Err(format!("replay artifact parent is not a directory: {}", current.display()));
+            return Err(format!(
+                "replay artifact parent is not a directory: {}",
+                current.display()
+            ));
         }
     }
     Ok(())
@@ -890,10 +948,7 @@ fn build_safe_time_artifact_with_run(
     let salt = privacy_salt()?;
     let time_payload = canonical_json(&[
         ("call_id", Json::Int(0)),
-        (
-            "site_id",
-            Json::Str(identity.time_site_id.clone()),
-        ),
+        ("site_id", Json::Str(identity.time_site_id.clone())),
         (
             "unix_ns",
             Json::Obj(vec![
@@ -993,10 +1048,7 @@ fn header_json(
             "capture",
             Json::Obj(vec![
                 ("mode".into(), Json::Str("safe".into())),
-                (
-                    "roots".into(),
-                    Json::Arr(vec![Json::Str("Time".into())]),
-                ),
+                ("roots".into(), Json::Arr(vec![Json::Str("Time".into())])),
             ]),
         ),
         (
@@ -1033,15 +1085,15 @@ fn header_json(
                     "source_digest".into(),
                     Json::Str(identity.source_digest.clone()),
                 ),
-                ("time_site_id".into(), Json::Str(identity.time_site_id.clone())),
+                (
+                    "time_site_id".into(),
+                    Json::Str(identity.time_site_id.clone()),
+                ),
                 (
                     "target_triple".into(),
                     Json::Str(identity.target_triple.clone()),
                 ),
-                (
-                    "tir_hash".into(),
-                    Json::Str(identity.tir_hash.clone()),
-                ),
+                ("tir_hash".into(), Json::Str(identity.tir_hash.clone())),
                 ("tir_schema".into(), Json::Str(identity.tir_schema.clone())),
             ]),
         ),
@@ -1149,10 +1201,14 @@ fn parse_and_verify(
         return Err(("E3622", "truncated header".into()));
     }
     let header_bytes = &bytes[16..header_end];
-    let header_text = std::str::from_utf8(header_bytes)
-        .map_err(|_| ("E3622", "header is not UTF-8".into()))?;
+    let header_text =
+        std::str::from_utf8(header_bytes).map_err(|_| ("E3622", "header is not UTF-8".into()))?;
     let flat = flatten_identity_fields(header_text).map_err(|why| {
-        let code = if header_schema_error(&why) { "E3620" } else { "E3622" };
+        let code = if header_schema_error(&why) {
+            "E3620"
+        } else {
+            "E3622"
+        };
         (code, why)
     })?;
     let jend = bytes
@@ -1213,7 +1269,10 @@ fn parse_and_verify(
             return Err(("E3622", "truncated frame payload".into()));
         }
         if plen > 1024 * 1024 {
-            return Err(("E3622", "replay frame payload exceeds the 1 MiB limit".into()));
+            return Err((
+                "E3622",
+                "replay frame payload exceeds the 1 MiB limit".into(),
+            ));
         }
         if flags != 1
             || !matches!(kind, KIND_TIME_WALL | KIND_RUN_ACT)
@@ -1233,7 +1292,10 @@ fn parse_and_verify(
         frame_count += 1;
         expected_sequence += 1;
         payload_bytes = payload_bytes
-            .checked_add(u64::try_from(plen).map_err(|_| ("E3622", "replay payload length overflow".into()))?)
+            .checked_add(
+                u64::try_from(plen)
+                    .map_err(|_| ("E3622", "replay payload length overflow".into()))?,
+            )
             .ok_or(("E3622", "replay payload length overflow".into()))?;
         if payload_bytes > 256 * 1024 * 1024 {
             return Err(("E3622", "replay payload exceeds the 256 MiB limit".into()));
@@ -1276,13 +1338,15 @@ fn parse_and_verify(
     }
     let artifact_id = flat.get("artifact_id").map(String::as_str).unwrap_or("");
     if artifact_id.len() != 24 || !artifact_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(("E3622", "replay artifact_id is not 24 lowercase hex bytes".into()));
+        return Err((
+            "E3622",
+            "replay artifact_id is not 24 lowercase hex bytes".into(),
+        ));
     }
     if artifact_id.bytes().any(|byte| byte.is_ascii_uppercase()) {
         return Err(("E3622", "replay artifact_id must use lowercase hex".into()));
     }
-    let zero_header = zero_artifact_id_header(header_text)
-        .map_err(|why| ("E3622", why))?;
+    let zero_header = zero_artifact_id_header(header_text).map_err(|why| ("E3622", why))?;
     if zero_header.len() != header_bytes.len() {
         return Err(("E3622", "replay artifact_id field is malformed".into()));
     }
@@ -1409,7 +1473,8 @@ fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String>
         if kind == KIND_RUN_ACT {
             let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
                 .map_err(|_| "recorded act payload is not UTF-8".to_string())?;
-            run.acts.push(parse_recorded_act_payload(payload, sequence)?);
+            run.acts
+                .push(parse_recorded_act_payload(payload, sequence)?);
         }
         off = frame_end;
     }
@@ -1424,7 +1489,8 @@ fn parse_recorded_act_payload(
     payload: &str,
     sequence: u64,
 ) -> Result<jet::Debug::RecordedAct, String> {
-    let value = parse_json(payload).map_err(|_| "recorded act payload is not valid JSON".to_string())?;
+    let value =
+        parse_json(payload).map_err(|_| "recorded act payload is not valid JSON".to_string())?;
     if canonical_json_value(&value)? != payload {
         return Err("recorded act payload is not canonical JSON".into());
     }
@@ -1511,7 +1577,6 @@ fn parse_recorded_act_payload(
     })
 }
 
-
 fn time_ms_from_payload(payload: &str) -> Result<i64, String> {
     let value = parse_json(payload).map_err(|_| "Time payload is not valid JSON".to_string())?;
     let JSONValue::Object(root) = value else {
@@ -1550,7 +1615,8 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     if !matches!(root.get("call_id"), Some(JSONValue::Number(0))) {
         return Err("Time payload call_id is invalid".into());
     }
-    if !matches!(root.get("site_id"), Some(JSONValue::String(site)) if site.len() == 64 && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) && site.bytes().any(|byte| byte != b'0')) {
+    if !matches!(root.get("site_id"), Some(JSONValue::String(site)) if site.len() == 64 && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) && site.bytes().any(|byte| byte != b'0'))
+    {
         return Err("Time payload site_id is invalid".into());
     }
     let JSONValue::Object(unix_ns) = root
@@ -1576,8 +1642,7 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     else {
         return Err("Time payload unix_ns value is invalid".into());
     };
-    parse_canonical_u64(value)
-        .map_err(|_| "Time payload unix_ns value is invalid".to_string())?;
+    parse_canonical_u64(value).map_err(|_| "Time payload unix_ns value is invalid".to_string())?;
     Ok(())
 }
 
@@ -1718,13 +1783,12 @@ fn flatten_identity_fields(
         ],
     )?;
     let mut out = std::collections::BTreeMap::new();
-    let string_field = |object: &std::collections::BTreeMap<String, JSONValue>, key: &str| {
-        match object.get(key) {
+    let string_field =
+        |object: &std::collections::BTreeMap<String, JSONValue>, key: &str| match object.get(key) {
             Some(JSONValue::String(value)) => Ok(value.clone()),
             Some(_) => Err(format!("header field `{key}` must be a string")),
             None => Err(format!("header missing `{key}`")),
-        }
-    };
+        };
     for key in ["schema", "artifact_id"] {
         out.insert(key.to_string(), string_field(&root, key)?);
     }
@@ -1782,14 +1846,22 @@ fn flatten_identity_fields(
     ] {
         let _ = string_field(identity, key)?;
     }
-    for key in ["build_digest", "lock_digest", "source_digest", "time_site_id", "tir_hash"] {
+    for key in [
+        "build_digest",
+        "lock_digest",
+        "source_digest",
+        "time_site_id",
+        "tir_hash",
+    ] {
         let value = string_field(identity, key)?;
         if value.len() != 64
             || !value
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         {
-            return Err(format!("header identity `{key}` is not lowercase SHA-256 hex"));
+            return Err(format!(
+                "header identity `{key}` is not lowercase SHA-256 hex"
+            ));
         }
     }
     let entry = string_field(identity, "entry")?;
@@ -1810,14 +1882,21 @@ fn flatten_identity_fields(
     }
     let adapter = string_field(identity, "execution_adapter")?;
     if !matches!(adapter.as_str(), "dev-tir-v1" | "aot-native-v1") {
-        return Err(format!("header execution adapter `{adapter}` is unsupported"));
+        return Err(format!(
+            "header execution adapter `{adapter}` is unsupported"
+        ));
     }
     for key in ["abi", "core_abi", "profile", "target_triple", "tir_schema"] {
         if string_field(identity, key)?.is_empty() {
             return Err(format!("header identity field `{key}` is empty"));
         }
     }
-    for key in ["entry", "source_digest", "execution_adapter", "target_triple"] {
+    for key in [
+        "entry",
+        "source_digest",
+        "execution_adapter",
+        "target_triple",
+    ] {
         out.insert(key.to_string(), string_field(identity, key)?);
     }
     for key in [
@@ -1856,10 +1935,16 @@ fn flatten_identity_fields(
     if !matches!(capture.get("mode"), Some(JSONValue::String(mode)) if mode == "safe") {
         return Err("header capture mode is not safe".into());
     }
-    if !matches!(capture.get("roots"), Some(JSONValue::Array(roots)) if roots.len() == 1 && matches!(&roots[0], JSONValue::String(root) if root == "Time")) {
+    if !matches!(capture.get("roots"), Some(JSONValue::Array(roots)) if roots.len() == 1 && matches!(&roots[0], JSONValue::String(root) if root == "Time"))
+    {
         return Err("header capture roots are not exactly [Time]".into());
     }
-    require_object_keys(capture, "header capture", &["mode", "roots"], &["mode", "roots"])?;
+    require_object_keys(
+        capture,
+        "header capture",
+        &["mode", "roots"],
+        &["mode", "roots"],
+    )?;
     let JSONValue::Object(limits) = root
         .get("limits")
         .ok_or_else(|| "header missing limits object".to_string())?
@@ -1873,7 +1958,10 @@ fn flatten_identity_fields(
         &["frames", "payload_bytes"],
     )?;
     if !matches!(limits.get("frames"), Some(JSONValue::Number(100_000)))
-        || !matches!(limits.get("payload_bytes"), Some(JSONValue::Number(268_435_456)))
+        || !matches!(
+            limits.get("payload_bytes"),
+            Some(JSONValue::Number(268_435_456))
+        )
     {
         return Err("header replay limits are invalid".into());
     }
@@ -1883,7 +1971,12 @@ fn flatten_identity_fields(
     else {
         return Err("header run must be an object".into());
     };
-    require_object_keys(run, "header run", &["outcome", "status"], &["outcome", "status"])?;
+    require_object_keys(
+        run,
+        "header run",
+        &["outcome", "status"],
+        &["outcome", "status"],
+    )?;
     if !matches!(run.get("outcome"), Some(JSONValue::String(outcome)) if matches!(outcome.as_str(), "exit" | "panic"))
         || !matches!(run.get("status"), Some(JSONValue::Number(status)) if (0..=255).contains(status))
     {
@@ -1968,12 +2061,10 @@ fn identity_matches(
     header: &std::collections::BTreeMap<String, String>,
     identity: &ReplayIdentity,
 ) -> Result<(), String> {
-    let check = |key: &str, expected: &str| {
-        match header.get(key) {
-            Some(actual) if actual == expected => Ok(()),
-            Some(_) => Err(key.to_string()),
-            None => Err(key.to_string()),
-        }
+    let check = |key: &str, expected: &str| match header.get(key) {
+        Some(actual) if actual == expected => Ok(()),
+        Some(_) => Err(key.to_string()),
+        None => Err(key.to_string()),
     };
     for (key, expected) in [
         ("entry", identity.entry.as_str()),
@@ -2063,7 +2154,12 @@ fn clone_json(v: &Json) -> Json {
     match v {
         Json::Str(s) => Json::Str(s.clone()),
         Json::Int(n) => Json::Int(*n),
-        Json::Obj(fields) => Json::Obj(fields.iter().map(|(k, v)| (k.clone(), clone_json(v))).collect()),
+        Json::Obj(fields) => Json::Obj(
+            fields
+                .iter()
+                .map(|(k, v)| (k.clone(), clone_json(v)))
+                .collect(),
+        ),
         Json::Arr(items) => Json::Arr(items.iter().map(clone_json).collect()),
     }
 }
@@ -2087,8 +2183,10 @@ fn render_value(v: &Json) -> String {
         Json::Str(s) => json_str(s),
         Json::Int(n) => n.to_string(),
         Json::Obj(fields) => {
-            let mut sorted: Vec<(String, Json)> =
-                fields.iter().map(|(k, v)| (k.clone(), clone_json(v))).collect();
+            let mut sorted: Vec<(String, Json)> = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), clone_json(v)))
+                .collect();
             sorted.sort_by(|a, b| a.0.cmp(&b.0));
             render_obj(&sorted)
         }
@@ -2124,7 +2222,13 @@ fn json_str(value: &str) -> String {
 }
 
 pub(crate) fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
-    crate::emit_cli_report(code, what.to_string(), why.to_string(), fix.to_string(), json_mode);
+    crate::emit_cli_report(
+        code,
+        what.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        json_mode,
+    );
 }
 
 #[allow(dead_code)]
@@ -2140,7 +2244,8 @@ mod tests {
     fn identity() -> ReplayIdentity {
         ReplayIdentity {
             entry: "examples/prove.jet".into(),
-            source_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            source_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
             execution_adapter: "dev-tir-v1".into(),
             target_triple: "x86_64-unknown-linux-gnu".into(),
             abi: "gnu".into(),
@@ -2156,7 +2261,8 @@ mod tests {
 
     #[test]
     fn safe_time_artifact_round_trips_and_preserves_authority() {
-        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
+        let bytes =
+            build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         assert_eq!(header.get("schema").map(String::as_str), Some("jet.replay"));
         assert_eq!(header.get("run_outcome").map(String::as_str), Some("exit"));
@@ -2178,14 +2284,9 @@ mod tests {
                 }],
             }],
         };
-        let bytes = build_safe_time_artifact_with_run(
-            &identity(),
-            1_234_567_890,
-            "exit",
-            0,
-            Some(&run),
-        )
-        .unwrap();
+        let bytes =
+            build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, Some(&run))
+                .unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         assert!(header.get("schema").is_some());
         assert!(String::from_utf8_lossy(&bytes).contains("recorded_run"));
@@ -2196,24 +2297,40 @@ mod tests {
     #[test]
     fn time_integer_encoding_is_minimal_until_fixed_width_is_required() {
         assert_eq!(canonical_u64_string(0), "0");
-        assert_eq!(canonical_u64_string(MAX_EXACT_JSON_INTEGER), "9007199254740991");
-        assert_eq!(canonical_u64_string(MAX_EXACT_JSON_INTEGER + 1), "0020000000000000");
+        assert_eq!(
+            canonical_u64_string(MAX_EXACT_JSON_INTEGER),
+            "9007199254740991"
+        );
+        assert_eq!(
+            canonical_u64_string(MAX_EXACT_JSON_INTEGER + 1),
+            "0020000000000000"
+        );
         assert_eq!(parse_canonical_u64("0").unwrap(), 0);
-        assert_eq!(parse_canonical_u64("0020000000000000").unwrap(), MAX_EXACT_JSON_INTEGER + 1);
+        assert_eq!(
+            parse_canonical_u64("0020000000000000").unwrap(),
+            MAX_EXACT_JSON_INTEGER + 1
+        );
         assert!(parse_canonical_u64("0000000000000000").is_err());
         assert!(parse_canonical_u64("9007199254740992").is_err());
     }
 
     #[test]
     fn privacy_salt_requires_a_valid_thirty_two_byte_base64url_value() {
-        assert!(is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-        assert!(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!"));
-        assert!(!is_base64url_32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-"));
+        assert!(is_base64url_32(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ));
+        assert!(!is_base64url_32(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!"
+        ));
+        assert!(!is_base64url_32(
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-"
+        ));
     }
 
     #[test]
     fn safe_time_artifact_detects_payload_tampering() {
-        let mut bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
+        let mut bytes =
+            build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
         let payload = 16 + hlen + 15;
         bytes[payload] ^= 1;
@@ -2230,7 +2347,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
+        let bytes =
+            build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         fs::write(&path, bytes).unwrap();
         let mut different = identity();
         different.source_digest = "different-source".into();
@@ -2241,7 +2359,8 @@ mod tests {
 
     #[test]
     fn replay_rejects_identity_changes_beyond_source_digest() {
-        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
+        let bytes =
+            build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         let mut different = identity();
         different.core_abi = "2".into();
@@ -2252,11 +2371,16 @@ mod tests {
     #[test]
     fn replay_rejects_time_site_identity_changes() {
         let original = identity();
-        let bytes = build_safe_time_artifact_with_run(&original, 1_234_567_890, "exit", 0, None).unwrap();
+        let bytes =
+            build_safe_time_artifact_with_run(&original, 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         let mut different = original.clone();
-        different.time_site_id = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into();
-        assert_eq!(header.get("time_site_id").map(String::as_str), Some(original.time_site_id.as_str()));
+        different.time_site_id =
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into();
+        assert_eq!(
+            header.get("time_site_id").map(String::as_str),
+            Some(original.time_site_id.as_str())
+        );
         assert!(identity_matches(&header, &different).is_err());
     }
 

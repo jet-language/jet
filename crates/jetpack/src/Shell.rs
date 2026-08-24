@@ -174,31 +174,69 @@ struct NixProjection {
     keepers: Vec<std::fs::File>,
 }
 
+#[derive(Debug)]
+enum NixProjectionError {
+    Unsupported { reason: String },
+    InvalidClosure { reason: String },
+}
+
+impl NixProjectionError {
+    fn unsupported(reason: impl Into<String>) -> Self {
+        Self::Unsupported {
+            reason: reason.into(),
+        }
+    }
+
+    fn invalid(reason: impl Into<String>) -> Self {
+        Self::InvalidClosure {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for NixProjectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported { reason } | Self::InvalidClosure { reason } => {
+                formatter.write_str(reason)
+            }
+        }
+    }
+}
+
+impl From<std::io::Error> for NixProjectionError {
+    fn from(error: std::io::Error) -> Self {
+        Self::invalid(error.to_string())
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn nix_projection_command(
     env: &Env,
     program: &str,
     rest: &[String],
-) -> std::io::Result<Option<NixProjection>> {
-    let mut projections = Vec::new();
+) -> Result<Option<NixProjection>, NixProjectionError> {
+    let mut projections = std::collections::BTreeMap::new();
     for lease in &env.cache_leases {
         for (logical, source) in lease.nix_store_projection() {
-            if let Some((_, existing)) = projections.iter().find(|entry| {
-                let (seen, _) = &**entry;
-                seen == logical
-            }) {
+            if let Some(existing) = projections.get(logical) {
                 if existing != source {
-                    return Err(std::io::Error::other(format!(
+                    return Err(NixProjectionError::invalid(format!(
                         "conflicting `/nix/store` projection for `{logical}`"
                     )));
                 }
                 continue;
             }
-            projections.push((logical.clone(), source.clone()));
+            projections.insert(logical.clone(), source.clone());
         }
     }
     if projections.is_empty() {
         return Ok(None);
+    }
+    if !Path::new("/proc/self/fd").is_dir() {
+        return Err(NixProjectionError::unsupported(
+            "`/proc/self/fd` is unavailable for stable projection handles",
+        ));
     }
     let unshare = [
         "/run/current-system/sw/bin/unshare",
@@ -208,7 +246,10 @@ fn nix_projection_command(
     .into_iter()
     .map(PathBuf::from)
     .find(|path| path.is_file())
-    .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `unshare`"))?;
+    .ok_or_else(|| {
+        NixProjectionError::unsupported("rootless `/nix/store` projection needs `unshare`")
+    })?;
+    check_rootless_namespace(&unshare)?;
     let mount = [
         "/run/current-system/sw/bin/mount",
         "/usr/bin/mount",
@@ -217,12 +258,16 @@ fn nix_projection_command(
     .into_iter()
     .map(PathBuf::from)
     .find(|path| path.is_file())
-    .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `mount`"))?;
+    .ok_or_else(|| {
+        NixProjectionError::unsupported("rootless `/nix/store` projection needs `mount`")
+    })?;
     let shell = ["/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"]
         .into_iter()
         .map(PathBuf::from)
         .find(|path| path.is_file())
-        .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `sh`"))?;
+        .ok_or_else(|| {
+            NixProjectionError::unsupported("rootless `/nix/store` projection needs `sh`")
+        })?;
     let mkdir = [
         "/run/current-system/sw/bin/mkdir",
         "/usr/bin/mkdir",
@@ -231,10 +276,18 @@ fn nix_projection_command(
     .into_iter()
     .map(PathBuf::from)
     .find(|path| path.is_file())
-    .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `mkdir`"))?;
-    let (mount, mount_file, _) = inherited_tool_path(&mount, None)?;
-    let (mkdir, mkdir_file, mkdir_mode) = inherited_tool_path(&mkdir, Some("mkdir"))?;
-    let mut keepers = vec![mount_file, mkdir_file];
+    .ok_or_else(|| {
+        NixProjectionError::unsupported("rootless `/nix/store` projection needs `mkdir`")
+    })?;
+    let (unshare, unshare_file, _) = inherited_tool_path(&unshare, None)
+        .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
+    let (shell, shell_file, _) = inherited_tool_path(&shell, None)
+        .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
+    let (mount, mount_file, _) = inherited_tool_path(&mount, None)
+        .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
+    let (mkdir, mkdir_file, mkdir_mode) = inherited_tool_path(&mkdir, Some("mkdir"))
+        .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
+    let mut keepers = vec![unshare_file, shell_file, mount_file, mkdir_file];
     let binary = env
         .cache_leases
         .iter()
@@ -258,14 +311,14 @@ fn nix_projection_command(
     for (logical, source) in &projections {
         validate_projection_path(logical)?;
         if source.starts_with("/nix/store") {
-            return Err(std::io::Error::other(format!(
+            return Err(NixProjectionError::invalid(format!(
                 "Nix projection source `{}` is the host store",
                 source.display()
             )));
         }
-        let metadata = std::fs::symlink_metadata(source)?;
-        if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
-            return Err(std::io::Error::other(format!(
+        let metadata = std::fs::metadata(source)?;
+        if !metadata.is_dir() && !metadata.is_file() {
+            return Err(NixProjectionError::invalid(format!(
                 "canonical Nix projection source `{}` is not a regular node",
                 source.display()
             )));
@@ -288,6 +341,24 @@ make_dir() {
 make_dir -p /nix
 "$mount" -t tmpfs -o mode=0755 jetpack-nix-store /nix
 make_dir -p /nix/store
+has_mount() {
+    expected="$1"
+    while IFS=' ' read -r _ _ _ _ mountpoint rest; do
+        if [ "$mountpoint" = "$expected" ]; then
+            return 0
+        fi
+    done < /proc/self/mountinfo
+    return 1
+}
+nix_tmpfs=0
+while IFS=' ' read -r _ _ _ _ mountpoint rest; do
+    if [ "$mountpoint" = /nix ]; then
+        case "$rest" in
+            *" - tmpfs "*) nix_tmpfs=1 ;;
+        esac
+    fi
+done < /proc/self/mountinfo
+[ "$nix_tmpfs" -eq 1 ]
 count="$1"
 shift
 i=0
@@ -309,6 +380,7 @@ while [ "$i" -lt "$count" ]; do
     fi
     "$mount" --bind "$source" "$target"
     "$mount" -o remount,bind,ro "$target"
+    has_mount "$logical"
     i=$((i + 1))
 done
 binary="$1"
@@ -344,6 +416,34 @@ fi
         .arg(binary.1.as_deref().unwrap_or(""))
         .args(rest);
     Ok(Some(NixProjection { command, keepers }))
+}
+
+#[cfg(target_os = "linux")]
+fn check_rootless_namespace(unshare: &Path) -> Result<(), NixProjectionError> {
+    let status = Command::new(unshare)
+        .args([
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--propagation",
+            "private",
+            "true",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| {
+            NixProjectionError::unsupported(format!(
+                "rootless user and mount namespaces are unavailable: {error}"
+            ))
+        })?;
+    if !status.success() {
+        return Err(NixProjectionError::unsupported(format!(
+            "rootless user and mount namespaces were refused ({status})"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -413,20 +513,33 @@ fn nix_projection_command(
     env: &Env,
     _program: &str,
     _rest: &[String],
-) -> std::io::Result<Option<NixProjection>> {
+) -> Result<Option<NixProjection>, NixProjectionError> {
     if env
         .cache_leases
         .iter()
         .any(|lease| !lease.nix_store_projection().is_empty())
     {
-        // The callers render this error through the registered E1340
-        // diagnostic; never fall back to a host `/nix/store` here.
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
+        return Err(NixProjectionError::unsupported(
             "host-store-independent `/nix/store` projection is supported only on Linux with rootless mount helpers",
         ));
     }
     Ok(None)
+}
+
+fn report_nix_projection_error(theme: &Theme, program: &str, error: &NixProjectionError) {
+    match error {
+        NixProjectionError::Unsupported { reason } => theme.error_coded(
+            "E1351",
+            "Nix closure execution is unavailable on this host.",
+            &format!("Jetpack could not create the isolated /nix/store projection: {reason}."),
+            "Use a Linux host with unprivileged user and mount namespaces, or choose a native provider for this package.",
+        ),
+        NixProjectionError::InvalidClosure { reason } => theme.error(
+            &format!("could not project `{program}` through `/nix/store`"),
+            reason,
+            "refresh the verified Hangar closure and run the command again",
+        ),
+    }
 }
 
 fn run_command_in_mode(
@@ -456,10 +569,10 @@ fn run_command_in_mode(
             (command, Vec::new())
         }
         Err(error) => {
-            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
-                &format!("could not project `{program}` through `/nix/store`"),
-                &error.to_string(),
-                "run on Linux with rootless mount helpers or provide a verified compatible output",
+            report_nix_projection_error(
+                &Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto),
+                program,
+                &error,
             );
             return 126;
         }
@@ -553,11 +666,7 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         Ok(Some(projection)) => (projection.command, projection.keepers),
         Ok(None) => (Command::new(kind.binary()), Vec::new()),
         Err(error) => {
-            theme.error(
-                "could not project the temporary shell through `/nix/store`",
-                &error.to_string(),
-                "run on Linux with rootless mount helpers or provide a verified compatible output",
-            );
+            report_nix_projection_error(theme, kind.binary(), &error);
             return 126;
         }
     };

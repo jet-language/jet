@@ -6,10 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use jet::AST::{BinOp, Expr, Item, Program, UnOp};
 use jet::Diagnostics::span_line_col;
 use jet::Lexer;
 use jet::Parser;
+use jet::AST::{BinOp, Expr, Item, Program, UnOp};
 use jet::SHA256;
 use jet_foundation::JSON::{parse_json, JSONValue};
 
@@ -37,10 +37,7 @@ impl Affine {
     fn var(name: &str, coeff: i128) -> Self {
         let mut terms = BTreeMap::new();
         terms.insert(name.to_string(), coeff);
-        Self {
-            constant: 0,
-            terms,
-        }
+        Self { constant: 0, terms }
     }
 
     fn add(&self, other: &Self) -> Result<Self, SolverFail> {
@@ -261,7 +258,7 @@ pub(crate) fn run_solver_producer(
         } else {
             prove_obligation(&obligation.formula)
         }
-            .map_err(|reason| format!("solver certificate failure: {reason}"))?;
+        .map_err(|reason| format!("solver certificate failure: {reason}"))?;
         let tag = match &outcome {
             SolverOutcome::Proved { .. } => "proved",
             SolverOutcome::Disproved { .. } => "disproved",
@@ -301,7 +298,12 @@ fn extract_obligations(
     };
     // Front-end checking is owned by `jet prove`; this producer only projects
     // the already-checked source into its fixed obligation shapes.
-    Ok(extract_from_program(path, source, target_input_sha256, &program))
+    Ok(extract_from_program(
+        path,
+        source,
+        target_input_sha256,
+        &program,
+    ))
 }
 
 fn extract_from_program(
@@ -334,33 +336,37 @@ fn collect_function_specs(items: &[Item], out: &mut BTreeMap<String, FunctionSpe
     for item in items {
         match item {
             Item::Func(func) => {
-                out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
-                    params: func.params.iter().map(|param| param.name.clone()).collect(),
-                    pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
-                });
-            }
-            Item::Impl(imp) => {
-                for func in &imp.methods {
-                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
+                out.entry(func.name.clone())
+                    .or_insert_with(|| FunctionSpec {
                         params: func.params.iter().map(|param| param.name.clone()).collect(),
                         pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
                     });
+            }
+            Item::Impl(imp) => {
+                for func in &imp.methods {
+                    out.entry(func.name.clone())
+                        .or_insert_with(|| FunctionSpec {
+                            params: func.params.iter().map(|param| param.name.clone()).collect(),
+                            pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                        });
                 }
             }
             Item::Struct(def) => {
                 for func in &def.methods {
-                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
-                        params: func.params.iter().map(|param| param.name.clone()).collect(),
-                        pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
-                    });
+                    out.entry(func.name.clone())
+                        .or_insert_with(|| FunctionSpec {
+                            params: func.params.iter().map(|param| param.name.clone()).collect(),
+                            pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                        });
                 }
             }
             Item::Enum(def) => {
                 for func in &def.methods {
-                    out.entry(func.name.clone()).or_insert_with(|| FunctionSpec {
-                        params: func.params.iter().map(|param| param.name.clone()).collect(),
-                        pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
-                    });
+                    out.entry(func.name.clone())
+                        .or_insert_with(|| FunctionSpec {
+                            params: func.params.iter().map(|param| param.name.clone()).collect(),
+                            pre: func.pre.iter().map(|clause| clause.cond.clone()).collect(),
+                        });
                 }
             }
             Item::CodeModule(module) => {
@@ -420,14 +426,7 @@ fn walk_items(
             }
             Item::Func(func) => {
                 collect_func_contracts(path, source, target_input_sha256, func, out);
-                collect_call_preconditions(
-                    path,
-                    source,
-                    target_input_sha256,
-                    func,
-                    specs,
-                    out,
-                );
+                collect_call_preconditions(path, source, target_input_sha256, func, specs, out);
             }
             Item::Impl(imp) => {
                 for method in &imp.methods {
@@ -492,9 +491,7 @@ fn collect_func_contracts(
     let mut unsupported_reason = None;
     for clause in &func.pre {
         match expr_to_inequalities(&clause.cond) {
-            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => {
-                assumptions.extend(ineqs)
-            }
+            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => assumptions.extend(ineqs),
             None => unsupported_reason = Some("unsupported_formula"),
             Some(_) => unsupported_reason = Some("machine_overflow"),
         }
@@ -527,10 +524,7 @@ fn collect_func_contracts(
             return;
         }
     }
-    let formula = Formula {
-        assumptions,
-        claim,
-    };
+    let formula = Formula { assumptions, claim };
     let formula_hash = formula.hash();
     let span = source_span_text(source, func.span);
     let id = framed_sha256(&[
@@ -581,8 +575,7 @@ fn affine_return_expression(
     }
     match last {
         jet::AST::Stmt::Return(Some(value), _) => Ok(Some(
-            expr_to_affine_with_subst(value, &substitutions)
-                .ok_or("unsupported_formula")?,
+            expr_to_affine_with_subst(value, &substitutions).ok_or("unsupported_formula")?,
         )),
         _ => Err("unsupported_formula"),
     }
@@ -600,9 +593,7 @@ fn collect_call_preconditions(
     let mut caller_pre_unsupported = false;
     for clause in &func.pre {
         match expr_to_inequalities(&clause.cond) {
-            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => {
-                assumptions.extend(ineqs)
-            }
+            Some(ineqs) if !contains_machine_arithmetic(&clause.cond) => assumptions.extend(ineqs),
             Some(_) => caller_pre_unsupported = true,
             None => caller_pre_unsupported = true,
         }
@@ -612,12 +603,7 @@ fn collect_call_preconditions(
         .iter()
         .map(|param| (param.name.clone(), Affine::var(&param.name, 1)))
         .collect::<BTreeMap<_, _>>();
-    let mut calls = Vec::<(
-        jet::AST::Call,
-        BTreeMap<String, Affine>,
-        bool,
-        bool,
-    )>::new();
+    let mut calls = Vec::<(jet::AST::Call, BTreeMap<String, Affine>, bool, bool)>::new();
     let mut caller_flow_unsupported = false;
     let mut caller_machine_overflow = false;
     for statement in &func.body {
@@ -657,13 +643,7 @@ fn collect_call_preconditions(
             caller_flow_unsupported = true;
         }
     }
-    for (
-        call,
-        caller_substitutions,
-        flow_unsupported,
-        machine_overflow,
-    ) in calls
-    {
+    for (call, caller_substitutions, flow_unsupported, machine_overflow) in calls {
         let Some(spec) = specs.get(&call.name) else {
             continue;
         };
@@ -676,11 +656,9 @@ fn collect_call_preconditions(
             .or(flow_unsupported.then_some("unsupported_formula"))
             .or(machine_overflow.then_some("machine_overflow"))
             .or(call_args_contain_machine_arithmetic(&call).then_some("machine_overflow"));
-        if let Some(substitutions) = bind_call_arguments(
-            &spec.params,
-            &call.args,
-            &caller_substitutions,
-        ) {
+        if let Some(substitutions) =
+            bind_call_arguments(&spec.params, &call.args, &caller_substitutions)
+        {
             for condition in &spec.pre {
                 match expr_to_inequalities_with_subst(condition, &substitutions) {
                     Some(inequalities) => claim.extend(inequalities),
@@ -693,7 +671,10 @@ fn collect_call_preconditions(
         if claim.is_empty() && unsupported_reason.is_none() {
             continue;
         }
-        let formula = Formula { assumptions: assumptions.clone(), claim };
+        let formula = Formula {
+            assumptions: assumptions.clone(),
+            claim,
+        };
         let formula_hash = formula.hash();
         let span = source_span_text(source, call.name_span);
         let origin = format!("{path}::{} -> {}", func.name, call.name);
@@ -800,9 +781,9 @@ fn bind_call_arguments(
 fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST::Call)) {
     use jet::AST::Stmt;
     match statement {
-        Stmt::Expr(expr)
-        | Stmt::Yield(expr, _)
-        | Stmt::DeferClose { close: expr, .. } => visit_expr_calls(expr, calls),
+        Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => {
+            visit_expr_calls(expr, calls)
+        }
         Stmt::Val(binding) => visit_expr_calls(&binding.init, calls),
         Stmt::Assign { target, value, .. } => {
             visit_lvalue_calls(target, calls);
@@ -822,7 +803,9 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                jet::AST::ForKind::Range { start, end, step, .. } => {
+                jet::AST::ForKind::Range {
+                    start, end, step, ..
+                } => {
                     visit_expr_calls(start, calls);
                     visit_expr_calls(end, calls);
                     if let Some(step) = step {
@@ -838,8 +821,18 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
             }
             visit_stmt_list(body, calls);
         }
-        Stmt::Switch { subject, arms, else_body, .. }
-        | Stmt::ComptimeSwitch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             visit_expr_calls(subject, calls);
             for arm in arms {
                 visit_expr_calls(&arm.cond, calls);
@@ -849,7 +842,13 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
                 visit_stmt_list(body, calls);
             }
         }
-        Stmt::CountedLoop { init, cond, step, body, .. } => {
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
             visit_expr_calls(&init.init, calls);
             visit_expr_calls(cond, calls);
             if let Some(step) = step {
@@ -857,7 +856,12 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
             }
             visit_stmt_list(body, calls);
         }
-        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             visit_expr_calls(cond, calls);
             visit_stmt_list(then_body, calls);
             if let Some(body) = else_body {
@@ -975,7 +979,13 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
             visit_expr_calls(base, calls);
             visit_expr_calls(index, calls);
         }
-        Expr::Slice { base, start, end, range, .. } => {
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
             visit_expr_calls(base, calls);
             if let Some(range) = range {
                 visit_expr_calls(range, calls);
@@ -1018,11 +1028,20 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
             }
         }
         Expr::Tainted(inner, _, _) => visit_expr_calls(inner, calls),
-        Expr::PatternTest { subject, pattern, .. } => {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => {
             visit_expr_calls(subject, calls);
             visit_pattern_calls(pattern, calls);
         }
-        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
             visit_expr_calls(cond, calls);
             visit_stmt_list(then_body, calls);
             visit_expr_calls(then_value, calls);
@@ -1033,7 +1052,9 @@ fn visit_expr_calls(expr: &Expr, calls: &mut impl FnMut(&jet::AST::Call)) {
             jet::AST::LambdaBody::Expr(value) => visit_expr_calls(value, calls),
             jet::AST::LambdaBody::Block(body) => visit_stmt_list(body, calls),
         },
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             visit_expr_calls(value, calls);
             match fallback {
                 jet::AST::OrFallback::Value(value)
@@ -1112,9 +1133,7 @@ fn function_body_contains_machine_arithmetic(func: &jet::AST::Func) -> bool {
         jet::AST::Stmt::Val(binding) => contains_machine_arithmetic(&binding.init),
         jet::AST::Stmt::Return(Some(value), _)
         | jet::AST::Stmt::Expr(value)
-        | jet::AST::Stmt::DeferClose { close: value, .. } => {
-            contains_machine_arithmetic(value)
-        }
+        | jet::AST::Stmt::DeferClose { close: value, .. } => contains_machine_arithmetic(value),
         _ => true,
     })
 }
@@ -1377,8 +1396,7 @@ fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), 
     loop {
         let mut assignment = BTreeMap::new();
         assignment.insert(variable.clone(), value);
-        if !satisfies(&formula.assumptions, &assignment)
-            || !satisfies(&formula.claim, &assignment)
+        if !satisfies(&formula.assumptions, &assignment) || !satisfies(&formula.claim, &assignment)
         {
             return Err("certificate_invalid");
         }
@@ -1400,7 +1418,11 @@ fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
     let mut negated_claim = Vec::new();
     for ineq in &formula.claim {
         // ¬(a <= 0)  <=>  a >= 1  <=>  -a + 1? Wait: a >= 1 => 1 - a <= 0 => (-a) + 1 <= 0
-        match ineq.affine.scale(-1).and_then(|a| a.add(&Affine::constant(1))) {
+        match ineq
+            .affine
+            .scale(-1)
+            .and_then(|a| a.add(&Affine::constant(1)))
+        {
             Ok(affine) => negated_claim.push(Inequality::le(affine)),
             Err(SolverFail::CoefficientOverflow) => {
                 return Ok(SolverOutcome::Unknown {
@@ -1454,9 +1476,7 @@ fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
         certificates
             .iter()
             .map(|(branch_index, proof)| {
-                format!(
-                    "{{\"branchIndex\":{branch_index},\"proof\":{proof}}}"
-                )
+                format!("{{\"branchIndex\":{branch_index},\"proof\":{proof}}}")
             })
             .collect::<Vec<_>>()
             .join(",")
@@ -1471,10 +1491,7 @@ fn prove_obligation(formula: &Formula) -> Result<SolverOutcome, String> {
     if let Err(reason) = check_certificate(formula, &certificate) {
         return match reason {
             "coefficient_overflow" | "structural_limit" | "step_limit" => {
-                Ok(SolverOutcome::Unknown {
-                    reason,
-                    steps,
-                })
+                Ok(SolverOutcome::Unknown { reason, steps })
             }
             _ => Err(format!("invalid certificate: {reason}")),
         };
@@ -1554,9 +1571,7 @@ fn search_unsat(ineqs: &[Inequality], steps: &mut u64) -> Result<String, SearchE
         charge(steps)?;
         for ineq in ineqs {
             if ineq.affine.terms.is_empty() && ineq.affine.constant > 0 {
-                return Ok(
-                    "{\"kind\":\"linear_contradiction\",\"multipliers\":[]}".into(),
-                );
+                return Ok("{\"kind\":\"linear_contradiction\",\"multipliers\":[]}".into());
             }
         }
         return Err(SearchErr::Sat(BTreeMap::new()));
@@ -1819,7 +1834,9 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
     Ok(())
 }
 
-fn as_object(value: &JSONValue) -> Result<&std::collections::BTreeMap<String, JSONValue>, &'static str> {
+fn as_object(
+    value: &JSONValue,
+) -> Result<&std::collections::BTreeMap<String, JSONValue>, &'static str> {
     match value {
         JSONValue::Object(object) => Ok(object),
         _ => Err("certificate_invalid"),
@@ -1849,7 +1866,9 @@ fn object_kind(value: &JSONValue) -> Result<&str, &'static str> {
 
 fn json_usize(value: Option<&JSONValue>) -> Result<usize, &'static str> {
     match value {
-        Some(JSONValue::Number(value)) if *value >= 0 => usize::try_from(*value).map_err(|_| "certificate_invalid"),
+        Some(JSONValue::Number(value)) if *value >= 0 => {
+            usize::try_from(*value).map_err(|_| "certificate_invalid")
+        }
         _ => Err("certificate_invalid"),
     }
 }
@@ -1931,7 +1950,12 @@ fn check_certificate_node(
                     return Err("certificate_invalid");
                 }
                 sum = sum
-                    .add(&inequalities[index].affine.scale(multiplier).map_err(|_| "coefficient_overflow")?)
+                    .add(
+                        &inequalities[index]
+                            .affine
+                            .scale(multiplier)
+                            .map_err(|_| "coefficient_overflow")?,
+                    )
                     .map_err(|_| "coefficient_overflow")?;
             }
             if sum.terms.is_empty() && sum.constant > 0 {
@@ -1959,7 +1983,9 @@ fn check_certificate_node(
             let mut left_branch = inequalities.to_vec();
             left_branch.push(Inequality::le(
                 Affine::var(variable, 1)
-                    .add(&Affine::constant(pivot.checked_neg().ok_or("coefficient_overflow")?))
+                    .add(&Affine::constant(
+                        pivot.checked_neg().ok_or("coefficient_overflow")?,
+                    ))
                     .map_err(|_| "coefficient_overflow")?,
             ));
             let mut right_branch = inequalities.to_vec();
@@ -2100,11 +2126,7 @@ mod tests {
         let formula = Formula {
             assumptions: vec![
                 Inequality::le(Affine::var("value", -1)), // 0 - value <= 0 => value >= 0
-                Inequality::le(
-                    Affine::var("value", 1)
-                        .add(&Affine::constant(-3))
-                        .unwrap(),
-                ),
+                Inequality::le(Affine::var("value", 1).add(&Affine::constant(-3)).unwrap()),
             ],
             claim: vec![Inequality::le(Affine::var("value", -1))],
         };
@@ -2191,12 +2213,8 @@ fn grow(value: Int) Int {
     return next
 }
 "#;
-        let evidence = run_solver_producer(
-            &[("grow.jet".into(), source.into())],
-            "target",
-            true,
-        )
-        .unwrap();
+        let evidence =
+            run_solver_producer(&[("grow.jet".into(), source.into())], "target", true).unwrap();
         assert_eq!(evidence.len(), 1);
         assert!(matches!(
             evidence[0].outcome,
@@ -2219,18 +2237,11 @@ fn caller(input: Int) Int {
     return checked(shifted)
 }
 "#;
-        let evidence = run_solver_producer(
-            &[("calls.jet".into(), source.into())],
-            "target",
-            true,
-        )
-        .unwrap();
+        let evidence =
+            run_solver_producer(&[("calls.jet".into(), source.into())], "target", true).unwrap();
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].obligation.kind, "call_precondition");
-        assert!(matches!(
-            evidence[0].outcome,
-            SolverOutcome::Proved { .. }
-        ));
+        assert!(matches!(evidence[0].outcome, SolverOutcome::Proved { .. }));
     }
 
     #[test]
@@ -2274,12 +2285,9 @@ fn checked(value: Int) Int { return value }
         return checked(shifted)
     }
 "#;
-        let evidence = run_solver_producer(
-            &[("calls-flow.jet".into(), source.into())],
-            "target",
-            true,
-        )
-        .unwrap();
+        let evidence =
+            run_solver_producer(&[("calls-flow.jet".into(), source.into())], "target", true)
+                .unwrap();
         assert_eq!(evidence.len(), 1);
         assert!(matches!(
             evidence[0].outcome,
@@ -2298,12 +2306,9 @@ fn nonlinear(value: Int) Int {
     return value * value
 }
 "#;
-        let evidence = run_solver_producer(
-            &[("nonlinear.jet".into(), source.into())],
-            "target",
-            true,
-        )
-        .unwrap();
+        let evidence =
+            run_solver_producer(&[("nonlinear.jet".into(), source.into())], "target", true)
+                .unwrap();
         assert_eq!(evidence.len(), 1);
         assert!(matches!(
             evidence[0].outcome,

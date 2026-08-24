@@ -7,6 +7,7 @@ use crate::EnvFile;
 use crate::Lock;
 use jet_env_model::ModuleEval;
 use crate::Output::{self, Theme};
+use crate::NixIndex::NixIndexClient;
 use crate::Provider::{self, ProviderError};
 use crate::RefSpec::{self, RefError};
 use crate::Services;
@@ -151,6 +152,8 @@ pub(super) fn realize_ref_outcome(
                 store_dir: &store_dir,
                 offline: flags.offline,
                 project_dir: project_dir.as_deref(),
+                nix_index: None,
+                nix_roots: None,
             };
             Provider::cache_expectation(spec, table, &probe).is_some()
         };
@@ -166,7 +169,13 @@ pub(super) fn realize_ref_outcome(
         return RefOutcome::Failed;
     }
     if uses_nix && !package_fixture_available(flags, spec) && !offline_reuse_ok {
-        if let Some(need) = Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir) {
+        if let Some(need) = Provider::needs_nix_bridge(
+            spec,
+            table,
+            flags.offline,
+            &store_dir,
+            project_dir.as_deref(),
+        ) {
             return RefOutcome::NeedsNix(need);
         }
     }
@@ -196,11 +205,30 @@ pub(super) fn realize_ref_outcome(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
+    let nix_index_client = if uses_nix && fixtures.is_none() && !offline_reuse_ok {
+        Some(
+            NixIndexClient::from_roots(roots)
+                .map_err(ProviderError::NixIndex),
+        )
+    } else {
+        None
+    };
+    let nix_index_client = match nix_index_client {
+        Some(Ok(client)) => Some(client),
+        Some(Err(error)) => {
+            report_provider_error(theme, &error);
+            drop(spinner);
+            return RefOutcome::Failed;
+        }
+        None => None,
+    };
     let ctx = Provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
+        nix_index: nix_index_client.as_ref(),
+        nix_roots: Some(roots),
     };
     // D-JPK-BUILDSCRIPT1: a Core Cargo action is an upstream executable hook,
     // even when its package manifest is locally reviewed. The exact staged
@@ -390,6 +418,8 @@ pub(super) fn realize_adapter(
         store_dir: &store_dir,
         offline: flags.offline,
         project_dir: project_dir.as_deref(),
+        nix_index: None,
+        nix_roots: None,
     };
     let expectation = match Provider::adapter_cache_expectation(plan, table, &ctx) {
         Ok(expectation) => expectation,
@@ -592,6 +622,25 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
                 "run `jetpack update` with network or fixture metadata, then commit `{}`.",
                 Syntax::UNIFIED_LOCK_FILE
             ),
+        ),
+        ProviderError::NixIndex(error) => {
+            let code = match error.code() {
+                1349 => "E1349",
+                1276 => "E1276",
+                _ => "E1348",
+            };
+            theme.error_coded(
+                code,
+                "signed nixpkgs index could not resolve that package",
+                &error.to_string(),
+                "refresh the signed index, use a covered locked nixpkgs attr, or drop `--offline` when a refresh is required.",
+            )
+        }
+        ProviderError::NixCache(reason) => theme.error_coded(
+            "E1350",
+            "native Nix cache closure could not be admitted",
+            reason,
+            "repair the signed cache response or restore network access, then retry the realization.",
         ),
         ProviderError::Offline(reason) => theme.error_coded(
             "E1276",

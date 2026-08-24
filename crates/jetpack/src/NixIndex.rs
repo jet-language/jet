@@ -12,7 +12,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -138,7 +137,7 @@ impl<T: IndexTransport + ?Sized> IndexTransport for &T {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum NixIndexError {
+pub enum NixIndexError {
     Invalid(String),
     NotIndexed {
         attrpath: Vec<String>,
@@ -269,87 +268,56 @@ struct CachedManifest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) struct OracleRecord {
     pub(crate) record: IndexRecord,
     pub(crate) cache_admitted: bool,
 }
 
-/// Native HTTP seam used by `from_roots`.  HTTPS is intentionally left to the
-/// #2156 native transport handoff; loopback HTTP remains useful for isolated
-/// tests and is accepted only through the paired test configuration files.
+/// Native bounded transport used by `from_roots`. HTTPS uses the existing
+/// dependency-free `jet_net` seam; plain HTTP remains restricted to loopback.
 struct NativeIndexTransport;
 
 impl IndexTransport for NativeIndexTransport {
     fn get_bounded(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, NixIndexError> {
-        let rest = url.strip_prefix("http://").ok_or_else(|| {
-            NixIndexError::Transport(
-                "the native index transport requires the #2156 HTTPS seam for production URLs"
-                    .to_string(),
-            )
-        })?;
-        let (authority, path) = match rest.split_once('/') {
-            Some((authority, path)) => (authority, format!("/{path}")),
-            None => (rest, "/".to_string()),
-        };
-        if authority.is_empty() || !is_loopback_host(authority) {
-            return Err(NixIndexError::Transport(
-                "plain HTTP index transport is restricted to loopback".to_string(),
-            ));
-        }
-        let mut addresses = authority.to_socket_addrs().map_err(|error| {
-            NixIndexError::Transport(format!("resolve index endpoint: {error}"))
-        })?;
-        let address = addresses
-            .next()
-            .ok_or_else(|| NixIndexError::Transport("index endpoint has no address".to_string()))?;
-        let mut stream = TcpStream::connect(address).map_err(|error| {
-            NixIndexError::Transport(format!("connect index endpoint: {error}"))
-        })?;
-        stream
-            .write_all(
-                format!("GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n")
-                    .as_bytes(),
-            )
-            .map_err(|error| {
-                NixIndexError::Transport(format!("request index endpoint: {error}"))
-            })?;
-        let limit = usize::try_from(max_bytes)
-            .map_err(|_| NixIndexError::invalid("index response bound is too large"))?;
-        let mut response = Vec::new();
-        stream
-            .take((limit as u64).saturating_add(64 * 1024))
-            .read_to_end(&mut response)
-            .map_err(|error| NixIndexError::Transport(format!("read index endpoint: {error}")))?;
-        let header_end = response
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .ok_or_else(|| {
-                NixIndexError::Transport("index response has no HTTP header".to_string())
-            })?;
-        let header = std::str::from_utf8(&response[..header_end]).map_err(|_| {
-            NixIndexError::Transport("index response header is not UTF-8".to_string())
-        })?;
-        if !header.starts_with("HTTP/1.1 200 ") && !header.starts_with("HTTP/1.0 200 ") {
-            return Err(NixIndexError::Transport(format!(
-                "index endpoint returned {}",
-                header.lines().next().unwrap_or("unknown status")
-            )));
-        }
-        let body = &response[header_end + 4..];
-        if body.len() > limit {
-            return Err(NixIndexError::invalid("index response exceeds its bound"));
-        }
-        if let Some(length) = header.lines().find_map(|line| {
-            line.strip_prefix("Content-Length:")
-                .and_then(|value| value.trim().parse::<usize>().ok())
-        }) {
-            if length != body.len() {
+        if let Some(authority) = url
+            .strip_prefix("http://")
+            .and_then(|value| value.split('/').next())
+        {
+            if !is_loopback_host(authority) {
                 return Err(NixIndexError::Transport(
-                    "index response Content-Length disagrees".to_string(),
+                    "plain HTTP index transport is restricted to loopback".to_string(),
                 ));
             }
         }
-        Ok(body.to_vec())
+        let limit = usize::try_from(max_bytes)
+            .map_err(|_| NixIndexError::invalid("index response bound is too large"))?;
+        let response = jet_net::get_stream(url, std::time::Duration::from_secs(120))
+            .map_err(|error| NixIndexError::Transport(error.to_string()))?;
+        if response.status() != 200 {
+            return Err(NixIndexError::Transport(format!(
+                "index endpoint returned HTTP {}",
+                response.status()
+            )));
+        }
+        let content_length = response.content_length();
+        if content_length.is_some_and(|length| length > max_bytes) {
+            return Err(NixIndexError::invalid("index response exceeds its bound"));
+        }
+        let mut body = Vec::new();
+        response
+            .take((limit as u64).saturating_add(1))
+            .read_to_end(&mut body)
+            .map_err(|error| NixIndexError::Transport(format!("read index endpoint: {error}")))?;
+        if body.len() > limit {
+            return Err(NixIndexError::invalid("index response exceeds its bound"));
+        }
+        if content_length.is_some_and(|length| length != body.len() as u64) {
+            return Err(NixIndexError::Transport(
+                "index response Content-Length disagrees".to_string(),
+            ));
+        }
+        Ok(body)
     }
 }
 
@@ -374,7 +342,7 @@ impl IndexClock for SystemIndexClock {
     }
 }
 
-pub(crate) struct NixIndexClient<'a> {
+pub struct NixIndexClient<'a> {
     endpoint: String,
     root: PathBuf,
     key_id: String,
@@ -385,6 +353,7 @@ pub(crate) struct NixIndexClient<'a> {
 }
 
 impl NixIndexClient<'static> {
+    #[allow(dead_code)]
     pub(crate) fn from_roots(roots: &Roots) -> Result<Self, NixIndexError> {
         Self::from_roots_with_mode(roots, false)
     }
@@ -454,6 +423,7 @@ impl NixIndexClient<'static> {
 }
 
 impl<'a> NixIndexClient<'a> {
+    #[cfg(test)]
     fn for_test(
         root: PathBuf,
         endpoint: String,
@@ -1643,6 +1613,7 @@ fn decode_signature(encoded: &str) -> Result<[u8; 64], NixIndexError> {
         .map_err(|_| NixIndexError::invalid("nix index signature must be 64 bytes"))
 }
 
+#[allow(dead_code)]
 fn signature_message(domain: &[u8], bytes: &[u8]) -> Vec<u8> {
     let mut message = Vec::with_capacity(domain.len() + bytes.len());
     message.extend_from_slice(domain);
@@ -1779,6 +1750,7 @@ fn is_loopback_host(authority: &str) -> bool {
     matches!(host, "127.0.0.1" | "localhost" | "::1")
 }
 
+#[allow(dead_code)]
 fn base64_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -1809,6 +1781,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 // ponytail: raw Zstandard blocks preserve the required deterministic frame
 // and avoid a new jetpack dependency; replace with #2156's native level-19
 // one-thread seam when that handoff lands.
+#[allow(dead_code)]
 fn zstd_encode(bytes: &[u8]) -> Vec<u8> {
     const BLOCK: usize = 128 * 1024;
     let mut output = Vec::with_capacity(bytes.len() + bytes.len() / BLOCK * 3 + 32);
@@ -2014,6 +1987,7 @@ fn xxh64(data: &[u8]) -> u64 {
     hash ^ (hash >> 32)
 }
 
+#[allow(dead_code)]
 fn generated_document(
     channel: String,
     revision: String,
@@ -2046,6 +2020,7 @@ fn generated_document(
     Ok(document)
 }
 
+#[allow(dead_code)]
 fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixIndexError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| NixIndexError::invalid("oracle output is not UTF-8"))?;
@@ -2133,6 +2108,7 @@ fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixInde
         .collect()
 }
 
+#[allow(dead_code)]
 fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
     validate_attrpath(&record.attrpath)?;
     if record.version.chars().any(|character| character.is_control()) {
@@ -2159,14 +2135,17 @@ fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_signature_request(index_bytes: &[u8]) -> Vec<u8> {
     signature_message(INDEX_DOMAIN, index_bytes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn manifest_signature_request(manifest_bytes: &[u8]) -> Vec<u8> {
     signature_message(MANIFEST_DOMAIN, manifest_bytes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn canonical_test_index(
     channel: &str,
     revision: &str,
@@ -2191,6 +2170,7 @@ pub(crate) fn canonical_test_index(
     Ok((bytes.clone(), zstd_encode(&bytes)))
 }
 
+#[allow(dead_code)]
 pub(crate) fn canonical_manifest_for_test(
     channel: &str,
     generation: u64,
@@ -2208,6 +2188,7 @@ pub(crate) fn canonical_manifest_for_test(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn signature_sidecar_for_test(key_id: &str, signature: &[u8]) -> Vec<u8> {
     canonical_signature_bytes(&IndexSignature {
         schema: INDEX_SCHEMA,
@@ -2217,6 +2198,7 @@ pub(crate) fn signature_sidecar_for_test(key_id: &str, signature: &[u8]) -> Vec<
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn index_target_for_test(
     revision: &str,
     system: &str,
@@ -2244,6 +2226,7 @@ pub(crate) fn index_target_for_test(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_generate(
     channel: &str,
     system: &str,
@@ -2263,6 +2246,7 @@ pub(crate) fn producer_generate(
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_generate_with_hydra_paths(
     channel: &str,
     system: &str,
@@ -2333,6 +2317,7 @@ pub(crate) fn producer_generate_with_hydra_paths(
     Ok((decoded, compressed, report))
 }
 
+#[allow(dead_code)]
 fn format_generation_report(decoded: &[u8], compressed: &[u8], document: &IndexDocument) -> String {
     let output_count: usize = document
         .records
@@ -2355,6 +2340,7 @@ fn format_generation_report(decoded: &[u8], compressed: &[u8], document: &IndexD
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_oracle_for_producer(
     bytes: &[u8],
     system: &str,
@@ -2362,6 +2348,7 @@ pub(crate) fn parse_oracle_for_producer(
     parse_oracle(bytes, system)
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_coverage_report(decoded: &[u8]) -> Result<String, NixIndexError> {
     let document = parse_index_strict(decoded)?;
     let mut output = String::new();
@@ -2393,6 +2380,7 @@ pub(crate) fn producer_coverage_report(decoded: &[u8]) -> Result<String, NixInde
     Ok(output)
 }
 
+#[allow(dead_code)]
 pub(crate) fn decode_index_records_for_producer(
     bytes: &[u8],
 ) -> Result<Vec<IndexRecord>, NixIndexError> {
@@ -2408,6 +2396,7 @@ pub(crate) fn decode_index_records_for_producer(
         .collect())
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_target_measurements(bytes: &[u8]) -> Result<(u64, u64), NixIndexError> {
     let decoded = if bytes.starts_with(&0xfd2f_b528u32.to_le_bytes()) {
         zstd_decode_bounded(bytes, MAX_DECODED_BYTES)?
@@ -2418,6 +2407,7 @@ pub(crate) fn producer_target_measurements(bytes: &[u8]) -> Result<(u64, u64), N
     Ok((decoded.len() as u64, document.records.len() as u64))
 }
 
+#[allow(dead_code)]
 pub(crate) fn producer_manifest_bytes(
     channel: &str,
     generation: u64,

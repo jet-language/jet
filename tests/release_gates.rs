@@ -802,6 +802,24 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
         fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
     );
 
+    fs::create_dir_all(fixture.join("outside")).unwrap();
+    let traversal_report = fixture.join("outside/../tower/traversal.txt");
+    let traversal = run_tower_hygiene_gate(
+        &repo,
+        &fixture.join("tower"),
+        &fixture.join("docs"),
+        &traversal_report,
+    );
+    assert!(
+        !traversal.status.success(),
+        "a report path resolving into Tower must block the gate:\n{}",
+        String::from_utf8_lossy(&traversal.stdout)
+    );
+    assert!(
+        !fixture.join("tower/traversal.txt").exists(),
+        "read-only gate wrote an audit report into Tower"
+    );
+
     fs::create_dir_all(fixture.join("tower/tower.json.lock")).unwrap();
     fs::write(
         fixture.join("tower/tower.json.lock/info.json"),

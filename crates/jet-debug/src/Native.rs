@@ -211,8 +211,8 @@ fn run_with_io(
         );
         return (ExitCodes::ICE, io_into_output(io), false);
     };
-    match inf.set_breakpoint(rust_file, entry_line) {
-        Ok(breakpoint) if breakpoint.resolved => {}
+    let entry_breakpoint_id = match inf.set_breakpoint(rust_file, entry_line) {
+        Ok(breakpoint) if breakpoint.resolved => Some(breakpoint.id),
         Ok(_) => {
             report_error(
                 &mut io,
@@ -227,7 +227,7 @@ fn run_with_io(
             );
             return (ExitCodes::ICE, io_into_output(io), false);
         }
-    }
+    };
     let result = match inf.resume_and_locate("run") {
         Ok(r) => r,
         Err(_e) => {
@@ -246,6 +246,7 @@ fn run_with_io(
         jet_src: jet_src.to_string(),
         raw_frames,
         started: false,
+        entry_breakpoint_id,
         exited: false,
         exit_code: ExitCodes::OK,
         io,
@@ -283,6 +284,10 @@ struct Session {
     jet_src: String,
     raw_frames: bool,
     started: bool,
+    /// Temporary breakpoint used to stop at `fn run`'s first statement. It
+    /// must be retired after the initial stop or `continue` can immediately
+    /// return to the same source line forever.
+    entry_breakpoint_id: Option<usize>,
     exited: bool,
     exit_code: i32,
     io: IO,
@@ -393,28 +398,45 @@ impl Session {
                     self.emit(&format!("program exited with status {}", self.exit_code));
                 }
             }
-            ResumeResult::Stopped(bt_text) => match Inferior::parse_top_frame(&bt_text) {
-                Some(frame) => {
-                    let func = if self.raw_frames {
-                        frame.func.clone()
-                    } else {
-                        Inferior::safe_jet_func(&frame.func)
-                    };
-                    self.show_frame(&func, &frame.rust_file, frame.rust_line, true)
-                }
-                None => {
-                    // A raw debugger transcript is an expert view only. The
-                    // default projection reports an honest, Jet-level state.
-                    let trimmed = bt_text.trim_end();
-                    if self.raw_frames && !trimmed.is_empty() {
-                        for line in trimmed.lines() {
-                            self.emit(&format!("[raw] {}", line));
-                        }
-                    } else {
-                        self.no_jet_frame();
+            ResumeResult::Stopped(bt_text) => {
+                if !self.started {
+                    self.retire_entry_breakpoint();
+                    if self.exited {
+                        return;
                     }
                 }
-            },
+                match Inferior::parse_top_frame(&bt_text) {
+                    Some(frame) => {
+                        let func = if self.raw_frames {
+                            frame.func.clone()
+                        } else {
+                            Inferior::safe_jet_func(&frame.func)
+                        };
+                        self.show_frame(&func, &frame.rust_file, frame.rust_line, true)
+                    }
+                    None => {
+                        // A raw debugger transcript is an expert view only. The
+                        // default projection reports an honest, Jet-level state.
+                        let trimmed = bt_text.trim_end();
+                        if self.raw_frames && !trimmed.is_empty() {
+                            for line in trimmed.lines() {
+                                self.emit(&format!("[raw] {}", line));
+                            }
+                        } else {
+                            self.no_jet_frame();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn retire_entry_breakpoint(&mut self) {
+        let Some(id) = self.entry_breakpoint_id.take() else {
+            return;
+        };
+        if self.inf.delete_breakpoint(id).is_err() {
+            self.backend_lost("could not retire the temporary entry breakpoint");
         }
     }
 

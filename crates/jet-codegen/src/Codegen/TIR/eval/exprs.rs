@@ -4579,6 +4579,14 @@ impl<'a> EvalCtx<'a> {
         message: &str,
         scope: &HashMap<String, CtValue>,
     ) -> jet_foundation::Outcome::JetRuntimeDiagnostic {
+        if self.runtime_execution {
+            let _ = crate::development_receipt::jet_production_failure_receipt_write(
+                "E3001",
+                loc.file.trim_matches('"'),
+                loc.line,
+                loc.fn_name.trim_matches('"'),
+            );
+        }
         let locals = loc
             .locals
             .iter()

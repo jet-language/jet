@@ -2055,10 +2055,55 @@ fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) 
                 }
                 changes.push_str(&format!(r#""{}": [{}]"#, json_escape(&file_uri), edits));
             }
-            Some(response(id, &format!(r#"{{"changes":{{{}}}}}"#, changes)))
+            // The semantic op records the rename as from -> to, so it needs the
+            // identifier under the cursor, not the new name.
+            let old_name = ident_at(&tokens, offset).unwrap_or("");
+            let semantic_op = lsp_rename_semantic_op(&db.index, old_name, new_name);
+            Some(response(
+                id,
+                &format!(r#"{{"changes":{{{}}},"semantic_ops":[{}]}}"#, changes, semantic_op),
+            ))
         }
         Err(msg) => Some(error_response(id, -32600, &msg)),
     }
+}
+
+/// LSP clients apply the workspace edit, so the semantic receipt travels in
+/// the same response until the client persists the edit. It is metadata, not a
+/// second rename engine: targets come from the checked definition facts.
+fn lsp_rename_semantic_op(
+    index: &jet_semindex::SemIndex,
+    from: &str,
+    to: &str,
+) -> String {
+    let targets = index
+        .definition_facts()
+        .iter()
+        .filter(|fact| fact.name == from)
+        .map(|fact| {
+            let before = json_escape(&fact.human_identity);
+            let after_identity = fact
+                .human_identity
+                .strip_suffix(&fact.name)
+                .map(|prefix| format!("{prefix}{to}"))
+                .unwrap_or_else(|| to.to_string());
+            format!(
+                r#"{{"stable_id":"{}","before":"{}","after":"{}","kind":"{}","module_path":"{}"}}"#,
+                json_escape(&fact.stable_id),
+                before,
+                json_escape(&after_identity),
+                json_escape(&fact.kind),
+                json_escape(&fact.module_path),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"kind":"rename","rule_id":"lsp.rename","from":"{}","to":"{}","targets":[{}],"files":[]}}"#,
+        json_escape(from),
+        json_escape(to),
+        targets,
+    )
 }
 
 fn semantic_tokens_response(

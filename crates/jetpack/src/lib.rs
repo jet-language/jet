@@ -53,12 +53,6 @@ pub mod JetOS;
 pub mod JetPin;
 pub mod MemberSelect;
 pub mod MigrationImport;
-// Card #2157 landed the signed nixpkgs index client and producer. Its only
-// consumer is card #2158, which wires `IndexClient::resolve` into
-// `NixProvider`; until that lands the module is unreachable from the library
-// build, and `deny(warnings)` treats every item as dead. Remove this allow
-// with #2158 -- it must not outlive that card.
-#[allow(dead_code)]
 pub(crate) mod NixIndex;
 // Card #367 slice 4: `ModuleEval` (the computed-modules evaluator + plan
 // types) now lives in `jet-env-model` (L2, pure eval) — both realizers,

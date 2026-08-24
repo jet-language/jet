@@ -233,6 +233,14 @@ impl LineMap {
             // keeping source breakpoints deterministic.
             jet_to_rust.entry(jet).or_insert(rust);
         }
+        // The hashes prove that this sidecar names the current build, but they
+        // do not prove that its table was produced from that build. Rebuild the
+        // table from the generated source and reject any edited mapping before
+        // it can influence a breakpoint or frame projection.
+        let expected = Self::build(rust_src);
+        if rust_to_jet != expected.rust_to_jet || jet_to_rust != expected.jet_to_rust {
+            return Err("debugger map entries do not match the generated source".to_string());
+        }
         Ok(LineMap {
             rust_to_jet,
             jet_to_rust,
@@ -350,6 +358,48 @@ mod tests {
             &binary,
         )
         .is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sidecar_round_trip_rejects_edited_entries_with_matching_hashes() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-debug-map-entry-test-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let binary = root.join("program");
+        let map_path = root.join("program.jetmap");
+        let jet_src = "main() {\n  print(1)\n}\n";
+        let rust_src = "fn main() {\n// jet:line 2\nlet x = 1;\n}\n";
+        std::fs::write(&binary, b"debug-binary").unwrap();
+        LineMap::write_artifact(
+            &map_path,
+            "program.jet",
+            jet_src,
+            "program.rs",
+            rust_src,
+            &binary,
+        )
+        .unwrap();
+        let map = std::fs::read_to_string(&map_path).unwrap();
+        let edited = map.replace("\"rust\":3,\"jet\":2", "\"rust\":3,\"jet\":99");
+        assert_ne!(edited, map, "fixture must contain the expected mapping");
+        std::fs::write(&map_path, edited).unwrap();
+        let result = LineMap::load_verified(
+            &map_path,
+            "program.jet",
+            jet_src,
+            "program.rs",
+            rust_src,
+            &binary,
+        );
+        let error = match result {
+            Ok(_) => panic!("edited sidecar entries must not be trusted"),
+            Err(error) => error,
+        };
+        assert!(error.contains("entries do not match"), "{error}");
         let _ = std::fs::remove_dir_all(root);
     }
 }

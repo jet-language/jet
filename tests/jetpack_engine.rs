@@ -4137,6 +4137,14 @@ fn package_and_environment_paths_have_no_installed_nix_shellout() {
             include_str!("../crates/jetpack/src/Provider.rs"),
         ),
         (
+            "NixIndex",
+            include_str!("../crates/jetpack/src/NixIndex.rs"),
+        ),
+        (
+            "Store/NixCache",
+            include_str!("../crates/jetpack/src/Store/NixCache.rs"),
+        ),
+        (
             "CLI/realize",
             include_str!("../crates/jetpack/src/CLI/realize.rs"),
         ),
@@ -4159,7 +4167,12 @@ fn package_and_environment_paths_have_no_installed_nix_shellout() {
         ("Store", include_str!("../crates/jetpack/src/Store.rs")),
     ];
     for (path, source) in sources {
-        for forbidden in ["Command::new(\"nix\")", "Command::new(\"nix-store\")"] {
+        for forbidden in [
+            "Command::new(\"nix\")",
+            "Command::new(\"nix-store\")",
+            "Command::new(\"curl\")",
+            "Command::new(\"wget\")",
+        ] {
             assert!(
                 !source.contains(forbidden),
                 "{path} must not shell out to installed Nix via {forbidden}"
@@ -7436,6 +7449,8 @@ fn independent_root_runner_promotes_only_agreed_source_output() {
         store_dir: &store_dir,
         offline: true,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     let result = jetpack::Store::certify_independent_root_build(
         &roots,
@@ -7479,6 +7494,8 @@ fn independent_root_runner_rejects_divergence_before_registration() {
         store_dir: &store_dir,
         offline: true,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     let checks = std::cell::Cell::new(0);
     let source = repo.join("pkgs/hello/bin/hello");
@@ -7535,6 +7552,8 @@ fn independent_root_runner_cancellation_leaves_no_store_result() {
         store_dir: &store_dir,
         offline: true,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
     let cancelled = || true;
     let error = jetpack::Store::certify_independent_root_build(

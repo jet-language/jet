@@ -365,6 +365,8 @@ fn core_provider_compiles_ring_package_to_rlib() {
         store_dir: &store,
         offline: false,
         project_dir: None,
+        nix_index: None,
+        nix_roots: None,
     };
 
     // Realize the ring package — CoreProvider should compile the Cargo.toml.

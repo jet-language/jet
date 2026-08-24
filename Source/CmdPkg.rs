@@ -44,7 +44,11 @@ pub(crate) fn run_add(raw_args: &[String]) {
         } else if let Some(r) = rev_val {
             jet::Manifest::GitSelector::Rev(r.to_string())
         } else {
-            crate::cli_error!("E2104", "git dependency `{}` needs one of: --tag, --branch, --rev", dep_name);
+            crate::cli_error!(
+                "E2104",
+                "git dependency `{}` needs one of: --tag, --branch, --rev",
+                dep_name
+            );
             exit(ExitCodes::USER_ERROR);
         };
         jet::Manifest::DepSpec::Git {
@@ -250,7 +254,8 @@ pub(crate) fn run_hangar_rollback(gen_str: &str, json: bool) {
             crate::emit_cli_report(
                 "E2105",
                 e.to_string(),
-                "Jet could not complete the named file, tool, or operating-system operation".to_string(),
+                "Jet could not complete the named file, tool, or operating-system operation"
+                    .to_string(),
                 "run `jet hangar generations` to see available generations".to_string(),
                 json,
             );
@@ -305,7 +310,8 @@ fn print_registry_tiers(lock: &jet::Lock::LockFile) {
             tier,
             gate_status,
             ..
-        } = &package.source else {
+        } = &package.source
+        else {
             continue;
         };
         println!(

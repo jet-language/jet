@@ -26,71 +26,74 @@ use jet_foundation::Report::render_status_json;
 static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
     jet::program_allocator::JetHostProgramAllocator;
 
-mod CmdCodemod;
-mod CmdTry;
 mod CmdBudget;
+mod CmdCodemod;
 mod CmdCompile;
 mod CmdDevTools;
-mod CmdNotebook;
 mod CmdDossier;
 mod CmdExec;
-mod CmdFill;
-mod CmdInspect;
 mod CmdExpand;
+mod CmdFill;
+mod CmdGates;
 mod CmdGc;
-mod CmdMemory;
 mod CmdImpact;
 mod CmdImport;
+mod CmdInspect;
+mod CmdMemory;
+mod CmdNotebook;
 mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
-mod ProveReplay;
-mod ProveSolver;
-mod CmdReport;
-mod ProductionReceipt;
-mod CmdReview;
 mod CmdRemote;
+mod CmdReport;
+mod CmdReview;
 mod CmdSchema;
 mod CmdSemIndex;
-mod CmdSupply;
-mod CmdUnsafe;
-mod CmdGates;
-mod CmdStructure;
+mod CmdStatus;
 mod CmdStructuralMerge;
+mod CmdStructure;
+mod CmdSupply;
+mod CmdTry;
+mod CmdUnsafe;
 mod EngineDispatch;
 mod NativeLinker;
+mod ProductionReceipt;
+mod ProveReplay;
+mod ProveSolver;
 
 use CmdCodemod::run_codemod;
-use CmdTry::run_try;
 use CmdCompile::{
-    resolve_named_profile, run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web,
-    run_fix, run_fmt, run_fuzz, run_new, run_jobs, run_test_opts, run_test_package,
-    run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
+    resolve_named_profile, run_build_query, run_compile_cmd, run_compiler_api, run_debug_native,
+    run_dev_entry, run_dev_web, run_fix, run_fmt, run_fuzz, run_jobs, run_new, run_test_opts,
+    run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
-    run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
+    run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
+    run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y,
+    run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExec::run_exec;
-use CmdFill::run_fill;
 use CmdExpand::run_expand;
-use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
-use CmdStructure::run_structure;
+use CmdFill::run_fill;
 use CmdImpact::run_impact;
+use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
 use CmdPkg::{
     run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_remove, run_update,
 };
 use CmdProve::run_prove;
+use CmdRemote::run_remote;
 use CmdReport::run_report;
 use CmdReview::run_review;
-use CmdRemote::run_remote;
 use CmdSchema::run_schema;
 use CmdSemIndex::{run_find, run_semindex};
-use CmdSupply::{
-    run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
-};
 use CmdStructuralMerge::{run_diff, run_merge, structural_help};
+use CmdStructure::run_structure;
+use CmdSupply::{
+    run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor,
+    run_yank,
+};
+use CmdTry::run_try;
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -175,13 +178,7 @@ pub(crate) fn emit_cli_diagnostic_with_fix(code: &str, what: String, fix: String
     emit_cli_report(code, what, why.to_string(), fix, false);
 }
 
-pub(crate) fn emit_cli_report(
-    code: &str,
-    what: String,
-    why: String,
-    fix: String,
-    json: bool,
-) {
+pub(crate) fn emit_cli_report(code: &str, what: String, why: String, fix: String, json: bool) {
     let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None);
     emit_cli_value(diagnostic, json);
 }
@@ -359,9 +356,16 @@ impl ProfileConfig {
         let mut args = Vec::new();
         if self.small {
             args.extend(
-                ["-C", "opt-level=z", "-C", "panic=abort", "-C", "strip=symbols"]
-                    .into_iter()
-                    .map(str::to_string),
+                [
+                    "-C",
+                    "opt-level=z",
+                    "-C",
+                    "panic=abort",
+                    "-C",
+                    "strip=symbols",
+                ]
+                .into_iter()
+                .map(str::to_string),
             );
             if !ffi {
                 args.extend(["-C".to_string(), "lto=fat".to_string()]);
@@ -528,14 +532,14 @@ fn command_help(cmd: &str) -> String {
         for usage_line in action.usage.lines() {
             lines.push_str(&format!("  {bin} {} {}\n", group.name, usage_line));
         }
-        return format!(
-            "{bin} {} {cmd} — {}\n\n{lines}",
-            group.name, action.summary
-        );
+        return format!("{bin} {} {cmd} — {}\n\n{lines}", group.name, action.summary);
     }
     // A canonical flat top-level command: summary, usage, and flags all come
     // from the live registry. No parsing of a second usage string.
-    let Some(command) = jet::CLI::COMMANDS.iter().find(|command| command.name == cmd) else {
+    let Some(command) = jet::CLI::COMMANDS
+        .iter()
+        .find(|command| command.name == cmd)
+    else {
         return format!("{bin} {cmd}\n\nRun `{bin} help` to see every command.\n");
     };
     let mut output = format!(
@@ -576,10 +580,7 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
     }
 
     let before_sep = sep.map_or(raw, |i| &raw[..i]);
-    let mut fwd = vec![
-        "run".to_string(),
-        target.to_string(),
-    ];
+    let mut fwd = vec!["run".to_string(), target.to_string()];
     let mut command_args = Vec::new();
     let mut saw_run = false;
     let mut saw_target = false;
@@ -692,11 +693,18 @@ fn first_cli_positional(raw: &[String]) -> Option<&str> {
             skip_next = false;
             continue;
         }
-        if matches!(arg.as_str(), "-p" | "--output" | "--gate" | "--scope" | "--kind" | "--target") {
+        if matches!(
+            arg.as_str(),
+            "-p" | "--output" | "--gate" | "--scope" | "--kind" | "--target"
+        ) {
             skip_next = true;
             continue;
         }
-        if arg.starts_with("--output=") || arg.starts_with("--scope=") || arg.starts_with("--kind=") || arg.starts_with("--target=") {
+        if arg.starts_with("--output=")
+            || arg.starts_with("--scope=")
+            || arg.starts_with("--kind=")
+            || arg.starts_with("--target=")
+        {
             continue;
         }
         if arg == "-" || !arg.starts_with('-') {
@@ -718,7 +726,9 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         *raw = rewrite(raw);
         eprintln!("Notice: `{}` is now `{}`.", retired.spelling, replacement);
     }
-    let Some(first) = raw.first().map(String::as_str) else { return };
+    let Some(first) = raw.first().map(String::as_str) else {
+        return;
+    };
     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
         let group = group_spec.name;
         let verb = first;
@@ -726,7 +736,8 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         emit_cli_report(
             "E2101",
             format!("`{verb}` moved under `jet {group}`."),
-            "infrequent commands live in a named area so daily Jet commands stay easy to scan.".to_string(),
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan."
+                .to_string(),
             format!("run `{replacement}`."),
             raw.iter().any(|arg| arg == "--json"),
         );
@@ -736,19 +747,24 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         emit_cli_report(
             "E2101",
             "`bind` moved under `jet inspect`.".to_string(),
-            "infrequent commands live in a named area so daily Jet commands stay easy to scan.".to_string(),
+            "infrequent commands live in a named area so daily Jet commands stay easy to scan."
+                .to_string(),
             format!("run `{} inspect bind`.", jet::Syntax::BINARY_NAME),
             raw.iter().any(|arg| arg == "--json"),
         );
         exit(ExitCodes::USAGE);
     }
-    let Some(group) = raw.first().cloned() else { return };
+    let Some(group) = raw.first().cloned() else {
+        return;
+    };
     // D-CLI-SURFACE3=B: `os` is not exhaustive — jetos's own native verbs
     // (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay opaque to this
     // registry, so bare `jet os` / `jet os help` fall through unchanged to
     // the real `jet os` dispatcher instead of being hijacked by this
     // group's (partial) action list.
-    let exhaustive = jet::CLI::command_group(&group).map(|spec| spec.exhaustive).unwrap_or(false);
+    let exhaustive = jet::CLI::command_group(&group)
+        .map(|spec| spec.exhaustive)
+        .unwrap_or(false);
     if let Some(spec) = jet::CLI::command_group(&group) {
         // #1659 criterion 2: `--help`/`-h` are real help requests here, not
         // an unmodeled subword — retiring the E2101 that used to fire for
@@ -767,7 +783,9 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             exit(ExitCodes::OK);
         }
     }
-    let Some(sub) = raw.get(1).cloned() else { return };
+    let Some(sub) = raw.get(1).cloned() else {
+        return;
+    };
     if exhaustive && jet::CLI::nested_command(&group, &sub).is_none() {
         emit_cli_report(
             "E2101",
@@ -787,15 +805,17 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
 }
 
 fn esc(s: &str) -> String {
-    s.chars().flat_map(|c| match c {
-        '"' => "\\\"".chars().collect::<Vec<_>>(),
-        '\\' => "\\\\".chars().collect(),
-        '\n' => "\\n".chars().collect(),
-        '\r' => "\\r".chars().collect(),
-        '\t' => "\\t".chars().collect(),
-        c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
-        c => vec![c],
-    }).collect()
+    s.chars()
+        .flat_map(|c| match c {
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\\' => "\\\\".chars().collect(),
+            '\n' => "\\n".chars().collect(),
+            '\r' => "\\r".chars().collect(),
+            '\t' => "\\t".chars().collect(),
+            c if c.is_control() => format!("\\u{:04x}", c as u32).chars().collect(),
+            c => vec![c],
+        })
+        .collect()
 }
 
 fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
@@ -814,10 +834,7 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
     let source_files = if skipped_only {
         Vec::new()
     } else {
-        report
-            .source_files
-            .iter()
-            .collect::<Vec<_>>()
+        report.source_files.iter().collect::<Vec<_>>()
     };
     let relative = |path: &Path| {
         path.strip_prefix(&root)
@@ -951,7 +968,10 @@ fn check_flags(raw: &[String], subcmd: &str) {
         if head == "--emit-rust" {
             eprintln!("Error [E2102]: `--emit-rust` isn't a flag {bin} understands");
             eprintln!(" Why: generated output belongs to the `emit` command");
-            eprintln!(" Fix: run `{bin} emit --rust <file.{}>`", jet::Syntax::FILE_EXT);
+            eprintln!(
+                " Fix: run `{bin} emit --rust <file.{}>`",
+                jet::Syntax::FILE_EXT
+            );
             exit(ExitCodes::USAGE);
         }
         eprintln!("Error [E2102]: `{}` isn't a flag {} understands", head, bin);
@@ -988,7 +1008,8 @@ fn reject_retired_gate_flags(argv: &[String], json: bool) {
     emit_cli_report(
         retirement.code.unwrap_or("E1343"),
         format!("`{}` is retired", retirement.retired),
-        "the old boolean changed which audited escapes were checked and is no longer accepted".to_string(),
+        "the old boolean changed which audited escapes were checked and is no longer accepted"
+            .to_string(),
         format!("use `{}`", retirement.canonical),
         json,
     );
@@ -1132,7 +1153,8 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
                     emit_cli_report(
                         "E2104",
                         "`--set` needs a key=value assignment".to_string(),
-                        "a typed package setting override names one declared key and its value".to_string(),
+                        "a typed package setting override names one declared key and its value"
+                            .to_string(),
                         "use `--set key=value`".to_string(),
                         json,
                     );
@@ -1164,11 +1186,15 @@ fn parse_setting_overrides(argv: &[String], json: bool) -> BTreeMap<String, Stri
             );
             exit(ExitCodes::USAGE);
         }
-        if settings.insert(key.to_string(), value.trim().to_string()).is_some() {
+        if settings
+            .insert(key.to_string(), value.trim().to_string())
+            .is_some()
+        {
             emit_cli_report(
                 "E2104",
                 format!("setting `{key}` is assigned more than once"),
-                "one invocation must contribute one unambiguous value for each declared setting".to_string(),
+                "one invocation must contribute one unambiguous value for each declared setting"
+                    .to_string(),
                 "remove the duplicate `--set` assignment".to_string(),
                 json,
             );
@@ -1200,8 +1226,7 @@ fn run_question_mark(args: &[String]) -> ! {
     // command. stdin+stderr remain attached to the real palette TTY.
     let shell_prefill = std::env::var_os("JET_HELP_SHELL_PREFILL").is_some();
     let is_tty = std::io::stdin().is_terminal()
-        && (std::io::stdout().is_terminal()
-            || (shell_prefill && std::io::stderr().is_terminal()));
+        && (std::io::stdout().is_terminal() || (shell_prefill && std::io::stderr().is_terminal()));
     let color = parse_color(args).resolve(is_tty);
     let mut query_args = Vec::new();
     let mut skip_value = false;
@@ -1225,7 +1250,18 @@ fn run_question_mark(args: &[String]) -> ! {
         jet::Help::Interactive::run(color).ok();
         exit(ExitCodes::OK);
     }
-    print!("{}\n", jet::Help::Render::render_categorized(&jet::Help::build_index(), 0, false, None, 72, color, None));
+    print!(
+        "{}\n",
+        jet::Help::Render::render_categorized(
+            &jet::Help::build_index(),
+            0,
+            false,
+            None,
+            72,
+            color,
+            None
+        )
+    );
     exit(ExitCodes::OK);
 }
 
@@ -1380,11 +1416,18 @@ fn main() {
     };
     // A no-OS machine carries the freestanding fact, so naming it is enough.
     let freestanding = freestanding_flag
-        || selected_machine.as_ref().is_some_and(|machine| machine.no_os);
+        || selected_machine
+            .as_ref()
+            .is_some_and(|machine| machine.no_os);
     let remote_builder: Option<String> = jet_argv.iter().enumerate().find_map(|(index, arg)| {
         arg.strip_prefix("--builder=")
             .map(str::to_string)
-            .or_else(|| (arg == "--builder").then(|| jet_argv.get(index + 1)).flatten().cloned())
+            .or_else(|| {
+                (arg == "--builder")
+                    .then(|| jet_argv.get(index + 1))
+                    .flatten()
+                    .cloned()
+            })
     });
     // c134 Phase 7: `jet dev <file> --target=web --port=<N>` picks the dev
     // server's port explicitly instead of scanning from 8080.
@@ -1459,7 +1502,19 @@ fn main() {
             }
             // `--project <dir>` swallows its value too (#2038): a project
             // directory is never the positional file/program arg.
-            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" || a == "--project" || a == "--base-receipt" || a == "--receipt" || a == "--head-receipt" || a == "--after-receipt" {
+            if a == "-p"
+                || a == "--output"
+                || a == "--gate"
+                || a == "--scope"
+                || a == "--kind"
+                || a == "--set"
+                || a == "--target"
+                || a == "--project"
+                || a == "--base-receipt"
+                || a == "--receipt"
+                || a == "--head-receipt"
+                || a == "--after-receipt"
+            {
                 skip_next = true;
                 continue;
             }
@@ -1702,12 +1757,34 @@ fn main() {
                 || mode.json
                 || !std::io::stdout().is_terminal();
             loop {
-                let snapshot = jet::DevServer::LiveInspect::read(pid).unwrap_or_else(|message| {
-                    crate::cli_error!(@fix "E2105", message, "start the program with --observe, or attach to a jet dev process");
-                    exit(ExitCodes::USER_ERROR);
-                });
+                let snapshot = match jet::DevServer::LiveInspect::read(pid) {
+                    Ok(snapshot) => snapshot,
+                    Err(message) => {
+                        if mode.json {
+                            let (why, fix) = cli_diagnostic_copy("E2105");
+                            emit_cli_report(
+                                "E2105",
+                                message,
+                                why.to_string(),
+                                fix.to_string(),
+                                true,
+                            );
+                        } else {
+                            crate::cli_error!(@fix "E2105", message, "start the program with --observe, or attach to a jet dev process");
+                        }
+                        exit(ExitCodes::USER_ERROR);
+                    }
+                };
                 if mode.json {
-                    println!("{snapshot}");
+                    println!(
+                        "{}",
+                        render_status_json(
+                            "ok",
+                            true,
+                            "inspect.live",
+                            &format!(",\"live\":{snapshot}"),
+                        )
+                    );
                 } else {
                     if !once {
                         print!("\x1b[2J\x1b[H");
@@ -1726,8 +1803,8 @@ fn main() {
         // D-DEVR-STATUS1=A: project truth has one read-only home. It consumes
         // receipts; it never runs a producer to manufacture a green answer.
         "status" => {
-            crate::cli_error!("E2101", "`jet status` is not built yet: its receipt grading API is unimplemented (Tower #2113)");
-            exit(ExitCodes::USAGE);
+            let status_args = raw.iter().skip(1).cloned().collect::<Vec<_>>();
+            exit(CmdStatus::run_status(&status_args, mode.json));
         }
         "parts" => run_project_parts(&raw, mode),
         "reserved" => {
@@ -1761,9 +1838,18 @@ fn main() {
             run_fill(target, mode);
             return;
         }
-        "diff" => { run_diff(&raw); return; }
-        "merge" => { run_merge(&raw); return; }
-        "review" => { run_review(&raw, mode.json); return; }
+        "diff" => {
+            run_diff(&raw);
+            return;
+        }
+        "merge" => {
+            run_merge(&raw);
+            return;
+        }
+        "review" => {
+            run_review(&raw, mode.json);
+            return;
+        }
         "report" => exit(run_report(&raw[1..])),
         "remote" => run_remote(&raw, mode),
         "help" => {
@@ -1880,9 +1966,10 @@ fn main() {
             // D-ECO12=A: external language formatting belongs to the same
             // environment realization/trust path as `jet env`; native `.jet`
             // formatting stays in the compiler driver below.
-            if jet_argv.iter().any(|a| {
-                a == jet::Syntax::FMT_FLAG_LANG || a.starts_with("--lang=")
-            }) {
+            if jet_argv
+                .iter()
+                .any(|a| a == jet::Syntax::FMT_FLAG_LANG || a.starts_with("--lang="))
+            {
                 exit(EngineDispatch::dispatch(
                     jet::Syntax::JETPACK_BINARY_NAME,
                     "fmt",
@@ -1891,8 +1978,7 @@ fn main() {
             }
             // D-FMTPROJECT1=D: project-level formatter. No positional target
             // required — defaults to discovering the workspace/project root.
-            let path_args: Vec<String> =
-                args[1..].iter().map(|s| s.as_str().to_string()).collect();
+            let path_args: Vec<String> = args[1..].iter().map(|s| s.as_str().to_string()).collect();
             let stdin_mode = path_args.iter().any(|p| p == "-");
             let stdin_path: Option<String> = jet_argv
                 .iter()
@@ -1900,8 +1986,7 @@ fn main() {
             let show_diff = jet_argv.iter().any(|a| a == "--diff") || dry_run;
             let changed_only = jet_argv.iter().any(|a| a == "--changed");
             let explicit_copies = jet_argv.iter().any(|a| a == "--explicit-copies");
-            let explicit_paths: Vec<String> =
-                path_args.into_iter().filter(|p| p != "-").collect();
+            let explicit_paths: Vec<String> = path_args.into_iter().filter(|p| p != "-").collect();
             run_fmt(
                 &explicit_paths,
                 stdin_mode,
@@ -1944,34 +2029,33 @@ fn main() {
         "fold" => run_fold(&args, &raw, mode),
         // D-OPTGC1=A: the grouped report is active; the old bare cleanup alias
         // still teaches `jet clean`.
-        "gc" => {
-            match args.get(1).map(|word| word.as_str()) {
-                Some("report") => {
-                    CmdGc::run(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
-                    return;
-                }
-                None => {
-                    emit_cli_report(
-                        "E2101",
-                        "`gc` isn't a jet command".to_string(),
-                        "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)".to_string(),
-                        "run `jet clean`".to_string(),
-                        json,
-                    );
-                    exit(ExitCodes::USAGE);
-                }
-                Some(other) => {
-                    emit_cli_report(
-                        "E2101",
-                        format!("`{other}` isn't a jet gc command"),
-                        "jet gc currently exposes only the automatic-promotion report".to_string(),
-                        "run `jet gc report`".to_string(),
-                        json,
-                    );
-                    exit(ExitCodes::USAGE);
-                }
+        "gc" => match args.get(1).map(|word| word.as_str()) {
+            Some("report") => {
+                CmdGc::run(&raw.iter().skip(2).cloned().collect::<Vec<_>>(), mode);
+                return;
             }
-        }
+            None => {
+                emit_cli_report(
+                    "E2101",
+                    "`gc` isn't a jet command".to_string(),
+                    "`jet clean` is the sole package-store cleanup entry (D-CLI-STORE2=A)"
+                        .to_string(),
+                    "run `jet clean`".to_string(),
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+            Some(other) => {
+                emit_cli_report(
+                    "E2101",
+                    format!("`{other}` isn't a jet gc command"),
+                    "jet gc currently exposes only the automatic-promotion report".to_string(),
+                    "run `jet gc report`".to_string(),
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+        },
         "publish" => {
             let force = raw.iter().any(|a| a == "--force");
             // c146 (D-PKGSIGN1): sign by default; --no-sign opts out.
@@ -2000,7 +2084,10 @@ fn main() {
                     exit(ExitCodes::USER_ERROR);
                 }
                 None => {
-                    crate::cli_error!("E2104", "`jet registry key` needs a subcommand — try `jet registry key backup`.");
+                    crate::cli_error!(
+                        "E2104",
+                        "`jet registry key` needs a subcommand — try `jet registry key backup`."
+                    );
                     exit(ExitCodes::USER_ERROR);
                 }
             }
@@ -2083,9 +2170,7 @@ fn main() {
             let operation = args.get(1).map(|value| value.as_str()).unwrap_or("");
             let file = args.get(2).map(|value| value.as_str()).unwrap_or("");
             if file.is_empty() {
-                eprintln!(
-                    "usage: jet inspect compiler <lex|parse|check|source-map> <file>"
-                );
+                eprintln!("usage: jet inspect compiler <lex|parse|check|source-map> <file>");
                 exit(ExitCodes::USAGE);
             }
             run_compiler_api(operation, file, mode);
@@ -2357,7 +2442,12 @@ fn main() {
                     ) {
                         Some(entry) => entry,
                         None => {
-                            crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                            crate::cli_error!(
+                                "E2104",
+                                "`jet dev` needs a file to watch: {} dev <file.{}>",
+                                jet::Syntax::BINARY_NAME,
+                                jet::Syntax::FILE_EXT
+                            );
                             exit(ExitCodes::USAGE);
                         }
                     };
@@ -2367,7 +2457,7 @@ fn main() {
                         entry
                     };
                     entry.to_string_lossy().into_owned()
-                },
+                }
             };
             // E2-M15: `jet dev` has the same target validation contract as
             // build/run, even when its execution tier is the native watcher.
@@ -2434,7 +2524,13 @@ fn main() {
                         record_name.as_deref(),
                     );
                 }
-                run_web_app_dev_entry(&file, mode, dev_port, &setting_overrides, record_name.as_deref());
+                run_web_app_dev_entry(
+                    &file,
+                    mode,
+                    dev_port,
+                    &setting_overrides,
+                    record_name.as_deref(),
+                );
                 return;
             }
             // c134 Phase 7: `jet dev <file> --target=web` compiles to JS/WASM
@@ -2480,20 +2576,19 @@ fn main() {
             // entry the same way run/build/check/dev do; outside a package
             // the usage error is unchanged.
             let file: String = match args.get(1) {
-                Some(f) => resolve_command_target(
-                    "debug",
-                    f,
-                    flag_value(&raw, "-p"),
-                    mode,
-                    false,
-                ),
+                Some(f) => resolve_command_target("debug", f, flag_value(&raw, "-p"), mode, false),
                 None => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     let member_flag = flag_value(&raw, "-p");
                     match resolve_bare_entry("debug", &cwd, member_flag) {
                         Some(entry) => entry.to_string_lossy().into_owned(),
                         None => {
-                            crate::cli_error!("E2104", "`jet debug` needs a file to debug: {} debug <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                            crate::cli_error!(
+                                "E2104",
+                                "`jet debug` needs a file to debug: {} debug <file.{}>",
+                                jet::Syntax::BINARY_NAME,
+                                jet::Syntax::FILE_EXT
+                            );
                             exit(ExitCodes::USAGE);
                         }
                     }
@@ -2543,7 +2638,8 @@ fn main() {
                         &raw,
                     ));
                 }
-                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign" | "recover" => {
+                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign"
+                | "recover" => {
                     exit(EngineDispatch::dispatch(
                         jet::Syntax::JETPACK_BINARY_NAME,
                         "hangar",
@@ -2579,7 +2675,12 @@ fn main() {
             let argument = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
-                    crate::cli_error!("E2104", "`jet eval` needs a file or an expression: {} eval <file.{} | expression>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                    crate::cli_error!(
+                        "E2104",
+                        "`jet eval` needs a file or an expression: {} eval <file.{} | expression>",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    );
                     exit(ExitCodes::USAGE);
                 }
             };
@@ -2620,9 +2721,7 @@ fn main() {
         _ => None,
     };
     let target = match args.get(1) {
-        Some(f) if cmd == "build" => {
-            named_build_entry.as_deref().unwrap_or(f.as_str())
-        }
+        Some(f) if cmd == "build" => named_build_entry.as_deref().unwrap_or(f.as_str()),
         Some(f) => f.as_str(),
         None => {
             // No target: try project-root mode for run/build/test/check/dev.
@@ -2657,7 +2756,9 @@ fn main() {
                                 run_test_package(
                                     &root,
                                     TestRunOpts {
-                                        show_default: jet_argv.iter().any(|a| a == "--show-default"),
+                                        show_default: jet_argv
+                                            .iter()
+                                            .any(|a| a == "--show-default"),
                                         release: release_flag,
                                         trace_tiers: jet_argv.iter().any(|a| a == "--trace-tiers"),
                                         measure: jet_argv.iter().any(|a| a == "--measure"),
@@ -3023,8 +3124,7 @@ fn main() {
                 cmd != "build"
                     || (Path::new(target).is_dir()
                         && !jet_argv.iter().any(|arg| arg == "--show-default")),
-                cmd != "build"
-                    || !jet_argv.iter().any(|arg| arg == "--show-default"),
+                cmd != "build" || !jet_argv.iter().any(|arg| arg == "--show-default"),
             );
         }
     }
@@ -3207,7 +3307,10 @@ fn command_scope_root(entry: &Path) -> PathBuf {
     let directory = if entry.is_dir() {
         entry
     } else {
-        entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."))
+        entry
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
     };
     jet::Loader::find_manifest_root(directory).unwrap_or_else(|| directory.to_path_buf())
 }
@@ -3370,7 +3473,9 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    if let Some(entry) = checked_project_entry(&resolver, Path::new(jet::Syntax::DEFAULT_ENTRY_FILE)) {
+    if let Some(entry) =
+        checked_project_entry(&resolver, Path::new(jet::Syntax::DEFAULT_ENTRY_FILE))
+    {
         return entry;
     }
     if let Some(entry) = checked_project_entry(
@@ -3380,11 +3485,9 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         return entry;
     }
     if let Some(manifest) = package.as_ref().map(|package| &package.facts) {
-        let named = resolver.root().join(format!(
-            "{}.{}",
-            manifest.name,
-            jet::Syntax::FILE_EXT
-        ));
+        let named = resolver
+            .root()
+            .join(format!("{}.{}", manifest.name, jet::Syntax::FILE_EXT));
         if let Ok(relative) = named.strip_prefix(resolver.root()) {
             if let Some(entry) = checked_project_entry(&resolver, relative) {
                 return entry;
@@ -3451,15 +3554,12 @@ fn resolve_named_build_member(cwd: &Path, wanted: &str) -> Result<Option<PathBuf
 }
 
 fn resolve_member_build_entry(root: &Path) -> Result<Option<PathBuf>, String> {
-    let member_resolver = jet::Authority::AuthorityResolver::open(&root)
-        .map_err(|error| error.to_string())?;
+    let member_resolver =
+        jet::Authority::AuthorityResolver::open(&root).map_err(|error| error.to_string())?;
     let checked = member_resolver
         .checked_manifest(Path::new("."))
         .map_err(|error| error.to_string())?;
-    if let Ok(Some(entry)) = checked
-        .facts
-        .resolve_run_entry_checked(&member_resolver)
-    {
+    if let Ok(Some(entry)) = checked.facts.resolve_run_entry_checked(&member_resolver) {
         return Ok(Some(entry.path));
     }
     if let Some(entry) = checked
@@ -3511,21 +3611,23 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     });
     if matches!(workspace_source.as_ref(), None | Some(Ok(None))) {
         let stale_workspace_lock = match workspace_resolver.as_ref() {
-            Some(resolver) => match resolver.checked_file(Path::new(jet::Syntax::UNIFIED_LOCK_FILE)) {
-                Ok(lock_file) => {
-                    let source = match lock_file.text() {
-                        Ok(source) => source,
-                        Err(error) => report_entry_authority_error(error),
-                    };
-                    if let Err(error) = resolver.revalidate_file(&lock_file) {
-                        report_entry_authority_error(error);
+            Some(resolver) => {
+                match resolver.checked_file(Path::new(jet::Syntax::UNIFIED_LOCK_FILE)) {
+                    Ok(lock_file) => {
+                        let source = match lock_file.text() {
+                            Ok(source) => source,
+                            Err(error) => report_entry_authority_error(error),
+                        };
+                        if let Err(error) = resolver.revalidate_file(&lock_file) {
+                            report_entry_authority_error(error);
+                        }
+                        jetpack::WorkspaceLock::load_checked_file(resolver, lock_file).is_none()
+                            && jetpack::Lock::looks_like_workspace_lock(&source)
                     }
-                    jetpack::WorkspaceLock::load_checked_file(resolver, lock_file).is_none()
-                        && jetpack::Lock::looks_like_workspace_lock(&source)
+                    Err(error) if error.is_missing() => false,
+                    Err(error) => report_entry_authority_error(error),
                 }
-                Err(error) if error.is_missing() => false,
-                Err(error) => report_entry_authority_error(error),
-            },
+            }
             None => false,
         };
         if stale_workspace_lock {
@@ -3547,17 +3649,19 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
     // members. Member selection (`-p`) remains an explicit escape.
     if cmd == "build" && member_flag.is_none() {
         if let Some(Ok(Some(source))) = workspace_source.as_ref() {
-            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index
-            {
+            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index {
                 return Some(source.path.clone());
             }
         }
     }
     let workspace = match (workspace_resolver.as_ref(), workspace_source.as_ref()) {
         (Some(resolver), Some(Ok(Some(source))))
-            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index => Some(
-                jetpack::WorkspaceFile::evaluate_checked_source(source, resolver),
-            ),
+            if source.role == jetpack::WorkspaceFile::WorkspaceSourceRole::Index =>
+        {
+            Some(jetpack::WorkspaceFile::evaluate_checked_source(
+                source, resolver,
+            ))
+        }
         (_, Some(Err(diagnostic))) => Some(Err(diagnostic.clone())),
         _ => None,
     };
@@ -3595,11 +3699,7 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 }
                 eprint!(
                     "{}",
-                    jet::render_diagnostics(
-                        jet::Syntax::WORKSPACE_FILE,
-                        "",
-                        &[diagnostic]
-                    )
+                    jet::render_diagnostics(jet::Syntax::WORKSPACE_FILE, "", &[diagnostic])
                 );
                 exit(ExitCodes::USER_ERROR);
             }
@@ -3817,7 +3917,12 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
                 .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
                 .status()
                 .unwrap_or_else(|e| {
-                    crate::cli_error!("E2105", "couldn't exec the pinned toolchain `{}`: {}", binary.display(), e);
+                    crate::cli_error!(
+                        "E2105",
+                        "couldn't exec the pinned toolchain `{}`: {}",
+                        binary.display(),
+                        e
+                    );
                     exit(ExitCodes::USER_ERROR);
                 });
             exit(status.code().unwrap_or(ExitCodes::USER_ERROR));
@@ -3934,9 +4039,15 @@ fn print_transition_result(
             }
         }
         if result.summary.before_fingerprint == result.summary.after_fingerprint {
-            println!("package graph unchanged: {}", result.summary.after_fingerprint);
+            println!(
+                "package graph unchanged: {}",
+                result.summary.after_fingerprint
+            );
         } else {
-            println!("package graph before: {}", result.summary.before_fingerprint);
+            println!(
+                "package graph before: {}",
+                result.summary.before_fingerprint
+            );
             println!("package graph after: {}", result.summary.after_fingerprint);
         }
         if check_only {
@@ -3989,11 +4100,7 @@ fn json_quote(value: &str) -> String {
     )
 }
 
-fn run_init(
-    script: Option<&str>,
-    raw: &[String],
-    mode: OutputMode,
-) -> ! {
+fn run_init(script: Option<&str>, raw: &[String], mode: OutputMode) -> ! {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if raw.iter().any(|arg| arg == "--restore-role-files") {
         let check_only = raw.iter().any(|arg| arg == "--check");
@@ -4029,7 +4136,7 @@ fn run_init(
             .any(|name| cwd.join(name).is_file())
         && !cwd.join(jet::Syntax::PACKAGE_FILE).is_file()
     {
-            match jetpack::Transition::init(&cwd, false) {
+        match jetpack::Transition::init(&cwd, false) {
             Ok(result) => print_transition_result(&result, false, mode),
             Err(error) => {
                 crate::cli_error!("E2105", "{error}");
@@ -4096,7 +4203,10 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
             "lifted {} inline dependenc{} into {}",
             deps.len(),
             if deps.len() == 1 { "y" } else { "ies" },
-            manifest_path.file_name().and_then(|name| name.to_str()).unwrap_or("package.jet")
+            manifest_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("package.jet")
         );
     }
 }
@@ -4108,7 +4218,10 @@ fn lift_inline_deps_into_manifest(cwd: &Path, script: &str) {
 /// stale — the same "locks by file-content hash" contract `jet run` uses).
 fn run_lock(script: Option<&str>, mode: OutputMode) {
     let Some(raw_arg) = script else {
-        crate::cli_error!("E2104", "`jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`");
+        crate::cli_error!(
+            "E2104",
+            "`jet fetch --lock` needs a script path, e.g. `jet fetch --lock stats.jet`"
+        );
         exit(ExitCodes::USER_ERROR);
     };
     let file = resolve_source_path(raw_arg);
@@ -4116,7 +4229,11 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
     let script_dir = script_path.parent().unwrap_or(Path::new("."));
 
     if jet::Loader::find_manifest_root(script_dir).is_some() {
-        crate::cli_error!("E1202", "`{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies", jet::Syntax::PACKAGE_FILE);
+        crate::cli_error!(
+            "E1202",
+            "`{file}` belongs to a project with a `{}` — use `jet fetch` to lock its dependencies",
+            jet::Syntax::PACKAGE_FILE
+        );
         exit(ExitCodes::USER_ERROR);
     }
 

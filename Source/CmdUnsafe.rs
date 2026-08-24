@@ -2,18 +2,13 @@
 
 use std::process::exit;
 
-use jet::AST::ProgramBundle;
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
-use jet_foundation::JSON::json_escape;
+use jet::AST::ProgramBundle;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 
-pub(crate) fn run(
-    args: &[String],
-    json: bool,
-    color: bool,
-    gates: jet::Policy::GateSet,
-) {
+pub(crate) fn run(args: &[String], json: bool, color: bool, gates: jet::Policy::GateSet) {
     let mut skip_value = false;
     let file = args.iter().find(|argument| {
         if skip_value {
@@ -138,7 +133,11 @@ fn render_human(entries: &[&GateEntry], bundle: &ProgramBundle) {
                 "  {}  {}  {}  required=[{}] asserted=[{}]",
                 location(&entry.source, &source, operation.span),
                 operation.kind,
-                if operation.discharged { "discharged" } else { "missing" },
+                if operation.discharged {
+                    "discharged"
+                } else {
+                    "missing"
+                },
                 operation.required.join(","),
                 operation.asserted.join(",")
             );

@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 use jet_foundation::JetTrace::TRACE_VERSION;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 use crate::OutputMode;
 
@@ -66,7 +66,10 @@ struct TraceError {
 
 impl TraceError {
     fn new(kind: ErrorKind, detail: impl Into<String>) -> Self {
-        Self { kind, detail: detail.into() }
+        Self {
+            kind,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -79,7 +82,10 @@ pub(crate) fn configure_trace() {
 pub(crate) fn run(args: &[String], mode: OutputMode) {
     if let Some(argument) = args.iter().find(|argument| !argument.starts_with('-')) {
         fail(
-            TraceError::new(ErrorKind::Malformed, format!("unexpected gc report argument `{argument}`")),
+            TraceError::new(
+                ErrorKind::Malformed,
+                format!("unexpected gc report argument `{argument}`"),
+            ),
             mode,
         );
     }
@@ -137,11 +143,17 @@ fn read_trace(path: &Path) -> Result<String, TraceError> {
                 format!("no GC trace exists at `{}`", path.display()),
             )
         } else {
-            TraceError::new(ErrorKind::Unsafe, format!("cannot inspect GC trace: {error}"))
+            TraceError::new(
+                ErrorKind::Unsafe,
+                format!("cannot inspect GC trace: {error}"),
+            )
         }
     })?;
     if !link.file_type().is_file() {
-        return Err(TraceError::new(ErrorKind::Unsafe, "GC trace is not a regular file"));
+        return Err(TraceError::new(
+            ErrorKind::Unsafe,
+            "GC trace is not a regular file",
+        ));
     }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -151,13 +163,22 @@ fn read_trace(path: &Path) -> Result<String, TraceError> {
         options.custom_flags(0o400000);
     }
     let file = options.open(path).map_err(|error| {
-        TraceError::new(ErrorKind::Unsafe, format!("cannot securely open GC trace: {error}"))
+        TraceError::new(
+            ErrorKind::Unsafe,
+            format!("cannot securely open GC trace: {error}"),
+        )
     })?;
     let metadata = file.metadata().map_err(|error| {
-        TraceError::new(ErrorKind::Unsafe, format!("cannot inspect GC trace: {error}"))
+        TraceError::new(
+            ErrorKind::Unsafe,
+            format!("cannot inspect GC trace: {error}"),
+        )
     })?;
     if !metadata.file_type().is_file() {
-        return Err(TraceError::new(ErrorKind::Unsafe, "GC trace is not a regular file"));
+        return Err(TraceError::new(
+            ErrorKind::Unsafe,
+            "GC trace is not a regular file",
+        ));
     }
     #[cfg(unix)]
     {
@@ -171,7 +192,10 @@ fn read_trace(path: &Path) -> Result<String, TraceError> {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Ok(self_metadata) = std::fs::metadata("/proc/self") {
             if metadata.uid() != self_metadata.uid() {
-                return Err(TraceError::new(ErrorKind::Unsafe, "GC trace belongs to another user"));
+                return Err(TraceError::new(
+                    ErrorKind::Unsafe,
+                    "GC trace belongs to another user",
+                ));
             }
         }
     }
@@ -184,7 +208,12 @@ fn read_trace(path: &Path) -> Result<String, TraceError> {
     let mut raw = String::new();
     file.take(MAX_TRACE_BYTES + 1)
         .read_to_string(&mut raw)
-        .map_err(|error| TraceError::new(ErrorKind::Malformed, format!("cannot read GC trace: {error}")))?;
+        .map_err(|error| {
+            TraceError::new(
+                ErrorKind::Malformed,
+                format!("cannot read GC trace: {error}"),
+            )
+        })?;
     if raw.len() as u64 > MAX_TRACE_BYTES {
         return Err(TraceError::new(
             ErrorKind::Oversized,
@@ -199,10 +228,16 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
         .map_err(|_| TraceError::new(ErrorKind::Malformed, "GC trace is not valid JSON"))?;
     let root = object(&value, "GC trace root")?;
     if string_field(root, "schema")? != TRACE_SCHEMA {
-        return Err(TraceError::new(ErrorKind::Incompatible, "GC trace schema is not supported"));
+        return Err(TraceError::new(
+            ErrorKind::Incompatible,
+            "GC trace schema is not supported",
+        ));
     }
     if uint_field(root, "version")? != u64::from(TRACE_VERSION) {
-        return Err(TraceError::new(ErrorKind::Incompatible, "GC trace version is not supported"));
+        return Err(TraceError::new(
+            ErrorKind::Incompatible,
+            "GC trace version is not supported",
+        ));
     }
     if expected_project.len() > MAX_TRACE_FIELD_BYTES
         || expected_project.chars().any(char::is_control)
@@ -221,15 +256,24 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
     }
     let pid = uint_field(root, "pid")?;
     if pid == 0 {
-        return Err(TraceError::new(ErrorKind::Malformed, "GC trace process id is zero"));
+        return Err(TraceError::new(
+            ErrorKind::Malformed,
+            "GC trace process id is zero",
+        ));
     }
     let started_unix_ms = uint_field(root, "started_unix_ms")?;
     let updated_unix_ms = uint_field(root, "updated_unix_ms")?;
     if started_unix_ms > updated_unix_ms || updated_unix_ms > now.saturating_add(5 * 60 * 1_000) {
-        return Err(TraceError::new(ErrorKind::Malformed, "GC trace timestamps are inconsistent"));
+        return Err(TraceError::new(
+            ErrorKind::Malformed,
+            "GC trace timestamps are inconsistent",
+        ));
     }
     if now.saturating_sub(updated_unix_ms) > MAX_TRACE_AGE_MS {
-        return Err(TraceError::new(ErrorKind::Stale, "GC trace is older than 30 days"));
+        return Err(TraceError::new(
+            ErrorKind::Stale,
+            "GC trace is older than 30 days",
+        ));
     }
     let complete = bool_field(root, "complete")?;
     let dropped_promotions = uint_field(root, "dropped_promotions")?;
@@ -242,7 +286,10 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
     let collections = uint_field(root, "collections")?;
     let site_values = array_field(root, "sites")?;
     if site_values.len() > MAX_TRACE_SITES {
-        return Err(TraceError::new(ErrorKind::Oversized, "GC trace has too many promotion sites"));
+        return Err(TraceError::new(
+            ErrorKind::Oversized,
+            "GC trace has too many promotion sites",
+        ));
     }
     let mut sites = Vec::with_capacity(site_values.len());
     let mut identities_seen = BTreeSet::new();
@@ -253,39 +300,65 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
         let span_start = uint_field(site, "span_start")?;
         let span_end = uint_field(site, "span_end")?;
         if span_start > span_end {
-            return Err(TraceError::new(ErrorKind::Malformed, "GC promotion span is reversed"));
+            return Err(TraceError::new(
+                ErrorKind::Malformed,
+                "GC promotion span is reversed",
+            ));
         }
         let scope = safe_string(site, "scope")?;
         let policy_provenance = safe_string(site, "policy_provenance")?;
         let reason = safe_string(site, "reason")?;
         let type_name = safe_string(site, "type_name")?;
         if !sites_seen.insert((
-            source.clone(), span_start, span_end, scope.clone(), policy_provenance.clone(),
-            reason.clone(), type_name.clone(),
+            source.clone(),
+            span_start,
+            span_end,
+            scope.clone(),
+            policy_provenance.clone(),
+            reason.clone(),
+            type_name.clone(),
         )) {
-            return Err(TraceError::new(ErrorKind::Malformed, "GC trace repeats a promotion site"));
+            return Err(TraceError::new(
+                ErrorKind::Malformed,
+                "GC trace repeats a promotion site",
+            ));
         }
         let identity_values = array_field(site, "identities")?;
         if identities_seen.len().saturating_add(identity_values.len()) > MAX_TRACE_IDENTITIES {
-            return Err(TraceError::new(ErrorKind::Oversized, "GC trace has too many identities"));
+            return Err(TraceError::new(
+                ErrorKind::Oversized,
+                "GC trace has too many identities",
+            ));
         }
         let mut identities = Vec::with_capacity(identity_values.len());
         for value in identity_values {
             let identity = object(value, "GC identity")?;
             let id = uint_field(identity, "identity")?;
             if id == 0 || !identities_seen.insert(id) {
-                return Err(TraceError::new(ErrorKind::Malformed, "GC trace has a zero or duplicate identity"));
+                return Err(TraceError::new(
+                    ErrorKind::Malformed,
+                    "GC trace has a zero or duplicate identity",
+                ));
             }
-            identities.push(Identity { id, retained: bool_field(identity, "retained")? });
+            identities.push(Identity {
+                id,
+                retained: bool_field(identity, "retained")?,
+            });
         }
         identities.sort_by_key(|identity| identity.id);
         let allocations = usize::try_from(uint_field(site, "allocations")?).map_err(|_| {
-            TraceError::new(ErrorKind::Oversized, "GC trace allocation count is too large")
+            TraceError::new(
+                ErrorKind::Oversized,
+                "GC trace allocation count is too large",
+            )
         })?;
         let retained = usize::try_from(uint_field(site, "retained")?).map_err(|_| {
             TraceError::new(ErrorKind::Oversized, "GC trace retained count is too large")
         })?;
-        let derived_retained = identities.iter().filter(|identity| identity.retained).count();
+        let derived_retained = identities
+            .iter()
+            .filter(|identity| identity.retained)
+            .count();
         if allocations != identities.len() || retained != derived_retained {
             return Err(TraceError::new(
                 ErrorKind::Malformed,
@@ -323,30 +396,58 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
                 &right.type_name,
             ))
     });
-    Ok(Trace { project, pid, started_unix_ms, updated_unix_ms, collections, sites })
-}
-
-fn object<'a>(value: &'a JSONValue, name: &str) -> Result<&'a std::collections::BTreeMap<String, JSONValue>, TraceError> {
-    match value {
-        JSONValue::Object(object) => Ok(object),
-        _ => Err(TraceError::new(ErrorKind::Malformed, format!("{name} is not an object"))),
-    }
-}
-
-fn field<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<&'a JSONValue, TraceError> {
-    object.get(name).ok_or_else(|| {
-        TraceError::new(ErrorKind::Malformed, format!("GC trace is missing `{name}`"))
+    Ok(Trace {
+        project,
+        pid,
+        started_unix_ms,
+        updated_unix_ms,
+        collections,
+        sites,
     })
 }
 
-fn string_field<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<&'a str, TraceError> {
-    match field(object, name)? {
-        JSONValue::String(value) => Ok(value),
-        _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not text"))),
+fn object<'a>(
+    value: &'a JSONValue,
+    name: &str,
+) -> Result<&'a std::collections::BTreeMap<String, JSONValue>, TraceError> {
+    match value {
+        JSONValue::Object(object) => Ok(object),
+        _ => Err(TraceError::new(
+            ErrorKind::Malformed,
+            format!("{name} is not an object"),
+        )),
     }
 }
 
-fn safe_string(object: &std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<String, TraceError> {
+fn field<'a>(
+    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<&'a JSONValue, TraceError> {
+    object.get(name).ok_or_else(|| {
+        TraceError::new(
+            ErrorKind::Malformed,
+            format!("GC trace is missing `{name}`"),
+        )
+    })
+}
+
+fn string_field<'a>(
+    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<&'a str, TraceError> {
+    match field(object, name)? {
+        JSONValue::String(value) => Ok(value),
+        _ => Err(TraceError::new(
+            ErrorKind::Malformed,
+            format!("GC trace `{name}` is not text"),
+        )),
+    }
+}
+
+fn safe_string(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<String, TraceError> {
     let value = string_field(object, name)?;
     if value.is_empty()
         || value.len() > MAX_TRACE_FIELD_BYTES
@@ -360,7 +461,10 @@ fn safe_string(object: &std::collections::BTreeMap<String, JSONValue>, name: &st
     Ok(value.to_string())
 }
 
-fn uint_field(object: &std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<u64, TraceError> {
+fn uint_field(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<u64, TraceError> {
     match field(object, name)? {
         JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
         _ => Err(TraceError::new(
@@ -370,22 +474,38 @@ fn uint_field(object: &std::collections::BTreeMap<String, JSONValue>, name: &str
     }
 }
 
-fn bool_field(object: &std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<bool, TraceError> {
+fn bool_field(
+    object: &std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<bool, TraceError> {
     match field(object, name)? {
         JSONValue::Bool(value) => Ok(*value),
-        _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not Bool"))),
+        _ => Err(TraceError::new(
+            ErrorKind::Malformed,
+            format!("GC trace `{name}` is not Bool"),
+        )),
     }
 }
 
-fn array_field<'a>(object: &'a std::collections::BTreeMap<String, JSONValue>, name: &str) -> Result<&'a [JSONValue], TraceError> {
+fn array_field<'a>(
+    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    name: &str,
+) -> Result<&'a [JSONValue], TraceError> {
     match field(object, name)? {
         JSONValue::Array(values) => Ok(values),
-        _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not a list"))),
+        _ => Err(TraceError::new(
+            ErrorKind::Malformed,
+            format!("GC trace `{name}` is not a list"),
+        )),
     }
 }
 
 fn render_text(trace: &Trace, color: bool) -> String {
-    let allocations = trace.sites.iter().map(|site| site.identities.len()).sum::<usize>();
+    let allocations = trace
+        .sites
+        .iter()
+        .map(|site| site.identities.len())
+        .sum::<usize>();
     let retained = trace
         .sites
         .iter()
@@ -402,7 +522,11 @@ fn render_text(trace: &Trace, color: bool) -> String {
         return out;
     }
     for site in &trace.sites {
-        let retained = site.identities.iter().filter(|identity| identity.retained).count();
+        let retained = site
+            .identities
+            .iter()
+            .filter(|identity| identity.retained)
+            .count();
         out.push_str(&format!(
             "\n{}  {}\n  scope: {}\n  policy: {}\n  reason: {}\n  allocations: {}  retained: {}\n  identities: {}\n  rewrite: {}\n",
             paint(&format!("{}:{}..{}", site.source, site.span_start, site.span_end), "1", color),
@@ -417,13 +541,23 @@ fn identity_summary(identities: &[Identity]) -> String {
     let mut out = identities
         .iter()
         .take(8)
-        .map(|identity| format!("{}{}", identity.id, if identity.retained { "*" } else { "" }))
+        .map(|identity| {
+            format!(
+                "{}{}",
+                identity.id,
+                if identity.retained { "*" } else { "" }
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     if identities.len() > 8 {
         out.push_str(&format!(" (+{} more)", identities.len() - 8));
     }
-    if out.is_empty() { "-".to_string() } else { out }
+    if out.is_empty() {
+        "-".to_string()
+    } else {
+        out
+    }
 }
 
 fn recommendation(site: &Site) -> String {
@@ -434,7 +568,11 @@ fn recommendation(site: &Site) -> String {
 }
 
 fn render_json(trace: &Trace) -> String {
-    let allocations = trace.sites.iter().map(|site| site.identities.len()).sum::<usize>();
+    let allocations = trace
+        .sites
+        .iter()
+        .map(|site| site.identities.len())
+        .sum::<usize>();
     let retained = trace
         .sites
         .iter()
@@ -462,13 +600,19 @@ fn render_json(trace: &Trace) -> String {
 }
 
 fn paint(value: &str, code: &str, enabled: bool) -> String {
-    if enabled { format!("\x1b[{code}m{value}\x1b[0m") } else { value.to_string() }
+    if enabled {
+        format!("\x1b[{code}m{value}\x1b[0m")
+    } else {
+        value.to_string()
+    }
 }
 
 fn fail(error: TraceError, mode: OutputMode) -> ! {
     let fix = match error.kind {
         ErrorKind::Missing => "run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`",
-        ErrorKind::Incomplete => "trace a smaller complete workload; reports never estimate dropped promotions",
+        ErrorKind::Incomplete => {
+            "trace a smaller complete workload; reports never estimate dropped promotions"
+        }
         _ => "rerun the program with `--gc-trace` to replace the rejected trace",
     };
     let diagnostic = jet::Diagnostics::Diagnostic::error(
@@ -524,8 +668,14 @@ mod tests {
     #[test]
     fn malformed_or_incomplete_evidence_never_becomes_a_report() {
         let bad_count = SAMPLE.replace("\"allocations\":2", "\"allocations\":3");
-        assert_eq!(parse_trace(&bad_count, "/project", 20).unwrap_err().kind, ErrorKind::Malformed);
+        assert_eq!(
+            parse_trace(&bad_count, "/project", 20).unwrap_err().kind,
+            ErrorKind::Malformed
+        );
         let incomplete = SAMPLE.replace("\"complete\":true", "\"complete\":false");
-        assert_eq!(parse_trace(&incomplete, "/project", 20).unwrap_err().kind, ErrorKind::Incomplete);
+        assert_eq!(
+            parse_trace(&incomplete, "/project", 20).unwrap_err().kind,
+            ErrorKind::Incomplete
+        );
     }
 }
