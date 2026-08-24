@@ -25,6 +25,7 @@ use jet_foundation::JSON::json_escape;
 use super::Output::Theme;
 use super::RefSpec::{RefSpec, SourceTable};
 use crate::Syntax;
+use jet_env_model::ModuleEval::SecretSpec;
 
 const HASH_PREFIX: &str = "hash:";
 const PATTERN_PREFIX: &str = "pattern:";
@@ -233,14 +234,17 @@ fn append_line(path: &Path, line: &str) {
 
 /// A stable hash over the env definition's trust-sensitive content: every
 /// realized ref (sorted), every declared named source (sorted, via
-/// `SourceTable::trust_lines`), and every U13 declared secret name (sorted).
-/// A change in any of those re-prompts.
-pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[String]) -> String {
+/// `SourceTable::trust_lines`), and every typed secret declaration (sorted).
+/// A change in any of those re-prompts. Secret values never enter this hash.
+pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[SecretSpec]) -> String {
     let mut ref_lines: Vec<String> = refs.iter().map(|r| r.raw.clone()).collect();
     ref_lines.sort();
     let mut source_lines = table.trust_lines();
     source_lines.sort();
-    let mut secret_lines = secrets.to_vec();
+    let mut secret_lines = secrets
+        .iter()
+        .map(SecretSpec::trust_fingerprint)
+        .collect::<Vec<_>>();
     secret_lines.sort();
     let mut content = String::new();
     for line in &ref_lines {
@@ -267,7 +271,7 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[Str
 pub fn environment_definition_hash(
     refs: &[RefSpec],
     table: &SourceTable,
-    secrets: &[String],
+    secrets: &[SecretSpec],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
 ) -> String {
     let mut content = env_definition_hash(refs, table, secrets);
@@ -413,7 +417,7 @@ pub fn environment_definition_hash(
 pub fn environment_definition_hash_with_snapshot(
     refs: &[RefSpec],
     table: &SourceTable,
-    secrets: &[String],
+    secrets: &[SecretSpec],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
     source_snapshot: Option<&str>,
 ) -> String {
@@ -482,7 +486,7 @@ pub fn is_env_trusted(
     project_dir: &Path,
     hash: &str,
     refs: &[RefSpec],
-    secrets: &[String],
+    secrets: &[SecretSpec],
 ) -> bool {
     if is_trusted(store, project_dir, hash) {
         return true;
@@ -564,7 +568,7 @@ pub fn is_environment_trusted(
     project_dir: &Path,
     hash: &str,
     refs: &[RefSpec],
-    secrets: &[String],
+    secrets: &[SecretSpec],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
 ) -> bool {
     if !integration_grants_trusted(store, facts) {
@@ -808,7 +812,7 @@ pub fn gate(
     project_dir: &Path,
     refs: &[RefSpec],
     table: &SourceTable,
-    secrets: &[String],
+    secrets: &[SecretSpec],
     bypass: bool,
 ) -> Result<(), i32> {
     let hash = env_definition_hash(refs, table, secrets);
@@ -833,7 +837,7 @@ pub fn gate_with_environment(
     project_dir: &Path,
     refs: &[RefSpec],
     table: &SourceTable,
-    secrets: &[String],
+    secrets: &[SecretSpec],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
     bypass: bool,
 ) -> Result<(), i32> {
@@ -870,7 +874,7 @@ pub fn gate_with_environment_and_snapshot(
     project_dir: &Path,
     refs: &[RefSpec],
     table: &SourceTable,
-    secrets: &[String],
+    secrets: &[SecretSpec],
     facts: &jet_env_model::ModuleEval::EnvironmentFacts,
     source_snapshot: Option<&str>,
     bypass: bool,
@@ -998,7 +1002,7 @@ fn gate_with_hash(
     store: &Path,
     project_dir: &Path,
     refs: &[RefSpec],
-    secrets: &[String],
+    secrets: &[SecretSpec],
     bypass: bool,
     hash: String,
     typed: bool,
@@ -1077,7 +1081,7 @@ fn gate_with_hash(
         ));
     }
     for s in secrets {
-        theme.detail(&format!("secret:{s}"));
+        theme.detail(&format!("secret:{}", s.name));
     }
     eprintln!(
         "\n  {}",
@@ -1201,6 +1205,10 @@ mod tests {
         }
     }
 
+    fn secret(name: &str) -> SecretSpec {
+        SecretSpec::stored(name)
+    }
+
     #[test]
     fn canonical_build_identity_selector_uses_build_authority() {
         let grant = parse_grant_selector(
@@ -1229,12 +1237,12 @@ mod tests {
         let a = env_definition_hash(
             &[ref_spec("a@nixpkgs"), ref_spec("b@nixpkgs")],
             &table,
-            &["stripe".to_string(), "db".to_string()],
+            &[secret("stripe"), secret("db")],
         );
         let b = env_definition_hash(
             &[ref_spec("b@nixpkgs"), ref_spec("a@nixpkgs")],
             &table,
-            &["db".to_string(), "stripe".to_string()],
+            &[secret("db"), secret("stripe")],
         );
         assert_eq!(a, b);
     }
@@ -1251,8 +1259,8 @@ mod tests {
     fn hash_changes_when_secrets_change() {
         let table = SourceTable::empty();
         let refs = [ref_spec("a@nixpkgs")];
-        let a = env_definition_hash(&refs, &table, &["stripe".to_string()]);
-        let b = env_definition_hash(&refs, &table, &["db".to_string()]);
+        let a = env_definition_hash(&refs, &table, &[secret("stripe")]);
+        let b = env_definition_hash(&refs, &table, &[secret("db")]);
         assert_ne!(a, b);
     }
 
@@ -1291,7 +1299,7 @@ mod tests {
             &dir,
             &hash,
             &refs,
-            &["db_password".to_string()]
+            &[secret("db_password")]
         ));
 
         let store = dir.join("trust-build");
@@ -1308,7 +1316,7 @@ mod tests {
             &dir,
             &hash,
             &refs,
-            &["db_password".to_string()]
+            &[secret("db_password")]
         ));
 
         let store = dir.join("trust-env");
@@ -1325,7 +1333,7 @@ mod tests {
             &dir,
             &hash,
             &refs,
-            &["db_password".to_string()]
+            &[secret("db_password")]
         ));
         std::fs::remove_dir_all(&dir).ok();
     }

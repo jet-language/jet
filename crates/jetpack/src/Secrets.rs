@@ -26,12 +26,76 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use jet_env_model::ModuleEval::{SecretDeclaration, SecretSpec};
+
+const RUNTIME_PLAN_FILE: &str = "secrets-plan";
+const RUNTIME_PLAN_MAGIC: &str = "JSEC1";
+
 /// `.jet/secrets.age` — the encrypted store, project-relative. Committed:
 /// it's ciphertext.
 pub fn store_path(project_dir: &Path) -> PathBuf {
     project_dir
         .join(crate::Syntax::CONFIG_DEFAULT_DIR)
         .join("secrets.age")
+}
+
+/// The non-secret runtime composition plan. It contains only output names,
+/// sorted input names, and the declared template. Composed values are never
+/// written here; the Prelude opens source pairs and assembles each read in
+/// memory.
+pub fn runtime_plan_path(project_dir: &Path) -> PathBuf {
+    project_dir
+        .join(crate::Syntax::CONFIG_DEFAULT_DIR)
+        .join(RUNTIME_PLAN_FILE)
+}
+
+pub fn write_runtime_plan(project_dir: &Path, specs: &[SecretSpec]) -> Result<(), String> {
+    let mut lines = String::from(RUNTIME_PLAN_MAGIC);
+    lines.push('\n');
+    for spec in specs {
+        let SecretDeclaration::Compose { template, from } = &spec.declaration else {
+            continue;
+        };
+        if has_plan_control_character(&spec.name)
+            || has_plan_control_character(template)
+            || from.iter().any(|name| has_plan_control_character(name))
+        {
+            return Err(format!("secret composition plan for {} contains a control character", spec.name));
+        }
+        lines.push_str(&spec.name);
+        lines.push('\t');
+        lines.push_str(&from.join(","));
+        lines.push('\t');
+        lines.push_str(template);
+        lines.push('\n');
+    }
+    let path = runtime_plan_path(project_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("couldn't create `{}`: {error}", parent.display()))?;
+    }
+    atomic_write(&path, lines.as_bytes())
+}
+
+fn has_plan_control_character(value: &str) -> bool {
+    value.chars().any(|character| matches!(character, '\n' | '\r' | '\t'))
+}
+
+pub fn store_age(project_dir: &Path) -> Result<Option<std::time::Duration>, String> {
+    let path = store_path(project_dir);
+    let metadata = match std::fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("couldn't inspect `{}`: {error}", path.display())),
+    };
+    let modified = metadata
+        .modified()
+        .map_err(|error| format!("couldn't read `{}` timestamp: {error}", path.display()))?;
+    Ok(Some(
+        std::time::SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default(),
+    ))
 }
 
 /// `.jet/secrets-recipients` — plaintext, one `age1...` public key per line

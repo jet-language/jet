@@ -3,6 +3,8 @@
 //! `OptionPlan`/`ImagePlan`, and the runnable `EnvPlan`.
 
 use crate::AST::Namespace;
+use std::collections::BTreeMap;
+use std::fmt;
 
 use super::super::Merge::{self, EntryContribution};
 use super::super::Recipe::BuildRecipe;
@@ -19,6 +21,179 @@ use super::Environment::{
 pub struct EnvironmentRead {
     pub name: String,
     pub ty: String,
+}
+
+/// One typed entry in an environment's `secrets:` map.
+///
+/// The declaration is deliberately a plan fact, not a decrypted value. The
+/// activation tier checks the policy against the encrypted store and the
+/// Prelude resolves a composed value only for the individual read that asks
+/// for it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SecretSpec {
+    pub name: String,
+    pub description: Option<String>,
+    pub required: bool,
+    pub allowed_environments: Vec<String>,
+    pub rotation: SecretRotationPolicy,
+    pub default: SecretDefault,
+    pub generate: SecretGenerator,
+    pub declaration: SecretDeclaration,
+    /// Integration imports contribute an implicit required source name. It is
+    /// not a second author spelling; an explicit map entry replaces it.
+    pub implicit: bool,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum SecretDeclaration {
+    Stored,
+    Compose { template: String, from: Vec<String> },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum SecretRotationPolicy {
+    None,
+    MaxAge { seconds: u64 },
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum SecretDefault {
+    None,
+    PerProfile(BTreeMap<String, String>),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum SecretGenerator {
+    None,
+    Random { length: u64 },
+}
+
+impl SecretSpec {
+    pub fn stored(name: impl Into<String>) -> SecretSpec {
+        SecretSpec {
+            name: name.into(),
+            description: None,
+            required: true,
+            allowed_environments: Vec::new(),
+            rotation: SecretRotationPolicy::None,
+            default: SecretDefault::None,
+            generate: SecretGenerator::None,
+            declaration: SecretDeclaration::Stored,
+            implicit: false,
+        }
+    }
+
+    pub fn implicit(name: impl Into<String>) -> SecretSpec {
+        let mut spec = SecretSpec::stored(name);
+        spec.implicit = true;
+        spec
+    }
+
+    pub fn is_composed(&self) -> bool {
+        matches!(self.declaration, SecretDeclaration::Compose { .. })
+    }
+
+    /// Stable trust identity. Secret defaults and generator recipes can carry
+    /// sensitive material, so only their non-value shape enters the hash.
+    pub fn trust_fingerprint(&self) -> String {
+        let declaration = match &self.declaration {
+            SecretDeclaration::Stored => "stored".to_string(),
+            SecretDeclaration::Compose { from, .. } => {
+                let mut from = from.clone();
+                from.sort();
+                format!("compose:{}", from.join(","))
+            }
+        };
+        let mut allowed = self.allowed_environments.clone();
+        allowed.sort();
+        let rotation = match self.rotation {
+            SecretRotationPolicy::None => "none".to_string(),
+            SecretRotationPolicy::MaxAge { seconds } => format!("max_age:{seconds}"),
+        };
+        let default_profiles = match &self.default {
+            SecretDefault::None => String::new(),
+            SecretDefault::PerProfile(values) => values.keys().cloned().collect::<Vec<_>>().join(","),
+        };
+        let generator = match self.generate {
+            SecretGenerator::None => "none".to_string(),
+            SecretGenerator::Random { length } => format!("random:{length}"),
+        };
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}",
+            self.name,
+            declaration,
+            self.required,
+            allowed.join(","),
+            rotation,
+            default_profiles,
+            generator,
+        )
+    }
+}
+
+impl fmt::Debug for SecretSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretSpec")
+            .field("name", &self.name)
+            .field("description", &self.description.as_ref().map(|_| "<redacted>"))
+            .field("required", &self.required)
+            .field("allowed_environments", &self.allowed_environments)
+            .field("rotation", &self.rotation)
+            .field("default", &self.default)
+            .field("generate", &self.generate)
+            .field("declaration", &self.declaration)
+            .field("implicit", &self.implicit)
+            .finish()
+    }
+}
+
+impl fmt::Debug for SecretDeclaration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SecretDeclaration::Stored => formatter.write_str("Stored"),
+            SecretDeclaration::Compose { from, .. } => formatter
+                .debug_struct("Compose")
+                .field("from", from)
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for SecretRotationPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SecretRotationPolicy::None => formatter.write_str("None"),
+            SecretRotationPolicy::MaxAge { seconds } => formatter
+                .debug_struct("MaxAge")
+                .field("seconds", seconds)
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for SecretDefault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SecretDefault::None => formatter.write_str("None"),
+            SecretDefault::PerProfile(values) => formatter
+                .debug_struct("PerProfile")
+                .field("profiles", &values.keys().collect::<Vec<_>>())
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for SecretGenerator {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SecretGenerator::None => formatter.write_str("None"),
+            SecretGenerator::Random { length } => formatter
+                .debug_struct("Random")
+                .field("length", length)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +229,7 @@ pub(super) struct EnvironmentContribution {
     pub(super) name: String,
     pub(super) environment_reads: Vec<EnvironmentRead>,
     pub(super) dev_services: Vec<DevServicePlan>,
-    pub(super) secrets: Vec<String>,
+    pub(super) secrets: Vec<SecretSpec>,
     pub(super) adapters: Vec<AdapterPlan>,
     pub(super) lifecycle: EnvironmentLifecycle,
     pub(super) presets: Vec<PresetSpec>,
@@ -391,11 +566,11 @@ pub struct EnvPlan {
     /// in source order. `jetpack services <verb>`/`jetpack dev`'s health gate
     /// are the only consumers — the jetos tier never reads this.
     pub dev_services: Vec<DevServicePlan>,
-    /// U13 (D-JPK-SECRETCRYPTO1): every declared `secrets:` name in the
-    /// selected environment, in source order. `jetpack enter`/`jetpack dev`
-    /// validate every name exists in the encrypted store at env entry (E1263);
-    /// the jetos tier never reads this.
-    pub secrets: Vec<String>,
+    /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: every typed declaration
+    /// in the selected environment's one `secrets:` map, in source order.
+    /// Activation validates policy and source presence; the runtime Prelude
+    /// resolves composed declarations on each `get` read.
+    pub secrets: Vec<SecretSpec>,
     /// Typed lifecycle facts for activation, checks, and reload.
     pub lifecycle: EnvironmentLifecycle,
     /// Named preset compositions from the selected environment before

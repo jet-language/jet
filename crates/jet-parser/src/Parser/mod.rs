@@ -36,6 +36,15 @@ pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, false, true, None)
 }
 
+/// Parse a Jetpack config surface while retaining source text for config
+/// values whose spelling is intentionally not a general Jet expression.
+pub fn parse_config_with_source(
+    toks: &[Token],
+    source: &str,
+) -> Result<Program, Vec<Diagnostic>> {
+    parse_inner(toks, false, true, Some(source))
+}
+
 /// Parse for `jet fmt`: succeeds when the AST is recoverable, even if live
 /// teaching diagnostics rewrote retired marker or punctuation forms.
 pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {

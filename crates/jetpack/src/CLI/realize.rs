@@ -620,10 +620,10 @@ pub(super) struct RunPlan {
     /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
     /// only readers.
     pub(super) dev_services: Vec<ModuleEval::DevServicePlan>,
-    /// U13: every declared `secrets: ["name", …]` entry from the typed env
-    /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
-    /// exist before entering the environment.
-    pub(super) secrets: Vec<String>,
+    /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the selected typed
+    /// `secrets:` map. Trust sees the redacted declaration identity; activation
+    /// checks policy and source presence before entering the environment.
+    pub(super) secrets: Vec<ModuleEval::SecretSpec>,
     /// Typed lifecycle, preset, and language-pack facts shared by activation,
     /// lifecycle hooks, and service commands.
     pub(super) environment: ModuleEval::EnvironmentFacts,

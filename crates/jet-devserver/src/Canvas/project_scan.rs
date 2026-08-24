@@ -1105,7 +1105,7 @@ pub(super) fn env_project_json(project_root: &Path) -> EnvProjectJson {
         let secrets = plan
             .secrets
             .iter()
-            .map(|s| json_str(s))
+            .map(|s| json_str(&s.name))
             .collect::<Vec<_>>()
             .join(",");
         let services = plan

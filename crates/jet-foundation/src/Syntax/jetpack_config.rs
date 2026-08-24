@@ -1,6 +1,7 @@
-/// U13: env-namespace field name — `secrets: ["name", …]` under an
-/// `env.<name>` role-module, the names this env expects to find in the
-/// project's encrypted store (validated at env entry, E1263 if any is
+/// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: env-namespace field name —
+/// one typed `secrets: { NAME: declaration }` map under an `env.<name>`
+/// role-module. Declarations are metadata records or read-time `compose`
+/// plans; activation checks the encrypted store (E1263 when required input is
 /// missing).
 pub const ENV_FIELD_SECRETS: &str = "secrets";
 

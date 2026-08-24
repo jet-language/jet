@@ -23,14 +23,22 @@ fn describe_unrecognized_character(character: char) -> String {
 /// Raw lex with no S6-R terminator insertion. Used for interpolation
 /// sub-streams (`{expr}`), which are single expressions and need no terminator.
 pub fn lex_raw(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
-    lex_raw_with_policy(src, false)
+    lex_raw_with_policy(src, false, false)
 }
 
 pub(super) fn lex_raw_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
-    lex_raw_with_policy(src, true)
+    lex_raw_with_policy(src, true, false)
 }
 
-fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Token>, Vec<Diagnostic>) {
+pub(super) fn lex_raw_config(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    lex_raw_with_policy(src, false, true)
+}
+
+fn lex_raw_with_policy(
+    src: &str,
+    allow_reserved_identifiers: bool,
+    config_surface: bool,
+) -> (Vec<Token>, Vec<Diagnostic>) {
     let mut lx = Lexer {
         chars: src.char_indices().collect(),
         end: src.len(),
@@ -38,6 +46,7 @@ fn lex_raw_with_policy(src: &str, allow_reserved_identifiers: bool) -> (Vec<Toke
         i: 0,
         diags: Vec::new(),
         allow_reserved_identifiers,
+        config_surface,
     };
     let mut toks = lx.run();
     toks.push(Token {
@@ -218,7 +227,12 @@ impl<'a> Lexer<'a> {
             }
 
             // Line comments (decision S5) — retained for fmt (M6/S44).
-            if c == '/' && self.at(self.i + 1) == '/' {
+            if c == '/'
+                && self.at(self.i + 1) == '/'
+                && !(self.config_surface
+                    && self.pos(self.i) > 0
+                    && self.src.as_bytes().get(self.pos(self.i) - 1) == Some(&b':'))
+            {
                 let comment_start = self.pos(self.i);
                 while self.i < self.chars.len() && self.at(self.i) != '\n' {
                     self.i += 1;
@@ -228,6 +242,26 @@ impl<'a> Lexer<'a> {
                     kind: TokKind::LineComment(text),
                     span: Span::new(comment_start, self.pos(self.i)),
                 });
+                continue;
+            }
+
+            // Config templates may use an unquoted URL such as
+            // `postgres://{USER}@{HOST}`. In that one config lexer mode, the
+            // adjacent slashes after a scheme colon are URL punctuation, not
+            // the ordinary line-comment opener.
+            if c == '/' && self.at(self.i + 1) == '/' && self.config_surface {
+                let start = self.pos(self.i);
+                let middle = self.pos(self.i + 1);
+                let end = self.pos(self.i + 2);
+                toks.push(Token {
+                    kind: TokKind::Slash,
+                    span: Span::new(start, middle),
+                });
+                toks.push(Token {
+                    kind: TokKind::Slash,
+                    span: Span::new(middle, end),
+                });
+                self.i += 2;
                 continue;
             }
 

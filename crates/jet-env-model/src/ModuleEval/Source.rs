@@ -25,7 +25,7 @@ use super::Environment::{
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
-    SystemPlan,
+    SecretSpec, SystemPlan,
 };
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 
@@ -35,7 +35,7 @@ use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 /// later syntax is malformed; only the legacy directive surface uses the
 /// tolerant fallback scanner.
 pub fn is_module_surface(src: &str) -> bool {
-    let (toks, diags) = crate::Lexer::lex(src);
+    let (toks, diags) = crate::Lexer::lex_config(src);
     let has_module = toks
         .iter()
         .any(|token| matches!(&token.kind, crate::Lexer::TokKind::KwModule));
@@ -402,7 +402,7 @@ pub fn evaluate_env_with_selections(
     let mut fleets: Vec<FleetPlan> = Vec::new();
     let mut vmtests = Vec::new();
     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
-    let mut secrets: Vec<String> = Vec::new();
+    let mut secrets: Vec<SecretSpec> = Vec::new();
     let mut adapters: Vec<AdapterPlan> = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
     let mut presets = PresetSet::default();
@@ -474,7 +474,7 @@ pub fn evaluate_env_with_selections(
                 dev_services.push(service.clone());
             }
             for secret in &contribution.secrets {
-                push_unique(&mut secrets, secret.clone());
+                merge_secret_spec(&mut secrets, secret.clone())?;
             }
             adapters.extend(contribution.adapters.iter().cloned());
             super::Eval::lifecycle_merge(
@@ -548,7 +548,9 @@ pub fn evaluate_env_with_selections(
                 integrations.push(integration.clone());
             }
             for secret in &integration.secrets {
-                push_unique(&mut secrets, secret.clone());
+                if !secrets.iter().any(|existing| existing.name == *secret) {
+                    secrets.push(SecretSpec::implicit(secret.clone()));
+                }
             }
             for package in &integration.packages {
                 push_unique(&mut integration_packages, package.clone());
@@ -676,6 +678,26 @@ pub fn evaluate_env_with_selections(
                     &host.system,
                     &system_names,
                 ));
+            }
+        }
+    }
+
+    super::Eval::validate_secret_graph(&secrets, crate::Diagnostics::Span::new(0, 0))?;
+    if requested_environment.is_some() {
+        for secret in &secrets {
+            for environment in &secret.allowed_environments {
+                if !environment_names.contains(environment) {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        format!(
+                            "secret `{}` names undeclared environment `{environment}`",
+                            secret.name
+                        ),
+                        "a known active profile can validate every allowed-environment label before activation".to_string(),
+                        "declare that `env.<name>` profile or defer selection with a dynamic profile".to_string(),
+                        None,
+                    ));
+                }
             }
         }
     }
@@ -826,6 +848,28 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.iter().any(|existing| existing == &value) {
         values.push(value);
     }
+}
+
+fn merge_secret_spec(specs: &mut Vec<SecretSpec>, incoming: SecretSpec) -> Result<(), Diagnostic> {
+    let Some(index) = specs.iter().position(|existing| existing.name == incoming.name) else {
+        specs.push(incoming);
+        return Ok(());
+    };
+    let existing = &specs[index];
+    if existing.implicit && !incoming.implicit {
+        specs[index] = incoming;
+        return Ok(());
+    }
+    if incoming.implicit {
+        return Ok(());
+    }
+    Err(Diagnostic::error(
+        "E1333",
+        format!("secret `{}` is declared more than once", incoming.name),
+        "one selected environment has one declaration for each secret name".to_string(),
+        "merge the metadata into one map entry or give the declarations different names".to_string(),
+        None,
+    ))
 }
 
 fn prompt_path_mode(value: &str) -> PromptPathMode {

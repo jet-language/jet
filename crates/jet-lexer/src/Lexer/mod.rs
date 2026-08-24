@@ -12,7 +12,7 @@ mod Strings;
 mod Terminators;
 mod Tokens;
 
-pub use Terminators::{lex, lex_generated};
+pub use Terminators::{lex, lex_config, lex_generated};
 pub use Tokens::{comments, describe, is_comment, without_comments, StrTokPart, TokKind, Token};
 
 // `lex_raw` is part of the public surface (interpolation sub-streams) and is
@@ -26,6 +26,7 @@ struct Lexer<'a> {
     i: usize,
     diags: Vec<Diagnostic>,
     allow_reserved_identifiers: bool,
+    config_surface: bool,
 }
 
 /// The word behind a keyword token. A position that accepts any written word —

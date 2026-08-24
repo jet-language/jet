@@ -287,7 +287,12 @@ pub(super) fn run_project_job_with_mode(
     ) {
         return code;
     }
-    if let Err(code) = validate_declared_secrets(theme, project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
     let mut env = if has_env || !plan.refs.is_empty() {
@@ -992,7 +997,7 @@ fn task_cache_key(
 fn task_environment_hash_with_env(
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
-    secrets: &[String],
+    secrets: &[ModuleEval::SecretSpec],
     facts: &ModuleEval::EnvironmentFacts,
     env: &Env,
 ) -> String {
@@ -1002,7 +1007,7 @@ fn task_environment_hash_with_env(
 fn task_environment_hash_with_vars(
     refs: &[RefSpec::RefSpec],
     table: &RefSpec::SourceTable,
-    secrets: &[String],
+    secrets: &[ModuleEval::SecretSpec],
     facts: &ModuleEval::EnvironmentFacts,
     vars: &BTreeMap<String, String>,
 ) -> String {
@@ -1492,7 +1497,12 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
 
@@ -1554,7 +1564,12 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
     let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
@@ -1634,7 +1649,12 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
     for action in &file_plan.actions {
@@ -2865,7 +2885,12 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
 

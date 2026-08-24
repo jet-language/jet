@@ -3,7 +3,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 
-use super::Scan::{lex_raw, lex_raw_generated};
+use super::Scan::{lex_raw, lex_raw_config, lex_raw_generated};
 use super::Tokens::{is_comment, TokKind, Token};
 
 /// Lex the whole file. Always returns a token stream (ending in Eof) plus
@@ -14,6 +14,15 @@ use super::Tokens::{is_comment, TokKind, Token};
 /// The grammar stays terminator-based; users never type `;`.
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw(src);
+    insert_terminators(src, &mut toks, &mut diags);
+    (toks, diags)
+}
+
+/// Lex a Jetpack config file. The only lexical difference from ordinary Jet
+/// source is that `://` inside an unquoted config template is URL punctuation,
+/// not the start of a line comment.
+pub fn lex_config(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
+    let (mut toks, mut diags) = lex_raw_config(src);
     insert_terminators(src, &mut toks, &mut diags);
     (toks, diags)
 }

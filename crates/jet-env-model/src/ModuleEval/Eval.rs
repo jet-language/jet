@@ -12,7 +12,7 @@ use crate::Lexer::{StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{
     CallArg, ContribValue, Contribution, CtKey, CtValue, EnvLit, Expr, Func, Item, ModuleDecl,
-    Namespace,
+    Namespace, StrPart,
 };
 
 use super::super::Merge::{
@@ -23,7 +23,7 @@ use super::DevService::evaluate_dev_service;
 use super::Environment::{
     files_from_value, lifecycle_from_field, languages_from_value, presets_from_value,
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
-    LanguageSpec, PackageProfileSpec, PresetSpec,
+    valid_env_name, LanguageSpec, PackageProfileSpec, PresetSpec,
 };
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -33,6 +33,7 @@ use super::Computed::evaluate_named_fields;
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
 use super::Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvironmentContribution, EvaluatedModule,
+    SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy, SecretSpec,
 };
 use super::Types::EnvironmentRead;
 
@@ -48,11 +49,11 @@ pub fn evaluate_source(src: &str, base_dir: &Path) -> Result<Vec<EvaluatedModule
 /// single diagnostic. The module surface is evaluated, not type-checked, here,
 /// so the first error is enough to stop.
 pub(super) fn parse_program(src: &str) -> Result<crate::AST::Program, Diagnostic> {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+    let (toks, lex_diags) = crate::Lexer::lex_config(src);
     if let Some(d) = lex_diags.into_iter().next() {
         return Err(d);
     }
-    crate::Parser::parse_config(&toks).map_err(|mut diags| {
+    crate::Parser::parse_config_with_source(&toks, src).map_err(|mut diags| {
         diags.pop().unwrap_or_else(|| {
             Diagnostic::error(
                 "E0000",
@@ -732,7 +733,7 @@ pub(super) fn lifecycle_merge(
 
 struct EnvCapture {
     entry: EntryContribution,
-    secrets: Vec<String>,
+    secrets: Vec<SecretSpec>,
     adapters: Vec<AdapterPlan>,
     lifecycle: EnvironmentLifecycle,
     presets: Vec<PresetSpec>,
@@ -1075,7 +1076,9 @@ fn evaluate_env_fields(
     let field_map = fields
         .iter()
         .filter(|(name, _, _)| {
-            name != &Syntax::SYSTEM_FIELD_PACKAGES && !is_lifecycle_field(name)
+            name != &Syntax::SYSTEM_FIELD_PACKAGES
+                && name != &Syntax::ENV_FIELD_SECRETS
+                && !is_lifecycle_field(name)
         })
         .map(|(name, span, value)| (name.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
@@ -1110,21 +1113,12 @@ fn evaluate_env_fields(
                 source,
             )?;
         } else if name == Syntax::ENV_FIELD_SECRETS {
-            // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
-            // sugar. Evaluated as an ordinary comptime expression; anything
-            // that isn't a `[String]` is captured as a fact setting instead
-            // (E1242-style "wrong shape" surfaces at env-entry validation,
-            // not here — this stays a pure capture step, no field-check).
-            let v = resolved
-                .get(name)
-                .cloned()
-                .ok_or_else(|| field_missing_value(name, value.span()))?;
-            match names_from(&v) {
-                Some(names) => secrets.extend(names),
-                None => {
-                    record_setting(&mut entry, name, v.jet_show(), *span, source);
-                }
-            }
+            secrets.extend(parse_secret_specs(
+                value,
+                base_dir,
+                funcs,
+                globals,
+            )?);
         } else if name == Syntax::ENV_FIELD_PRESETS {
             if let Some(value) = resolved.get(name) {
                 presets.extend(presets_from_value(value).map_err(|error| {
@@ -1405,6 +1399,748 @@ fn names_from(v: &crate::Comptime::CtValue) -> Option<Vec<String>> {
             _ => None,
         })
         .collect()
+}
+
+fn secret_decl_error(message: impl Into<String>, span: crate::Diagnostics::Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1333",
+        format!("secret declaration is invalid: {}", message.into()),
+        "`secrets:` is one typed map from a secret name to either a metadata record or a `compose(template:, from:)` declaration".to_string(),
+        "fix the named secret declaration without putting a secret value in the configuration".to_string(),
+        Some(span),
+    )
+}
+
+fn secret_name_error(name: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+    secret_decl_error(format!("secret name `{name}` is not a valid name"), span)
+}
+
+/// Lower one `secrets:` map. Both declaration shapes enter through this one
+/// function; the dispatch is on the value after the map key, never on a second
+/// grammar or a second field parser.
+fn parse_secret_specs(
+    value: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<Vec<SecretSpec>, Diagnostic> {
+    let mut entries = Vec::<(String, crate::Diagnostics::Span, &Expr)>::new();
+    match value.without_parens() {
+        Expr::StructLit {
+            type_name, fields, ..
+        } => {
+            if !type_name.is_empty() {
+                return Err(secret_decl_error(
+                    "the secret declaration map must be an inferred `{ … }` record",
+                    value.span(),
+                ));
+            }
+            entries.extend(fields.iter().map(|(name, span, value)| (name.clone(), *span, value)));
+        }
+        Expr::MapLit(fields, _) => {
+            for (key, value) in fields {
+                let key = secret_eval_value(key, base_dir, funcs, globals).map_err(|_| {
+                    secret_decl_error("secret map keys must be strings or bare names", key.span())
+                })?;
+                let CtValue::Str(name) = key else {
+                    return Err(secret_decl_error(
+                        "secret map keys must be strings or bare names",
+                        key_span(key, value.span()),
+                    ));
+                };
+                entries.push((name, value.span(), value));
+            }
+        }
+        _ => {
+            return Err(secret_decl_error(
+                "`secrets:` must be a map from names to declarations",
+                value.span(),
+            ));
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut specs = Vec::with_capacity(entries.len());
+    for (name, span, declaration) in entries {
+        if !valid_env_name(&name) {
+            return Err(secret_name_error(&name, span));
+        }
+        if !seen.insert(name.clone()) {
+            return Err(secret_decl_error(
+                format!("secret name `{name}` is declared more than once"),
+                span,
+            ));
+        }
+        let spec = match declaration.without_parens() {
+            Expr::Call(call) if call.name == "compose" => {
+                parse_secret_compose(&name, call, base_dir, funcs, globals)?
+            }
+            Expr::StructLit { .. } => {
+                parse_secret_metadata(&name, declaration, base_dir, funcs, globals)?
+            }
+            _ => {
+                return Err(secret_decl_error(
+                    format!("secret `{name}` must use a metadata record or `compose(...)`"),
+                    declaration.span(),
+                ));
+            }
+        };
+        specs.push(spec);
+    }
+    validate_secret_graph(&specs, value.span())?;
+    Ok(specs)
+}
+
+fn key_span(_key: CtValue, fallback: crate::Diagnostics::Span) -> crate::Diagnostics::Span {
+    // Keys have no independent span after comptime lowering. Keep the error
+    // anchored to the value, and never render the rejected key's contents.
+    fallback
+}
+
+fn parse_secret_metadata(
+    name: &str,
+    value: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<SecretSpec, Diagnostic> {
+    let Expr::StructLit {
+        type_name, fields, ..
+    } = value.without_parens()
+    else {
+        unreachable!("secret metadata dispatch validates the record shape")
+    };
+    if !type_name.is_empty() {
+        return Err(secret_decl_error(
+            format!("secret `{name}` metadata must be an inferred record"),
+            value.span(),
+        ));
+    }
+    let allowed = [
+        "description",
+        "required",
+        "allowed_environments",
+        "rotation",
+        "default",
+        "generate",
+    ];
+    let mut values = BTreeMap::<String, (crate::Diagnostics::Span, CtValue)>::new();
+    for (field, span, expression) in fields {
+        if !allowed.iter().any(|known| known == field) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` has unknown field `{field}`"),
+                *span,
+            ));
+        }
+        if values.contains_key(field) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` repeats field `{field}`"),
+                *span,
+            ));
+        }
+        let lowered = secret_eval_value(expression, base_dir, funcs, globals).map_err(|_| {
+            secret_decl_error(
+                format!("secret `{name}` field `{field}` is not a deterministic value"),
+                *span,
+            )
+        })?;
+        values.insert(field.clone(), (*span, lowered));
+    }
+
+    let description = values
+        .get("description")
+        .map(|(span, value)| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(secret_decl_error(
+                format!("secret `{name}` field `description` must be a string"),
+                *span,
+            )),
+        })
+        .transpose()?;
+    let required = match values.get("required") {
+        None => true,
+        Some((_span, CtValue::Bool(value))) => *value,
+        Some((span, _)) => {
+            return Err(secret_decl_error(
+                format!("secret `{name}` field `required` must be a boolean"),
+                *span,
+            ));
+        }
+    };
+    let allowed_environments = match values.get("allowed_environments") {
+        None => Vec::new(),
+        Some((span, value)) => secret_environment_list(name, value, *span)?,
+    };
+    let rotation = match values.get("rotation") {
+        None => SecretRotationPolicy::None,
+        Some((span, value)) => secret_rotation(name, value, *span)?,
+    };
+    let default = match values.get("default") {
+        None => SecretDefault::None,
+        Some((span, value)) => secret_default(name, value, *span)?,
+    };
+    let generate = match values.get("generate") {
+        None => SecretGenerator::None,
+        Some((span, value)) => secret_generator(name, value, *span)?,
+    };
+    Ok(SecretSpec {
+        name: name.to_string(),
+        description,
+        required,
+        allowed_environments,
+        rotation,
+        default,
+        generate,
+        declaration: SecretDeclaration::Stored,
+        implicit: false,
+    })
+}
+
+fn parse_secret_compose(
+    name: &str,
+    call: &crate::AST::Call,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<SecretSpec, Diagnostic> {
+    let mut template = None;
+    let mut from = None;
+    let mut seen = HashSet::new();
+    for argument in &call.args {
+        let Some((label, label_span)) = &argument.label else {
+            return Err(secret_decl_error(
+                format!("secret `{name}` compose arguments must be labeled"),
+                argument.span,
+            ));
+        };
+        if !seen.insert(label.clone()) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` compose repeats field `{label}`"),
+                *label_span,
+            ));
+        }
+        match label.as_str() {
+            "template" => {
+                let value = secret_template_value(&argument.expr, base_dir, funcs, globals)
+                    .map_err(|_| {
+                        secret_decl_error(
+                            format!("secret `{name}` compose `template` must be text"),
+                            argument.expr.span(),
+                        )
+                    })?;
+                template = Some((value, argument.expr.span()));
+            }
+            "from" => {
+                let value = secret_eval_value(&argument.expr, base_dir, funcs, globals).map_err(|_| {
+                    secret_decl_error(
+                        format!("secret `{name}` compose `from` must be a list of names"),
+                        argument.expr.span(),
+                    )
+                })?;
+                from = Some((value, argument.expr.span()));
+            }
+            _ => {
+                return Err(secret_decl_error(
+                    format!("secret `{name}` compose has unknown field `{label}`"),
+                    *label_span,
+                ));
+            }
+        }
+    }
+    let (template, template_span) = template.ok_or_else(|| {
+        secret_decl_error(
+            format!("secret `{name}` compose needs `template`"),
+            call.name_span,
+        )
+    })?;
+    let (from, from_span) = from.ok_or_else(|| {
+        secret_decl_error(
+            format!("secret `{name}` compose needs `from`"),
+            call.name_span,
+        )
+    })?;
+    let mut from = secret_string_list(&from, &format!("secret `{name}` compose `from`"), from_span)?;
+    if from.is_empty() {
+        return Err(secret_decl_error(
+            format!("secret `{name}` compose `from` must not be empty"),
+            from_span,
+        ));
+    }
+    let mut seen_inputs = HashSet::new();
+    for input in &from {
+        if !valid_env_name(input) {
+            return Err(secret_name_error(input, from_span));
+        }
+        if !seen_inputs.insert(input.clone()) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` compose repeats input `{input}`"),
+                from_span,
+            ));
+        }
+    }
+    validate_secret_template(name, &template, &from, template_span)?;
+    from.sort();
+    Ok(SecretSpec {
+        name: name.to_string(),
+        description: None,
+        required: true,
+        allowed_environments: Vec::new(),
+        rotation: SecretRotationPolicy::None,
+        default: SecretDefault::None,
+        generate: SecretGenerator::None,
+        declaration: SecretDeclaration::Compose { template, from },
+        implicit: false,
+    })
+}
+
+fn secret_environment_list(
+    name: &str,
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<Vec<String>, Diagnostic> {
+    let values = secret_string_list(value, &format!("secret `{name}` field `allowed_environments`"), span)?;
+    let mut seen = HashSet::new();
+    for environment in &values {
+        if !valid_env_name(environment) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` names invalid environment label `{environment}`"),
+                span,
+            ));
+        }
+        if !seen.insert(environment.clone()) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` repeats allowed environment `{environment}`"),
+                span,
+            ));
+        }
+    }
+    Ok(values)
+}
+
+fn secret_rotation(
+    name: &str,
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<SecretRotationPolicy, Diagnostic> {
+    match value {
+        CtValue::Str(value) if value == "none" => Ok(SecretRotationPolicy::None),
+        CtValue::Struct { type_name, fields } if type_name == "SecretMaxAge" => {
+            let seconds = fields
+                .iter()
+                .find_map(|(field, value)| (field == "seconds").then_some(value))
+                .and_then(|value| match value {
+                    CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    secret_decl_error(
+                        format!("secret `{name}` rotation max age must be positive"),
+                        span,
+                    )
+                })?;
+            Ok(SecretRotationPolicy::MaxAge { seconds })
+        }
+        _ => Err(secret_decl_error(
+            format!("secret `{name}` field `rotation` must be `none` or `max_age(…)`"),
+            span,
+        )),
+    }
+}
+
+fn secret_default(
+    name: &str,
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<SecretDefault, Diagnostic> {
+    if matches!(value, CtValue::Str(value) if value == "none") {
+        return Ok(SecretDefault::None);
+    }
+    let fields = match value {
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .map(|(profile, value)| (profile.clone(), value))
+            .collect::<Vec<_>>(),
+        CtValue::Map(entries) => {
+            let mut fields = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                let CtKey::Str(profile) = key else {
+                    return Err(secret_decl_error(
+                        format!("secret `{name}` default profiles must be named strings"),
+                        span,
+                    ));
+                };
+                fields.push((profile.clone(), value));
+            }
+            fields
+        }
+        _ => {
+            return Err(secret_decl_error(
+                format!("secret `{name}` field `default` must be `none` or a profile map"),
+                span,
+            ));
+        }
+    };
+    let mut result = BTreeMap::new();
+    for (profile, value) in fields {
+        if !valid_env_name(&profile) {
+            return Err(secret_decl_error(
+                format!("secret `{name}` default uses invalid profile `{profile}`"),
+                span,
+            ));
+        }
+        let CtValue::Str(value) = value else {
+            return Err(secret_decl_error(
+                format!("secret `{name}` default values must be strings"),
+                span,
+            ));
+        };
+        if result.insert(profile.clone(), value.clone()).is_some() {
+            return Err(secret_decl_error(
+                format!("secret `{name}` repeats default profile `{profile}`"),
+                span,
+            ));
+        }
+    }
+    Ok(SecretDefault::PerProfile(result))
+}
+
+fn secret_generator(
+    name: &str,
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<SecretGenerator, Diagnostic> {
+    if matches!(value, CtValue::Str(value) if value == "none") {
+        return Ok(SecretGenerator::None);
+    }
+    if let CtValue::Struct { type_name, fields } = value {
+        if type_name == "SecretRandom" {
+            let length = fields
+                .iter()
+                .find_map(|(field, value)| (field == "length").then_some(value))
+                .and_then(|value| match value {
+                    CtValue::Int(value) if *value > 0 => u64::try_from(*value).ok(),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    secret_decl_error(
+                        format!("secret `{name}` random generator length must be positive"),
+                        span,
+                    )
+                })?;
+            return Ok(SecretGenerator::Random { length });
+        }
+    }
+    Err(secret_decl_error(
+        format!("secret `{name}` field `generate` must be `none` or `random(length: …)`"),
+        span,
+    ))
+}
+
+fn secret_string_list(
+    value: &CtValue,
+    scope: &str,
+    span: crate::Diagnostics::Span,
+) -> Result<Vec<String>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(secret_decl_error(format!("{scope} must be a list of strings"), span));
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Str(value) => Ok(value.clone()),
+            _ => Err(secret_decl_error(format!("{scope} must contain only strings"), span)),
+        })
+        .collect()
+}
+
+fn secret_template_value(
+    value: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<String, Diagnostic> {
+    match value.without_parens() {
+        Expr::Str(parts, _) => {
+            let mut template = String::new();
+            for part in parts {
+                match part {
+                    StrPart::Lit(value) => template.push_str(value),
+                    StrPart::Interp(expression, _) => {
+                        let Some(name) = secret_reference_name(expression) else {
+                            return Err(secret_decl_error(
+                                "compose template interpolations must name secrets",
+                                expression.span(),
+                            ));
+                        };
+                        template.push('{');
+                        template.push_str(&name);
+                        template.push('}');
+                    }
+                }
+            }
+            Ok(template)
+        }
+        Expr::Ident(name, _) => Ok(name.clone()),
+        Expr::Field(..) => Ok(expression_name(value)),
+        _ => match secret_eval_value(value, base_dir, funcs, globals)? {
+            CtValue::Str(value) => Ok(value),
+            _ => Err(secret_decl_error(
+                "compose `template` must be a string",
+                value.span(),
+            )),
+        },
+    }
+}
+
+fn secret_reference_name(value: &Expr) -> Option<String> {
+    match value.without_parens() {
+        Expr::Ident(_, _) | Expr::Field(_, _, _) => Some(expression_name(value)),
+        _ => None,
+    }
+}
+
+fn validate_secret_template(
+    name: &str,
+    template: &str,
+    from: &[String],
+    span: crate::Diagnostics::Span,
+) -> Result<(), Diagnostic> {
+    if template.is_empty() || template.chars().any(char::is_control) {
+        return Err(secret_decl_error(
+            format!("secret `{name}` compose template must be non-empty text"),
+            span,
+        ));
+    }
+    let mut placeholders = HashSet::new();
+    let mut chars = template.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '{' => {
+                let mut placeholder = String::new();
+                let mut closed = false;
+                for next in chars.by_ref() {
+                    if next == '}' {
+                        closed = true;
+                        break;
+                    }
+                    if next == '{' || next.is_whitespace() {
+                        return Err(secret_decl_error(
+                            format!("secret `{name}` compose template has an invalid placeholder"),
+                            span,
+                        ));
+                    }
+                    placeholder.push(next);
+                }
+                if !closed || !valid_env_name(&placeholder) {
+                    return Err(secret_decl_error(
+                        format!("secret `{name}` compose template has an invalid placeholder"),
+                        span,
+                    ));
+                }
+                placeholders.insert(placeholder);
+            }
+            '}' => {
+                return Err(secret_decl_error(
+                    format!("secret `{name}` compose template has an unmatched brace"),
+                    span,
+                ));
+            }
+            _ => {}
+        }
+    }
+    let inputs = from.iter().cloned().collect::<HashSet<_>>();
+    if placeholders != inputs {
+        return Err(secret_decl_error(
+            format!("secret `{name}` compose template placeholders must match `from`"),
+            span,
+        ));
+    }
+    Ok(())
+}
+
+/// A graph check shared by each map parser and the selected-environment merge.
+/// Unknown input names are allowed here; activation is the tier that checks
+/// whether each source exists in the encrypted store.
+pub(super) fn validate_secret_graph(
+    specs: &[SecretSpec],
+    span: crate::Diagnostics::Span,
+) -> Result<(), Diagnostic> {
+    let composed = specs
+        .iter()
+        .filter_map(|spec| match &spec.declaration {
+            SecretDeclaration::Compose { from, .. } => Some((spec.name.clone(), from.clone())),
+            SecretDeclaration::Stored => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut states = HashMap::<String, u8>::new();
+    for name in composed.keys() {
+        secret_graph_visit(name, &composed, &mut states, span)?;
+    }
+    Ok(())
+}
+
+fn secret_graph_visit(
+    name: &str,
+    composed: &BTreeMap<String, Vec<String>>,
+    states: &mut HashMap<String, u8>,
+    span: crate::Diagnostics::Span,
+) -> Result<(), Diagnostic> {
+    match states.get(name).copied() {
+        Some(1) => {
+            return Err(secret_decl_error(
+                format!("secret composition cycle includes `{name}`"),
+                span,
+            ));
+        }
+        Some(2) => return Ok(()),
+        _ => {}
+    }
+    states.insert(name.to_string(), 1);
+    if let Some(inputs) = composed.get(name) {
+        for input in inputs {
+            if composed.contains_key(input) {
+                secret_graph_visit(input, composed, states, span)?;
+            }
+        }
+    }
+    states.insert(name.to_string(), 2);
+    Ok(())
+}
+
+fn secret_eval_value(
+    value: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, CtValue>,
+) -> Result<CtValue, Diagnostic> {
+    match value.without_parens() {
+        Expr::Ident(name, _) => Ok(globals
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| CtValue::Str(name.clone()))),
+        Expr::Field(..) => Ok(CtValue::Str(expression_name(value))),
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| secret_eval_value(value, base_dir, funcs, globals))
+            .collect::<Result<Vec<_>, _>>()
+            .map(CtValue::List),
+        Expr::MapLit(values, _) => {
+            let mut lowered = BTreeMap::new();
+            for (key, value_expr) in values {
+                let key = CtKey::from_value(secret_eval_value(key, base_dir, funcs, globals)?)
+                    .ok_or_else(|| secret_decl_error("secret map keys must be scalar values", key.span()))?;
+                let lowered_value = secret_eval_value(value_expr, base_dir, funcs, globals)?;
+                if lowered.insert(key, lowered_value).is_some() {
+                    return Err(secret_decl_error(
+                        "secret map contains a duplicate key",
+                        value_expr.span(),
+                    ));
+                }
+            }
+            Ok(CtValue::Map(lowered))
+        }
+        Expr::StructLit {
+            type_name, fields, ..
+        } => {
+            let fields = fields
+                .iter()
+                .map(|(name, _, value)| {
+                    secret_eval_value(value, base_dir, funcs, globals)
+                        .map(|value| (name.clone(), value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(CtValue::Struct {
+                type_name: type_name.clone(),
+                fields,
+            })
+        }
+        Expr::UnitLit { raw, int, suffix, .. } => {
+            let Some(amount) = int else {
+                return Err(secret_decl_error(
+                    "secret duration policies need an integer unit literal",
+                    value.span(),
+                ));
+            };
+            let _ = raw;
+            Ok(CtValue::Struct {
+                type_name: suffix.clone(),
+                fields: vec![("value".to_string(), CtValue::Int(*amount))],
+            })
+        }
+        Expr::Call(call) if call.name == "max_age" => {
+            if call.args.len() != 1 || call.args[0].label.is_some() {
+                return Err(secret_decl_error(
+                    "`max_age` needs one duration argument",
+                    call.name_span,
+                ));
+            }
+            let duration = secret_eval_value(&call.args[0].expr, base_dir, funcs, globals)?;
+            let seconds = secret_duration_seconds(&duration).ok_or_else(|| {
+                secret_decl_error("`max_age` needs a positive duration", call.args[0].expr.span())
+            })?;
+            Ok(CtValue::Struct {
+                type_name: "SecretMaxAge".to_string(),
+                fields: vec![("seconds".to_string(), CtValue::Int(seconds as i64))],
+            })
+        }
+        Expr::Call(call) if call.name == "random" => {
+            let mut length = None;
+            for argument in &call.args {
+                if argument.label.as_ref().map(|(name, _)| name.as_str()) != Some("length") {
+                    return Err(secret_decl_error(
+                        "`random` needs a labeled `length` argument",
+                        argument.span,
+                    ));
+                }
+                if length.is_some() {
+                    return Err(secret_decl_error(
+                        "`random` repeats `length`",
+                        argument.span,
+                    ));
+                }
+                let value = secret_eval_value(&argument.expr, base_dir, funcs, globals)?;
+                let CtValue::Int(value) = value else {
+                    return Err(secret_decl_error(
+                        "`random` length must be an integer",
+                        argument.expr.span(),
+                    ));
+                };
+                length = Some(value);
+            }
+            let Some(length) = length.filter(|value| *value > 0) else {
+                return Err(secret_decl_error(
+                    "`random` length must be positive",
+                    call.name_span,
+                ));
+            };
+            Ok(CtValue::Struct {
+                type_name: "SecretRandom".to_string(),
+                fields: vec![("length".to_string(), CtValue::Int(length))],
+            })
+        }
+        Expr::Paren(inner, _) => secret_eval_value(inner, base_dir, funcs, globals),
+        _ => Comptime::evaluate(value, funcs, &HashSet::new(), base_dir, globals),
+    }
+}
+
+fn secret_duration_seconds(value: &CtValue) -> Option<i64> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    let amount = fields.iter().find_map(|(field, value)| {
+        (field == "value").then_some(value).and_then(|value| match value {
+            CtValue::Int(value) if *value > 0 => Some(*value),
+            _ => None,
+        })
+    })?;
+    let unit = type_name.rsplit('.').next().unwrap_or(type_name);
+    Some(match unit {
+        "d" | "day" | "days" => amount.saturating_mul(86_400),
+        "h" | "hour" | "hours" => amount.saturating_mul(3_600),
+        "m" | "min" | "minute" | "minutes" => amount.saturating_mul(60),
+        "s" | "sec" | "second" | "seconds" => amount,
+        _ => return None,
+    })
 }
 
 /// U12/D-JPK-MODBODY1=A: evaluate a canonical `env.<name>: { … }` role-module

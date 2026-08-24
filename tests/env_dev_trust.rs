@@ -100,10 +100,61 @@ fn write_package_project(dir: &std::path::Path, main_src: &str) {
 fn write_secret_project(dir: &std::path::Path, main_src: &str) {
     fs::write(
         dir.join("env.jet"),
-        "module env.dev { secrets: [\"db_password\"] }\n",
+        "module env.dev { secrets: { db_password: { required: true } } }\n",
     )
     .unwrap();
     fs::write(dir.join("main.jet"), main_src).unwrap();
+}
+
+#[test]
+fn typed_secret_map_captures_metadata_and_read_time_composition() {
+    let project = Scratch::new("typed-secret-map");
+    let source = r#"
+        module env.ci {
+            secrets: {
+                API_KEY: {
+                    required: true
+                    description: "CI credential"
+                    allowed_environments: ["ci", "prod"]
+                    rotation: max_age(90d)
+                    default: none
+                    generate: none
+                }
+                DB_URL: compose(
+                    template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app
+                    from: [DB_HOST, DB_USER, DB_PASSWORD]
+                )
+            }
+        }
+        module env.prod { }
+    "#;
+    let plan = jet_env_model::ModuleEval::evaluate_env_with_environment(
+        source,
+        &project.path,
+        Some("ci"),
+    )
+    .expect("typed metadata and compose declarations must evaluate");
+    assert_eq!(
+        plan.secrets.iter().map(|secret| secret.name.as_str()).collect::<Vec<_>>(),
+        ["API_KEY", "DB_URL"]
+    );
+    assert!(plan.secrets[0].required);
+    assert_eq!(
+        plan.secrets[0].allowed_environments,
+        vec!["ci".to_string(), "prod".to_string()]
+    );
+    assert_eq!(
+        plan.secrets[1].declaration,
+        jet_env_model::ModuleEval::SecretDeclaration::Compose {
+            template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app".to_string(),
+            from: vec!["DB_HOST".to_string(), "DB_PASSWORD".to_string(), "DB_USER".to_string()],
+        }
+    );
+    let shown = format!("{plan:?}");
+    assert!(shown.contains("API_KEY"), "plan disclosure must retain names: {shown}");
+    assert!(shown.contains("DB_URL"), "plan disclosure must retain names: {shown}");
+    assert!(!shown.contains("CI credential"), "metadata text must not be disclosed: {shown}");
+    assert!(!shown.contains("postgres://"), "compose templates must not be disclosed: {shown}");
 }
 
 /// `jetpack enter` (`jet env`) realizes the declared env and drops into a
@@ -244,8 +295,10 @@ fn dev_declared_missing_secret_is_e1263() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1263"), "stderr: {stderr}");
-    assert!(stderr.contains("db_password"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("E1263 required secret named db_password is missing for environment dev"),
+        "stderr: {stderr}"
+    );
     assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
 }
 
@@ -266,8 +319,10 @@ fn env_declared_missing_secret_is_e1263() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1263"), "stderr: {stderr}");
-    assert!(stderr.contains("db_password"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("E1263 required secret named db_password is missing for environment dev"),
+        "stderr: {stderr}"
+    );
     assert!(!String::from_utf8_lossy(&out.stdout).contains("entered"));
 }
 

@@ -14,34 +14,101 @@ use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-/// U13: before `jet env`/`jet dev` enters a trusted project environment, every
-/// declared `secrets: ["name", …]` entry must exist in `.jet/secrets.age`.
-/// Values stay inside `Secrets::get` and are dropped immediately; this is a
-/// presence check, not env-var injection.
+/// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: before activation, validate
+/// one typed secret map against the selected environment and encrypted store.
+/// Values stay inside `Secrets::get` and are dropped immediately; composition
+/// is installed as a names/template plan and never as a vault row.
 pub(super) fn validate_declared_secrets(
     theme: &Theme,
     project_dir: &Path,
-    names: &[String],
+    specs: &[ModuleEval::SecretSpec],
+    active_environment: Option<&str>,
 ) -> Result<(), i32> {
-    for name in names {
-        match Secrets::get(project_dir, name) {
-            Ok(Some(_)) => {}
-            Ok(None) => {
+    let environment = active_environment.unwrap_or("dynamic");
+    if let Err(message) = Secrets::write_runtime_plan(project_dir, specs) {
+        theme.error("couldn't install the secret read plan", &message, "fix the project `.jet` directory and try activation again.");
+        return Err(2);
+    }
+    for spec in specs {
+        if !spec.allowed_environments.is_empty()
+            && !spec.allowed_environments.iter().any(|name| name == environment)
+        {
+            theme.error_coded(
+                "E1333",
+                &format!("secret named {} is not allowed for environment {}", spec.name, environment),
+                "the selected environment is outside this declaration's allowed-environments policy.",
+                "select an allowed environment or update the named declaration.",
+            );
+            return Err(2);
+        }
+        let missing = match secret_activation_missing(project_dir, spec, specs, &mut Vec::new()) {
+            Ok(missing) => missing,
+            Err(message) => {
+                theme.error(&format!("couldn't read secret named {}", spec.name), &message, "");
+                return Err(2);
+            }
+        };
+        if let Some(name) = missing {
+            if spec.required || spec.is_composed() {
                 theme.error_coded(
                     "E1263",
-                    &format!("no secret named `{name}`"),
-                    "this environment declares that secret, but the encrypted store doesn't have an entry with this name.",
-                    &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                    &format!("required secret named {name} is missing for environment {environment}"),
+                    "this environment requires the named encrypted-store entry before activation.",
+                    &format!("set it with `jetpack secrets set {name} <value>`, or check the declaration."),
                 );
                 return Err(2);
             }
-            Err(msg) => {
-                theme.error(&format!("couldn't read `{name}`"), &msg, "");
-                return Err(2);
+            continue;
+        }
+        if let ModuleEval::SecretRotationPolicy::MaxAge { seconds } = spec.rotation {
+            if let Some(age) = Secrets::store_age(project_dir).map_err(|message| {
+                theme.error("couldn't inspect secret rotation age", &message, "");
+                2
+            })? {
+                if age > std::time::Duration::from_secs(seconds) {
+                    let headline = format!("secret named {} is past its rotation age for environment {}", spec.name, environment);
+                    if spec.required {
+                        theme.error_coded("E1333", &headline, "the required declaration's max-age policy is overdue.", "rotate the named secret and activate again.");
+                        return Err(2);
+                    }
+                    theme.warning_coded("E1333", &headline, "the optional declaration's max-age policy is overdue.", "rotate the named secret when practical.");
+                }
             }
         }
     }
     Ok(())
+}
+
+fn secret_activation_missing(
+    project_dir: &Path,
+    spec: &ModuleEval::SecretSpec,
+    specs: &[ModuleEval::SecretSpec],
+    visiting: &mut Vec<String>,
+) -> Result<Option<String>, String> {
+    if visiting.iter().any(|name| name == &spec.name) {
+        return Ok(Some(spec.name.clone()));
+    }
+    match &spec.declaration {
+        ModuleEval::SecretDeclaration::Stored => match Secrets::get(project_dir, &spec.name)? {
+            Some(_) => Ok(None),
+            None => Ok(Some(spec.name.clone())),
+        },
+        ModuleEval::SecretDeclaration::Compose { from, .. } => {
+            visiting.push(spec.name.clone());
+            for input in from {
+                let Some(input_spec) = specs.iter().find(|candidate| candidate.name == *input) else {
+                    visiting.pop();
+                    return Ok(Some(input.clone()));
+                };
+                if let Some(missing) = secret_activation_missing(project_dir, input_spec, specs, visiting)? {
+                    visiting.pop();
+                    return Ok(Some(missing));
+                }
+            }
+            visiting.pop();
+            Ok(None)
+        }
+    }
 }
 
 /// U12: bring up every enabled dev `services:` entry and block until each is
@@ -485,7 +552,12 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
         ) {
             return code;
         }
-        if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        if let Err(code) = validate_declared_secrets(
+            theme,
+            &project_dir,
+            &plan.secrets,
+            plan.environment.active_environment.as_deref(),
+        ) {
             return code;
         }
     }
@@ -885,7 +957,12 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
 

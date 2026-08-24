@@ -2881,15 +2881,24 @@ fn vault_error_value(error: Crypto::runtime::JetVaultError) -> CtValue {
 /// The key type is a Jet type argument, so the engine reads it from the call's
 /// resolved return type exactly as the Cranelift lowering does
 /// (`Crypto::vault_key_tag`) and hands the tag to the shared bridge. Only the
-/// read row `current` has an interpreter projection; a mutation row still has
-/// none and keeps the shared evaluator's registered refusal rather than a
-/// second, engine-local write path into the store.
+/// read rows `get` and `current` have interpreter projections; mutation rows
+/// still have none and keep the shared evaluator's registered refusal rather
+/// than a second, engine-local write path into the store.
 fn ambient_vault_call(
     method: &str,
     args: &[CtValue],
     resolved_ret: Option<&Type>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if method == "get" {
+        let Some(CtValue::Str(name)) = args.first() else {
+            return Err(unsupported("core.crypto.vault.get name", span));
+        };
+        return Ok(match Crypto::runtime::jet_vault_get_impl(name) {
+            Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+            None => CtValue::absent(Type::String),
+        });
+    }
     if method != "current" {
         return Err(unsupported(
             &format!("core.crypto.vault.{method} ambient"),

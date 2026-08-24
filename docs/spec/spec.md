@@ -2996,14 +2996,38 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   processes managed by Jetpack for the dev loop (`jetpack services
   up/down/health/logs/wait`). They are not system services and do not imply jetos
   activation.
-- **Secrets (D-JPK-SECRETCRYPTO1):** an `env.<name>` role-module may
-  declare `secrets: ["name", …]` — a plain `[String]` list, no dedicated
-  grammar. Each name is one this env expects to find in the project's
-  encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
-  set/get/recipients/keygen`); reading one at runtime is `core.crypto.vault.get`,
-  gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
-  denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
-  `jetpack secrets get <name>` on a name absent from the store is **E1263**.
+- **Secrets (D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D):** an
+  `env.<name>` role-module declares one typed map from secret names to either
+  metadata or a read-time composition:
+
+  ```jet
+  secrets: {
+      API_KEY: {
+          required: true
+          description: "CI credential"
+          allowed_environments: ["ci", "prod"]
+          rotation: max_age(90d)
+          default: none
+          generate: none
+      }
+      DB_URL: compose(
+          template: postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app
+          from: [DB_HOST, DB_USER, DB_PASSWORD]
+      )
+  }
+  ```
+
+  The compiler checks declaration types, duplicate names, environment labels,
+  policy/generator shape, template placeholders, input names, and composition
+  cycles. A known profile checks allowed-environment labels; a dynamic profile
+  defers that check to activation. Activation checks the selected profile and
+  store presence. `required: false` permits absence; a required missing entry
+  reuses **E1263** and names the entry and environment. The compiler cannot
+  prove ciphertext contains a value. Composition resolves on every
+  `core.crypto.vault.get` read, keeps only source pairs encrypted, and derives
+  the result in memory, so rotation changes the next read. Plans and read
+  audits contain the output name and sorted input names only; no secret value is
+  written to diagnostics, logs, fixtures, snapshots, or audit events.
 - **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.crypto.vault` persists only
   `SigningKey` and `X25519SecretKey` behind immutable `KeyRef<T>` handles.
   Reads, preparation, authorization, and commits all require `Secret`.

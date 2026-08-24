@@ -135,7 +135,12 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
-    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+    if let Err(code) = validate_declared_secrets(
+        theme,
+        &project_dir,
+        &plan.secrets,
+        plan.environment.active_environment.as_deref(),
+    ) {
         return code;
     }
 

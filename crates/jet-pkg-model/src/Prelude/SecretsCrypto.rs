@@ -141,12 +141,142 @@ fn identity_path() -> std::path::PathBuf {
 
 /// `core.crypto.vault.get(name)` — the whole read path a compiled Jet program uses:
 /// read the local identity, read the project's encrypted store, decrypt,
-/// look up `name`. `None` on any failure (no identity, no store, wrong key,
-/// missing entry) — the same "may be missing" shape as `core.sys.get`, never
-/// a panic (I2: no path here may crash the program in place of a value).
+/// look up `name`. A composed declaration is resolved here, on every read,
+/// from source pairs in memory. `None` on any failure (no identity, no store,
+/// wrong key, missing entry) — the same "may be missing" shape as `core.sys.get`.
 pub fn jet_vault_get_impl(name: &str) -> Option<String> {
-    let (store, _, _, _) = vault_read_at(std::path::Path::new(".")).ok()?;
-    store.strings.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
+    let plans = secret_compose_plan();
+    let plan = plans.iter().find(|plan| plan.output == name);
+    let inputs = plan.map(|plan| plan.from.as_slice()).unwrap_or(&[]);
+    let Ok((store, _, _, _)) = vault_read_at(std::path::Path::new(".")) else {
+        append_secret_read_audit(name, inputs);
+        return None;
+    };
+    let source = store
+        .strings
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut visiting = Vec::new();
+    let value = resolve_secret_read(name, &source, &plans, &mut visiting);
+    append_secret_read_audit(name, inputs);
+    value
+}
+
+struct SecretComposePlan {
+    output: String,
+    from: Vec<String>,
+    template: String,
+}
+
+fn secret_compose_plan() -> Vec<SecretComposePlan> {
+    let Ok(text) = std::fs::read_to_string(std::path::Path::new(".jet").join("secrets-plan")) else {
+        return Vec::new();
+    };
+    let mut lines = text.lines();
+    if lines.next() != Some("JSEC1") {
+        return Vec::new();
+    }
+    let mut plans = Vec::new();
+    for line in lines {
+        let mut parts = line.splitn(3, '\t');
+        let Some(output) = parts.next().filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let Some(raw_from) = parts.next() else { continue };
+        let Some(template) = parts.next() else { continue };
+        if output.chars().any(char::is_control) || template.chars().any(char::is_control) {
+            continue;
+        }
+        let mut from = raw_from
+            .split(',')
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if from.is_empty() || from.iter().any(|value| value.chars().any(char::is_control)) {
+            continue;
+        }
+        from.sort();
+        plans.push(SecretComposePlan {
+            output: output.to_string(),
+            from,
+            template: template.to_string(),
+        });
+    }
+    plans
+}
+
+fn resolve_secret_read(
+    name: &str,
+    source: &std::collections::BTreeMap<String, String>,
+    plans: &[SecretComposePlan],
+    visiting: &mut Vec<String>,
+) -> Option<String> {
+    if visiting.iter().any(|seen| seen == name) {
+        return None;
+    }
+    let Some(plan) = plans.iter().find(|plan| plan.output == name) else {
+        return source.get(name).cloned();
+    };
+    visiting.push(name.to_string());
+    let mut values = std::collections::BTreeMap::new();
+    for input in &plan.from {
+        let value = resolve_secret_read(input, source, plans, visiting)?;
+        values.insert(input.as_str(), value);
+    }
+    visiting.pop();
+    substitute_secret_template(&plan.template, &values)
+}
+
+fn substitute_secret_template(
+    template: &str,
+    values: &std::collections::BTreeMap<&str, String>,
+) -> Option<String> {
+    let mut output = String::new();
+    let mut chars = template.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '{' {
+            if character == '}' {
+                return None;
+            }
+            output.push(character);
+            continue;
+        }
+        let mut name = String::new();
+        let mut closed = false;
+        for next in chars.by_ref() {
+            if next == '}' {
+                closed = true;
+                break;
+            }
+            name.push(next);
+        }
+        if !closed || name.is_empty() || name.chars().any(char::is_control) {
+            return None;
+        }
+        output.push_str(values.get(name.as_str())?);
+    }
+    Some(output)
+}
+
+fn append_secret_read_audit(output: &str, inputs: &[String]) {
+    if output.chars().any(char::is_control)
+        || inputs.iter().any(|input| input.chars().any(char::is_control))
+    {
+        return;
+    }
+    let path = std::path::Path::new(".jet").join("secrets-audit");
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let mut line = format!("read output={output} from=[");
+    line.push_str(&inputs.join(","));
+    line.push_str("]\n");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = file.write_all(line.as_bytes());
+    }
 }
 
 // ── Typed key vault (D-CRYPTO-VAULT1=A) ─────────────────────────────

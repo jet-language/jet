@@ -41,7 +41,8 @@ pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EnvironmentRead, EvaluatedModule,
     FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
     PromptPathMode, PromptStripMode,
-    ReadyProbe, RestartPolicy, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
+    ReadyProbe, RestartPolicy, SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy,
+    SecretSpec, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 pub use Environment::{
     DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, FormatterSpec, HookAction, HookSpec, LanguageExpansion, LanguagePack,

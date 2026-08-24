@@ -559,11 +559,11 @@ pub(super) fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {
 fn validate_task_secret_allowlist(
     task_name: &str,
     secret: &str,
-    declared: &[String],
+    declared: &[ModuleEval::SecretSpec],
 ) -> Result<(), String> {
     declared
         .iter()
-        .any(|name| name == secret)
+        .any(|name| name.name == secret)
         .then_some(())
         .ok_or_else(|| {
             format!("integration task `{task_name}` lost secret `{secret}` before activation")
@@ -668,6 +668,7 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::{build_sandbox_outcome, resolve_provider_paths, validate_task_secret_allowlist};
+    use jet_env_model::ModuleEval;
 
     #[test]
     fn sandbox_claim_uses_recorded_backend_or_says_no_child_ran() {
@@ -761,7 +762,7 @@ mod tests {
         let error = validate_task_secret_allowlist(
             "vault-check",
             "database_password",
-            &["api_key".to_string()],
+            &[ModuleEval::SecretSpec::stored("api_key")],
         )
         .expect_err("activation must deny a task secret outside its declared list");
         assert!(
