@@ -140,6 +140,24 @@ fn jet_process_policy_limits(spec: &jet_std::ProcessSpec) -> Vec<String> {
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "none".to_string())
         ),
+        format!(
+            "cpu-time-limit-ms={}",
+            spec.cpu_time_limit_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        format!(
+            "memory-limit-bytes={}",
+            spec.memory_limit_bytes
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
+        format!(
+            "open-file-limit={}",
+            spec.open_file_limit
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ),
     ]);
     limits
 }
@@ -274,6 +292,18 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         .output_limit
         .map(|value| value.to_string())
         .unwrap_or_default();
+    let cpu_time_limit_ms = spec
+        .cpu_time_limit_ms
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let memory_limit_bytes = spec
+        .memory_limit_bytes
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    let open_file_limit = spec
+        .open_file_limit
+        .map(|value| value.to_string())
+        .unwrap_or_default();
     let rights = jet_process_policy_rights(spec)
         .iter()
         .map(|right| jet_process_policy_digest_right(right))
@@ -305,6 +335,9 @@ fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
         ("cwd", cwd.as_str()),
         ("timeout-ms", timeout_ms.as_str()),
         ("output-limit", output_limit.as_str()),
+        ("cpu-time-limit-ms", cpu_time_limit_ms.as_str()),
+        ("memory-limit-bytes", memory_limit_bytes.as_str()),
+        ("open-file-limit", open_file_limit.as_str()),
         ("backend.limits", backend_limits.as_str()),
         ("environment.keys", environment_keys.as_str()),
         (
@@ -451,6 +484,7 @@ fn jet_process_spec_backend_check(
 fn jet_process_spec_plan(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessPlan, jet_std::IOError> {
+    jet_process_resource_limits_check(spec)?;
     if spec.policy_wire.is_none() {
         return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
             jet_std::IOOperation::Resolve,

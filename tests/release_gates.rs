@@ -5,7 +5,7 @@
 //! the example discovery loop.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
@@ -660,4 +660,127 @@ fn verify_full_default_run_covers_whole_workspace() {
         verify.contains("tools/ci/test-shards.sh"),
         "the sharded path must delegate enumeration to tools/ci/test-shards.sh"
     );
+}
+
+// ============================================================================
+// Section: #805 read-only Tower hygiene (D-ONCE-LEDGER1=A)
+
+fn run_tower_hygiene_gate(
+    repo: &Path,
+    tower_dir: &Path,
+    docs_root: &Path,
+    report: &Path,
+) -> std::process::Output {
+    Command::new("bash")
+        .arg(repo.join("tools/ci/tower-hygiene-gate.sh"))
+        .current_dir(repo)
+        .env("TOWER_DATA", tower_dir)
+        .env("JET_TOWER_LINT_SCOPE", docs_root)
+        .env("JET_TOWER_HYGIENE_REPORT", report)
+        .env_remove("JET_TEST_SHARD")
+        .output()
+        .expect("run Tower hygiene gate")
+}
+
+#[test]
+fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
+    let repo = root();
+    let fixture = common::test_scratch_root(&format!("tower-hygiene-gate-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&fixture);
+    fs::create_dir_all(fixture.join("docs/spec")).unwrap();
+    fs::create_dir_all(fixture.join("tower")).unwrap();
+
+    fs::write(
+        fixture.join("tower/tower.json"),
+        r#"{
+  "meta": {"version": 4, "project": "fixture", "currentEpoch": null, "nextNum": 1, "rev": 0, "ui": {"toggled": []}},
+  "epochs": [{"id": "e1", "name": "Epoch 1", "goal": "", "status": "active"}],
+  "milestones": [],
+  "cards": [],
+  "decisions": [{"id": "D-OK1", "status": "ratified", "outcome": "A"}],
+  "questions": [],
+  "ideas": [],
+  "papercuts": [],
+  "events": []
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("tower/history.json"),
+        r#"{"version": 1, "decisions": [], "cards": [], "events": []}
+"#,
+    )
+    .unwrap();
+    fs::write(fixture.join("docs/spec/ok.md"), "D-OK1\n").unwrap();
+
+    let tower_before = fs::read(fixture.join("tower/tower.json")).unwrap();
+    let history_before = fs::read(fixture.join("tower/history.json")).unwrap();
+    let success_report = fixture.join("success.txt");
+    let success = run_tower_hygiene_gate(
+        &repo,
+        &fixture.join("tower"),
+        &fixture.join("docs"),
+        &success_report,
+    );
+    assert!(
+        success.status.success(),
+        "valid Tower hygiene must pass:\n{}",
+        String::from_utf8_lossy(&success.stdout)
+    );
+    let success_text = fs::read_to_string(&success_report).unwrap();
+    assert!(success_text.contains("status=pass"), "{success_text}");
+    assert!(success_text.contains("read_only=pass"), "{success_text}");
+    assert!(success_text.contains("lint_exit=0"), "{success_text}");
+    assert!(success_text.contains("lint_repeat_exit=0"), "{success_text}");
+    assert!(success_text.contains("candidate_commit="), "{success_text}");
+    assert!(success_text.contains("runner_os="), "{success_text}");
+    assert!(success_text.contains("node=v"), "{success_text}");
+    assert!(success_text.contains("scope_input="), "{success_text}");
+    assert_eq!(
+        tower_before,
+        fs::read(fixture.join("tower/tower.json")).unwrap()
+    );
+    assert_eq!(
+        history_before,
+        fs::read(fixture.join("tower/history.json")).unwrap()
+    );
+
+    fs::write(fixture.join("docs/spec/bad.md"), "D-MISSING1\n").unwrap();
+    let failure_report = fixture.join("failure.txt");
+    let failure = run_tower_hygiene_gate(
+        &repo,
+        &fixture.join("tower"),
+        &fixture.join("docs"),
+        &failure_report,
+    );
+    assert!(
+        !failure.status.success(),
+        "missing Tower decision record must block:\n{}",
+        String::from_utf8_lossy(&failure.stdout)
+    );
+    let failure_text = fs::read_to_string(&failure_report).unwrap();
+    assert!(failure_text.contains("status=fail"), "{failure_text}");
+    assert!(failure_text.contains("lint_exit=1"), "{failure_text}");
+    assert!(failure_text.contains("lint_repeat_exit=1"), "{failure_text}");
+    assert!(
+        failure_text.contains("spec-decision-ref-missing"),
+        "{failure_text}"
+    );
+    assert!(failure_text.contains("D-MISSING1"), "{failure_text}");
+    assert_eq!(
+        tower_before,
+        fs::read(fixture.join("tower/tower.json")).unwrap()
+    );
+    assert_eq!(
+        history_before,
+        fs::read(fixture.join("tower/history.json")).unwrap()
+    );
+
+    let verify = fs::read_to_string(repo.join("scripts/agent/verify-full.sh")).unwrap();
+    assert!(
+        verify.contains("tools/ci/tower-hygiene-gate.sh"),
+        "verify-full must run the production Tower hygiene gate"
+    );
+    let _ = fs::remove_dir_all(&fixture);
 }

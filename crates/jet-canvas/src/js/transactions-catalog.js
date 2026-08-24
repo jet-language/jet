@@ -420,18 +420,47 @@
     return graphUrl + (graphUrl.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId);
   }
 
-  function emptyCanvasGraphPayload(payload) {
+  function canvasSourceUrl(sourceId) {
+    const base = window.__JET_CANVAS_BASE__ || "/canvas";
+    const query = sourceId ? "?source_id=" + encodeURIComponent(sourceId) : "";
+    return base + "/source" + query;
+  }
+
+  function sourceIsTeachingEmpty(source) {
+    const withoutComments = String(source || "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    return withoutComments.trim() === "";
+  }
+
+  function emptyCanvasGraphPayload(payload, source) {
     const message = String(payload && payload.message || "");
-    const source = String(latestDoc && latestDoc.source_text || "");
     return payload && payload.kind === "diagnostic"
       && message.includes("E0101")
       && message.includes("no `run` function")
-      && !/(?:^|\n)\s*(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*/m.test(source);
+      && sourceIsTeachingEmpty(source);
   }
 
-  function showEmptyCanvasGraph() {
-    if (!latestDoc) return false;
-    drawGraph(Object.assign({}, latestDoc, { graphs: [] }));
+  function currentSourceForEmptyGraph(sourceId) {
+    return fetch(canvasSourceUrl(sourceId), { cache: "no-store" })
+      .then((response) => response.ok ? response.text() : null)
+      .catch(() => null);
+  }
+
+  function showEmptyCanvasGraph(payload, sourceId, sourceText) {
+    const base = latestDoc || {
+      protocol: "jet.canvas.graph",
+      schema_version: 1,
+      source_id: sourceId || "",
+      revision: payload && payload.revision || "",
+      node_descriptors: []
+    };
+    drawGraph(Object.assign({}, base, {
+      source_id: base.source_id || sourceId || "",
+      revision: payload && payload.revision || base.revision || "",
+      source_text: sourceText,
+      graphs: []
+    }));
     setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
       { label: "Open source", run: openSourceRecovery },
       { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
@@ -463,10 +492,20 @@
         }
         return { ok: r.ok, doc };
       }))
-      .then((result) => {
+      .then(async (result) => {
         if (loadToken !== window.__jetCanvasGraphLoadGeneration) return;
+        const message = String(result.doc && result.doc.message || "");
+        if (result.doc && result.doc.kind === "diagnostic"
+          && message.includes("E0101")
+          && message.includes("no `run` function")) {
+          const source = await currentSourceForEmptyGraph(requestedSourceId);
+          if (loadToken !== window.__jetCanvasGraphLoadGeneration) return;
+          if (source !== null && emptyCanvasGraphPayload(result.doc, source)) {
+            showEmptyCanvasGraph(result.doc, requestedSourceId, source);
+            return;
+          }
+        }
         if (!result.ok) {
-          if (emptyCanvasGraphPayload(result.doc) && showEmptyCanvasGraph()) return;
           const hasDiagnostics = acceptDiagnosticsPayload(result.doc, "Graph");
           jump.textContent = "Canvas graph has problems";
           details.textContent = result.doc && result.doc.message || "Graph check failed";

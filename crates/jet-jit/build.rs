@@ -107,6 +107,7 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         ("ProcessStreamMode", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "ProcessStreamMode"),
         ("IOOperation", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "IOOperation"),
         ("IOError", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "IOError"),
+        ("ProcessResourceLimit", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "ProcessResourceLimit"),
         ("TextWidthAmbiguous", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthAmbiguous"),
         ("TextWidthControls", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthControls"),
         ("TerminalMode", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "TerminalMode"),

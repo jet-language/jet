@@ -153,6 +153,7 @@
   }
 
   function setCanvasState(kind, title, detail, actions = []) {
+    if (window.__jetCanvasNoopCanvasState) return;
     ensureCanvasChrome();
     const state = document.getElementById("canvas-state");
     const titleEl = document.getElementById("canvas-state-title");
@@ -425,6 +426,62 @@
     const facts = latestDoc && latestDoc.facts;
     const variants = facts && facts.enum_variants && facts.enum_variants[type];
     return Array.isArray(variants) ? variants : [];
+  }
+
+  function patternVariantsForType(type) {
+    const facts = latestDoc && latestDoc.facts;
+    const variants = facts && facts.pattern_variants && facts.pattern_variants[type];
+    return Array.isArray(variants) ? variants : [];
+  }
+
+  function patternArmHead(pattern) {
+    let text = String(pattern || "").trim();
+    if (text.startsWith("==")) text = text.slice(2).trim();
+    text = text.replace(/\s*->\s*$/, "").trim();
+    const match = text.match(/^\.?([A-Z][A-Za-z0-9_.]*)(?:\s*\((.*)\))?$/);
+    if (!match) return null;
+    const args = match[2];
+    let arity = 0;
+    if (args !== undefined && args.trim()) {
+      let depth = 0;
+      arity = 1;
+      for (const char of args) {
+        if ("([{".includes(char)) depth++;
+        else if (")]}".includes(char)) depth--;
+        else if (char === "," && depth === 0) arity++;
+      }
+    }
+    return { name: match[1], arity };
+  }
+
+  function patternArmEditPlan(node, pattern) {
+    const type = node && node.meta && node.meta.pattern_type;
+    const variants = patternVariantsForType(type);
+    if (!type || !variants.length) return null;
+    const head = patternArmHead(pattern);
+    if (!head) return null;
+    const variant = variants.find((candidate) => candidate && candidate.name === head.name);
+    if (!variant) {
+      return { label: `Pattern arm ${head.name} is not a ${type} variant` };
+    }
+    if (Number.isInteger(variant.arity) && variant.arity !== head.arity) {
+      return { label: `Pattern arm ${head.name} needs ${variant.arity} payload value${variant.arity === 1 ? "" : "s"}` };
+    }
+    return null;
+  }
+
+  function refusePatternArmEdit(plan) {
+    const refusal = {
+      ok: false,
+      changed: false,
+      reason: plan.label,
+      message: plan.label,
+      code: "client_pattern_gate"
+    };
+    window.__jetCanvasLastTx = null;
+    window.__jetCanvasLastTxResult = refusal;
+    showToast("Edit refused: " + plan.label, { isError: true });
+    return false;
   }
 
   function isScalarType(type) {
@@ -1147,6 +1204,8 @@
     if (!latestDoc || !node) return;
     const pattern = window.prompt("Pattern arm", "== Variant(x)");
     if (pattern === null || pattern.trim() === "") return;
+    const plan = patternArmEditPlan(node, pattern);
+    if (plan) return refusePatternArmEdit(plan);
     postTransaction({
       schema_version: 1,
       op: "add_pattern_arm",
@@ -1162,6 +1221,10 @@
     if (!latestDoc || !pin) return;
     const pattern = window.prompt("Pattern arm", pin.pattern_source || "== Variant(x)");
     if (pattern === null || pattern.trim() === "") return;
+    const graph = currentGraphOrNull();
+    const node = graph && (graph.nodes || []).find((candidate) => candidate.node_id === pin.node_id);
+    const plan = patternArmEditPlan(node, pattern);
+    if (plan) return refusePatternArmEdit(plan);
     const span = pin.pattern_source_span || pin.source_span || {};
     postTransaction({
       schema_version: 1,

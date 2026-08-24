@@ -263,7 +263,7 @@ pub(crate) fn process_spec_method_return(
                 args: vec![Type::String],
             }),
         })),
-        ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
+        ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", 1) => Some(Some(spec_ty)),
         ("under", 1) => Some(Some(spec_ty.clone())),
         ("plan", 0) => Some(Some(result_ty(
             Type::Named("ProcessPlan".to_string()),
@@ -304,7 +304,7 @@ pub(crate) fn process_spec_method_return(
             ));
             Some(None)
         }
-        ("timeout" | "output_limit", _) => {
+        ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }

@@ -44,3 +44,18 @@ RECOMMENDED FIX, and it is a product fix rather than a test fix: run compilation
 ALSO NEWLY FOUND, unfixed: the Panic effect root breaks the corpus. examples/features/effects/effect_grant.jet fails with E0712 "this #Caps region uses the effect Panic, which it has no capability for" and examples/features/lowlevel/polyglot_fortran fails with E0740 "run uses the effect Panic, which its signature doesn't allow". Panic ships as an effect root (Prelude/Effects.jet), so every #Caps region and every signature that can panic now needs to declare it. This lands squarely in M12: card #1567 already records that 31 effect roots ship where it specifies 13. Decide whether Panic is an effect root at all before fixing the examples -- if it is, the beginner surface just acquired a large new declaration burden, which is an owner call.
 
 Also unfixed: examples/features/io/io_prelude.jet fails E0405 "?? return here needs a value".
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `JIT-COVERAGE` | card | #1663 |
+| `DEV-STACK` | card | #1319 |
+| `PANIC-EFFECT-ROOT` | card | #1567 |
+| `CLI-RED-SUITE` | card | #1362 |
+| `STALE-GOLDENS` | card | #1302 |
+| `IO-PRELUDE` | card | #1480 |
+| `FOREIGN-LOOP` | card | #1887 |
+| `OPEN-CARD-COUNT` | no-action | archived: a handoff count is historical state, not a separate product finding |
+<!-- /audit-dispositions -->

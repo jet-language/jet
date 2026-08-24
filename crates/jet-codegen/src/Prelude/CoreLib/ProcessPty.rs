@@ -32,9 +32,25 @@ pub struct PtyPair {
     pub slave: File,
 }
 
+/// D-PROCESS-RESOURCE1=A: native child controls are carried through the one
+/// process-launch seam. Empty fields preserve the existing process behavior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResourceLimits {
+    pub cpu_time_ms: Option<i64>,
+    pub memory_bytes: Option<i64>,
+    pub open_files: Option<i64>,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceLimitKind {
+    CpuTime,
+    Memory,
+}
+
 #[cfg(unix)]
 mod unix {
-    use super::{File, PtyConfig, PtyPair};
+    use super::{File, PtyConfig, PtyPair, ResourceLimits};
     use std::ffi::{CStr, OsStr};
     use std::io;
     use std::os::fd::{AsRawFd, FromRawFd};
@@ -108,7 +124,54 @@ mod unix {
         fn cfmakeraw(termios: *mut Termios);
         fn fcntl(fd: i32, command: i32, ...) -> i32;
         fn setsid() -> i32;
+        fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
         fn kill(pid: i32, signal: i32) -> i32;
+    }
+
+    #[repr(C)]
+    struct RLimit {
+        current: u64,
+        maximum: u64,
+    }
+
+    #[cfg(target_os = "linux")]
+    const RLIMIT_CPU: i32 = 0;
+    #[cfg(target_os = "linux")]
+    const RLIMIT_MEMORY: i32 = 9; // RLIMIT_AS
+    #[cfg(target_os = "linux")]
+    const RLIMIT_NOFILE: i32 = 7;
+    #[cfg(target_os = "macos")]
+    const RLIMIT_CPU: i32 = 0;
+    #[cfg(target_os = "macos")]
+    const RLIMIT_MEMORY: i32 = 5; // RLIMIT_RSS
+    #[cfg(target_os = "macos")]
+    const RLIMIT_NOFILE: i32 = 8;
+
+    fn apply_limits(limits: ResourceLimits) -> io::Result<()> {
+        let set = |resource, value| {
+            let limit = RLimit {
+                current: value,
+                maximum: value,
+            };
+            // SAFETY: `limit` is a live kernel-shaped value for this call.
+            if unsafe { setrlimit(resource, &limit) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        };
+        if let Some(milliseconds) = limits.cpu_time_ms {
+            // POSIX CPU rlimits are whole seconds. Round up so unit conversion
+            // never makes the requested budget stricter.
+            let seconds = milliseconds.max(0).saturating_add(999) / 1000;
+            set(RLIMIT_CPU, seconds as u64)?;
+        }
+        if let Some(bytes) = limits.memory_bytes {
+            set(RLIMIT_MEMORY, bytes.max(0) as u64)?;
+        }
+        if let Some(files) = limits.open_files {
+            set(RLIMIT_NOFILE, files.max(0) as u64)?;
+        }
+        Ok(())
     }
 
     fn invalid(message: impl Into<String>) -> io::Error {
@@ -233,13 +296,17 @@ mod unix {
         Ok(())
     }
 
-    pub(super) fn attach_command(command: &mut Command) -> io::Result<()> {
+    pub(super) fn attach_command(
+        command: &mut Command,
+        limits: ResourceLimits,
+    ) -> io::Result<()> {
         use std::os::unix::process::CommandExt;
         // SAFETY: `pre_exec` is the standard Rust boundary for the small set of
-        // async-signal-safe session calls required between fork and exec. The
-        // closure captures nothing and allocates nothing.
+        // async-signal-safe session and resource calls required between fork
+        // and exec. The captured value is a plain Copy struct.
         unsafe {
-            command.pre_exec(|| {
+            command.pre_exec(move || {
+                apply_limits(limits)?;
                 if setsid() < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -252,12 +319,16 @@ mod unix {
         Ok(())
     }
 
-    pub(super) fn attach_process_group(command: &mut Command) -> io::Result<()> {
+    pub(super) fn attach_process_group(
+        command: &mut Command,
+        limits: ResourceLimits,
+    ) -> io::Result<()> {
         use std::os::unix::process::CommandExt;
-        // SAFETY: `pre_exec` only installs a session boundary; `setsid` is
-        // async-signal-safe and the closure captures nothing.
+        // SAFETY: `pre_exec` installs the session and resource boundary using
+        // async-signal-safe calls. The captured value is a plain Copy struct.
         unsafe {
-            command.pre_exec(|| {
+            command.pre_exec(move || {
+                apply_limits(limits)?;
                 if setsid() < 0 {
                     return Err(io::Error::last_os_error());
                 }
@@ -321,7 +392,7 @@ mod unix {
 
 #[cfg(windows)]
 mod windows {
-    use super::{File, PtyConfig};
+    use super::{File, PtyConfig, ResourceLimits};
     use std::ffi::c_void;
     use std::io::{self, Write};
     use std::os::windows::ffi::OsStrExt;
@@ -335,7 +406,10 @@ mod windows {
     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
     const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x0002_0016;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: u32 = 9;
+    const JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION: u32 = 1;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+    const JOB_OBJECT_LIMIT_PROCESS_TIME: u32 = 0x0000_0002;
+    const JOB_OBJECT_LIMIT_PROCESS_MEMORY: u32 = 0x0000_0100;
     const WAIT_OBJECT_0: u32 = 0;
     const WAIT_TIMEOUT: u32 = 258;
     const WAIT_FAILED: u32 = 0xffff_ffff;
@@ -426,6 +500,17 @@ mod windows {
         peak_job_memory_used: usize,
     }
 
+    #[repr(C)]
+    struct BasicAccountingInformation {
+        total_user_time: i64,
+        total_kernel_time: i64,
+        this_period_total_user_time: i64,
+        this_period_total_kernel_time: i64,
+        total_processes: u32,
+        active_processes: u32,
+        terminated_processes: u32,
+    }
+
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
@@ -472,6 +557,13 @@ mod windows {
             information_class: u32,
             information: *mut c_void,
             length: u32,
+        ) -> i32;
+        fn QueryInformationJobObject(
+            job: Handle,
+            information_class: u32,
+            information: *mut c_void,
+            length: u32,
+            return_length: *mut u32,
         ) -> i32;
         fn TerminateJobObject(job: Handle, exit_code: u32) -> i32;
         fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
@@ -661,15 +753,28 @@ mod windows {
     struct Job(HandleGuard);
 
     impl Job {
-        fn create() -> io::Result<Self> {
+        fn create(resource_limits: ResourceLimits) -> io::Result<Self> {
             // SAFETY: null attributes/name request one private unnamed job.
             let handle = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
             let guard = HandleGuard::new(handle)?;
             let mut limits = ExtendedLimitInformation {
                 basic: BasicLimitInformation {
-                    per_process_user_time_limit: 0,
+                    per_process_user_time_limit: resource_limits
+                        .cpu_time_ms
+                        .map(|milliseconds| milliseconds.max(0).saturating_mul(10_000))
+                        .unwrap_or(0),
                     per_job_user_time_limit: 0,
-                    limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                    limit_flags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                        | if resource_limits.cpu_time_ms.is_some() {
+                            JOB_OBJECT_LIMIT_PROCESS_TIME
+                        } else {
+                            0
+                        }
+                        | if resource_limits.memory_bytes.is_some() {
+                            JOB_OBJECT_LIMIT_PROCESS_MEMORY
+                        } else {
+                            0
+                        },
                     minimum_working_set_size: 0,
                     maximum_working_set_size: 0,
                     active_process_limit: 0,
@@ -685,7 +790,10 @@ mod windows {
                     write_bytes: 0,
                     other_bytes: 0,
                 },
-                process_memory_limit: 0,
+                process_memory_limit: resource_limits
+                    .memory_bytes
+                    .map(|bytes| bytes.max(0) as usize)
+                    .unwrap_or(0),
                 job_memory_limit: 0,
                 peak_process_memory_used: 0,
                 peak_job_memory_used: 0,
@@ -827,6 +935,7 @@ mod windows {
         args: &[String],
         cwd: Option<&str>,
         env: &[(std::ffi::OsString, std::ffi::OsString)],
+        limits: ResourceLimits,
     ) -> io::Result<WindowsPtyProcess> {
         let (input_read, input_write) = create_pipe()?;
         let (output_read, output_write) = create_pipe()?;
@@ -841,7 +950,7 @@ mod windows {
         // consumed by the child console's own mode; the pipe remains binary.
         let console = ConsoleGuard::create(config, input_read.raw(), output_write.raw())?;
 
-        let job = Job::create()?;
+        let job = Job::create(limits)?;
         let application = make_wide(executable)?;
         let mut command = command_line(executable, args)?;
         let current_directory = cwd.map(make_wide).transpose()?;
@@ -951,8 +1060,8 @@ mod windows {
         })
     }
 
-    pub fn attach_job(process: RawHandle) -> io::Result<File> {
-        let job = Job::create()?;
+    pub fn attach_job(process: RawHandle, limits: ResourceLimits) -> io::Result<File> {
+        let job = Job::create(limits)?;
         job.assign(process)?;
         Ok(job.into_file())
     }
@@ -986,6 +1095,87 @@ mod windows {
             return Err(error("GetExitCodeProcess"));
         }
         Ok(code)
+    }
+
+    pub fn resource_limit_hit(
+        job: &File,
+        limits: ResourceLimits,
+    ) -> io::Result<Option<super::ResourceLimitKind>> {
+        if limits.cpu_time_ms.is_some() {
+            let mut accounting = BasicAccountingInformation {
+                total_user_time: 0,
+                total_kernel_time: 0,
+                this_period_total_user_time: 0,
+                this_period_total_kernel_time: 0,
+                total_processes: 0,
+                active_processes: 0,
+                terminated_processes: 0,
+            };
+            let mut returned = 0;
+            // SAFETY: Windows fills the documented accounting structure only.
+            if unsafe {
+                QueryInformationJobObject(
+                    job.as_raw_handle(),
+                    JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION,
+                    (&mut accounting as *mut BasicAccountingInformation).cast(),
+                    std::mem::size_of::<BasicAccountingInformation>() as u32,
+                    &mut returned,
+                )
+            } == 0
+            {
+                return Err(error("QueryInformationJobObject(accounting)"));
+            }
+            let limit = limits.cpu_time_ms.unwrap_or(0).max(0) as i64;
+            if accounting.total_user_time >= limit.saturating_mul(10_000) {
+                return Ok(Some(super::ResourceLimitKind::CpuTime));
+            }
+        }
+        if limits.memory_bytes.is_some() {
+            let mut information = ExtendedLimitInformation {
+                basic: BasicLimitInformation {
+                    per_process_user_time_limit: 0,
+                    per_job_user_time_limit: 0,
+                    limit_flags: 0,
+                    minimum_working_set_size: 0,
+                    maximum_working_set_size: 0,
+                    active_process_limit: 0,
+                    affinity: 0,
+                    priority_class: 0,
+                    scheduling_class: 0,
+                },
+                io: IoCounters {
+                    read_operations: 0,
+                    write_operations: 0,
+                    other_operations: 0,
+                    read_bytes: 0,
+                    write_bytes: 0,
+                    other_bytes: 0,
+                },
+                process_memory_limit: 0,
+                job_memory_limit: 0,
+                peak_process_memory_used: 0,
+                peak_job_memory_used: 0,
+            };
+            let mut returned = 0;
+            // SAFETY: Windows fills the documented extended-limit structure only.
+            if unsafe {
+                QueryInformationJobObject(
+                    job.as_raw_handle(),
+                    JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                    (&mut information as *mut ExtendedLimitInformation).cast(),
+                    std::mem::size_of::<ExtendedLimitInformation>() as u32,
+                    &mut returned,
+                )
+            } == 0
+            {
+                return Err(error("QueryInformationJobObject(memory)"));
+            }
+            let limit = limits.memory_bytes.unwrap_or(0).max(0) as usize;
+            if information.peak_process_memory_used >= limit {
+                return Ok(Some(super::ResourceLimitKind::Memory));
+            }
+        }
+        Ok(None)
     }
 
     pub fn terminate(job: &File) -> io::Result<()> {
@@ -1071,26 +1261,26 @@ pub fn open(config: PtyConfig) -> io::Result<PtyPair> {
     }
 }
 
-pub fn attach_command(command: &mut Command) -> io::Result<()> {
+pub fn attach_command(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
     #[cfg(unix)]
     {
-        return unix::attach_command(command);
+        return unix::attach_command(command, limits);
     }
     #[cfg(not(unix))]
     {
-        let _ = command;
+        let _ = (command, limits);
         Ok(())
     }
 }
 
-pub fn attach_process_group(command: &mut Command) -> io::Result<()> {
+pub fn attach_process_group(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
     #[cfg(unix)]
     {
-        return unix::attach_process_group(command);
+        return unix::attach_process_group(command, limits);
     }
     #[cfg(not(unix))]
     {
-        let _ = command;
+        let _ = (command, limits);
         Ok(())
     }
 }
@@ -1117,13 +1307,17 @@ pub fn spawn(
     args: &[String],
     cwd: Option<&str>,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
+    limits: ResourceLimits,
 ) -> io::Result<WindowsPtyProcess> {
-    windows::spawn(config, executable, args, cwd, env)
+    windows::spawn(config, executable, args, cwd, env, limits)
 }
 
 #[cfg(windows)]
-pub fn attach_job(process: std::os::windows::io::RawHandle) -> io::Result<File> {
-    windows::attach_job(process)
+pub fn attach_job(
+    process: std::os::windows::io::RawHandle,
+    limits: ResourceLimits,
+) -> io::Result<File> {
+    windows::attach_job(process, limits)
 }
 
 #[cfg(windows)]
@@ -1139,6 +1333,14 @@ pub fn try_wait(process: &File) -> io::Result<Option<u32>> {
 #[cfg(windows)]
 pub fn terminate(job: &File) -> io::Result<()> {
     windows::terminate(job)
+}
+
+#[cfg(windows)]
+pub fn resource_limit_hit(
+    job: &File,
+    limits: ResourceLimits,
+) -> io::Result<Option<ResourceLimitKind>> {
+    windows::resource_limit_hit(job, limits)
 }
 
 #[cfg(windows)]

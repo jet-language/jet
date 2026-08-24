@@ -325,6 +325,22 @@ fn run() {
 }
 "#;
 
+const EVENTS_PANEL_SOURCE: &str = r#"use core.event as event
+
+fn dev() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+    clicked.on(scope, n -> print("clicked {n}"))
+    clicked.once(scope, n -> print("once {n}"))
+    print(clicked.emit(1).summary())
+    scope.cancel()
+}
+
+fn run() {
+    dev()
+}
+"#;
+
 struct BigFixtureFacts {
     file_count: usize,
     function_count: usize,
@@ -538,6 +554,11 @@ fn library_panel() {
 }
 
 #[test]
+fn library_panel_events_example() {
+    run_canvas_scenario("library-panel-events");
+}
+
+#[test]
 fn palette_insert_catalog_sweep() {
     run_canvas_scenario("palette-insert-catalog-sweep");
 }
@@ -685,6 +706,11 @@ fn node_docs_pointer_hover() {
 #[test]
 fn canvas_teaching_empty_states() {
     run_canvas_scenario("canvas-teaching-empty-states");
+}
+
+#[test]
+fn harness_checked_doc_empty_noop_selftest() {
+    run_canvas_scenario("harness-checked-doc-empty-noop-selftest");
 }
 
 #[test]
@@ -1049,19 +1075,35 @@ impl CanvasCase {
             .expect("copy Canvas onboarding example source");
             None
         } else {
-            if name == "library-panel" {
+            if matches!(name, "library-panel" | "library-panel-events") {
                 fs::write(
                     dir.join("package.jet"),
                     "name: \"canvas_library\"\nversion: \"0.1.0\"\n",
                 )
                 .expect("write Canvas library package fixture");
             }
-            let source = if name == "debug-breakpoints-run-control-gestures" {
-                DEBUG_DEMO
+            if name == "library-panel-events" {
+                fs::copy(
+                    repo.join("examples/features/ui/events.jet"),
+                    &entry,
+                )
+                .expect("copy Canvas library events source");
             } else {
-                DEMO
-            };
-            fs::write(&entry, source).expect("write Canvas scenario source");
+                let source = if matches!(
+                    name,
+                    "debug-breakpoints-run-control-gestures"
+                        | "debug-runtime-values-staleness-liveness"
+                ) {
+                    DEBUG_DEMO
+                } else {
+                    DEMO
+                };
+                fs::write(&entry, source).expect("write Canvas scenario source");
+                if name == "events-panel-authoring" {
+                    fs::write(dir.join("events.jet"), EVENTS_PANEL_SOURCE)
+                        .expect("write Canvas events source fixture");
+                }
+            }
             None
         };
         let screenshots = dir.join("screenshots");

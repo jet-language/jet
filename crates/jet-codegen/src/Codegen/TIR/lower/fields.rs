@@ -466,6 +466,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
                 | "outputs"
                 | "redacted"
                 | "pid"
+                | "limit_hit"
         ),
         "ProcessPlan" => matches!(
             member,

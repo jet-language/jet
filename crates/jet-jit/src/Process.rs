@@ -29,7 +29,7 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         // Field order mirrors ProcessReceipt in JetStd/Open.rs. The first six
         // fields preserve the shipped ProcessResult layout; audit facts are
         // appended so old field lowering cannot silently change ABI slots.
-        let record = rt.heap.alloc_record(17);
+        let record = rt.heap.alloc_record(18);
         let _ = rt.heap.record_set_int(record, 0, out.code);
         let output = rt.heap.alloc_string(out.output.clone());
         let _ = rt.heap.record_set_string(record, 1, output);
@@ -80,6 +80,22 @@ fn alloc_process_result(out: &process_prelude::ProcessReceipt) -> i64 {
         let _ = rt.heap.record_set_int(record, 14, outputs);
         let _ = rt.heap.record_set_bool(record, 15, out.redacted);
         let _ = rt.heap.record_set_int(record, 16, out.pid);
+        let limit_hit = out
+            .limit_hit
+            .map(|limit| {
+                let name = match limit {
+                    process_prelude::ProcessResourceLimit::WallTime => "WallTime",
+                    process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
+                    process_prelude::ProcessResourceLimit::Memory => "Memory",
+                    process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
+                    process_prelude::ProcessResourceLimit::Output => "Output",
+                };
+                crate::types_meta::prelude_enum_variant_index("ProcessResourceLimit", name)
+                    .unwrap_or(0)
+                    .wrapping_add(1)
+            })
+            .unwrap_or(0);
+        let _ = rt.heap.record_set_int(record, 17, limit_hit);
         record
     })
 }
@@ -157,6 +173,31 @@ fn process_io_error_result(error: process_prelude::IOError) -> i64 {
         process_prelude::IOError::Closed(context) => (5, context),
         process_prelude::IOError::Protocol(context) => (6, context),
         process_prelude::IOError::Other(context) => (7, context),
+        process_prelude::IOError::ResourceLimit(limit) => {
+            return Concurrency::with_runtime_mut(|rt| {
+                let limit_name = match limit {
+                    process_prelude::ProcessResourceLimit::WallTime => "WallTime",
+                    process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
+                    process_prelude::ProcessResourceLimit::Memory => "Memory",
+                    process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
+                    process_prelude::ProcessResourceLimit::Output => "Output",
+                };
+                let disc = crate::types_meta::prelude_enum_variant_index(
+                    "ProcessResourceLimit",
+                    limit_name,
+                )
+                .unwrap_or(0);
+                let error_disc = jet_foundation::Syntax::IO_ERROR_VARIANTS
+                    .iter()
+                    .position(|name| *name == "ResourceLimit")
+                    .unwrap_or(8) as u64;
+                rt.results.push(super::JitResultValue {
+                    ok: false,
+                    bits: ((disc as u64) << 8) | error_disc,
+                });
+                rt.results.len() as i64
+            });
+        }
     };
     Concurrency::with_runtime_mut(|rt| {
         let process_prelude::IOContext {
@@ -326,6 +367,19 @@ fn jet_jit_process_spec_timeout(spec: i64, timeout: i64) -> i64 {
 
 fn jet_jit_process_spec_output_limit(spec: i64, limit: i64) -> i64 {
     update_spec(spec, |spec| process_prelude::spec_output_limit(spec, limit))
+}
+
+fn jet_jit_process_spec_cpu_time_limit(spec: i64, timeout: i64) -> i64 {
+    let timeout = process_duration(timeout);
+    update_spec(spec, |spec| process_prelude::spec_cpu_time_limit(spec, &timeout))
+}
+
+fn jet_jit_process_spec_memory_limit(spec: i64, limit: i64) -> i64 {
+    update_spec(spec, |spec| process_prelude::spec_memory_limit(spec, limit))
+}
+
+fn jet_jit_process_spec_open_file_limit(spec: i64, limit: i64) -> i64 {
+    update_spec(spec, |spec| process_prelude::spec_open_file_limit(spec, limit))
 }
 
 fn jet_jit_process_spec_run(spec: i64) -> i64 {
@@ -665,6 +719,9 @@ host_fns! {
     spec_stdin: "jet_jit_process_spec_stdin" => jet_jit_process_spec_stdin: sig_binary;
     spec_timeout: "jet_jit_process_spec_timeout" => jet_jit_process_spec_timeout: sig_binary;
     spec_output_limit: "jet_jit_process_spec_output_limit" => jet_jit_process_spec_output_limit: sig_binary;
+    spec_cpu_time_limit: "jet_jit_process_spec_cpu_time_limit" => jet_jit_process_spec_cpu_time_limit: sig_binary;
+    spec_memory_limit: "jet_jit_process_spec_memory_limit" => jet_jit_process_spec_memory_limit: sig_binary;
+    spec_open_file_limit: "jet_jit_process_spec_open_file_limit" => jet_jit_process_spec_open_file_limit: sig_binary;
     spec_cwd: "jet_jit_process_spec_cwd" => jet_jit_process_spec_cwd: sig_binary;
     spec_env: "jet_jit_process_spec_env" => jet_jit_process_spec_env: sig_ternary;
     spec_env_remove: "jet_jit_process_spec_env_remove" => jet_jit_process_spec_env_remove: sig_binary;

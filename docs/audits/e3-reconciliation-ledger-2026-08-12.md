@@ -76,3 +76,19 @@ M01 e3-bucket-1 Integration and build truth (17, incl. #1869) → M02 failure-mo
 - Released stale leases on #1435 #1629 and building handoffs on #1804 #1805 #1806 #1867 (implementations landed with the merge; verification deltas recorded per card).
 - D-TESTFAULT1 reworked twice per owner feedback: rec is now B — keep #Test fn; per-effect question-mark suffix in the signature row, test-only; keyword change parked as option A. #1916 plan synced.
 - Stray pre-merge WIP checkpointed as 732437403 (nothing lost).
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `E3-RECONCILIATION` | card | #1869 |
+| `BIND-TIER0-DEOPT` | card | #1934 |
+| `LINT-SNAPSHOT-MISMATCHES` | card | #1935 |
+| `JIT-COVERAGE-STACK` | card | #1936 |
+| `AUTH-SESSIONS-EXAMPLE` | card | #1933 |
+| `MISSING-TYPED-ROW` | card | #1806 |
+| `SHARED-GUARDS` | card | #1864 |
+| `SALVAGE-TRIAGE` | card | #1937 |
+| `LEDGER-HEURISTICS` | no-action | archived: duplicate and evidence-conflict rows are historical lint explanations, not live defects |
+<!-- /audit-dispositions -->

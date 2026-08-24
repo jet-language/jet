@@ -48,3 +48,12 @@ provenance choice stays on #1197 / D-MEMPROVENANCE2.
 - `owner_backed_collection_example_runs_production_pipeline` runs the
   executable memory example through the native production CLI.
 - Scoped golden `memory/owner_backed_views` checks the same output.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `OWNER-BACKED-VIEWS` | card | #1163 |
+| `VIEW-PROVENANCE` | card | #1197 |
+<!-- /audit-dispositions -->

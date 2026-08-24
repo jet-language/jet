@@ -147,6 +147,10 @@ if [ "${JET_VERIFY_CANVAS_PREREQUISITES_ONLY:-}" = "1" ]; then
   exit 0
 fi
 
+# #805 / D-ONCE-LEDGER1=A: Tower is read-only here; docs/spec is its rendered
+# decision surface. The gate writes only its audit report, never board data.
+bash "$repo/tools/ci/tower-hygiene-gate.sh"
+
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"
 
 # Compile every selected workspace test target before running tests.

@@ -552,6 +552,15 @@ pub(crate) mod process_prelude {
             pub cause: JetOutcome<String, JetAbsent>,
         }
 
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub enum ProcessResourceLimit {
+            WallTime,
+            CpuTime,
+            Memory,
+            OpenFiles,
+            Output,
+        }
+
         impl IOContext {
             pub fn new(
                 operation: IOOperation,
@@ -578,6 +587,7 @@ pub(crate) mod process_prelude {
             Closed(IOContext),
             Protocol(IOContext),
             Other(IOContext),
+            ResourceLimit(ProcessResourceLimit),
         }
 
         impl IOError {
@@ -633,6 +643,7 @@ pub(crate) mod process_prelude {
             pub outputs: Vec<String>,
             pub redacted: bool,
             pub pid: i64,
+            pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
         }
 
         pub type ProcessResult = ProcessReceipt;
@@ -797,6 +808,9 @@ pub(crate) mod process_prelude {
             pub stderr: ProcessStreamMode,
             pub timeout_ms: Option<i64>,
             pub output_limit: Option<i64>,
+            pub cpu_time_limit_ms: Option<i64>,
+            pub memory_limit_bytes: Option<i64>,
+            pub open_file_limit: Option<i64>,
             pub detached: bool,
             pub terminal: Option<TerminalPolicy>,
             pub policy_wire: Option<String>,
@@ -901,7 +915,7 @@ pub(crate) mod process_prelude {
 
     pub(crate) use jet_std::{
         Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
-        ProcessReceipt, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
+        ProcessReceipt, ProcessResourceLimit, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
         TerminalSession, TerminalSize,
     };
 
@@ -943,6 +957,18 @@ pub(crate) mod process_prelude {
 
     pub(crate) fn spec_output_limit(spec: ProcessSpec, output_limit: i64) -> ProcessSpec {
         jet_process_spec_output_limit(spec, output_limit)
+    }
+
+    pub(crate) fn spec_cpu_time_limit(spec: ProcessSpec, timeout: &Duration) -> ProcessSpec {
+        jet_process_spec_cpu_time_limit(spec, timeout)
+    }
+
+    pub(crate) fn spec_memory_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
+        jet_process_spec_memory_limit(spec, limit)
+    }
+
+    pub(crate) fn spec_open_file_limit(spec: ProcessSpec, limit: i64) -> ProcessSpec {
+        jet_process_spec_open_file_limit(spec, limit)
     }
 
     pub(crate) fn spec_detached(spec: ProcessSpec) -> ProcessSpec {
@@ -1341,6 +1367,27 @@ fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude
     )?
     .map(|value| process_int(&value, "ProcessSpec.output_limit", span))
     .transpose()?;
+    spec.cpu_time_limit_ms = process_optional(
+        process_spec_field(recv, "cpu_time_limit"),
+        "ProcessSpec.cpu_time_limit",
+        span,
+    )?
+    .map(|value| process_duration(&value, "ProcessSpec.cpu_time_limit", span).map(|duration| duration.as_millis()))
+    .transpose()?;
+    spec.memory_limit_bytes = process_optional(
+        process_spec_field(recv, "memory_limit"),
+        "ProcessSpec.memory_limit",
+        span,
+    )?
+    .map(|value| process_int(&value, "ProcessSpec.memory_limit", span))
+    .transpose()?;
+    spec.open_file_limit = process_optional(
+        process_spec_field(recv, "open_file_limit"),
+        "ProcessSpec.open_file_limit",
+        span,
+    )?
+    .map(|value| process_int(&value, "ProcessSpec.open_file_limit", span))
+    .transpose()?;
     spec.detached = process_bool(
         process_spec_field(recv, "detached"),
         false,
@@ -1416,6 +1463,25 @@ fn process_spec_value(spec: &process_prelude::ProcessSpec) -> CtValue {
             (
                 "output_limit".to_string(),
                 optional(spec.output_limit.map(CtValue::Int), Type::Int),
+            ),
+            (
+                "cpu_time_limit".to_string(),
+                optional(
+                    spec.cpu_time_limit_ms.map(|ms| {
+                        process_duration_value(process_prelude::Duration {
+                            ns: ms.saturating_mul(1_000_000),
+                        })
+                    }),
+                    Type::Named("Duration".to_string()),
+                ),
+            ),
+            (
+                "memory_limit".to_string(),
+                optional(spec.memory_limit_bytes.map(CtValue::Int), Type::Int),
+            ),
+            (
+                "open_file_limit".to_string(),
+                optional(spec.open_file_limit.map(CtValue::Int), Type::Int),
             ),
             ("detached".to_string(), CtValue::Bool(spec.detached)),
             (
@@ -1527,6 +1593,24 @@ fn process_result_value(result: process_prelude::ProcessReceipt) -> CtValue {
             ),
             ("redacted".to_string(), CtValue::Bool(result.redacted)),
             ("pid".to_string(), CtValue::Int(result.pid)),
+            (
+                "limit_hit".to_string(),
+                match result.limit_hit {
+                    Ok(limit) => CtValue::Present(Box::new(CtValue::Enum {
+                        type_name: "ProcessResourceLimit".to_string(),
+                        variant: match limit {
+                            process_prelude::ProcessResourceLimit::WallTime => "WallTime",
+                            process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
+                            process_prelude::ProcessResourceLimit::Memory => "Memory",
+                            process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
+                            process_prelude::ProcessResourceLimit::Output => "Output",
+                        }
+                        .to_string(),
+                        args: vec![],
+                    })),
+                    Err(_) => CtValue::absent(Type::Named("ProcessResourceLimit".to_string())),
+                },
+            ),
         ],
     }
 }
@@ -1579,6 +1663,27 @@ fn process_io_error(error: process_prelude::IOError) -> CtValue {
         process_prelude::IOError::Closed(context) => ("Closed", context),
         process_prelude::IOError::Protocol(context) => ("Protocol", context),
         process_prelude::IOError::Other(context) => ("Other", context),
+        process_prelude::IOError::ResourceLimit(limit) => {
+            let variant = match limit {
+                process_prelude::ProcessResourceLimit::WallTime => "WallTime",
+                process_prelude::ProcessResourceLimit::CpuTime => "CpuTime",
+                process_prelude::ProcessResourceLimit::Memory => "Memory",
+                process_prelude::ProcessResourceLimit::OpenFiles => "OpenFiles",
+                process_prelude::ProcessResourceLimit::Output => "Output",
+            };
+            return CtValue::Enum {
+                type_name: "IOError".to_string(),
+                variant: "ResourceLimit".to_string(),
+                args: vec![(
+                    None,
+                    CtValue::Enum {
+                        type_name: "ProcessResourceLimit".to_string(),
+                        variant: variant.to_string(),
+                        args: vec![],
+                    },
+                )],
+            };
+        }
     };
     CtValue::Enum {
         type_name: "IOError".to_string(),
@@ -1703,6 +1808,9 @@ fn ambient_process_handle(
             | "stderr"
             | "timeout"
             | "output_limit"
+            | "cpu_time_limit"
+            | "memory_limit"
+            | "open_file_limit"
             | "detached"
             | "terminal"
             | "abilities"
@@ -1750,6 +1858,18 @@ fn ambient_process_handle(
             "output_limit" => {
                 let output_limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.output_limit argument", span))?, "ProcessSpec.output_limit argument", span)?;
                 Ok(process_spec_value(&process_prelude::spec_output_limit(spec, output_limit)))
+            }
+            "cpu_time_limit" => {
+                let timeout = process_duration(args.first().ok_or_else(|| unsupported("ProcessSpec.cpu_time_limit argument", span))?, "ProcessSpec.cpu_time_limit argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_cpu_time_limit(spec, &timeout)))
+            }
+            "memory_limit" => {
+                let limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.memory_limit argument", span))?, "ProcessSpec.memory_limit argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_memory_limit(spec, limit)))
+            }
+            "open_file_limit" => {
+                let limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.open_file_limit argument", span))?, "ProcessSpec.open_file_limit argument", span)?;
+                Ok(process_spec_value(&process_prelude::spec_open_file_limit(spec, limit)))
             }
             "detached" => Ok(process_spec_value(&process_prelude::spec_detached(spec))),
             "terminal" => match args {

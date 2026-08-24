@@ -390,3 +390,18 @@ default run and AOT. A fresh workspace build was attempted first, but unrelated
 current edits in `crates/jetpack/src/Overlay.rs` do not compile. Source lowering
 independently confirms both stream behaviors. No broad performance or memory
 claim is made without a benchmark.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `API-LABELS` | card | #1393 |
+| `CALLABLE-POLICY` | card | #1396 |
+| `GENERATOR-LIFECYCLE` | card | #1392 |
+| `JSON-EDITION-SPLIT` | card | #1394 |
+| `JSON-EXACT-NUMBERS` | card | #1395 |
+| `INSPECTION-LENSES` | card | #1397 |
+| `PYTHON-API-RELEASE-GATE` | card | #1398 |
+| `CORE-PYTHON-METHOD-LEDGER` | card | #1442 |
+<!-- /audit-dispositions -->

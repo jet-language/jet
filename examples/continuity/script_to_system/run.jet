@@ -1,0 +1,29 @@
+// Card #1415: one useful file at the start of the continuity journey.
+// The same functions and types remain the package, service, executable, and
+// native Library surface after package metadata is added.
+#CLI
+struct TimerArgs {
+    #Doc("minutes to convert") minutes: Int{1}
+}
+
+pub fn seconds(minutes: Int) Int -> minutes * 60
+
+fn run(args: TimerArgs) {
+    print(seconds(args.minutes))
+}
+
+fn serve() {
+    print(seconds(1))
+}
+
+fn dev() {
+    serve()
+}
+
+#Test("one minute is sixty seconds") {
+    assert_eq(seconds(1), 60)
+}
+
+app: Output :: .Executable{ name: "pulse", entry: run };
+api: Output :: .Service{ name: "pulse-api", entry: serve };
+defaults: { run: app };

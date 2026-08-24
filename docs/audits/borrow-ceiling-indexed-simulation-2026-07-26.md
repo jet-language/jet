@@ -49,3 +49,12 @@ integration test selects the explicit production native path with
   generated-unsafe policy, and checks the same output.
 
 Independent fresh-context review is required before card closure.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `INDEXED-PORT` | card | #1162 |
+| `DYNAMIC-DISJOINTNESS` | card | #1198 |
+<!-- /audit-dispositions -->

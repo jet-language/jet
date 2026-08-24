@@ -108,3 +108,17 @@ Required evidence after the `#820-#825` backend chain is complete:
 ## Strongest unverified assumption
 
 Jet may feel good in the first session once a windowed backend lands, but source shape and report design cannot prove the time to a usable first-party window or visible first pixel.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `P1-BEGINNER-CLI` | card | #1924 |
+| `P2-TYPESCRIPT-CLI` | card | #1901 |
+| `P3-FIRST-WINDOW` | card | #820, #822, #823, #824, #825 |
+| `P3-FIRST-PIXEL` | card | #820, #822, #823, #824, #825 |
+| `P3-MISSING-BACKEND-LINK` | no-action | archived: retired card #821 is preserved by the complete backend-chain references in this report |
+| `P4-AGENT-REPAIR-LOOP` | card | #1873, #1877 |
+| `FIRST-SESSION-NONRESULT` | no-action | no-action: the report refuses to invent timing or frame evidence before a live windowed run |
+<!-- /audit-dispositions -->

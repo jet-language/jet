@@ -218,7 +218,7 @@ pub(crate) fn is_process_handle_method_name(
                 | ("terminal", 0 | 1)
                 | ("env_clear" | "detached" | "abilities" | "plan" | "run" | "run_checked" | "spawn", 0)
                 | ("under", 1)
-                | ("timeout" | "output_limit", 1)
+                | ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", 1)
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),

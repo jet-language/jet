@@ -18,9 +18,9 @@ use super::project_scan::project_file;
 use super::query_actions::{core_member_params, default_arg_for_type};
 use super::source_model::{write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
-    extract_params, find_comment_hint, find_hint_region, find_simple_helper, normalize_bounds,
-    parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha, validate_comment_color,
-    validate_ident, wire_span_from_json_chunk,
+    extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
+    normalize_bounds, parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha,
+    validate_comment_color, validate_ident, wire_span_from_json_chunk,
 };
 
 pub(super) fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
@@ -941,11 +941,18 @@ fn structural_insert_target(
                 .map(|(node, _)| (node, "output"))
         })
         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+    let pin_marker = format!("\"pin_id\":{}", json_str(pin_id));
+    if !projection.json.contains(&pin_marker) {
+        return Err(edit_error(
+            "not_found",
+            "Canvas insertion pin no longer exists",
+        ));
+    }
     let node = projection
         .node_refs
         .iter()
         .filter(|node| node.graph_id == graph_id)
-        .filter(|node| node.node_id == node_id || node.node_id.ends_with(&format!(":{node_id}")))
+        .filter(|node| node.node_id == node_id)
         .max_by_key(|node| node.span.end.saturating_sub(node.span.start))
         .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
     if node.node_id.ends_with(":entry") {

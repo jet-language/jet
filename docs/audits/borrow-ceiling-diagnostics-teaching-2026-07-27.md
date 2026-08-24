@@ -40,3 +40,15 @@ syntax. No reopen of D-MEM1.
 - `string_view_as_owned_return_teaches_copy_once`
 - `owner_backed_collection_rejects_plain_string_as_view_str_field` (message)
 - UI: `tests/ui/owned_string_as_view_str.jet` plus refreshed view snapshots
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `BORROW-PRECISION` | card | #1164 |
+| `VIEW-PROVENANCE` | card | #1197 |
+| `INDEXED-PORT` | card | #1162 |
+| `OWNER-PORT` | card | #1163 |
+| `ZERO-COPY-PORT` | no-action | archived: retired card #745 is represented by the completed parser evidence in this report |
+<!-- /audit-dispositions -->

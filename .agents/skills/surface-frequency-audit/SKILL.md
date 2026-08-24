@@ -229,6 +229,11 @@ The retained output is one Markdown report. Report the path, coverage, strongest
 
 ## Failure guards
 
+Before close, add the required per-finding disposition table from
+`.agents/skills/_shared/audit-dispositions.md` to the retained report. Every
+finding must name a Tower card, a ratified decision, or a concrete no-action
+reason.
+
 - Do not confuse source frequency with runtime frequency, importance, or approval.
 - Do not let one monorepo, ecosystem, domain, or copied codebase dominate the rank.
 - Do not compare raw glyph or token counts across languages as equivalent semantics.

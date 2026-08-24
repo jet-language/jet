@@ -13,6 +13,9 @@ fn main() {
         Some("tree") => tree(args.next().expect("tree needs a pid file")),
         Some("descendant") => descendant(args.next().expect("descendant needs a pid file")),
         Some("output") => output(args.next().as_deref().unwrap_or("large")),
+        Some("cpu") => cpu(),
+        Some("memory") => memory(),
+        Some("files") => files(),
         _ => process::exit(2),
     }
 }
@@ -24,6 +27,32 @@ fn output(size: &str) {
         b"0123456789abcdef0123456789abcdef\n".as_slice()
     };
     io::stdout().write_all(bytes).expect("write process output");
+}
+
+fn cpu() {
+    loop {
+        std::hint::spin_loop();
+    }
+}
+
+fn memory() {
+    let mut blocks = Vec::new();
+    loop {
+        let mut block = vec![0_u8; 256 * 1024];
+        block[0] = 1;
+        blocks.push(block);
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn files() {
+    let mut handles = Vec::new();
+    loop {
+        match fs::File::open(if cfg!(windows) { "NUL" } else { "/dev/null" }) {
+            Ok(handle) => handles.push(handle),
+            Err(_) => thread::sleep(Duration::from_millis(1)),
+        }
+    }
 }
 
 fn terminal() {

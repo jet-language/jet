@@ -470,3 +470,23 @@ Keep these properties while the P0 logic changes.
 - [Rust standard library: pinning](https://doc.rust-lang.org/std/pin/)
 - [Rust Reference: higher-ranked trait bounds](https://doc.rust-lang.org/reference/trait-bounds.html#higher-ranked-trait-bounds)
 - The 18 pinned repository links in the per-project table.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `F1-NESTED-ACCESS` | card | #1196 |
+| `F2-WHOLE-PLACE-CONFLICT` | card | #1196 |
+| `F3-IMPORTED-ACCESS` | card | #1196 |
+| `F4-COMPLETION-STATUS` | card | #1196 |
+| `G1-VIEW-PROVENANCE` | card | #1197 |
+| `G2-DISJOINT-WRITES` | card | #1198 |
+| `G3-SCOPED-BORROWED-CONCURRENCY` | card | #1199 |
+| `G4-ADDRESS-STABILITY` | card | #1200 |
+| `G5-RATIFIED-CONFLICTS` | card | #1196 |
+| `P1-INTERIOR-MUTABILITY` | card | #1201 |
+| `P2-LONG-LIVED-GUARDS` | card | #1202 |
+| `P3-BORROW-HEAVY-LIBRARY-SHAPE` | card | #1164 |
+| `ZERO-COPY-PORT` | no-action | archived: retired card #745 is covered by the later parser evidence report |
+<!-- /audit-dispositions -->

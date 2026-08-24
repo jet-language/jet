@@ -1966,6 +1966,25 @@ fn persona_audit_skill_and_reports_have_first_session_lens() {
     }
 }
 
+#[test]
+fn audit_report_dispositions_match_tower() {
+    let root = root();
+    let output = Command::new("node")
+        .args(["scripts/agent/check-audit-dispositions.mjs", "--root"])
+        .arg(&root)
+        .current_dir(&root)
+        .output()
+        .expect("audit disposition check must run");
+    assert!(
+        output.status.success(),
+        "audit disposition check failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("audit dispositions: 0 unresolved findings"));
+}
+
 fn markdown_table_cells(line: &str) -> Vec<String> {
     let line = line.trim();
     let line = line.strip_prefix('|').unwrap_or(line);

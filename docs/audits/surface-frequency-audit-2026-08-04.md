@@ -1062,3 +1062,18 @@ and 519–520 and 3116, `crates/jet-foundation/src/Syntax.rs`.
 D-LOOPMAP1 and D-LOOP-HEADER3 (card #1325), D-LOOP-COMMA1 (card #1336), D-BRANCH-TEACH1 (card
 #1259), D-BRANCH-CODEGEN1 (card #1260), D-AUTODERIVE1 (card #1267), D-SPREAD1 (card #1341),
 D-DESTRUCT1, D-ITERTOOLS1. No Tower record was created or changed by this audit.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `R1-LOOP-YIELD-COMPREHENSION` | card | #1325 |
+| `R2-OPTIONAL-CHAINING-EXAMPLES` | no-action | archived: example-only follow-up has no current product card and is retained as a watch item |
+| `R3-IMMUTABLE-BINDING` | card | #746 |
+| `R4-FALLBACK-FAMILY` | card | #746 |
+| `R5-FALLIBLE-SIGNATURE` | card | #746 |
+| `R6-UNIFIED-IF` | card | #1259, #1260 |
+| `R7-CONDITIONAL-EXPRESSION` | no-action | no-action: the measured surface is retained and the report requests no change |
+| `R8-SWALLOWED-FAILURES` | no-action | archived: weak-confidence diagnostic study remains on the report watchlist |
+<!-- /audit-dispositions -->

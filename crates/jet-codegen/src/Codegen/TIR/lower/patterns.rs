@@ -792,7 +792,7 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if type_name == "TLSVersion" {
         return at_root("JetTLSVersion");
     }
-    if matches!(type_name, "IOError" | "IOOperation") {
+    if matches!(type_name, "IOError" | "IOOperation" | "ProcessResourceLimit") {
         return in_std(type_name);
     }
     if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPCorsOrigins" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {

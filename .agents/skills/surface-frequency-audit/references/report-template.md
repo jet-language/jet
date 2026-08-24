@@ -50,6 +50,12 @@ For each recommendation, show:
 
 Discuss at most 20 recommendations.
 
+## Finding dispositions
+
+Add the machine-readable table from
+`.agents/skills/_shared/audit-dispositions.md`. Use one row per recommendation
+or other actionable finding before closing the report.
+
 ## Keep
 
 Name Jet defaults and surfaces that the evidence supports.

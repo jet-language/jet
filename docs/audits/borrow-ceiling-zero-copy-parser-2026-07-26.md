@@ -30,3 +30,11 @@ D-MEM-VIEWRET1, not a new mechanism.
 Focused tests cover the successful port, a parser-owned source failure, hostile
 source replacement for each output slot in isolation, and exact native output
 from the executable memory example.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `PARSER-VIEW-PROVENANCE` | no-action | archived: retired card #745 is closed by the focused parser evidence recorded above |
+<!-- /audit-dispositions -->

@@ -30,3 +30,12 @@ Date: 2026-07-25
 - Worktree layout policy test passed.
 - git diff --check passed.
 - Tower lint with docs passed before cleanup and runs again at closeout.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `ACTIVE-WORKTREES` | no-action | archived: active owner worktrees were intentionally retained and are not a product defect |
+| `CLEANUP-PROOF` | no-action | no-action: the cleanup proof is complete and exposes no remaining finding |
+<!-- /audit-dispositions -->

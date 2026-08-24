@@ -1328,7 +1328,13 @@
     if (!input) return null;
     const facts = expressionFacts(found.graph, body.new_expr);
     if (facts.invalid) return { ok: false, label: facts.label, color: "#fb7185" };
-    if (!facts.known || !facts.type) return null;
+    if (!facts.known || !facts.type) {
+      return {
+        ok: false,
+        label: facts.label || "Expression type is ambiguous; edit the complete expression",
+        color: "#fb7185"
+      };
+    }
     const plan = dataCompatibilityPlan({ type: facts.type, fallible: facts.fallible, ability: facts.ability }, input);
     if (plan.ok && !plan.exact) {
       return { ok: false, label: "Inline value type " + facts.type + " does not match " + input.type, color: "#fb7185" };

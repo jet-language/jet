@@ -78,4 +78,14 @@ rows. Until that run exists, criterion 6 is not met.
 ```text
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 17.65s
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `PROCESS-SESSION-CI-MATRIX` | card | #1186 |
+| `PLATFORM-EVIDENCE-LAW` | decision | D-PLATFORM-EVIDENCE1=D |
+| `UNSUPPORTED-TARGETS` | no-action | no-action: the compatibility matrix records unsupported targets explicitly |
+<!-- /audit-dispositions -->
 ```

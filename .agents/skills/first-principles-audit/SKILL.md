@@ -249,6 +249,11 @@ visually. Prose preps; visuals decide. Structure, in order:
 - Save a memory pointer so the next session knows the slate exists and what
   awaits the owner.
 
+Before close, add the required per-finding disposition table from
+`.agents/skills/_shared/audit-dispositions.md` to the retained proposal or
+report. Every finding must name a Tower card, a ratified decision, or a concrete
+no-action reason.
+
 ## Anti-patterns (each one has burned a run)
 
 - Designing before the silhouette pass — the unification hides in what's

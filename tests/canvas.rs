@@ -2113,6 +2113,20 @@ fn canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target() {
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
 
+    let live_target_node_id = field_before(&graph_after, "\"source\":\"\\\"target\\\"\"", "node_id");
+    let unknown_pin = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:not_a_pin\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&inserted),
+        graph_id,
+        live_target_node_id
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &unknown_pin).unwrap_err();
+    assert!(
+        err.contains("Canvas insertion pin no longer exists"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
+
     let output_path = write_fixture(
         "structural_output_target",
         r#"fn run() {

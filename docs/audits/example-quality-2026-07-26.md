@@ -385,3 +385,16 @@ New examples should meet the same bar:
 Line count is a useful pressure test, not the sole objective. The target is the
 shortest source that remains safe, explicit about important policy, and easy to
 reason about.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `EXAMPLE-OWNER-MAP` | card | #1210 |
+| `COMPTIME-IO` | card | #1509 |
+| `PROGRAMMABLE-BUILD-CHECK` | card | #1370 |
+| `RUN-TIER-JSON` | card | #1254 |
+| `DEBUG-STACK` | card | #1319 |
+| `FORMATTER-AND-SOURCE-SHAPE` | no-action | no-action: the formatter and example-shape corrections are shipped and proved in this report |
+<!-- /audit-dispositions -->

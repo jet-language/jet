@@ -559,3 +559,17 @@ Strongest unverified assumption: “Canvas/scene CLI” may mean a future termin
 surface rather than the current browser Canvas server. This audit records the
 current fact: `jet canvas` does not exist; notebook `--protocol` is JSONL, not a
 TUI.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `TUI-TERMINAL-LIFECYCLE` | card | #2049 |
+| `TUI-ANSI-OWNERSHIP` | card | #2049 |
+| `TUI-PROGRESS-STATUS` | card | #2049 |
+| `TUI-INTERACTIVE-DISCOVERY` | card | #2049 |
+| `TUI-PROGRESSIVE-DISCLOSURE` | card | #2049 |
+| `TUI-CANVAS-NOTEBOOK-BOUNDARY` | card | #2049 |
+| `TUI-NONTTY` | card | #2049 |
+<!-- /audit-dispositions -->

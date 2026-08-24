@@ -161,27 +161,118 @@ fn process_session_resource_limits_match_all_execution_tiers() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let resource_builders = if cfg!(target_os = "linux") {
+        ".cpu_time_limit(cpu_budget).memory_limit(67108864).open_file_limit(64)"
+    } else if cfg!(target_os = "windows") {
+        ".cpu_time_limit(cpu_budget).memory_limit(67108864)"
+    } else {
+        ".cpu_time_limit(cpu_budget)"
+    };
     let src = format!(
         r#"
 use core.process as process
 
 fn run() {{
-    accepted :: process.cmd(["{fixture}", "output", "small"]).output_limit(16).run() ?? panic("under-limit run failed")
+    cpu_budget :: Duration.milliseconds(100) ?? panic("duration failed")
+    accepted :: process.cmd(["{fixture}", "output", "small"]){resource_builders}.output_limit(16).run() ?? panic("under-limit run failed")
     print(accepted.success)
     print(accepted.output == "ok\n")
     limited :: process.cmd(["{fixture}", "output", "large"]).output_limit(16).run()
     if limited == {{
         .Ok(_) -> {{ print("limit:accepted") }}
-        .Err(_) -> {{ print("limit:rejected") }}
+        .Err(error) -> {{
+            if error == {{
+                .ResourceLimit(limit) -> {{
+                    if limit == {{
+                        .Output -> {{ print("limit:output") }}
+                        else -> {{ print("limit:wrong") }}
+                    }}
+                }}
+                else -> {{ print("limit:wrong") }}
+            }}
+        }}
+    }}
+}}
+"#,
+        fixture = fixture,
+        resource_builders = resource_builders,
+    );
+    tir_support::assert_tiers_agree(
+        "process_session_resource_limits",
+        &src,
+        "true\ntrue\nlimit:output\n",
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn process_session_resource_limit_exhaustion_names_each_limit_all_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_session_resource_exhaustion_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    cpu :: process.cmd(["{fixture}", "cpu"]).cpu_time_limit(Duration.milliseconds(1000)).run()
+    if cpu == {{
+        .Ok(_) -> print("cpu:missed")
+        .Err(error) -> {{
+            if error == {{
+                .ResourceLimit(limit) -> {{
+                    if limit == {{
+                        .CpuTime -> print("cpu:typed")
+                        else -> print("cpu:wrong")
+                    }}
+                }}
+                else -> print("cpu:wrong")
+            }}
+        }}
+    }}
+    memory :: process.cmd(["{fixture}", "memory"]).memory_limit(33554432).run()
+    if memory == {{
+        .Ok(_) -> print("memory:missed")
+        .Err(error) -> {{
+            if error == {{
+                .ResourceLimit(limit) -> {{
+                    if limit == {{
+                        .Memory -> print("memory:typed")
+                        else -> print("memory:wrong")
+                    }}
+                }}
+                else -> print("memory:wrong")
+            }}
+        }}
+    }}
+    files :: process.cmd(["{fixture}", "files"]).open_file_limit(64).run()
+    if files == {{
+        .Ok(_) -> print("files:missed")
+        .Err(error) -> {{
+            if error == {{
+                .ResourceLimit(limit) -> {{
+                    if limit == {{
+                        .OpenFiles -> print("files:typed")
+                        else -> print("files:wrong")
+                    }}
+                }}
+                else -> print("files:wrong")
+            }}
+        }}
     }}
 }}
 "#,
         fixture = fixture,
     );
     tir_support::assert_tiers_agree(
-        "process_session_resource_limits",
+        "process_session_resource_limit_exhaustion",
         &src,
-        "true\ntrue\nlimit:rejected\n",
+        "cpu:typed\nmemory:typed\nfiles:typed\n",
     );
     let _ = fs::remove_dir_all(&dir);
 }

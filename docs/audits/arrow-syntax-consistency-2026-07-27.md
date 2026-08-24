@@ -124,3 +124,14 @@ syntax acceptance.
 The four focused Tower cards contain the scoped evidence and independent
 review. The unrelated broad-suite failures above remain isolated from this
 syntax proof.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `ARROW-MIGRATION` | card | #1207 |
+| `ARROW-DIAGNOSTICS` | card | #1204 |
+| `ARROW-GOLDENS` | card | #1211 |
+| `ARROW-SWEEP` | card | #1212 |
+<!-- /audit-dispositions -->

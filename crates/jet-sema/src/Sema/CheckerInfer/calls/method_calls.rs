@@ -3896,7 +3896,18 @@ impl<'a> Checker<'a> {
                                     &mut args[0],
                                 );
                             }
+                            "cpu_time_limit" if args.len() == 1 => {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("Duration".to_string()),
+                                    &mut args[0],
+                                );
+                            }
                             "output_limit" if args.len() == 1 => {
+                                self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                            }
+                            "memory_limit" | "open_file_limit" if args.len() == 1 => {
                                 self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
                             }
                             "terminal" if args.len() == 1 => {

@@ -171,3 +171,7 @@ Ballot titles or card ids only — do not create cards unless asked.
 - Not proposing a second mechanism for one semantic job
 
 Follow `AGENTS.md`. Pick this skill alone.
+
+Before close, add the required per-finding disposition table from
+`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
+card, a ratified decision, or a concrete no-action reason.

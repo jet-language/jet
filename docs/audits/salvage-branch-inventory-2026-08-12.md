@@ -86,3 +86,11 @@ After the bucket-1 integration landed (31b0c79ec) and 57 fully-merged branches w
 - **sweep/wt4** — 9513c19d6 2026-08-12 14:00:12 -0400 wip: salvage on session cleanup 2026-08-12 — uncommitted worker state preserved for the next burndown
   - 28 files changed, 351 insertions(+), 160 deletions(-)
   - files: Source/lib.rs, crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs, crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/eval/handles.rs, crates/jet-codegen/src/Codegen/TIR/eval/mod.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-codegen/src/Codegen/TIR/subset/handles.rs, crates/jet-codegen/src/Codegen/TIR/tests.rs
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `SALVAGE-BRANCH-INVENTORY` | no-action | archived: this file is a recovery inventory; its only actionable triage is recorded on the linked board work |
+<!-- /audit-dispositions -->

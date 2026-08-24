@@ -409,3 +409,22 @@ Ballot titles only. Do not create cards unless asked.
    tables, `loop` yields, `#` vs `@`, and the `?` cluster. No new syntax.
 
 No `ontology.md` edits. No syntax proposals beyond the titles above.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `F1-F5-CELEBRATED-ISOMORPHISMS` | no-action | no-action: the report marks these mechanisms as aligned and gives no repair work |
+| `F6-FIXED-LENGTH-HASH` | card | #1324 |
+| `F7-ACCESS-SIGIL-RHYME` | card | #1704 |
+| `F8-MULTIHEAD-DISPATCH` | card | #1811 |
+| `F9-INCREMENT-CEREMONY` | no-action | no-action: D-INCR1 keeps the explicit exception and the report asks for no change |
+| `F10-DISPATCH-MARKER` | no-action | no-action: teach the existing dispatch-table marker; no mechanism change is proposed |
+| `F11-PIPE-FACET` | no-action | no-action: D-SHAPE-PIPE1 keeps the current surface |
+| `F12-NAMED-TUPLES` | no-action | no-action: clarity wins over tuple golf in the report's stated scope |
+| `F13-COMPUTED-FIELD` | no-action | no-action: the report keeps the existing computed-field form |
+| `F14-DESTINATION-CONVERSION` | no-action | no-action: the report celebrates the ratified conversion rail |
+| `F15-EFFECT-OMISSION` | no-action | no-action: the report celebrates empty effect rows and requests no change |
+| `DOCS-ISOMORPHISMS` | no-action | archived: documentation-only follow-up was not a product finding in this run |
+<!-- /audit-dispositions -->

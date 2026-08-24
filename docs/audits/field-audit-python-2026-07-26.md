@@ -575,3 +575,26 @@ The audit ran:
   `docs/audits/example-quality-2026-07-26.md`.
 
 This report changes no syntax and makes no owner-gated design choice.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `P0-JSON-EXECUTION` | card | #1394 |
+| `P0-RUN-STORIES` | card | #688, #666 |
+| `P0-NIX-FREE-INSTALL` | card | #399, #1095 |
+| `P0-NOTEBOOK` | card | #1413, #442 |
+| `P0-PYTHON-BRIDGE` | card | #1156, #180, #1125 |
+| `P1-WORKLOAD-CORPUS` | card | #769, #1170 |
+| `P1-SOURCE-COST` | card | #1398 |
+| `P1-DATA-GAPS` | card | #237, #307 |
+| `P1-WEB-PARITY` | no-action | archived: earlier web cards #301 and #438 are retired; this report records no current open finding |
+| `P1-TEST-ERGONOMICS` | no-action | archived: the report's test wishlist has no separate current card and is retained as historical backlog |
+| `P1-PACKAGING` | card | #1345, #423 |
+| `P1-SAFE-AUTOMATION` | card | #772 |
+| `P2-TASK-COOKBOOK` | no-action | archived: report-only documentation idea retained for a future conversion pass |
+| `P2-PYTHON-DIAGNOSTICS` | card | #1398 |
+| `P2-BRIDGE-ESCAPE-HATCH` | card | #1345 |
+| `P2-CONVERSION-BENCHMARK` | card | #1876 |
+<!-- /audit-dispositions -->

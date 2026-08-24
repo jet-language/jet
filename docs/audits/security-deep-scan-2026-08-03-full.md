@@ -86162,3 +86162,11 @@ Canonical candidates: 134. Authoritative source ledgers: 1046.
   ]
 }
 ```
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `SECURITY-FULL-DISCOVERY` | no-action | archived: generated source and sink evidence; the durable campaign dispositions live in security-deep-scan-2026-08-03.md |
+<!-- /audit-dispositions -->

@@ -12,6 +12,80 @@ fn jet_process_spec_output_limit(
     spec.output_limit = Some(output_limit.max(0));
     spec
 }
+fn jet_process_spec_cpu_time_limit(
+    mut spec: jet_std::ProcessSpec,
+    cpu_time: &jet_std::Duration,
+) -> jet_std::ProcessSpec {
+    spec.cpu_time_limit_ms = Some(cpu_time.as_millis().max(0));
+    spec
+}
+fn jet_process_spec_memory_limit(
+    mut spec: jet_std::ProcessSpec,
+    memory_bytes: i64,
+) -> jet_std::ProcessSpec {
+    spec.memory_limit_bytes = Some(memory_bytes.max(0));
+    spec
+}
+fn jet_process_spec_open_file_limit(
+    mut spec: jet_std::ProcessSpec,
+    open_files: i64,
+) -> jet_std::ProcessSpec {
+    spec.open_file_limit = Some(open_files.max(0));
+    spec
+}
+
+fn jet_process_native_limits(spec: &jet_std::ProcessSpec) -> jet_process_pty::ResourceLimits {
+    jet_process_pty::ResourceLimits {
+        cpu_time_ms: spec.cpu_time_limit_ms,
+        memory_bytes: spec.memory_limit_bytes,
+        open_files: spec.open_file_limit,
+    }
+}
+
+/// Refuse a request before spawn when this target has no honest native
+/// enforcement path. Unix uses the child `setrlimit` seam; Windows uses Job
+/// Objects for CPU and memory, but has no portable per-process descriptor cap.
+fn jet_process_resource_limits_check(
+    spec: &jet_std::ProcessSpec,
+) -> Result<(), jet_std::IOError> {
+    #[cfg(target_os = "macos")]
+    if spec.memory_limit_bytes.is_some() || spec.open_file_limit.is_some() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "macOS can enforce CPU limits here, but cannot report typed memory or open-file exhaustion; refusing those requests before spawn",
+        ));
+    }
+    #[cfg(windows)]
+    if spec.open_file_limit.is_some() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "open_file_limit cannot be enforced by Windows Job Objects; refusing before spawn",
+        ));
+    }
+    #[cfg(windows)]
+    if spec.detached && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "detached Windows children cannot carry CPU or memory Job Object limits; refusing before spawn",
+        ));
+    }
+    #[cfg(not(any(unix, windows)))]
+    if spec.cpu_time_limit_ms.is_some()
+        || spec.memory_limit_bytes.is_some()
+        || spec.open_file_limit.is_some()
+    {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "process CPU, memory, and open-file limits are unsupported on this target; refusing before spawn",
+        ));
+    }
+    let _ = spec;
+    Ok(())
+}
 fn jet_process_spec_detached(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
     spec.detached = true;
     spec
@@ -295,6 +369,9 @@ fn jet_process_receipt(
         outputs,
         redacted,
         pid,
+        limit_hit: jet_outcome_of(
+            timed_out.then_some(jet_std::ProcessResourceLimit::WallTime),
+        ),
     }
 }
 
@@ -309,7 +386,10 @@ fn jet_process_child_from_inner(
         None
     } else {
         use std::os::windows::io::AsRawHandle;
-        match jet_process_pty::attach_job(child.as_raw_handle()) {
+        match jet_process_pty::attach_job(
+            child.as_raw_handle(),
+            jet_process_native_limits(spec),
+        ) {
             Ok(job) => Some(std::rc::Rc::new(job)),
             Err(error) => {
                 let _ = child.kill();
@@ -430,6 +510,7 @@ fn jet_process_command_with_identity(
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
+    jet_process_resource_limits_check(spec)?;
     let launch_plan = if spec.policy_wire.is_some() {
         Some(jet_process_spec_plan(spec)?)
     } else {
@@ -495,7 +576,7 @@ fn jet_process_spec_spawn(
                     command.stdout(jet_process_stdio(&spec.stdout));
                     command.stderr(jet_process_stdio(&spec.stderr));
                 }
-                jet_process_pty::attach_process_group(command)
+                jet_process_pty::attach_process_group(command, jet_process_native_limits(spec))
                     .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))?;
                 Ok(())
             },
@@ -525,7 +606,7 @@ fn jet_process_spec_spawn(
         command.stderr(std::process::Stdio::null());
     }
     #[cfg(unix)]
-    jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+    jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
         jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
             spec.cmd.first().cloned(),
@@ -628,7 +709,7 @@ fn jet_process_terminal_spawn(
                 command.stdin(std::process::Stdio::from(stdin));
                 command.stdout(std::process::Stdio::from(stdout));
                 command.stderr(std::process::Stdio::from(stderr));
-                jet_process_pty::attach_command(command)
+                jet_process_pty::attach_command(command, jet_process_native_limits(spec))
                     .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))
             },
         )
@@ -638,7 +719,7 @@ fn jet_process_terminal_spawn(
         command.stdin(std::process::Stdio::from(stdin));
         command.stdout(std::process::Stdio::from(stdout));
         command.stderr(std::process::Stdio::from(stderr));
-        jet_process_pty::attach_command(&mut command).map_err(|error| {
+        jet_process_pty::attach_command(&mut command, jet_process_native_limits(spec)).map_err(|error| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Resolve,
                 Some("process terminal".to_string()),
@@ -659,7 +740,7 @@ fn jet_process_terminal_spawn(
         command.stdin(std::process::Stdio::from(stdin));
         command.stdout(std::process::Stdio::from(stdout));
         command.stderr(std::process::Stdio::from(stderr));
-        jet_process_pty::attach_command(&mut command).map_err(|error| {
+        jet_process_pty::attach_command(&mut command, jet_process_native_limits(spec)).map_err(|error| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Resolve,
                 Some("process terminal".to_string()),
@@ -770,6 +851,7 @@ fn jet_process_terminal_spawn(
         &spec.cmd[1..],
         spec.cwd.as_deref(),
         &environment,
+        jet_process_native_limits(spec),
     )
     .map_err(|error| {
         jet_std::IOError::other(
@@ -1382,7 +1464,7 @@ fn jet_process_sandbox_pipeline_spawn(
             }
             command.stdout(std::process::Stdio::piped());
             command.stderr(std::process::Stdio::piped());
-            jet_process_pty::attach_process_group(command)
+            jet_process_pty::attach_process_group(command, jet_process_native_limits(spec))
                 .map_err(|error| jet_process_sandbox::Error::Io(error.to_string()))?;
             Ok(())
         },
@@ -1467,7 +1549,7 @@ fn jet_process_spec_pipeline(
                 }
                 command.stderr(jet_process_stdio(&spec.stderr));
                 #[cfg(unix)]
-                jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+                jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Resolve,
                         spec.cmd.first().cloned(),
@@ -1500,7 +1582,7 @@ fn jet_process_spec_pipeline(
                 }
                 command.stderr(jet_process_stdio(&spec.stderr));
                 #[cfg(unix)]
-                jet_process_pty::attach_process_group(&mut command).map_err(|error| {
+                jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Resolve,
                         spec.cmd.first().cloned(),
@@ -1631,10 +1713,8 @@ fn jet_process_spec_pipeline(
         errors.push_str(&result.text);
     }
     if output_exceeded || output_limit_exceeded {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            None,
-            "process output exceeded output_limit",
+        return Err(jet_std::IOError::ResourceLimit(
+            jet_std::ProcessResourceLimit::Output,
         ));
     }
     let output_text = output.text;
@@ -1710,6 +1790,90 @@ fn jet_process_inner_kill(inner: &mut jet_std::ProcessHandle) -> std::io::Result
     }
 }
 
+#[cfg(target_os = "linux")]
+fn jet_process_linux_vm_size(pid: u32) -> Option<u64> {
+    let path = format!("/proc/{pid}/status");
+    let status = std::fs::read_to_string(path).ok()?;
+    status.lines().find_map(|line| {
+        let value = line.strip_prefix("VmSize:")?.trim();
+        let kilobytes = value.strip_suffix("kB")?.trim().parse::<u64>().ok()?;
+        Some(kilobytes.saturating_mul(1024))
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn jet_process_linux_open_files(pid: u32) -> Option<u64> {
+    let path = format!("/proc/{pid}/fd");
+    Some(std::fs::read_dir(path).ok()?.count() as u64)
+}
+
+/// Linux's rlimits make the ceiling real; this parent-side observation turns
+/// the two limits whose native failure is normally `ENOMEM`/`EMFILE` into the
+/// same typed process outcome as CPU/output. `/proc` is a Linux contract, so a
+/// read race simply leaves the kernel-enforced failure to the child and does
+/// not invent a classification.
+fn jet_process_live_resource_limit(
+    pid: u32,
+    spec: &jet_std::ProcessSpec,
+) -> Option<jet_std::ProcessResourceLimit> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(limit) = spec.memory_limit_bytes {
+            if jet_process_linux_vm_size(pid)
+                .is_some_and(|used| used >= limit.max(0) as u64)
+            {
+                return Some(jet_std::ProcessResourceLimit::Memory);
+            }
+        }
+        if let Some(limit) = spec.open_file_limit {
+            if jet_process_linux_open_files(pid)
+                .is_some_and(|used| used >= limit.max(0) as u64)
+            {
+                return Some(jet_std::ProcessResourceLimit::OpenFiles);
+            }
+        }
+    }
+    let _ = (pid, spec);
+    None
+}
+
+#[cfg(windows)]
+fn jet_process_inner_resource_limit(
+    inner: &jet_std::ProcessHandle,
+    spec: &jet_std::ProcessSpec,
+) -> std::io::Result<Option<jet_std::ProcessResourceLimit>> {
+    let job = match inner {
+        jet_std::ProcessHandle::Std { job, .. } => job.as_deref(),
+        jet_std::ProcessHandle::Native { job, .. } => Some(job.as_ref()),
+    };
+    let Some(job) = job else {
+        return Ok(None);
+    };
+    jet_process_pty::resource_limit_hit(job, jet_process_native_limits(spec)).map(|hit| {
+        hit.map(|hit| match hit {
+            jet_process_pty::ResourceLimitKind::CpuTime => {
+                jet_std::ProcessResourceLimit::CpuTime
+            }
+            jet_process_pty::ResourceLimitKind::Memory => jet_std::ProcessResourceLimit::Memory,
+        })
+    })
+}
+
+fn jet_process_status_resource_limit(
+    status: &std::process::ExitStatus,
+    spec: &jet_std::ProcessSpec,
+) -> Option<jet_std::ProcessResourceLimit> {
+    #[cfg(unix)]
+    if spec.cpu_time_limit_ms.is_some()
+        && std::os::unix::process::ExitStatusExt::signal(status) == Some(24)
+    {
+        // SIGXCPU is the POSIX rlimit CPU exhaustion signal on Linux and macOS.
+        return Some(jet_std::ProcessResourceLimit::CpuTime);
+    }
+    let _ = (status, spec);
+    None
+}
+
 fn jet_process_tree_signal(
     inner: &mut jet_std::ProcessHandle,
     process_group: bool,
@@ -1767,6 +1931,7 @@ fn jet_process_child_wait(
     let output_limit_hit = child.output_limit_hit.clone();
     let output_read_error = child.output_read_error.clone();
     let mut timed_out = false;
+    let mut resource_limit = None;
     let status = loop {
         let mut slot = child.inner.borrow_mut();
         let Some(inner) = slot.as_mut() else {
@@ -1777,6 +1942,49 @@ fn jet_process_child_wait(
                 Some("process child wait result is unavailable".to_string()),
             )));
         };
+        #[cfg(windows)]
+        if let Some(limit) = jet_process_inner_resource_limit(inner, &child.audit_spec).map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Close,
+                Some("process".to_string()),
+                error,
+            )
+        })? {
+            jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
+                .map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                })?;
+            resource_limit = Some(limit);
+            break jet_process_inner_wait(inner).map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("process".to_string()),
+                    error,
+                )
+            })?;
+        }
+        if let Some(limit) = jet_process_live_resource_limit(jet_process_inner_id(inner), &child.audit_spec) {
+            jet_process_tree_signal(inner, child.process_group, jet_process_signal_kill())
+                .map_err(|error| {
+                    jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("process".to_string()),
+                        error,
+                    )
+                })?;
+            resource_limit = Some(limit);
+            break jet_process_inner_wait(inner).map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Close,
+                    Some("process".to_string()),
+                    error,
+                )
+            })?;
+        }
         if let Some(status) = jet_process_inner_try_wait(inner).map_err(|error| {
             jet_std::IOError::other(
                 jet_std::IOOperation::Close,
@@ -1874,11 +2082,15 @@ fn jet_process_child_wait(
         return Err(error);
     }
     if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            None,
-            "process output exceeded output_limit",
+        return Err(jet_std::IOError::ResourceLimit(
+            jet_std::ProcessResourceLimit::Output,
         ));
+    }
+    if let Some(limit) = resource_limit {
+        return Err(jet_std::IOError::ResourceLimit(limit));
+    }
+    if let Some(limit) = jet_process_status_resource_limit(&status, &child.audit_spec) {
+        return Err(jet_std::IOError::ResourceLimit(limit));
     }
     let code = status.code().unwrap_or(-1) as i64;
     #[cfg(unix)]

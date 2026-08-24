@@ -364,3 +364,20 @@ Ballot titles or docs work only — no cards created this run.
    you pass is a lambda." No new syntax.
 
 No `ontology.md` edits. No syntax proposals beyond the carried titles.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `F1-TYPED-LITERAL-HEAD` | card | #1265 |
+| `F2-CODE-AS-LAMBDA` | card | #1266 |
+| `F3-OPTIONAL-SPACING` | no-action | no-action: the spacing law is complete and the report requests no change |
+| `F4-TYPED-TEXT-BOUNDARY` | no-action | no-action: E0149 and the typed-literal head are the retained solution |
+| `F5-FIXED-LENGTH-HASH` | card | #1324 |
+| `F6-ACCESS-SIGIL-RHYME` | card | #1704 |
+| `F7-MULTIHEAD-DISPATCH` | card | #1811 |
+| `F8-INCREMENT-CEREMONY` | no-action | no-action: D-INCR1 keeps the explicit exception |
+| `F9-TOKEN-COST` | no-action | no-action: the report accepts boundary-teaching tokens and requests no change |
+| `DOCS-ISOMORPHISMS` | no-action | archived: documentation-only follow-up was not a product finding in this run |
+<!-- /audit-dispositions -->

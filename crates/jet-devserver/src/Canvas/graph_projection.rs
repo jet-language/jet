@@ -64,8 +64,9 @@ pub(super) fn project_checked(
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
     let blueprint = canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events);
     let enum_catalog = enum_catalog_json(bundle);
+    let pattern_catalog = pattern_catalog_json(bundle);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&source_revision(src)),
@@ -75,6 +76,7 @@ pub(super) fn project_checked(
         graph_json.join(","),
         index.schema_version(),
         enum_catalog,
+        pattern_catalog,
         blueprint
     );
     Projection {
@@ -218,6 +220,63 @@ fn collect_enum_variants(items: &[Item], catalog: &mut BTreeMap<String, Vec<Stri
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     collect_enum_variants(body, catalog);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn pattern_catalog_json(bundle: &AST::ProgramBundle) -> String {
+    let mut catalog = BTreeMap::<String, Vec<(String, usize)>>::new();
+    for module in &bundle.modules {
+        collect_pattern_variants(&module.items, &mut catalog);
+    }
+    let entries = catalog
+        .into_iter()
+        .map(|(name, variants)| {
+            let variants = variants
+                .into_iter()
+                .map(|(variant, arity)| {
+                    format!(
+                        "{{\"name\":{},\"arity\":{}}}",
+                        json_str(&variant),
+                        arity
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}:[{}]", json_str(&name), variants)
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{entries}}}")
+}
+
+fn collect_pattern_variants(
+    items: &[Item],
+    catalog: &mut BTreeMap<String, Vec<(String, usize)>>,
+) {
+    for item in items {
+        match item {
+            Item::Enum(def) => {
+                let variants = def
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let arity = match &variant.payload {
+                            AST::VariantPayload::Unit => 0,
+                            AST::VariantPayload::Single(_, _) => 1,
+                            AST::VariantPayload::Named(fields) => fields.len(),
+                        };
+                        (variant.name.clone(), arity)
+                    })
+                    .collect::<Vec<_>>();
+                catalog.entry(def.name.clone()).or_insert(variants);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_pattern_variants(body, catalog);
                 }
             }
             _ => {}
@@ -1534,6 +1593,9 @@ fn project_stmt(
                     vec!["control"],
                     affordances,
                 );
+                if let Some(pattern_type) = pattern_subject_type(g, index, &arm.cond) {
+                    set_pattern_node_type(g, &node_id, &pattern_type);
+                }
                 let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
                 if is_pattern_test {
                     add_arm_pin(
@@ -1588,6 +1650,15 @@ fn project_stmt(
                 vec!["control"],
                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
+            let pattern_type = if subjectless {
+                arms.first()
+                    .and_then(|arm| pattern_subject_type(g, index, &arm.cond))
+            } else {
+                Some(expr_type(g, index, subject))
+            };
+            if let Some(pattern_type) = pattern_type {
+                set_pattern_node_type(g, &node_id, &pattern_type);
+            }
             if !subjectless {
                 let ty = expr_type(g, index, subject);
                 let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
@@ -1873,6 +1944,19 @@ fn switch_was_classic_if(src: &str, arms: &[AST::SwitchArm], span: Span) -> bool
         return false;
     };
     AST::uses_classic_if_spelling(src, span, first.cond.span())
+}
+
+fn pattern_subject_type(g: &GraphBuilder, index: &SemIndex, cond: &Expr) -> Option<String> {
+    match cond {
+        Expr::PatternTest { subject, .. } => Some(expr_type(g, index, subject)),
+        _ => None,
+    }
+}
+
+fn set_pattern_node_type(g: &mut GraphBuilder, node_id: &str, pattern_type: &str) {
+    if let Some(node) = g.nodes.iter_mut().find(|node| node.id == node_id) {
+        node.meta_json = Some(format!("{{\"pattern_type\":{}}}", json_str(pattern_type)));
+    }
 }
 
 fn pattern_pin_label(src: &str, expr: &Expr) -> String {

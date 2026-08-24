@@ -1448,16 +1448,28 @@ fn run() {
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
-`stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
-`terminal()` or `terminal(policy)`.
+`stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`,
+`cpu_time_limit(duration)`, `memory_limit(bytes)`, `open_file_limit(count)`,
+`detached()`, and `terminal()` or `terminal(policy)`.
 
-`timeout(duration)` and `output_limit(bytes)` are portable resource controls
-on the same `ProcessSpec`. A timeout stops the full child tree and returns a
-receipt with `timed_out: true`. An output limit counts raw bytes from captured
-or streamed stdout and stderr together; when it trips, Jet stops the child
-tree, closes its streams, and returns an `IOError` before unbounded capture.
-Pipeline stages apply their own timeout and output limit. The controls keep
-the same meaning in AOT, default `jet run`, and the interpreter.
+All five limits use the same `ProcessResourceLimit` enum. Wall time stops the
+full child tree and returns a receipt with both `timed_out: true` and
+`limit_hit: .WallTime`. CPU, memory, open-file, and output exhaustion return
+`IOError.ResourceLimit(.CpuTime)`, `.Memory`, `.OpenFiles`, or `.Output`; the
+caller never parses an error string. An output limit counts raw bytes from
+captured or streamed stdout and stderr together. The child is stopped and its
+streams are closed before the limit error returns. Pipeline stages apply their
+own declared controls. The controls keep the same meaning in AOT, default
+`jet run`, and the interpreter.
+
+The enforcement matrix is intentionally explicit. Linux enforces CPU time with
+the child POSIX rlimit and memory/open files with POSIX rlimits plus the shared
+parent supervisor, which reports typed exhaustion. macOS accepts CPU time and
+refuses memory/open-file requests before spawn because this implementation
+cannot report their native failures as typed outcomes. Windows enforces CPU
+time and memory with a Job Object and refuses open-file requests before spawn.
+Other targets refuse all three native resource requests before spawn. A refusal
+is an `IOError`, not a silently ignored limit.
 
 #### Authority-bound execution (D-AGENT-EXEC1=A)
 
@@ -1613,8 +1625,10 @@ The machine-readable rows are in
 `tests/fixtures/process_sessions/compatibility.tsv`; the targeted integration
 test is `tests/process_sessions.rs`. The resource-control case is
 `process_session_resource_limits_match_all_execution_tiers`; it proves an
-under-limit receipt and a rejected over-limit capture through the same
-`ProcessSpec` path.
+under-limit receipt, the typed output-limit error, and all three new builder
+fields through the same `ProcessSpec` path. The Linux exhaustion case is
+`process_session_resource_limit_exhaustion_names_each_limit_all_tiers`; it
+proves typed CPU, memory, and open-file outcomes on every execution tier.
 
 `pipeline()` keeps ordinary pipe edges and honors the final stage's declared
 stdout and each stage's declared stderr mode; an intermediate stdout is the
@@ -1649,7 +1663,8 @@ without waiting for output receipt assembly or blocking on child completion
 `executable_identity: String`, `argv: [String]`, `input_digest: String`,
 `policy_digest: String`,
 `backend: String`, `authority: [String]`, `descendants: String`,
-`limits: [String]`, `outputs: [String]`, `redacted: Bool`, `pid: Int`.
+`limits: [String]`, `outputs: [String]`, `redacted: Bool`, `pid: Int`,
+`limit_hit: ProcessResourceLimit?`.
 
 **Ledger-declined names (D-CORESURF-SMALL1).** `id`/`kill`/`wait`/`spawn`/
 `output`/`success` above already answer those competitor names one-for-one.

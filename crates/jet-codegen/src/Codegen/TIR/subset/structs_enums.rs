@@ -45,6 +45,7 @@ pub(crate) fn core_enum_equal_type(name: &str) -> bool {
     matches!(
         name,
         "ProcessStreamMode"
+            | "ProcessResourceLimit"
             | "TerminalMode"
             | "EncodingFormat"
             | "EncodingErrorKind"

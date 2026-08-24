@@ -73,3 +73,7 @@ Never overwrite a different day's note. Do not write reports under `docs/plans/`
 
 Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
 skills unless the owner asks.
+
+Before close, add the required per-finding disposition table from
+`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
+card, a ratified decision, or a concrete no-action reason.

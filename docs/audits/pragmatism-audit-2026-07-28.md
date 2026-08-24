@@ -272,3 +272,26 @@ Filed after this run at the owner's request (2026-07-28):
   path), #1287 (finish uninit fixed-array buffer fill through TIR).
 - Everything from this audit is now on the board; nothing is left
   report-only.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `F1-TYPED-CSV` | card | #1269 |
+| `F2-DERIVED-PRINT-NAMES` | card | #1270 |
+| `F3-RAW-PANIC` | card | #1271 |
+| `F4-QUANTITY-PRINT` | card | #1268 |
+| `F5-ARGS-HELP` | card | #1279 |
+| `F6-CLI-FIELDS` | card | #1277 |
+| `F7-PROCESS-STATUS` | card | #1280 |
+| `F8-HTTP-JSON` | card | #1273 |
+| `F9-DIAGNOSTIC-HINTS` | card | #1272 |
+| `F10-GAME-LOOP` | card | #1276 |
+| `F11-WEB-SERVE` | card | #1274 |
+| `F12-UI-LAYOUT` | card | #1275 |
+| `F13-INTERPOLATION-PRECISION` | card | #1278 |
+| `F14-STATIC-FILES-CORS` | card | #1273 |
+| `F15-EXAMPLE-SHORTPATH` | card | #1285 |
+| `F16-EMBEDDED-EXAMPLES` | card | #1287 |
+<!-- /audit-dispositions -->

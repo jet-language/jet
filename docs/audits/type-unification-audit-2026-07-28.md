@@ -576,3 +576,22 @@ Cards and ballots are live on the board (created 2026-07-28, this audit):
 
 Notes, no action: user typed-text heads ride the IFC decision (F9); typed
 capability handles are a post-v1 design note (F6).
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `F1-OPEN-DIMENSIONS` | card | #1292 |
+| `F2-MARKER-ARGUMENT-TYPES` | card | #1293 |
+| `F3-ONE-FACT-MODEL` | card | #1294 |
+| `F4-STRICT-VALUE-TAGS` | card | #1295 |
+| `F5-STATE-NAMESPACE` | card | #1296 |
+| `F6-TASKGROUP-PARAMETER` | card | #1297 |
+| `F7-RANGES-AS-VALUES` | card | #1298 |
+| `F8-EFFECT-LEAF-DECLARATIONS` | card | #1299 |
+| `F9-TYPED-TEXT-HEADS` | card | #1265 |
+| `F10-MARKER-NAME-COLLISION` | card | #1300 |
+| `F11-CONSTRUCT-BOUNDARY` | card | #1291 |
+| `F12-NON-TYPES` | no-action | no-action: the boundary law keeps these constructs non-types and requests no work |
+<!-- /audit-dispositions -->

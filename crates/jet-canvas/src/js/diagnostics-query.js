@@ -47,24 +47,31 @@
     const base = window.__JET_CANVAS_BASE__ || "/canvas";
     const source = latestDoc && latestDoc.source_id;
     const query = source ? "?source_id=" + encodeURIComponent(source) : "";
-    return fetch(base + "/source" + query, { cache: "no-store" })
-      .then((response) => {
+    const currentSource = latestDoc && String(latestDoc.source_text || "");
+    const draft = latestDoc && readSourceDraft(latestDoc);
+    const editorSource = sourceEditMode && sourceEditor ? sourceEditor.value : null;
+    const pendingSource = draft !== null && draft !== currentSource
+      ? draft
+      : editorSource !== null && editorSource !== currentSource ? editorSource : null;
+    const sourceRequest = pendingSource !== null
+      ? Promise.resolve(pendingSource)
+      : fetch(base + "/source" + query, { cache: "no-store" }).then((response) => {
         if (!response.ok) throw new Error("source request failed (" + response.status + ")");
         return response.text();
-      })
-      .then((text) => {
-        setViewMode("split");
-        setSourceEditMode(true);
-        if (sourceEditor) {
-          sourceEditor.value = text;
-          saveSourceDraft(text);
-        }
-        sourceView.textContent = text;
-        setCanvasState("recovery", "Source is available", "Edit the Jet source, then check it before applying a change.", [
-          { label: "Close", run: clearCanvasState }
-        ]);
-        return text;
-      })
+      });
+    return sourceRequest.then((text) => {
+      setViewMode("split");
+      setSourceEditMode(true);
+      if (sourceEditor) {
+        sourceEditor.value = text;
+        saveSourceDraft(text);
+      }
+      sourceView.textContent = text;
+      setCanvasState("recovery", "Source is available", "Edit the Jet source, then check it before applying a change.", [
+        { label: "Close", run: clearCanvasState }
+      ]);
+      return text;
+    })
       .catch((error) => {
         setCanvasState("error", "Source unavailable", "Canvas could not read Jet source. Retry when the server is reachable.", [
           { label: "Retry", primary: true, run: openSourceRecovery }

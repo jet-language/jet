@@ -24,6 +24,18 @@ mod jet_std {
         pub cause: JetOutcome<String, JetAbsent>,
     }
 
+    /// D-PROCESS-RESOURCE1=A: the limit that stopped a process session. A
+    /// receipt keeps the typed wall-time fact; failed launches use the same
+    /// enum in `IOError::ResourceLimit`.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum ProcessResourceLimit {
+        WallTime,
+        CpuTime,
+        Memory,
+        OpenFiles,
+        Output,
+    }
+
     impl IOContext {
         // The constructor still takes Rust plumbing so every host call site reads
         // the same; the carrier starts here, once.
@@ -47,6 +59,7 @@ mod jet_std {
         Closed(IOContext),
         Protocol(IOContext),
         Other(IOContext),
+        ResourceLimit(ProcessResourceLimit),
     }
 
     impl IOError {
@@ -121,6 +134,7 @@ mod jet_std {
         pub outputs: Vec<String>,
         pub redacted: bool,
         pub pid: i64,
+        pub limit_hit: JetOutcome<ProcessResourceLimit, JetAbsent>,
     }
 
     // The old internal spelling remains a Rust alias while the user-facing

@@ -452,6 +452,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
         n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
+        n if n == Syntax::TYPE_PROCESS_RESOURCE_LIMIT => Some("ProcessResourceLimit"),
         "EnvError" => Some("EnvError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => Some("UTF8Error"),
         "ProcessResult" | "ProcessReceipt" => Some("ProcessReceipt"),
@@ -4098,6 +4099,7 @@ pub(crate) fn build_cx_items(
     };
 
     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
+    let process_resource_limit = Type::Named(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
     // D-TYPE2-TIME1=A: Duration/Instant are the core delta/point of the
     // canonical Time family. They carry unit facts for dimensional lowering,
     // but never enter the generated Float-family trait path.
@@ -4125,12 +4127,34 @@ pub(crate) fn build_cx_items(
         ("cause".to_string(), Type::Option(Box::new(Type::String))),
     ]);
     cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
-    cx.enum_variants.insert(Syntax::TYPE_IO_ERROR.to_string(), Syntax::IO_ERROR_VARIANTS.iter().map(|name| ((*name).to_string(), VariantPayload::Single(io_context.clone(), Span::new(0, 0)))).collect());
+    cx.enum_variants.insert(
+        Syntax::TYPE_IO_ERROR.to_string(),
+        Syntax::IO_ERROR_VARIANTS
+            .iter()
+            .map(|name| {
+                let payload = if *name == "ResourceLimit" {
+                    VariantPayload::Single(process_resource_limit.clone(), Span::new(0, 0))
+                } else {
+                    VariantPayload::Single(io_context.clone(), Span::new(0, 0))
+                };
+                ((*name).to_string(), payload)
+            })
+            .collect(),
+    );
     cx.enum_variants.insert(Syntax::TYPE_IO_OPERATION.to_string(), Syntax::IO_OPERATION_VARIANTS.iter().map(|name| ((*name).to_string(), VariantPayload::Unit)).collect());
+    cx.enum_variants.insert(
+        Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+        Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
+            .iter()
+            .map(|name| ((*name).to_string(), VariantPayload::Unit))
+            .collect(),
+    );
     for name in Syntax::IO_ERROR_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_ERROR.to_string()); }
     for name in Syntax::IO_OPERATION_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string()); }
+    for name in Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string()); }
     cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
     cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
+    cx.cloneable.insert(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
     let zero = Span::new(0, 0);
     let http_operations = ["ClientConnect", "ServerBind", "ServeListener"];
     cx.enum_variants.insert(

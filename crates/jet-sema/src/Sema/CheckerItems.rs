@@ -1730,6 +1730,9 @@ impl<'a> Checker<'a> {
         if enum_name == "ProcessStreamMode" {
             return Some(core_process_stream_mode_variants());
         }
+        if enum_name == crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT {
+            return Some(core_process_resource_limit_variants());
+        }
         if enum_name == Syntax::TYPE_TERMINAL_MODE {
             return Some(core_terminal_mode_variants());
         }

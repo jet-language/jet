@@ -268,7 +268,7 @@ pub(crate) fn clif_ty_with_distinct(
     {
         return Some(types::I64);
     }
-    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError" | "ProcessResourceLimit")) {
         return Some(types::I64);
     }
     if matches!(&ty, Type::Shared(_))
@@ -919,6 +919,9 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
+        if enum_name == "ProcessResourceLimit" {
+            return Some(EMPTY_PAYLOAD.as_slice());
+        }
         if enum_name == "IOOperation" {
             return Some(EMPTY_PAYLOAD.as_slice());
         }
@@ -1147,6 +1150,7 @@ impl<'a> JitMeta<'a> {
                 | "YAML"
                 | "CSV"
                 | "ProcessStreamMode"
+                | "ProcessResourceLimit"
                 | "TerminalMode"
                 | "EncodingFormat"
                 | "EncodingErrorKind"
@@ -1344,6 +1348,10 @@ mod tests {
             ("outputs", Type::List(Box::new(Type::String))),
             ("redacted", Type::Bool),
             ("pid", Type::Int),
+            (
+                "limit_hit",
+                Type::Option(Box::new(Type::Named("ProcessResourceLimit".into()))),
+            ),
         ] {
             assert_eq!(
                 core_struct_field_type("ProcessReceipt", field),
@@ -1459,6 +1467,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
             "outputs",
             "redacted",
             "pid",
+            "limit_hit",
         ],
     ),
     (

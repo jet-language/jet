@@ -337,3 +337,14 @@ That precursor contains six Jet repair rounds and 14 diagnostics. Its diagnostic
 No #1876 agent result is recorded. The current evidence supports only the narrower finding that one small Jet/Node run showed actionable Jet diagnostics and full post-repair semantic success, while Node had fewer compile barriers but more wrong outputs. It does not show whether compiler strictness carries an agent through an unfamiliar language, whether Jet lacks an expressible surface for any frozen task, or how many model tokens either language costs per task or repair round.
 
 The next required artifact is one externally executed, fixed-model Jet/Node run over the 29 manifest rows. Append its task ledger, loss links, repair rounds, completed-task token counts, and diagnostic length distribution here. Do not add a runner or a second scoring model.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `AGENT-29-ROWS` | card | #1876 |
+| `AOT-WALL-TIME` | card | #666 |
+| `NATIVE-MATRIX` | card | #1173 |
+| `UNMEASURED-EXTERNAL-WRITES` | no-action | archived: outside the frozen workload contract; #769 keeps it explicitly unmeasured |
+<!-- /audit-dispositions -->

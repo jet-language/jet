@@ -187,6 +187,9 @@ pub const TYPE_IO_ERROR: &str = "IOError";
 /// D-IOERROR-TREE1=A: shared structured byte-stream error context and operation.
 pub const TYPE_IO_CONTEXT: &str = "IOContext";
 pub const TYPE_IO_OPERATION: &str = "IOOperation";
+/// D-PROCESS-RESOURCE1=A: typed process-session exhaustion names. These are
+/// payloads of `IOError.ResourceLimit`, not strings parsed from diagnostics.
+pub const TYPE_PROCESS_RESOURCE_LIMIT: &str = "ProcessResourceLimit";
 pub const IO_ERROR_VARIANTS: &[&str] = &[
     "InvalidInput",
     "NotFound",
@@ -196,6 +199,14 @@ pub const IO_ERROR_VARIANTS: &[&str] = &[
     "Closed",
     "Protocol",
     "Other",
+    "ResourceLimit",
+];
+pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] = &[
+    "WallTime",
+    "CpuTime",
+    "Memory",
+    "OpenFiles",
+    "Output",
 ];
 pub const IO_OPERATION_VARIANTS: &[&str] = &[
     "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",

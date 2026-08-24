@@ -460,6 +460,7 @@
   });
 
   window.addEventListener("mousemove", function (ev) {
+    if (window.__jetCanvasNoopHover) return;
     const rect = canvas.getBoundingClientRect();
     lastPointer = graphPointFromClient(ev.clientX, ev.clientY);
     if (!drag) {

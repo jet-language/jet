@@ -4806,8 +4806,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "timeout" => {
                         format!("{}jet_process_spec_timeout({}, &({}))", root, recv, a(0))
                     }
+                    "cpu_time_limit" => {
+                        format!("{}jet_process_spec_cpu_time_limit({}, &({}))", root, recv, a(0))
+                    }
                     "output_limit" => {
                         format!("{}jet_process_spec_output_limit({}, {})", root, recv, a(0))
+                    }
+                    "memory_limit" => {
+                        format!("{}jet_process_spec_memory_limit({}, {})", root, recv, a(0))
+                    }
+                    "open_file_limit" => {
+                        format!("{}jet_process_spec_open_file_limit({}, {})", root, recv, a(0))
                     }
                     "detached" => format!("{}jet_process_spec_detached({})", root, recv),
                     // D-PROCESS-SESSION1=A: terminal-backed session opt-in.

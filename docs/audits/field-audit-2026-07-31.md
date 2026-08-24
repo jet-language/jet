@@ -111,3 +111,19 @@ UL11 sits late in the epoch-3 dependency order (after UL1–UL3 + UL13), which i
 7. **Card: mixed-repo DX** — cross-language debug/profile/coverage/CI acceptance lanes, attached to UL7/UL11.
 8. **Card: enterprise adoption pack** — playbooks, LTS calendar, compliance bundle, air-gap runbook; capstone case studies feed it.
 9. **Chore: fix stale philosophy.md C-FFI sentence.**
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `G1-JET-AS-GUEST` | card | #1343 |
+| `G2-JET-CC` | card | #1344 |
+| `G3-FOREIGN-BUILD-HOSTS` | card | #1347 |
+| `G4-IMPORTER-COVERAGE` | card | #1346 |
+| `G5-FOREIGN-PUBLISHING` | card | #1345 |
+| `G6-MIXED-REPO-DX` | card | #1348 |
+| `G7-ADOPTION-PACK` | card | #1349 |
+| `G8-RUSTC-DEPENDENCY` | card | #670 |
+| `G9-C-ABI-TRUTH` | card | #436 |
+<!-- /audit-dispositions -->

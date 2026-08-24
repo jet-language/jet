@@ -303,3 +303,21 @@ interactive help flow. This audit does not invent one.
    `truthfulness` test was not run because the owner instruction forbids tests.
 
 No Tower or plugin data changed. No code gap was marked pass by this report.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `A11Y-001` | no-action | no-action: checked-in human diagnostic fixture proves the ordered frame |
+| `A11Y-002` | no-action | no-action: checked-in color and NO_COLOR fixtures prove the plain path |
+| `A11Y-003` | card | #1807 |
+| `A11Y-004` | card | #1858 |
+| `A11Y-005` | card | #1901 |
+| `A11Y-006` | card | #1931 |
+| `A11Y-007` | card | #1873 |
+| `A11Y-008` | card | #1877 |
+| `A11Y-009` | card | #1807 |
+| `A11Y-010` | no-action | no-action: the copyable explain command is proved by the checked-in fixture |
+| `A11Y-011` | no-action | no-action: human and JSON report parity is proved by the checked-in fixtures |
+<!-- /audit-dispositions -->

@@ -63,3 +63,18 @@ shrink-only burndown section (same D-LENS-RUN2 ratchet semantics as `jit_gaps.tx
 surface from the runtime tier (#1254's diagnostic slice). No new parallel gate (I8).
 
 Raw run log: reproduce with default `jet run` per example; this doc is the curated result.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `E0956-RUNTIME-GAPS` | card | #1254, #1509, #1762 |
+| `DIMENSIONAL-QUANTITIES` | card | #1930 |
+| `DEADLINE-CONTEXT` | card | #1929 |
+| `PARALLEL-SCAN` | no-action | no-action: the re-probe matched the golden output and found no live defect |
+| `TERMINAL-PARITY` | card | #1931 |
+| `RETURNED-VIEWS` | card | #1932 |
+| `WEB-WASM-ROWS` | no-action | no-action: the re-probe matched the golden output for all three web rows |
+| `PARITY-GATE` | card | #1648 |
+<!-- /audit-dispositions -->

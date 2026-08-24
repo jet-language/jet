@@ -214,7 +214,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // fifth value type.
         | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
         | "Range" | Syntax::TYPE_ALLOC_ERROR
-        | "IOContext" | "IOOperation"
+        | "IOContext" | "IOOperation" | Syntax::TYPE_PROCESS_RESOURCE_LIMIT
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
@@ -1273,6 +1273,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessResult" | "ProcessReceipt", "signal") => {
             Some(Type::Option(Box::new(Type::Int)))
         }
+        ("ProcessResult" | "ProcessReceipt", "limit_hit") => Some(Type::Option(Box::new(
+            Type::Named("ProcessResourceLimit".to_string()),
+        ))),
         ("ProcessResult" | "ProcessReceipt", "output" | "errors" | "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants") => Some(Type::String),
         ("ProcessResult" | "ProcessReceipt", "argv" | "authority" | "limits" | "outputs") => {
             Some(Type::List(Box::new(Type::String)))
@@ -1455,6 +1458,19 @@ pub(crate) fn core_process_stream_mode_variants(
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     m
+}
+
+/// D-PROCESS-RESOURCE1=A: process resource exhaustion is a closed core enum,
+/// resolved through the same dot-literal path as `ProcessStreamMode`.
+pub(crate) fn core_process_resource_limit_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
+        .iter()
+        .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+        .collect()
 }
 
 /// D-PROCESS-SESSION2=D: expert terminal mode has the two owner-ratified
@@ -1692,10 +1708,18 @@ pub(crate) fn core_io_variants(
     }
     if !is_io_error_type_name(enum_name) { return None; }
     for name in Syntax::IO_ERROR_VARIANTS {
-        variants.insert((*name).to_string(), (
-            zero,
-            VariantPayload::Single(Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()), zero),
-        ));
+        let payload = if *name == "ResourceLimit" {
+            VariantPayload::Single(
+                Type::Named(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string()),
+                zero,
+            )
+        } else {
+            VariantPayload::Single(
+                Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()),
+                zero,
+            )
+        };
+        variants.insert((*name).to_string(), (zero, payload));
     }
     Some(variants)
 }

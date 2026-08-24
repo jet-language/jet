@@ -132,3 +132,15 @@ Required evidence for the next run:
 
 Jet may have a good first-session feel once a window backend lands, but source
 shape and report design cannot prove the time to the first window or pixel.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `P1-BEGINNER-CLI` | card | #1924 |
+| `P2-TYPESCRIPT-CLI` | card | #1901 |
+| `P3-GRAPHICS-FIRST-PIXEL` | card | #820 |
+| `P4-AGENT-REPAIR-LOOP` | card | #1873, #1877 |
+| `FIRST-SESSION-NONRESULT` | no-action | no-action: the report refuses to invent window or pixel timing before the backend exists |
+<!-- /audit-dispositions -->

@@ -6596,7 +6596,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             matches!(
                 (method.as_str(), args.len()),
                 (
-                    "stdout" | "stderr" | "stdin" | "timeout" | "output_limit" | "cwd"
+                    "stdout" | "stderr" | "stdin" | "timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit" | "cwd"
                         | "env_remove",
                     1,
                 ) | ("env", 2)

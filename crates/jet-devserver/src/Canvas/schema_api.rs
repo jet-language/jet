@@ -257,6 +257,13 @@ fn runtime_events_json(snapshot: &str) -> Result<String, String> {
 
 /// Resolve a project-relative source id without escaping the projected source truth.
 pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathBuf> {
+    // Project-part discovery parses every source file. Keep that recursive
+    // parser work on the canonical compiler stack even before graph
+    // projection crosses the same boundary.
+    jet_driver::run_compiler_work(|| project_path_for_source_id_on_compiler_stack(entry, source_id))
+}
+
+fn project_path_for_source_id_on_compiler_stack(entry: &Path, source_id: &str) -> Option<PathBuf> {
     let wanted = clean_project_rel_path(source_id).ok()?;
     if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(jet_driver::Syntax::FILE_EXT)
     {

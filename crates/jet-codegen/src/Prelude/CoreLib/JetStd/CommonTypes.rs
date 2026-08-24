@@ -471,6 +471,14 @@
         pub stderr: ProcessStreamMode,
         pub timeout_ms: Option<i64>,
         pub output_limit: Option<i64>,
+        /// CPU budget in milliseconds. Unix applies the native CPU rlimit;
+        /// Windows applies a Job Object process-time limit.
+        pub cpu_time_limit_ms: Option<i64>,
+        /// Address-space/resident-set ceiling in bytes, according to the
+        /// platform backend's documented enforcement.
+        pub memory_limit_bytes: Option<i64>,
+        /// Maximum descriptors/handles the child may keep open.
+        pub open_file_limit: Option<i64>,
         pub detached: bool,
         // D-PROCESS-SESSION1=A: `.terminal()` asks for a terminal-backed
         // session. Argv execution with no terminal stays the default, so this
@@ -2573,6 +2581,9 @@
                 IOError::Closed(context) => (5, context),
                 IOError::Protocol(context) => (6, context),
                 IOError::Other(context) => (7, context),
+                IOError::ResourceLimit(limit) => {
+                    return format!("process resource limit exceeded: {}", limit.jet_show());
+                }
             };
             crate::jet_show_io_error(
                 variant,
@@ -2598,8 +2609,39 @@
                 IOError::Closed(context) => ("Closed", context),
                 IOError::Protocol(context) => ("Protocol", context),
                 IOError::Other(context) => ("Other", context),
+                IOError::ResourceLimit(limit) => {
+                    return crate::jet_debug_variant("ResourceLimit", Some(limit.jet_debug()));
+                }
             };
             crate::jet_debug_variant(variant, Some(super::JetDebug::jet_debug(context)))
+        }
+    }
+    impl super::JetShow for ProcessResourceLimit {
+        fn jet_show(&self) -> String {
+            match self {
+                ProcessResourceLimit::WallTime => "wall time".to_string(),
+                ProcessResourceLimit::CpuTime => "CPU time".to_string(),
+                ProcessResourceLimit::Memory => "memory".to_string(),
+                ProcessResourceLimit::OpenFiles => "open file handles".to_string(),
+                ProcessResourceLimit::Output => "output".to_string(),
+            }
+        }
+    }
+    impl super::JetDisplay for ProcessResourceLimit {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+    impl super::JetDebug for ProcessResourceLimit {
+        fn jet_debug(&self) -> String {
+            match self {
+                ProcessResourceLimit::WallTime => "WallTime",
+                ProcessResourceLimit::CpuTime => "CpuTime",
+                ProcessResourceLimit::Memory => "Memory",
+                ProcessResourceLimit::OpenFiles => "OpenFiles",
+                ProcessResourceLimit::Output => "Output",
+            }
+            .to_string()
         }
     }
     impl super::JetShow for EnvError {

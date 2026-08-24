@@ -5176,6 +5176,15 @@ pub(crate) fn register_packed_enum_show(
 
 fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
     if enum_name == "IOError" {
+        if (packed & 0xff) as usize
+            == jet_foundation::Syntax::IO_ERROR_VARIANTS
+                .iter()
+                .position(|name| *name == "ResourceLimit")
+                .unwrap_or(usize::MAX)
+        {
+            return show_packed_enum(packed >> 8, "ProcessResourceLimit", heap)
+                .replace("ProcessResourceLimit.", "process resource limit: ");
+        }
         let context = packed >> 8;
         let resource = heap
             .record_get_int(context, 1)

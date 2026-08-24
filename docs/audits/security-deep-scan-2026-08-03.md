@@ -301,3 +301,21 @@ The full report preserves source, control, sink, impact, evidence, preconditions
 uncertainty, CWE data, validation guidance, and source-ledger paths.
 
 This summary is the durable candidate inventory and Tower campaign map.
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| `TOWER-CONTROL-PLANE` | card | #1377 |
+| `MEMORY-ABI-SAFETY` | card | #1378 |
+| `IDENTITY-SECRETS-CRYPTO` | card | #1379 |
+| `RESOURCE-BOUNDS` | card | #1380 |
+| `NETWORK-BOUNDARIES` | card | #1381 |
+| `FILESYSTEM-CONTAINMENT` | card | #1382 |
+| `DEVTOOLS-CONTROL-PLANE` | card | #1383 |
+| `COMMAND-CODE-INJECTION` | card | #1384 |
+| `PACKAGE-SUPPLY-CHAIN` | card | #1385 |
+| `POLICY-INTEGRITY` | card | #1387 |
+| `SECURITY-GATE` | card | #1387 |
+<!-- /audit-dispositions -->
